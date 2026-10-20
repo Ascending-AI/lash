@@ -367,26 +367,12 @@ const SESSION_WITNESSES: usize = 2;
 /// default: past a region's nursery, short of what the longest run holds.
 const TIGHT: u64 = 96 * 1024;
 
-/// Independent libtest laws, one per Buck shard of the target, so no law
-/// carries more than a sixteenth of the program families.
+/// Core witness groups; their repeated witnesses and smith schedules remain
+/// fixed while the other program matrices are balanced across all laws.
 const SHARDS: usize = 16;
 
-/// Deals one law's programs to the [`SHARDS`] laws in a single sequence
-/// across every family, so a family shorter than [`SHARDS`] starts where
-/// the one before it stopped instead of stacking on the first laws.
-struct Deal {
-    shard: usize,
-    next: usize,
-}
-
-impl Deal {
-    /// Whether the next program in the sequence is this law's.
-    fn mine(&mut self) -> bool {
-        let mine = self.next % SHARDS == self.shard;
-        self.next += 1;
-        mine
-    }
-}
+mod deal;
+use deal::Deal;
 
 /// One run of a case under a plan: what it observed, its charge program,
 /// its projections and the work regions committed in it.
@@ -1039,23 +1025,33 @@ fn ran(name: &str, plans: (usize, usize), work: RegionWork, failures: &mut Vec<S
 /// smith programs runs so with charge Off too, under every slice: its
 /// plans form as under Exact, run where they run charged, and its slices
 /// count its pace.
-fn regions_on_and_off_agree(shard: usize, sweep: Sweep) {
+fn regions_on_and_off_agree(group: Option<usize>, core: Option<(usize, Sweep)>) {
     let began = std::time::Instant::now();
     let registry = Arc::new(super::corpus_registry());
     let on = prepare_with_layout(Arc::clone(&registry), Layout(ON));
     let off = prepare_with_layout(Arc::clone(&registry), Layout(OFF));
-    let mut counts = Counts {
-        sweep,
-        ..Counts::default()
-    };
+    let mut counts = Counts::default();
     let mut failures = Vec::new();
     let mut regions = 0;
-    let mut deal = Deal { shard, next: 0 };
-    let programs = PROGRAMS.iter().filter(|_| deal.mine()).chain(EXIT_PROGRAMS);
+    let mut deal = Deal::new(group);
+    let report_group = group.unwrap_or_else(|| {
+        let (shard, sweep) = core.expect("a law owns programs or core witnesses");
+        GROUPS + PARTS[..shard].iter().sum::<usize>() + sweep.part
+    });
+    let programs = PROGRAMS
+        .iter()
+        .map(|program| (program, false))
+        .chain(EXIT_PROGRAMS.iter().map(|program| (program, true)));
     let mut region_programs = 0;
-    for (name, text, call_depth) in programs {
-        region_programs += 1;
+    for ((name, text, call_depth), witness) in programs {
         let case = program_case(name, text, *call_depth);
+        if witness {
+            let Some((_, sweep)) = core else { continue };
+            counts.sweep = sweep;
+        } else if !deal.mine(&case, 1, &mut counts) {
+            continue;
+        }
+        region_programs += 1;
         let plans = formed_alike(&on, &off, &case);
         assert!(plans.0 > 0, "{name}: no loop region forms");
         regions += plans.0;
@@ -1063,11 +1059,11 @@ fn regions_on_and_off_agree(shard: usize, sweep: Sweep) {
         ran(name, plans, work, &mut failures);
     }
     for (name, text) in ALLOCATING {
-        if !deal.mine() {
+        let case = program_case(name, text, 16);
+        if !deal.mine(&case, 3, &mut counts) {
             continue;
         }
         region_programs += 1;
-        let case = program_case(name, text, 16);
         let plans = formed_alike(&on, &off, &case);
         assert!(plans.0 > 0, "{name}: no loop region forms");
         regions += plans.0;
@@ -1083,10 +1079,6 @@ fn regions_on_and_off_agree(shard: usize, sweep: Sweep) {
         check(&on, &off, &tight, &mut counts, &mut failures);
     }
     for (index, (name, text, parks)) in SESSIONS.iter().enumerate() {
-        if index >= SESSION_WITNESSES && !deal.mine() {
-            continue;
-        }
-        region_programs += 1;
         let mut case = program_case(name, text, 16);
         if *parks {
             case.environment.deliveries = vec![vec![crate::Delivery {
@@ -1095,6 +1087,13 @@ fn regions_on_and_off_agree(shard: usize, sweep: Sweep) {
                 dropped: false,
             }]];
         }
+        if index < SESSION_WITNESSES {
+            let Some((_, sweep)) = core else { continue };
+            counts.sweep = sweep;
+        } else if !deal.mine(&case, 1, &mut counts) {
+            continue;
+        }
+        region_programs += 1;
         let plans = formed_alike(&on, &off, &case);
         assert!(plans.0 > 0, "{name}: no loop region forms");
         regions += plans.0;
@@ -1105,15 +1104,15 @@ fn regions_on_and_off_agree(shard: usize, sweep: Sweep) {
         }
     }
     for (lowered, program) in crate::helper_plans::top_level_region_programs() {
-        if !deal.mine() {
-            continue;
-        }
-        region_programs += 1;
         let registry = program.library.registry();
         let on = prepare_with_layout(Arc::clone(registry), Layout(ON));
         let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
         let mut case = program_case(&lowered.id, "main { return null }", 16);
         case.document = print_document(&program.document);
+        if !deal.mine(&case, 1, &mut counts) {
+            continue;
+        }
+        region_programs += 1;
         let plans = formed_alike(&on, &off, &case);
         assert!(plans.0 > 0, "{}: no loop region forms", case.name);
         regions += plans.0;
@@ -1121,31 +1120,34 @@ fn regions_on_and_off_agree(shard: usize, sweep: Sweep) {
         ran(&case.name, plans, work, &mut failures);
         sessions_hold(&on, &off, &case, &mut counts, &mut failures);
     }
-    counts.report(shard, "region-programs", began);
+    counts.report(report_group, "region-programs", began);
     let (mut island_programs, mut islands) = (0, 0);
-    for (name, text, call_depth) in ISLANDS.iter().filter(|_| deal.mine()) {
-        island_programs += 1;
+    for (name, text, call_depth) in ISLANDS {
         let case = program_case(name, text, *call_depth);
+        if !deal.mine(&case, 1, &mut counts) {
+            continue;
+        }
+        island_programs += 1;
         let plans = formed_alike(&on, &off, &case);
         assert!(plans.1 > 0, "{name}: no call island forms");
         islands += plans.1;
         let work = check(&on, &off, &case, &mut counts, &mut failures);
         ran(name, plans, work, &mut failures);
     }
-    counts.report(shard, "island-programs", began);
+    counts.report(report_group, "island-programs", began);
     // FIG-6754: actual Python invokes preserve their atom/action charge,
     // occurrences and continuations, including declines and zero division;
     // FIG-6758: both dialects' heap paths and the kinds they decline.
     // Assign each extra program once, like the existing program families.
     for (lowered, program) in crate::helper_plans::dialect_region_programs() {
-        if !deal.mine() {
-            continue;
-        }
         let registry = program.library.registry();
         let on = prepare_with_layout(Arc::clone(registry), Layout(ON));
         let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
         let mut case = program_case(&lowered.id, "main { return null }", 16);
         case.document = print_document(&program.document);
+        if !deal.mine(&case, 5, &mut counts) {
+            continue;
+        }
         let plans = formed_alike(&on, &off, &case);
         assert!(plans.0 > 0, "{}", case.name);
         for call_depth in [1, 2, 3, 4, 16] {
@@ -1156,18 +1158,18 @@ fn regions_on_and_off_agree(shard: usize, sweep: Sweep) {
             }
         }
     }
-    counts.report(shard, "dialect-invokes", began);
+    counts.report(report_group, "dialect-invokes", began);
     // FIG-6759: lowered guest calls, root call actions and the callbacks a
     // helper's plan applies run as islands, under both depths around them.
     for (lowered, program) in crate::helper_plans::island_programs() {
-        if !deal.mine() {
-            continue;
-        }
         let registry = program.library.registry();
         let on = prepare_with_layout(Arc::clone(registry), Layout(ON));
         let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
         let mut case = program_case(&lowered.id, "main { return null }", 16);
         case.document = print_document(&program.document);
+        if !deal.mine(&case, 2, &mut counts) {
+            continue;
+        }
         let plans = formed_alike(&on, &off, &case);
         assert!(plans.1 > 0, "{}: no call island forms", case.name);
         for call_depth in [3, 16] {
@@ -1178,35 +1180,38 @@ fn regions_on_and_off_agree(shard: usize, sweep: Sweep) {
             }
         }
     }
-    counts.report(shard, "dialect-islands", began);
+    counts.report(report_group, "dialect-islands", began);
     for case in super::corpus_shards().iter().flat_map(|shard| &shard.cases) {
-        if deal.mine() {
+        if deal.mine(case, 2, &mut counts) {
             check(&on, &off, case, &mut counts, &mut failures);
             if let Some(wrapped) = wrapped(case) {
                 check(&on, &off, &wrapped, &mut counts, &mut failures);
             }
         }
     }
-    counts.report(shard, "corpus", began);
-    for (seed, smith) in
-        crate::smith::tests::seeds().filter(|(seed, _)| *seed as usize % SHARDS == shard)
-    {
-        check_smith(
-            &format!("smith seed {seed}"),
-            &smith,
-            &mut counts,
-            &mut failures,
-        );
-        if let Some(document) = wrap(&smith.document) {
-            let wrapped = crate::smith::Smith {
-                document,
-                schedule: smith.schedule.clone(),
-            };
-            let name = format!("smith seed {seed} (wrapped)");
-            check_smith(&name, &wrapped, &mut counts, &mut failures);
+    counts.report(report_group, "corpus", began);
+    if let Some((shard, sweep)) = core {
+        counts.sweep = sweep;
+        for (seed, smith) in
+            crate::smith::tests::seeds().filter(|(seed, _)| *seed as usize % SHARDS == shard)
+        {
+            check_smith(
+                &format!("smith seed {seed}"),
+                &smith,
+                &mut counts,
+                &mut failures,
+            );
+            if let Some(document) = wrap(&smith.document) {
+                let wrapped = crate::smith::Smith {
+                    document,
+                    schedule: smith.schedule.clone(),
+                };
+                let name = format!("smith seed {seed} (wrapped)");
+                check_smith(&name, &wrapped, &mut counts, &mut failures);
+            }
         }
     }
-    counts.report(shard, "smith", began);
+    counts.report(report_group, "smith", began);
     assert!(
         failures.is_empty(),
         "{} of {} paired runs disagree:\n{}",
@@ -1215,7 +1220,7 @@ fn regions_on_and_off_agree(shard: usize, sweep: Sweep) {
         failures.join("\n")
     );
     println!(
-        "regions on and off shard={shard}: cases={} paired runs={} region programs={region_programs} loop regions={regions} island programs={island_programs} call islands={islands} seconds={:.3}",
+        "regions on and off group={report_group}: cases={} paired runs={} region programs={region_programs} loop regions={regions} island programs={island_programs} call islands={islands} seconds={:.3}",
         counts.cases,
         counts.runs,
         began.elapsed().as_secs_f64(),
@@ -2392,58 +2397,4 @@ fn list_appends_stop_where_the_reference_stops() {
     );
 }
 
-macro_rules! program_shards {
-    (@parts $shard:literal, $parts:expr, $part:expr;) => {};
-    (@parts $shard:literal, $parts:expr, $part:expr; $name:ident $(, $rest:ident)*) => {
-        #[test]
-        fn $name() {
-            regions_on_and_off_agree($shard, Sweep { part: $part, parts: $parts });
-        }
-        program_shards!(@parts $shard, $parts, $part + 1; $($rest),*);
-    };
-    ($($shard:literal => [$($name:ident),+]),+ $(,)?) => {
-        $(program_shards!(@parts $shard, [$(stringify!($name)),+].len(), 0; $($name),+);)+
-    };
-}
-
-// Each group's membership defines both its exhaustive partition count and
-// its tests. The slow laws split their expensive projection sweeps;
-// all other program shards retain their complete sweep in one law.
-program_shards! {
-    0 => [regions_on_and_off_agree_programs_0],
-    1 => [regions_on_and_off_agree_programs_1],
-    2 => [
-        regions_on_and_off_agree_programs_2,
-        regions_on_and_off_agree_programs_2_sweep_1,
-        regions_on_and_off_agree_programs_2_sweep_2,
-        regions_on_and_off_agree_programs_2_sweep_3
-    ],
-    3 => [regions_on_and_off_agree_programs_3],
-    4 => [regions_on_and_off_agree_programs_4],
-    5 => [
-        regions_on_and_off_agree_programs_5,
-        regions_on_and_off_agree_programs_5_sweep_1,
-        regions_on_and_off_agree_programs_5_sweep_2,
-        regions_on_and_off_agree_programs_5_sweep_3
-    ],
-    6 => [
-        regions_on_and_off_agree_programs_6,
-        regions_on_and_off_agree_programs_6_sweep_1,
-        regions_on_and_off_agree_programs_6_sweep_2,
-        regions_on_and_off_agree_programs_6_sweep_3
-    ],
-    7 => [regions_on_and_off_agree_programs_7],
-    8 => [regions_on_and_off_agree_programs_8],
-    9 => [regions_on_and_off_agree_programs_9],
-    10 => [regions_on_and_off_agree_programs_10],
-    11 => [regions_on_and_off_agree_programs_11],
-    12 => [regions_on_and_off_agree_programs_12],
-    13 => [regions_on_and_off_agree_programs_13],
-    14 => [
-        regions_on_and_off_agree_programs_14,
-        regions_on_and_off_agree_programs_14_sweep_1,
-        regions_on_and_off_agree_programs_14_sweep_2,
-        regions_on_and_off_agree_programs_14_sweep_3
-    ],
-    15 => [regions_on_and_off_agree_programs_15],
-}
+include!("regions/groups.rs");

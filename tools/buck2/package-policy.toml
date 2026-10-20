@@ -685,12 +685,12 @@ kinds = ["unit-test"]
 data = ["//:workspace_rust_sources"]
 
 # Kernel conformance reads independently owned rule shards and the specification.
-# The TS helper corpus is split into 16 laws, distributed over separate
+# Region matrices and core witnesses have 92 laws, distributed over separate
 # actions so each comparison stays inside the pool's unchanged 300 s bound.
 [[rule]]
 packages = ["lash-kernel-conformance"]
 kinds = ["unit-test"]
-shards = 16
+shards = 92
 compile_data = ["//docs/kernel:package_files", "//crates/lash-kernel-conformance:package_files", "//crates/lash-kernel-lib:package_files", "//crates/lash-dialect-typescript:package_files", "//crates/lash-ext-helper-compiler:control_law_source"]
 
 [[rule]]
