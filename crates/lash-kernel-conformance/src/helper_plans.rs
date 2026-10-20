@@ -6,6 +6,8 @@
     reason = "malformed fixtures and failed machine operations are law failures"
 )]
 
+mod conversions;
+
 use crate::projection::{Plan, Projector};
 use lash_kernel_doc::{Datum, ErrorDatum, Handle, Integer, Timestamp};
 use lash_kernel_vm::kernel_internals::{Layout, prepare_with_layout};

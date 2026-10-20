@@ -436,11 +436,16 @@ impl Prepared {
         {
             None
         } else {
+            // A native's prepared entry is its own implementation; a
+            // generated template supplies an entry only where none exists.
             registered
-                .plan()
-                .and_then(|plan| plan.template.as_ref())
-                .and_then(|template| Entry::template(&self.registry, template))
-                .or_else(|| registered.native()?.prepare().map(Entry::Native))
+                .native()
+                .and_then(|native| native.prepare())
+                .map(Entry::Native)
+                .or_else(|| {
+                    let template = registered.plan()?.template.as_ref()?;
+                    Entry::template(&self.registry, template)
+                })
         };
         let body_slot = self
             .tables

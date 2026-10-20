@@ -23,6 +23,8 @@
 //! an embedder installs each plan and adds each native beside the helper
 //! its build registered ([`implement`]).
 
+mod conversions;
+
 use std::sync::Arc;
 
 use lash_kernel_doc::arena::ShortText;
@@ -49,12 +51,14 @@ mod plans;
 pub use plans::PLANS;
 
 /// The helpers this crate has a native for, by name.
-pub const OPERATIONS: [&str; 9] = [
+pub const OPERATIONS: [&str; 11] = [
     "ts.builtin_name",
     "ts.get",
     "ts.add",
     "ts.sub",
     "ts.to_number",
+    "ts.to_boolean",
+    "ts.number.to_string",
     "ts.lt",
     "ts.le",
     "ts.gt",
@@ -122,6 +126,8 @@ pub fn implement(
             "ts.add" => add.clone(),
             "ts.sub" => subtract.clone(),
             "ts.to_number" => Arc::new(ToNumber),
+            "ts.to_boolean" => Arc::new(conversions::ToBoolean),
+            "ts.number.to_string" => Arc::new(conversions::NumberToString),
             "ts.lt" => relation(Relation::Lt),
             "ts.le" => relation(Relation::Le),
             "ts.gt" => relation(Relation::Gt),
