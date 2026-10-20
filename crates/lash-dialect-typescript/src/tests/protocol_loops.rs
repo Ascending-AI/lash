@@ -122,3 +122,66 @@ fn list_item_charge_does_not_walk_graphs_behind_the_element() {
         "immutable key bytes bound key work"
     );
 }
+
+/// FIG-6976: a for-loop updates once after its body (including finally),
+/// uses the head's bindings at continue sites, and keeps each captured let.
+/// Awaiting tests and updates resume with the same result and exact charge.
+#[test]
+fn for_loops_keep_update_order_bindings_and_parks() {
+    let lowered = super::lower_with_effects("for (; await host.echo(false);) {}")
+        .expect("an awaiting test lowers");
+    assert!(
+        lowered.document.main.iter().any(|stmt| matches!(
+            stmt,
+            lash_kernel_doc::Stmt::While {
+                condition: lash_kernel_doc::Expr::Literal(lash_kernel_doc::Literal::Bool(true)),
+                ..
+            }
+        )),
+        "a test that can park stays in the loop body"
+    );
+    let source = r#"
+        const out = [];
+        for (let i = 0; i < 3; i = await host.echo(i + 1)) {
+            if (i === 0) { let i = 99; continue; }
+            switch (i) { case 1: continue; }
+            out.push(i);
+        }
+        for (var v = 0; await host.echo(v < 2); v++) { out.push("v" + v); }
+        out.push(v);
+        let missing = 0;
+        for (;;) { missing++; if (missing === 2) break; continue; }
+        for (; missing < 4;) { missing++; continue; }
+        out.push(missing);
+        const fs = [];
+        for (let captured = 0; captured < 3; captured++) {
+            fs.push(() => captured);
+            if (captured === 1) continue;
+        }
+        out.push(fs[0](), fs[1](), fs[2]());
+        for (let f = 0; f < 2; f = await host.echo(f + 1)) {
+            try { continue; } finally { out.push("f" + f); }
+        }
+        function bad() { out.push("error"); throw new Error("stop"); }
+        try { for (let t = 0; bad(); t++) { out.push("unreachable"); } }
+        catch (e) { out.push("test"); }
+        try { for (let u = 0; u < 2; bad()) { out.push("body"); } }
+        catch (e) { out.push("update"); }
+        try {
+            for (let c = 0; c < 2; bad()) {
+                try { continue; } catch (e) { out.push("wrong catch"); break; }
+            }
+        } catch (e) { out.push("outer catch"); }
+        await control.finish(out.join(","));
+    "#;
+    assert_eq!(
+        finished(source),
+        Datum::Text(
+            "2,v0,v1,2,4,0,1,2,f0,f1,error,test,body,error,update,error,outer catch".into()
+        )
+    );
+    // Labels remain a dialect refusal; shortening a loop cannot admit one.
+    let refused = super::lower("outer: for (let i = 0; i < 2; i++) { continue outer; }")
+        .expect_err("labels are unsupported");
+    assert_eq!(refused.code, crate::DiagnosticCode::LabelUnsupported);
+}

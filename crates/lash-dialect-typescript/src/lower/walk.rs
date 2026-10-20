@@ -5,6 +5,22 @@ use crate::adapter::{
     Pattern, PropertyKey, Stmt, VarKind,
 };
 
+/// Whether a continue-site update could enter a body's catch/finally region.
+/// Nested loops and functions have their own continues and do not count.
+pub(super) fn has_try(statement: &Stmt) -> bool {
+    match statement.unspanned() {
+        Stmt::Block(body) => body.iter().any(has_try),
+        Stmt::If {
+            consequent,
+            alternate,
+            ..
+        } => has_try(consequent) || alternate.as_deref().is_some_and(has_try),
+        Stmt::Switch { cases, .. } => cases.iter().any(|case| case.consequent.iter().any(has_try)),
+        Stmt::Try { .. } => true,
+        _ => false,
+    }
+}
+
 /// Whether evaluating `expr` runs no code at all, so that nothing read
 /// before it can have changed after it.
 pub(super) fn is_inert(expr: &Expr) -> bool {

@@ -3,7 +3,9 @@
 use lash_kernel_doc::{AssignOrder, Expr, Literal, Member, Name, Place, Stmt};
 
 use super::patterns::Mode;
-use super::{BindingKind, Buf, Control, Lowerer, Lowering, Note, Operand, Ty, walk};
+use super::{
+    BeforeContinue, BindingKind, Buf, Control, Lowerer, Lowering, Note, Operand, Ty, walk,
+};
 use crate::adapter::{self as ast, VarKind};
 use crate::{Diagnostic, DiagnosticCode};
 
@@ -443,9 +445,9 @@ impl Lowerer<'_> {
         before_continue: Vec<Stmt>,
         lower: impl FnOnce(&mut Self) -> Lowering<()>,
     ) -> Lowering<Buf> {
-        self.frame_mut()
-            .controls
-            .push(Control::Loop { before_continue });
+        self.frame_mut().controls.push(Control::Loop {
+            before_continue: BeforeContinue::Statements(before_continue),
+        });
         let body = self.scoped_block(lower);
         self.frame_mut().controls.pop();
         body
@@ -496,6 +498,12 @@ impl Lowerer<'_> {
             }
             self.lower_statement(init)?;
         }
+        // An update must run outside the body's catch/finally handlers.
+        // Keep it at the next pass's front when a continue could cross
+        // one, as for heads whose captured bindings need per-pass copies.
+        if per_pass.is_empty() && (update.is_none() || !walk::has_try(body)) {
+            return self.lower_for_without_copies(test, update, body);
+        }
         let first = update.map(|_| self.let_expr(truth(), Ty::Bool));
         // The head's variable and the pass's copy of it, by source name.
         let mut copies: Vec<(String, Name, Name)> = Vec::new();
@@ -519,7 +527,7 @@ impl Lowerer<'_> {
                 .collect()
         };
         self.frame_mut().controls.push(Control::Loop {
-            before_continue: Vec::new(),
+            before_continue: BeforeContinue::Statements(Vec::new()),
         });
         let body = self.scoped_block(|this| {
             for (name, outer) in outer_names {
@@ -531,7 +539,7 @@ impl Lowerer<'_> {
                 copies.push((name, outer, inner));
             }
             if let Some(Control::Loop { before_continue }) = this.frame_mut().controls.last_mut() {
-                *before_continue = copy_back(&copies);
+                *before_continue = BeforeContinue::Statements(copy_back(&copies));
             }
             if let (Some(first), Some(update)) = (&first, update) {
                 this.unless_first(first, |this| {
@@ -553,6 +561,64 @@ impl Lowerer<'_> {
         });
         self.frame_mut().controls.pop();
         self.emit_while(truth(), body?);
+        Ok(())
+    }
+
+    /// With no per-pass bindings, a for-loop is init; while (test) { body; update }.
+    fn lower_for_without_copies(
+        &mut self,
+        test: Option<&ast::Expr>,
+        update: Option<&ast::Expr>,
+        body: &ast::Stmt,
+    ) -> Lowering<()> {
+        let (test_buf, condition) = self.aside(|this| match test {
+            Some(test) => {
+                let value = this.lower_expr(test)?;
+                this.condition(value)
+            }
+            None => Ok(truth()),
+        })?;
+        let mut pure_test = test_buf.is_empty();
+        // An await or guest call can lower entirely to a nested action,
+        // without emitting statements. Such a test stays in the body.
+        let mut pending = vec![lash_kernel_doc::Node::Expr(&condition)];
+        while let Some(node) = pending.pop() {
+            if matches!(node, lash_kernel_doc::Node::Expr(Expr::Act(_))) {
+                pure_test = false;
+                break;
+            }
+            pending.extend(node.children());
+        }
+        let before_continue = match update {
+            Some(expression) => BeforeContinue::ForUpdate {
+                expression: Box::new(expression.clone()),
+                scope_depth: self.scopes.len(),
+                narrowed_depth: self.narrowed.len(),
+            },
+            None => BeforeContinue::Statements(Vec::new()),
+        };
+        self.frame_mut()
+            .controls
+            .push(Control::Loop { before_continue });
+        let lowered = self.scoped_block(|this| {
+            this.append(test_buf);
+            if !pure_test {
+                this.exit_unless(condition.clone());
+            }
+            this.lower_statement(body)?;
+            if let Some(update) = update {
+                this.lower_for_update(update)?;
+            }
+            Ok(())
+        });
+        self.frame_mut().controls.pop();
+        self.emit_while(if pure_test { condition } else { truth() }, lowered?);
+        Ok(())
+    }
+
+    fn lower_for_update(&mut self, update: &ast::Expr) -> Lowering<()> {
+        let value = self.lower_expr(update)?;
+        self.discard(value);
         Ok(())
     }
 
@@ -728,8 +794,24 @@ impl Lowerer<'_> {
         };
         match before {
             Some(before) => {
-                for stmt in before {
-                    self.emit(stmt);
+                match before {
+                    BeforeContinue::Statements(before) => {
+                        for stmt in before {
+                            self.emit(stmt);
+                        }
+                    }
+                    BeforeContinue::ForUpdate {
+                        expression,
+                        scope_depth,
+                        narrowed_depth,
+                    } => {
+                        let inner = self.scopes.split_off(scope_depth);
+                        let narrowed = self.narrowed.split_off(narrowed_depth);
+                        let result = self.lower_for_update(&expression);
+                        self.narrowed.extend(narrowed);
+                        self.scopes.extend(inner);
+                        result?;
+                    }
                 }
                 self.emit(Stmt::Continue);
             }

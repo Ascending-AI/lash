@@ -354,12 +354,25 @@ struct Scope {
     predeclare: Vec<(Name, Expr, Option<SourceSpan>)>,
 }
 
+/// Work a source `continue` must run before the kernel's own continue.
+#[derive(Clone, Debug)]
+enum BeforeContinue {
+    Statements(Block),
+    /// Lower at each continue site with fresh temporaries, in the head's
+    /// lexical environment rather than a shadowing body block's.
+    ForUpdate {
+        expression: Box<ast::Expr>,
+        scope_depth: usize,
+        narrowed_depth: usize,
+    },
+}
+
 /// What `break` and `continue` leave.
 #[derive(Debug)]
 enum Control {
     Loop {
         /// What a `continue` runs before the kernel's own `continue`.
-        before_continue: Block,
+        before_continue: BeforeContinue,
     },
     Switch {
         /// Set by a `continue` inside the switch, which first has to leave
