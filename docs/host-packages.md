@@ -139,13 +139,38 @@ The surface spells those declarations explicitly. For example, the
 fixture contains:
 
 ```text
-operation run(plan: Any) -> List(Any) contract "dataframe.run/1"
-internal operation explain(plan: Any) -> Text contract "dataframe.explain/1"
+operation run(plan: List(Record{step: Text, exprs: List(Json), callback?: Fn(value: Any) -> Any, n?: Int})) -> List(Any) contract "dataframe.run/1"
+internal operation explain(plan: List(Record{step: Text, exprs: List(Json), callback?: Fn(value: Any) -> Any, n?: Int})) -> Text contract "dataframe.explain/1"
 ```
 
-The operation requirement is part of a performing body's identity. The
-shared runner contract-id dispatch check is still in progress; current
-provider registration uses the runner's schemas and execution declarations.
+Declare an operation's parameters with the types its runner can serve. A
+runner's tool takes its input as JSON, so a `Json` slot is plain schema
+and a function slot is marked `{"x-lash": {"kind": "function"}}`. The
+fixture's runner states the plan as an array of objects whose `callback`
+property is such a slot, which serves `run`'s parameter. An `Any` slot, or
+a package value type, has no JSON schema that serves it.
+
+The operation requirement is part of a performing body's identity: the
+code pins each operation's contract id beside its signature. A runner
+serves a contract through `ToolManifest.contract`, a
+`lash::tools::ContractSource`. `ContractSource::Declared { id }` states the
+id; build it with `ToolDraft::declared_contract`. `ContractSource::Derived
+{ tag }` derives the id from the input and output schemas, output contract,
+declared intents and the host's `HostTag`, and from nothing else; set the
+tag with `ToolDraft::host_tag` when two meanings share one set of schemas.
+`ToolDefinition::contract_id()` computes the result; it is never stored.
+
+On a package-owned path, a runner must declare the package's contract id
+and intents and serve the operation's signature. Otherwise a process whose
+code performs the operation is refused when its environment is checked
+against it, with the `runner_not_packaged` refusal naming the tool and the
+package, and the cell's surface setup refuses the runner the same way. A
+program performs an owned operation under the package's declared
+requirement, whether it calls the operation directly or through a member
+body, so both state one requirement. A tool advertised under another
+contract than the package declares, or at the segment of one of the
+package's functions, types or errors, is refused when the namespaces are
+composed, naming both; a tool never shadows package code.
 
 The `internal` declaration records own-package-only visibility on the
 export. End-to-end enforcement across direct calls, discovery, Standard
@@ -169,12 +194,23 @@ A read may execute again after a crash; use it only where recomputation is
 acceptable. The acceptance laws run both operations through a fake host;
 they do not certify a production provider's retry behavior.
 
-Replace a production runner with a fake by registering it under the same
-operation paths and compatible schemas. A replacement for already-linked
-work must remain resolvable under the recorded tool and provider keys and
-read any retained execution-binding payload. Keep the operation's meaning
-unchanged. A committed outcome is consumed without executing the runner
-again. The [plugin guide](plugins.md) covers provider readiness,
+Replace a production runner with a fake by registering the fake to serve
+the same contracts. Each `lash::tools::OperationLink` records the tool,
+provider, execution policy, argument projection and the runner's codec
+payload, and whether the tool was advertised, resolved through a deferred
+match or reached dynamically. It carries no contract: contract identity
+stays in the code's requirement. A replacement for already-linked work must
+remain resolvable under the recorded tool and provider keys and must read
+any retained codec payload. One judge decides every pinned call. When the
+live definition's contract id equals the pinned one, the call runs under
+the link's policy. When it differs, the call raises
+`operation_contract_changed`, which the program may catch, and no runner
+body runs. A missing tool parks. A description, transport, server-version
+or retry-bound change is not a contract change. A committed outcome is
+consumed without executing the runner again. An MCP tool derives its
+contract from its durable tool id and a digest of its schemas, so a
+redeployed server that keeps the contract receives an admitted call again,
+`Once` included. The [plugin guide](plugins.md) covers provider readiness,
 configuration and certification.
 
 ## Install once, choose a complete set

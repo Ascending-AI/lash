@@ -260,7 +260,16 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
     let registry = embedding.registry()?;
     let mut boundary = lash::vm::HostBoundary::new();
     for tool in tools()? {
-        boundary.offer_tool(&tool.manifest, &tool.contract)?;
+        boundary.offer_operation(
+            tool.manifest.operation.clone(),
+            lash::vm::offered_tool(
+                &tool.manifest,
+                &tool.contract,
+                lash::dialect::OfferedSource::Catalog {
+                    tool: tool.manifest.id.to_string(),
+                },
+            ),
+        )?;
     }
     let mut effects = boundary
         .operations()

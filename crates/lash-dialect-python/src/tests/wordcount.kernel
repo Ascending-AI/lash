@@ -1,7 +1,7 @@
 kernel 1
 numbers by_spelling
-effect dataframe.explain(plan: Any) -> Text contract "dataframe.explain/1"
-effect dataframe.run(plan: Any) -> List(Any) contract "dataframe.run/1"
+effect dataframe.explain(plan: List(Record{step: Text, exprs: List(Json), callback?: Fn(value: Any) -> Any, n?: Int})) -> Text contract "dataframe.explain/1"
+effect dataframe.run(plan: List(Record{step: Text, exprs: List(Json), callback?: Fn(value: Any) -> Any, n?: Int})) -> List(Any) contract "dataframe.run/1"
 use abs = @627d3fa925484d12b13ecfa198a1a07f3d88fb6f75df2c907ff4b9373105ead9
 use add = @7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537
 use bool.not = @740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d
@@ -10,8 +10,8 @@ use brand.of = @bd9a21264286394a5cd731fecaa03951fb50517689667675c0788623eb529dc1
 use dataframe.col = @a7731598daa1e882766960880c990f7c671b4ca4b48674fd558dbfa612d27f79
 use dataframe.count = @370d30ccfaf6ef7864ce3a054c4d8761157fbf754b4aca8c8155da4a455d5709
 use dataframe.data_quanta.check_shape = @54819d41cf8f046723240c72206542ff430d4b330a877186f9394e685f20e76c
-use dataframe.data_quanta.collect_rows = @a8218d9f12ec508a7679ebf3bb7436deb15eeed41c2dd0f2da763f29c7b58cbb
-use dataframe.data_quanta.explain = @460504e68a17a0733f63ea388cbf45ad6053e67661c589f0f9c25c19819e7bfe
+use dataframe.data_quanta.collect_rows = @0194d8e7aa251a1d6a7a8211b5ed72bae13a784b3a74e94291615781d646d4e9
+use dataframe.data_quanta.explain = @be28ec38ad6bda3bb478ee8be9b9c337c795e5f600a41cee2bcbc458b8c0ac30
 use dataframe.data_quanta.filter = @72677ec79629effb6390ac378adfce33d26f1ffc0a80ba92e3d0a900026acd5a
 use dataframe.data_quanta.flat_map = @dacf0f3ab4990efb3029a9958f96dd520e07ebcd95669b84193ea88e207ca502
 use dataframe.data_quanta.limit = @709baff19f1e3b8c573abf743e51a65c6e725da300aa792c375578717afa3349

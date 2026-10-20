@@ -19,5 +19,5 @@ type data_quanta = Record{source: Text, plan: List(Record{step: Text, exprs: Lis
   async method collect_rows(self: data_quanta) -> List(Any) = dataframe.data_quanta.collect_rows
   async method explain(self: data_quanta) -> Text = dataframe.data_quanta.explain
 error execution_error
-operation run(plan: Any) -> List(Any) contract "dataframe.run/1"
-internal operation explain(plan: Any) -> Text contract "dataframe.explain/1"
+operation run(plan: List(Record{step: Text, exprs: List(Json), callback?: Fn(value: Any) -> Any, n?: Int})) -> List(Any) contract "dataframe.run/1"
+internal operation explain(plan: List(Record{step: Text, exprs: List(Json), callback?: Fn(value: Any) -> Any, n?: Int})) -> Text contract "dataframe.explain/1"

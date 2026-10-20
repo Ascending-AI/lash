@@ -192,6 +192,97 @@ fn disjoint_packages_merge_and_a_taken_root_is_refused_naming_both() {
     Namespaces::build(&view, operations(&["tools.search"])).expect("`tools` is accepted");
 }
 
+/// NS-COMPOSE (FIG-6988): one path, one owner. An offered operation at a
+/// segment a code package exports as anything but an operation is refused
+/// naming both, so a catalog tool never shadows package code. An operation
+/// at the package's own operation export composes under the package's
+/// declared requirement, and under another contract is refused.
+#[test]
+fn an_operation_at_a_code_export_is_refused_naming_both() {
+    let mut packages = dataframe();
+    let exports = packages
+        .0
+        .get_mut(&PackagePath::parse("dataframe").expect("a path"))
+        .expect("the package");
+    exports.insert(
+        Segment::new("execution_error").expect("a segment"),
+        Export::Error,
+    );
+    exports.insert(
+        Segment::new("run").expect("a segment"),
+        Export::Operation(crate::OperationExport {
+            requirement: lash_kernel_doc::OperationRequirement::new(
+                signature(),
+                lash_kernel_doc::ContractId::new("1"),
+            ),
+            intents: Default::default(),
+            visibility: crate::Visibility::Public,
+        }),
+    );
+    for export in ["dataframe.col", "dataframe.execution_error"] {
+        let refused = Namespaces::build(&packages, operations(&["dataframe.run", export]))
+            .expect_err("an operation at a code export");
+        assert_eq!(
+            refused,
+            NamespaceRefusal::OperationIsExport {
+                operation: export.to_owned(),
+                package: "dataframe".to_owned(),
+                export: export.to_owned(),
+            },
+            "{export}"
+        );
+        assert!(refused.to_string().contains(export), "{refused}");
+    }
+    // A runner's tool states its own signature, `(input: Json)`; the
+    // operation is offered under the package's declared requirement, the
+    // one the package's bodies state.
+    let run = operation("dataframe.run");
+    let offered_under = |contract: &str| {
+        Operations::from([(
+            run.clone(),
+            Offered::tool(
+                "dataframe.run",
+                lash_kernel_doc::OperationRequirement::new(
+                    Signature {
+                        params: vec![lash_kernel_doc::Param {
+                            name: lash_kernel_doc::Name::new("input"),
+                            ty: Type::Json,
+                            optional: false,
+                        }],
+                        result: Type::Any,
+                    },
+                    lash_kernel_doc::ContractId::new(contract),
+                ),
+            ),
+        )])
+    };
+    let namespaces = Namespaces::build(&packages, offered_under("1"))
+        .expect("the package's own operation composes");
+    assert!(matches!(
+        namespaces.resolve(&["dataframe", "run"], Spelling::Python),
+        Resolution::Operation { operation, offered }
+            if *operation == run
+                && offered.requirement
+                    == lash_kernel_doc::OperationRequirement::new(
+                        signature(),
+                        lash_kernel_doc::ContractId::new("1"),
+                    )
+    ));
+    assert_eq!(
+        Namespaces::build(&packages, offered_under("2")).expect_err("another contract"),
+        NamespaceRefusal::OperationContractDiffers {
+            operation: "dataframe.run".to_owned(),
+            package: "dataframe".to_owned(),
+            offered: "2".to_owned(),
+            declared: "1".to_owned(),
+        }
+    );
+    assert!(matches!(
+        namespaces.resolve(&["dataframe", "col"], Spelling::Python),
+        Resolution::Export { .. }
+    ));
+}
+
 /// PKG-NAMESPACE (FIG-6920): only the package path is spelled as path
 /// segments. A value type after it resolves by its type-name spelling, and
 /// only by it, and a static under it by its member spelling, in each

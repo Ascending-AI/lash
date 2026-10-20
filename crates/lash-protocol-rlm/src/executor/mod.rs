@@ -397,7 +397,16 @@ async fn link_cell(
             .map_err(|refusal| host_failure(format!("invalid host tool surface: {refusal}")))?;
         }
         boundary
-            .offer_tool(&tool.manifest, &tool.contract)
+            .offer_operation(
+                tool.manifest.operation.clone(),
+                lash_vm_runtime::offered_tool(
+                    &tool.manifest,
+                    &tool.contract,
+                    lash_kernel_dialect::OfferedSource::Catalog {
+                        tool: tool.manifest.id.to_string(),
+                    },
+                ),
+            )
             .map_err(|error| host_failure(format!("invalid host tool surface: {error}")))?;
         if tool.manifest.execution_policy == lash_core::ExecutionPolicy::Read {
             read_tools.insert(

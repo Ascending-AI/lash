@@ -168,6 +168,7 @@ testing = [
     "lash-protocol-rlm?/testing",
     "lash-provider-openai?/testing",
     "lash-vm-worker?/testing",
+    "lash-kernel-package?/testing",
 ]
 # Exposes the host-installed OpenTelemetry adapter (`lash::tracing::OtelTelemetry`).
 otel-trace = ["lash-core/otel-trace"]

@@ -3,7 +3,16 @@ fn corpus_tool_signatures() -> anyhow::Result<
 > {
     let mut boundary = lash::vm::HostBoundary::new();
     for tool in workflow_corpus::tools()? {
-        boundary.offer_tool(&tool.manifest, &tool.contract)?;
+        boundary.offer_operation(
+            tool.manifest.operation.clone(),
+            lash::vm::offered_tool(
+                &tool.manifest,
+                &tool.contract,
+                lash::dialect::OfferedSource::Catalog {
+                    tool: tool.manifest.id.to_string(),
+                },
+            ),
+        )?;
     }
     Ok(boundary
         .operations()

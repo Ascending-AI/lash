@@ -109,29 +109,6 @@ impl HostBoundary {
         Ok(())
     }
 
-    /// Offers the catalog tool `manifest` describes, under its schema
-    /// `contract`, as its operation.
-    ///
-    /// # Errors
-    ///
-    /// [`BoundaryError`] when its operation is taken.
-    pub fn offer_tool(
-        &mut self,
-        manifest: &lash_protocol_types::ToolManifest,
-        contract: &lash_protocol_types::ToolContract,
-    ) -> Result<(), BoundaryError> {
-        self.offer_operation(
-            manifest.operation.clone(),
-            offered_tool(
-                manifest,
-                contract,
-                OfferedSource::Catalog {
-                    tool: manifest.id.to_string(),
-                },
-            ),
-        )
-    }
-
     /// Every tool of `catalog` as its operation: what a process of that
     /// catalog may perform. A tool that declares a turn control is not
     /// offered: a process cannot end a session turn, so a process document
@@ -147,7 +124,16 @@ impl HostBoundary {
             if !entry.manifest.declaration().controls.is_empty() {
                 continue;
             }
-            boundary.offer_tool(&entry.manifest, &entry.contract)?;
+            boundary.offer_operation(
+                entry.manifest.operation.clone(),
+                offered_tool(
+                    &entry.manifest,
+                    &entry.contract,
+                    OfferedSource::Catalog {
+                        tool: entry.manifest.id.to_string(),
+                    },
+                ),
+            )?;
         }
         Ok(boundary)
     }
@@ -389,8 +375,9 @@ mod tests {
     /// PKG-RUNNER: on a path a package owns, a tool runs the operation only
     /// when it declares the package's contract id and intents and serves
     /// its signature. On the `dataframe` fixture's `run`, a runner that
-    /// declares `dataframe.run/1` passes the contract and intent gates; one
-    /// declaring another id, or deriving its id, is refused, naming the
+    /// declares `dataframe.run/1` and takes the plan, its callback as a
+    /// function slot, serves it; one whose input admits no function, one
+    /// declaring another id, or one deriving its id, is refused, naming the
     /// tool and `dataframe`.
     #[test]
     fn a_runner_on_a_packaged_path_serves_the_packages_contract() {
@@ -412,12 +399,26 @@ mod tests {
             owner.requirement.contract,
             lash_kernel_doc::ContractId::new("dataframe.run/1")
         );
-        let runner = |contract: Option<&str>| {
+        let plan = serde_json::json!({
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "step": { "type": "string" },
+                    "exprs": { "type": "array" },
+                    "callback": { "x-lash": { "kind": "function" } },
+                    "n": { "type": "integer" }
+                },
+                "required": ["step", "exprs"],
+                "additionalProperties": false
+            }
+        });
+        let runner_of = |input: serde_json::Value, contract: Option<&str>| {
             let draft = lash_core::ToolDefinition::raw(
                 "tool:dataframe_runner",
                 "dataframe.run",
                 "Runs a plan.",
-                serde_json::json!({}),
+                input,
                 serde_json::json!({ "type": "array" }),
             )
             .expect("valid declared tool schemas");
@@ -427,6 +428,7 @@ mod tests {
             }
             .with_execution(std::time::Duration::from_secs(30))
         };
+        let runner = |contract: Option<&str>| runner_of(plan.clone(), contract);
         let check = |runner: lash_core::ToolDefinition| {
             lash_execution_contracts::process::check_runner(
                 &effect,
@@ -435,17 +437,17 @@ mod tests {
                 &runner.contract,
             )
         };
-        // A runner declaring the package's id and intents passes those
-        // gates; a tool's input projects to one `input` record, which does
-        // not serve `run(plan: Any)`, so its signature is what refuses it.
-        let declared = check(runner(Some("dataframe.run/1")));
+        check(runner(Some("dataframe.run/1"))).expect("the declared runner serves `run`");
+        // An input that admits no function does not take the plan's
+        // callback, so its signature is what refuses it.
+        let data_only = check(runner_of(serde_json::json!({}), Some("dataframe.run/1")));
         assert!(
             matches!(
-                &declared,
+                &data_only,
                 Err(lash_execution_contracts::process::ProcessEnvRefusal::RunnerNotPackaged { reason, .. })
                     if reason.starts_with("its signature")
             ),
-            "{declared:?}"
+            "{data_only:?}"
         );
         for refused in [runner(Some("dataframe.run/2")), runner(None)] {
             let refusal = check(refused).expect_err("another or a derived id is refused");

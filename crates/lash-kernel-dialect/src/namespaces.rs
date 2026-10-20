@@ -171,6 +171,25 @@ pub enum NamespaceRefusal {
         package: String,
         export: String,
     },
+    /// An offered operation at a segment a code package exports as
+    /// something other than an operation: the tool would shadow the code.
+    #[error("the operation `{operation}` is the code export `{export}` of `{package}`")]
+    OperationIsExport {
+        operation: String,
+        package: String,
+        export: String,
+    },
+    /// An offered operation a package declares, offered under another
+    /// contract than the package's.
+    #[error(
+        "the operation `{operation}` is offered under contract `{offered}`, and `{package}` declares `{declared}`"
+    )]
+    OperationContractDiffers {
+        operation: String,
+        package: String,
+        offered: String,
+        declared: String,
+    },
     /// An offered effect name that is no canonical operation.
     #[error("`{effect}` is not an operation: {message}")]
     NotAnOperation { effect: String, message: String },
@@ -243,10 +262,15 @@ impl Namespaces {
     ///
     /// # Errors
     ///
-    /// [`NamespaceRefusal`]: a package path equal to another package's
-    /// export, or a root that is reserved (`lash`, a dialect global, a
+    /// [`NamespaceRefusal`]: an offered operation at a code export that is
+    /// no operation, or at an operation export under another contract than
+    /// the package declares, a package path equal to another package's export, or
+    /// a root that is reserved (`lash`, a dialect global, a
     /// printer-generated name, a root of lash's own packages).
-    pub fn build(view: &dyn ExportView, operations: Operations) -> Result<Self, NamespaceRefusal> {
+    pub fn build(
+        view: &dyn ExportView,
+        mut operations: Operations,
+    ) -> Result<Self, NamespaceRefusal> {
         let mut code = BTreeMap::new();
         for path in view.paths() {
             if let Some(exports) = view.exports(&path) {
@@ -258,6 +282,38 @@ impl Namespaces {
             .cloned()
             .chain(operations.keys().map(|operation| operation.package.clone()))
             .collect::<BTreeSet<_>>();
+        // One path, one owner. An offered operation at a segment a code
+        // package exports as anything but an operation would shadow the
+        // code, so it is refused naming both. One the package declares is
+        // performed under the package's declared requirement, the one its
+        // own bodies state: a runner serves it under that contract
+        // (PKG-RUNNER), so a direct perform and a member body's state one
+        // requirement.
+        for (operation, offered) in &mut operations {
+            let Some(export) = code
+                .get(&operation.package)
+                .and_then(|members| members.get(&operation.name))
+            else {
+                continue;
+            };
+            let package = dotted(operation.package.iter());
+            let Export::Operation(declared) = export else {
+                return Err(NamespaceRefusal::OperationIsExport {
+                    operation: operation.effect_name().to_string(),
+                    export: format!("{package}.{}", operation.name),
+                    package,
+                });
+            };
+            if offered.requirement.contract != declared.requirement.contract {
+                return Err(NamespaceRefusal::OperationContractDiffers {
+                    operation: operation.effect_name().to_string(),
+                    package,
+                    offered: offered.requirement.contract.to_string(),
+                    declared: declared.requirement.contract.to_string(),
+                });
+            }
+            offered.requirement.clone_from(&declared.requirement);
+        }
         // What each node exports, by segment: its code exports and its
         // operations, named for a refusal.
         let mut exports = BTreeMap::<Vec<Segment>, BTreeMap<Segment, String>>::new();
@@ -270,19 +326,10 @@ impl Namespaces {
             }
         }
         for operation in operations.keys() {
-            let node = exports
+            exports
                 .entry(operation.package.as_slice().to_vec())
-                .or_default();
-            let named = operation.effect_name().to_string();
-            if let Some(other) = node.insert(operation.name.clone(), named.clone())
-                && other != named
-            {
-                return Err(NamespaceRefusal::PathIsExport {
-                    path: named,
-                    package: dotted(operation.package.iter()),
-                    export: other,
-                });
-            }
+                .or_default()
+                .insert(operation.name.clone(), operation.effect_name().to_string());
         }
         let mut nodes = BTreeSet::new();
         for package in &packages {

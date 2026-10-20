@@ -1,7 +1,7 @@
 # The `dataframe` fixture's code (FIG-6917): every member's definition,
 # which the builder begins with the checks of its package-typed slots.
-effect dataframe.run(plan: Any) -> List(Any) contract "dataframe.run/1"
-effect dataframe.explain(plan: Any) -> Text contract "dataframe.explain/1"
+effect dataframe.run(plan: List(Record{step: Text, exprs: List(Json), callback?: Fn(value: Any) -> Any, n?: Int})) -> List(Any) contract "dataframe.run/1"
+effect dataframe.explain(plan: List(Record{step: Text, exprs: List(Json), callback?: Fn(value: Any) -> Any, n?: Int})) -> Text contract "dataframe.explain/1"
 use list.concat
 use list.len
 use brand.built

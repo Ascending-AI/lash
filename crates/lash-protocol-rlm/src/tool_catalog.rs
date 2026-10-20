@@ -411,9 +411,15 @@ mod tests {
         // The effect a cell performs carries the pinned contract's types.
         let mut boundary = lash_vm_runtime::HostBoundary::new();
         boundary
-            .offer_tool(
-                &catalog.entries()[0].manifest,
-                &catalog.entries()[0].contract,
+            .offer_operation(
+                catalog.entries()[0].manifest.operation.clone(),
+                lash_vm_runtime::offered_tool(
+                    &catalog.entries()[0].manifest,
+                    &catalog.entries()[0].contract,
+                    lash_kernel_dialect::OfferedSource::Catalog {
+                        tool: catalog.entries()[0].manifest.id.to_string(),
+                    },
+                ),
             )
             .expect("pinned contract is offered as an operation");
         let offered = boundary
@@ -517,9 +523,15 @@ mod tests {
         // The advertised path is the effect a cell performs.
         let mut boundary = lash_vm_runtime::HostBoundary::new();
         boundary
-            .offer_tool(
-                &catalog.entries()[0].manifest,
-                &catalog.entries()[0].contract,
+            .offer_operation(
+                catalog.entries()[0].manifest.operation.clone(),
+                lash_vm_runtime::offered_tool(
+                    &catalog.entries()[0].manifest,
+                    &catalog.entries()[0].contract,
+                    lash_kernel_dialect::OfferedSource::Catalog {
+                        tool: catalog.entries()[0].manifest.id.to_string(),
+                    },
+                ),
             )
             .expect("the tool is offered as its operation");
         assert!(

@@ -822,7 +822,16 @@ main {{
     let mut boundary = lash::vm::HostBoundary::new();
     for tool in launch_definitions() {
         boundary
-            .offer_tool(&tool.manifest, &tool.contract)
+            .offer_operation(
+                tool.manifest.operation.clone(),
+                lash::vm::offered_tool(
+                    &tool.manifest,
+                    &tool.contract,
+                    lash::dialect::OfferedSource::Catalog {
+                        tool: tool.manifest.id.to_string(),
+                    },
+                ),
+            )
             .expect("the launch contract");
     }
     let effect = lash::workflow::document::EffectName::new(format!("tools.{launch}"))
