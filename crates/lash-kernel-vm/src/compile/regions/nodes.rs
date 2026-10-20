@@ -29,6 +29,7 @@ use super::super::{
     find_property,
 };
 use super::GuestCall;
+use super::calls;
 use super::cx::Cx;
 use crate::machine::SlotState;
 
@@ -328,16 +329,27 @@ pub(super) fn compile(
         {
             node
         }
-        Kind::Operator { lib, args, .. } => match fused(
-            libs,
-            *lib,
-            args,
-            |expr| Leaf::of(expr, &mut node),
-            fresh(args),
-        ) {
-            Some(fused) => fused,
-            None => operator(libs, *lib, nodes(args, &mut node)?, fresh(args))?,
-        },
+        Kind::Operator { lib, args, .. } => {
+            match fused(
+                libs,
+                *lib,
+                args,
+                |expr| Leaf::of(expr, &mut node),
+                fresh(args),
+            )
+            .or_else(|| {
+                calls::operator(
+                    libs,
+                    *lib,
+                    args,
+                    |expr| Leaf::of(expr, &mut node),
+                    fresh(args),
+                )
+            }) {
+                Some(called) => called,
+                None => operator(libs, *lib, nodes(args, &mut node)?)?,
+            }
+        }
         Kind::Native { lib, args, .. } => call(libs, *lib, nodes(args, &mut node)?, fresh(args))?,
         Kind::Call { callee, args, .. } => {
             let read = match callee {
@@ -448,7 +460,16 @@ pub(super) fn action(libs: &Libs<'_>, id: LibId, args: &[super::super::Atom]) ->
         |atom| Leaf::atom(libs, atom),
         Fresh::default(),
     )
-    .or_else(|| operator(libs, id, atoms(libs, args)?, Fresh::default()))
+    .or_else(|| {
+        calls::operator(
+            libs,
+            id,
+            args,
+            |atom| Leaf::atom(libs, atom),
+            Fresh::default(),
+        )
+    })
+    .or_else(|| operator(libs, id, atoms(libs, args)?))
 }
 
 /// The compiled statement-root guest call `call` of `callee` on `args`,
@@ -586,30 +607,6 @@ impl Answer {
         })
     }
 
-    /// The entry's answer on `args` in an allocating plan, as
-    /// [`Cx::operate_on`] takes it: `Ok` with the value where its guard
-    /// certifies the sizes its table charges, which are charged; `Err`
-    /// with the answer, or decline, for [`Cx::operated`] to charge or run.
-    #[inline(always)]
-    fn certified(
-        &self,
-        args: &[Value],
-        cx: &mut Cx<'_>,
-    ) -> Result<Value, Option<lash_kernel_doc::PreparedAnswer>> {
-        let answer = self.prepared.answer(args, cx.charging);
-        match answer {
-            Some(answer) if !cx.charging => Ok(answer.value),
-            Some(answer) => match answer.scalar_sizes.and_then(|mask| self.table.units(mask)) {
-                Some(units) => {
-                    cx.meter.measured(units);
-                    Ok(answer.value)
-                }
-                None => Err(Some(answer)),
-            },
-            None => Err(None),
-        }
-    }
-
     /// The entry on `args`: its scalar value, metered by its formula from
     /// the table, at the sizes its guard certifies or, where it certifies
     /// none, the values show. A paced run's (not `CHARGING`) runs the
@@ -637,9 +634,9 @@ impl Answer {
     }
 }
 
-/// An operand of a fused operator: a frame variable or a constant read in
-/// place, or any other expression's node.
-enum Leaf {
+/// An operand of a fused operator or an operator site: a frame variable or
+/// a constant read in place, or any other expression's node.
+pub(super) enum Leaf {
     Slot(usize),
     Const(Value),
     Node(Node),
@@ -669,8 +666,16 @@ impl Leaf {
         })
     }
 
+    /// The constant it reads, if it is one.
+    pub(super) fn constant(&self) -> Option<Value> {
+        match self {
+            Self::Const(value) => Some(*value),
+            Self::Slot(_) | Self::Node(_) => None,
+        }
+    }
+
     #[inline(always)]
-    fn eval(&self, slots: &[SlotState], cx: &mut Cx<'_>) -> Option<Value> {
+    pub(super) fn eval(&self, slots: &[SlotState], cx: &mut Cx<'_>) -> Option<Value> {
         match self {
             Self::Slot(at) => match slots.get(*at) {
                 Some(SlotState::Value(value)) => Some(*value),
@@ -724,31 +729,25 @@ fn fused<A>(
     let answer = Answer::of(function)?;
     let (a, b) = (leaf(a)?, leaf(b)?);
     Some(match (libs.general, libs.charging) {
-        (true, _) => Box::new(move |slots, cx| {
-            let x = a.eval(slots, cx)?;
-            let y = b.eval(slots, cx)?;
-            let Some(value) = typed(&pair, x, y) else {
-                return match answer.certified(&[x, y], cx) {
-                    Ok(value) => Some(value),
-                    Err(answered) => cx.operated(cx.exe.lib(id), &[x, y], fresh, answered),
+        (true, _) => {
+            let site = calls::Site::of(libs, id, &[a.constant(), b.constant()], fresh)?;
+            Box::new(move |slots, cx| {
+                let x = a.eval(slots, cx)?;
+                let y = b.eval(slots, cx)?;
+                let Some(value) = typed(&pair, x, y) else {
+                    return site.call(&[x, y], cx);
                 };
-            };
-            let answered = Some(lash_kernel_doc::PreparedAnswer {
-                value,
-                scalar_sizes: (cx.charging && scalar(&value)).then(|| pair_sizes(x, y, value)),
-            });
-            match answered {
-                Some(answered) if !cx.charging => Some(answered.value),
-                Some(lash_kernel_doc::PreparedAnswer {
-                    value,
-                    scalar_sizes: Some(mask),
-                }) => {
-                    cx.meter.measured(answer.table.units(mask)?);
-                    Some(value)
+                if !cx.charging {
+                    return Some(value);
                 }
-                answered => cx.operated(cx.exe.lib(id), &[x, y], fresh, answered),
-            }
-        }),
+                if scalar(&value) {
+                    cx.meter
+                        .measured(answer.table.units(pair_sizes(x, y, value))?);
+                    return Some(value);
+                }
+                site.charged(&[x, y], value.into(), cx)
+            })
+        }
         (false, true) => Box::new(move |slots, cx| {
             let x = a.eval(slots, cx)?;
             let y = b.eval(slots, cx)?;
@@ -826,18 +825,17 @@ fn kind_node(
 }
 
 /// The compiled operator `id` over `operands`.
-fn operator(libs: &Libs<'_>, id: LibId, operands: Vec<Node>, fresh: Fresh) -> Option<Node> {
+fn operator(libs: &Libs<'_>, id: LibId, operands: Vec<Node>) -> Option<Node> {
     if libs.general {
-        let function = libs.exe.lib(id);
-        function.prepared.as_ref()?;
-        if let Some(answer) = Answer::of(function) {
-            match operands.len() {
-                1 => return Some(certified::<1>(id, answer, operands, fresh)),
-                2 => return Some(certified::<2>(id, answer, operands, fresh)),
-                _ => {}
-            }
-        }
-        return Some(direct::<true>(id, operands.len(), operands, fresh));
+        // More operands than a site holds in place ([`calls::operator`]):
+        // evaluated into an operand window.
+        libs.exe.lib(id).prepared.as_ref()?;
+        let arity = operands.len();
+        return Some(Box::new(move |slots, cx| {
+            arguments(&operands, arity, slots, cx, |cx, args| {
+                cx.operate(cx.exe.lib(id), args)
+            })
+        }));
     }
     let answer = Answer::of(libs.exe.lib(id))?;
     if libs.charging {
@@ -845,24 +843,6 @@ fn operator(libs: &Libs<'_>, id: LibId, operands: Vec<Node>, fresh: Fresh) -> Op
     } else {
         scalar_operator::<false>(answer, operands)
     }
-}
-
-/// An allocating plan's operator `id` of `N` parameters over `operands`,
-/// held in place: its entry `answer` runs once, and its answer is charged
-/// from the table where its guard certifies the sizes
-/// ([`Answer::certified`]), and as [`Cx::operate_on`] charges it, or runs
-/// its decline, otherwise.
-fn certified<const N: usize>(id: LibId, answer: Answer, operands: Vec<Node>, fresh: Fresh) -> Node {
-    Box::new(move |slots, cx| {
-        let mut values = [Value::Absent; N];
-        for (value, operand) in values.iter_mut().zip(&operands) {
-            *value = operand(slots, cx)?;
-        }
-        match answer.certified(&values, cx) {
-            Ok(value) => Some(value),
-            Err(answered) => cx.operated(cx.exe.lib(id), &values, fresh, answered),
-        }
-    })
 }
 
 /// A scalar plan's operator over `operands`, answered by `answer`.
@@ -906,7 +886,7 @@ fn call(libs: &Libs<'_>, id: LibId, operands: Vec<Node>, fresh: Fresh) -> Option
     {
         return Some(length(id, units, operands.into_iter().next()?));
     }
-    Some(direct::<false>(id, function.arity, operands, fresh))
+    Some(direct(id, function.arity, operands, fresh))
 }
 
 /// The compiled `list.len` of native `id` on `list`, charging `units`
@@ -984,41 +964,30 @@ fn fresh(args: &[Expr]) -> Fresh {
     )
 }
 
-/// The most parameters an operator's or a native's call evaluates in
-/// place: as many as a template's heap paths take.
-const DIRECT: usize = 8;
+/// The most parameters a native's call evaluates in place: as many as an
+/// operator site holds.
+const DIRECT: usize = calls::IN_PLACE;
 
-/// The call of library function `id`, an operator's when `OPERATOR` and
-/// otherwise a native's, of `arity` parameters over `operands`, the
+/// The call of native `id` of `arity` parameters over `operands`, the
 /// parameters they leave out absent. Its operands are evaluated in order
 /// in place, where its prepared entry answers them directly
-/// ([`Cx::operate_on`], [`Cx::native_on`]); a call of more parameters
-/// evaluates them into an operand window.
-fn direct<const OPERATOR: bool>(
-    id: LibId,
-    arity: usize,
-    operands: Vec<Node>,
-    fresh: Fresh,
-) -> Node {
+/// ([`Cx::native_on`]); a call of more parameters evaluates them into an
+/// operand window.
+fn direct(id: LibId, arity: usize, operands: Vec<Node>, fresh: Fresh) -> Node {
     let operands = operands.into_boxed_slice();
     match arity {
-        0 => in_place::<OPERATOR, 0>(id, operands, fresh),
-        1 => in_place::<OPERATOR, 1>(id, operands, fresh),
-        2 => in_place::<OPERATOR, 2>(id, operands, fresh),
-        3 => in_place::<OPERATOR, 3>(id, operands, fresh),
-        4 => in_place::<OPERATOR, 4>(id, operands, fresh),
-        5 => in_place::<OPERATOR, 5>(id, operands, fresh),
-        6 => in_place::<OPERATOR, 6>(id, operands, fresh),
-        7 => in_place::<OPERATOR, 7>(id, operands, fresh),
-        DIRECT => in_place::<OPERATOR, DIRECT>(id, operands, fresh),
+        0 => in_place::<0>(id, operands, fresh),
+        1 => in_place::<1>(id, operands, fresh),
+        2 => in_place::<2>(id, operands, fresh),
+        3 => in_place::<3>(id, operands, fresh),
+        4 => in_place::<4>(id, operands, fresh),
+        5 => in_place::<5>(id, operands, fresh),
+        6 => in_place::<6>(id, operands, fresh),
+        7 => in_place::<7>(id, operands, fresh),
+        DIRECT => in_place::<DIRECT>(id, operands, fresh),
         _ => Box::new(move |slots, cx| {
             arguments(&operands, arity, slots, cx, |cx, args| {
-                let function = cx.exe.lib(id);
-                if OPERATOR {
-                    cx.operate(function, args)
-                } else {
-                    cx.native(function, args)
-                }
+                cx.native(cx.exe.lib(id), args)
             })
         }),
     }
@@ -1026,22 +995,13 @@ fn direct<const OPERATOR: bool>(
 
 /// [`direct`]'s call of `N` parameters, its operands' values held in
 /// place.
-fn in_place<const OPERATOR: bool, const N: usize>(
-    id: LibId,
-    operands: Box<[Node]>,
-    fresh: Fresh,
-) -> Node {
+fn in_place<const N: usize>(id: LibId, operands: Box<[Node]>, fresh: Fresh) -> Node {
     Box::new(move |slots, cx| {
         let mut values = [Value::Absent; N];
         for (value, operand) in values.iter_mut().zip(&operands) {
             *value = operand(slots, cx)?;
         }
-        let function = cx.exe.lib(id);
-        if OPERATOR {
-            cx.operate_on(function, &values, fresh)
-        } else {
-            cx.native_on(function, &values, fresh)
-        }
+        cx.native_on(cx.exe.lib(id), &values, fresh)
     })
 }
 

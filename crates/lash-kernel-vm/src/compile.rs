@@ -60,7 +60,7 @@ pub(crate) use templates::{Entry, INNER, inner as inner_entry};
 pub(crate) mod segments;
 pub(crate) use reads::{Field, PropertySlot, ReadSite, find as find_property};
 
-pub(crate) use formula::{Charge, Fast, Plan, ScalarTable, Source};
+pub(crate) use formula::{Charge, Fast, Plan, ScalarTable, SiteFormula, Source};
 pub(crate) use regions::{
     Accumulator, Arms, BARREN, Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Cx,
     Event, Fresh, GuestCall, Guests, Headroom, Hook, Kept, LoopPlan, Made, Meter, NESTING, Node,

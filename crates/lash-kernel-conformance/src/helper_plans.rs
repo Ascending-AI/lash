@@ -6,6 +6,7 @@
     reason = "malformed fixtures and failed machine operations are law failures"
 )]
 
+mod calls;
 mod conversions;
 mod numeric;
 pub(crate) mod sorts;
@@ -174,6 +175,18 @@ fn run_with_options<const L: u64>(
     call_depth: u32,
     memory_meter: lash_kernel_vm::MemoryMeter,
 ) -> Observed {
+    run_with_work::<L>(case, program, projector, charge, call_depth, memory_meter).0
+}
+
+/// [`run_with_options`], and the work its regions and islands ran.
+fn run_with_work<const L: u64>(
+    case: &runner::Case,
+    program: &Program,
+    projector: &mut Projector<'_>,
+    charge: u64,
+    call_depth: u32,
+    memory_meter: lash_kernel_vm::MemoryMeter,
+) -> (Observed, lash_kernel_vm::kernel_internals::RegionWork) {
     let bounds = Bounds {
         memory_meter,
         charge: lash_kernel_vm::Charge::Exact,
@@ -246,7 +259,7 @@ fn run_with_options<const L: u64>(
         }
         _ => None,
     };
-    Observed {
+    let observed = Observed {
         end: crate::ExpectedEnd::from_end(end),
         bound_in,
         prints: world.prints,
@@ -262,7 +275,11 @@ fn run_with_options<const L: u64>(
                 atomic => vec![atomic],
             })
             .collect(),
-    }
+    };
+    (
+        observed,
+        lash_kernel_vm::kernel_internals::region_work(&tape),
+    )
 }
 
 /// Recursion through helpers (`%`, `-`, `+`, `==`) to depths around the

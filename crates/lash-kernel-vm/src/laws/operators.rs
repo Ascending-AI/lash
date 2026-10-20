@@ -689,3 +689,107 @@ fn statement_root_operators_use_the_kernel_with_the_certified_charge() {
         }
     }
 }
+
+/// FIG-6965 / K-CHG-003: an operator site's formula, with what its
+/// constant and fresh operands measure folded in where the site compiles,
+/// charges every call what the entry's immediate formula charges it: for
+/// every kernel library formula and the law's own (a minimum pair, a
+/// magnitude, the result, a product), every choice of constant and fresh
+/// operands, every value kind a measure reads or the arena holds, and with
+/// and without a write held, which measures fresh operands as their values.
+#[test]
+fn a_site_formula_charges_what_the_immediate_formula_charges() {
+    use crate::compile::{Fast, Fresh, Plan};
+    use lash_kernel_doc::arena::{ArenaHandle, ShortText};
+    let mut registry = FunctionRegistry::declarations();
+    crate::register_machine_functions(&mut registry).unwrap();
+    lash_kernel_lib::register_numbers(&mut registry).unwrap();
+    lash_kernel_lib::register_text_json(&mut registry).unwrap();
+    lash_kernel_lib::register_collections(&mut registry).unwrap();
+    let mut definitions: Vec<_> = registry
+        .iter()
+        .map(|(_, registered)| registered.definition().clone())
+        .collect();
+    for charge in [
+        "sum(3, min(size(a), size(b)), size(c))",
+        "sum(1, size(a), min(deep(b), size(result)))",
+        "sum(2, magnitude(a), size(b), magnitude(result))",
+        "sum(16, deep(a), size(result), nested(c))",
+        "sum(4, size(a), product(size(a), magnitude(b)))",
+        "7",
+    ] {
+        definitions.push(Arc::new(
+            parse_definition(&format!(
+                "function law.site(a: Any, b: Any, c: Any) -> Any\nkernel 1\ncharge {charge}\nnative\n"
+            ))
+            .unwrap(),
+        ));
+    }
+    let list = Value::List(ArenaHandle::new(1, 0));
+    let values = [
+        Value::Int(0),
+        Value::Int(-7),
+        Value::Float(Float::new(2.5)),
+        Value::Text(ShortText::new("abc").unwrap()),
+        Value::Null,
+        list,
+    ];
+    let results = [
+        Value::Int(9),
+        Value::Text(ShortText::new("xy").unwrap()),
+        Value::Bool(true),
+        Value::Map(ArenaHandle::new(2, 0)),
+    ];
+    let mut compared = 0;
+    for definition in &definitions {
+        let params = &definition.signature.params;
+        let arity = params.len();
+        if arity > 3 {
+            continue;
+        }
+        let charge = Plan::new(&definition.charge, params);
+        let fast = Fast::new(&definition.charge, params, &charge, true);
+        // Each operand is a constant, a fresh construction or neither.
+        for roles in 0..3_usize.pow(arity as u32) {
+            let role = |at: usize| roles / 3_usize.pow(at as u32) % 3;
+            let fresh = Fresh::of(
+                (0..arity)
+                    .filter(|at| role(*at) == 1)
+                    .fold(0, |mask, at| mask | 1 << at),
+            );
+            for picks in 0..values.len().pow(arity as u32) {
+                let args: Vec<Value> = (0..arity)
+                    .map(|at| match role(at) {
+                        1 => list,
+                        _ => values[picks / values.len().pow(at as u32) % values.len()],
+                    })
+                    .collect();
+                let known: Vec<Option<Value>> = (0..arity)
+                    .map(|at| (role(at) == 2).then_some(args[at]))
+                    .collect();
+                let site = fast.at_site(&known, fresh);
+                for result in &results {
+                    for held in [false, true] {
+                        let expected = fast.immediate(
+                            &args,
+                            if held { Fresh::default() } else { fresh },
+                            result,
+                        );
+                        let actual = site
+                            .as_ref()
+                            .and_then(|site| site.units(&args, result, held));
+                        assert_eq!(
+                            actual,
+                            expected,
+                            "{}: {:?}, roles {roles}, args {args:?}, result {result:?}, held {held}",
+                            definition.name.as_str(),
+                            definition.charge
+                        );
+                        compared += 1;
+                    }
+                }
+            }
+        }
+    }
+    assert!(compared > 100_000, "compared {compared}");
+}

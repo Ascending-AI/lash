@@ -223,7 +223,7 @@ pub(crate) fn inner(function: &super::Lib) -> Option<&Entry> {
 /// Classify only immediate scalars; all other answers keep formula evaluation.
 /// The helper's formula, rather than any callee's, indexes this mask.
 #[inline]
-fn scalar_sizes(args: &[Value], value: Value) -> Option<u8> {
+pub(super) fn scalar_sizes(args: &[Value], value: Value) -> Option<u8> {
     #[inline]
     fn bit(value: Value) -> Option<u8> {
         match value {

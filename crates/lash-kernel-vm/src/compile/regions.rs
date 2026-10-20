@@ -52,6 +52,7 @@ use lash_kernel_doc::arena::ShortText;
 use lash_kernel_exec::{ActIx, Op, OpRange, Reg, Weight};
 
 mod accumulators;
+mod calls;
 mod cx;
 mod nodes;
 mod typed;

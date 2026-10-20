@@ -9,10 +9,10 @@ use std::ops::Range;
 
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::heap::{HeapFault, LogicalBytes};
-use lash_kernel_doc::plan::{Collection, Table, TemplateHeap};
+use lash_kernel_doc::plan::{Collection, HeapTemplate, Table, TemplateHeap};
 use lash_kernel_doc::{
     Args, KernelDataLimits, Measure, NativeCall, NativeError, NewObject, Nursery, PreparedAnswer,
-    Value, ValueKind, WorkCounter,
+    PreparedNative, Value, ValueKind, WorkCounter,
 };
 use lash_kernel_state::arena::Arena;
 
@@ -453,7 +453,7 @@ impl Cx<'_> {
     }
 
     /// `call` on a window holding `values`, released after it.
-    fn windowed(
+    pub(super) fn windowed(
         &mut self,
         values: &[Value],
         call: impl FnOnce(&mut Self, Range<usize>) -> Option<Value>,
@@ -470,7 +470,7 @@ impl Cx<'_> {
     /// The general call of native `function` on `args`, one per
     /// parameter, as the reference's call answers it: charged its formula
     /// when it answers, a miss when it raises, declines or asks again.
-    fn general(&mut self, function: &Lib, args: Range<usize>) -> Option<Value> {
+    pub(super) fn general(&mut self, function: &Lib, args: Range<usize>) -> Option<Value> {
         let value = self.answered(function, args.clone())?;
         if self.charging {
             let units = self.formula(&function.charge, &self.args[args], Some(&value))?;
@@ -644,22 +644,31 @@ impl Cx<'_> {
         else {
             return self.windowed(values, |cx, args| cx.general(function, args));
         };
-        // A heap path that declines has written nothing; what it built is
-        // a miss's garbage, so the statement misses. One that built nothing
-        // leaves its kind to the reference. The paths hold the context, so
-        // they read a copy of the operands.
-        let mut operands = [Value::Absent; HEAP_ARITY];
-        let operands = operands.get_mut(..values.len())?;
-        operands.copy_from_slice(values);
+        let value = self.heap_paths(heap, callees, natives, values)?;
+        self.charged(function, fast, values, fresh, value.into())
+    }
+
+    /// `heap`'s paths on `values`, their general calls by `callees` and
+    /// their immediate ones by `natives`: the value they answer, uncharged.
+    /// A path that declines has written nothing; what it built is a miss's
+    /// garbage, so the statement misses, and one that built nothing leaves
+    /// its kind to the reference ([`Self::declined`]).
+    pub(super) fn heap_paths(
+        &mut self,
+        heap: &HeapTemplate,
+        callees: &[LibId],
+        natives: &[PreparedNative],
+        values: &[Value],
+    ) -> Option<Value> {
         let mut paths = HeapCx::new(self, callees, 0);
-        let value = (heap.entry)(&mut paths, operands, natives);
+        let value = (heap.entry)(&mut paths, values, natives);
         if paths.spoiled || value.is_none() {
             let declined = !paths.built;
             paths.release();
             self.declined = declined;
             return None;
         }
-        self.charged(function, fast, values, fresh, value?.into())
+        value
     }
 
     /// `function`'s prepared `answer` on `args`, charged as the
@@ -721,9 +730,23 @@ impl Cx<'_> {
         if let Some(units) = fast.immediate(args, fresh, &answer.value) {
             return Some(units);
         }
-        match fast.charge(&function.charge, args, &answer.value) {
+        self.charge_of(function, fast, args, &answer.value)
+    }
+
+    /// What `function`'s prepared answer `result` on `args` charges where
+    /// a value its immediate formula measures is one the arena measures:
+    /// its scalar table's units where its values classify, and otherwise
+    /// its formula measured as the reference measures it.
+    pub(super) fn charge_of(
+        &self,
+        function: &Lib,
+        fast: &Fast,
+        args: &[Value],
+        result: &Value,
+    ) -> Option<u64> {
+        match fast.charge(&function.charge, args, result) {
             Charge::Units(units) => Some(units),
-            Charge::Plan(plan) => self.formula(plan, args, Some(&answer.value)),
+            Charge::Plan(plan) => self.formula(plan, args, Some(result)),
         }
     }
 }

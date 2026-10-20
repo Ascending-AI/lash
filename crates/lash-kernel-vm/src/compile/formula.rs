@@ -442,6 +442,85 @@ impl ScalarTable {
     }
 }
 
+/// A prepared entry's immediate formula at one call site
+/// ([`Fast::at_site`]): its constant with what the site's constant
+/// operands measure folded in, the terms a call measures, and its minimum
+/// pair. Every amount is a non-negative saturating sum, which no order of
+/// its terms changes, so it computes what [`Fast::immediate`] computes.
+pub(crate) struct SiteFormula {
+    constant: u64,
+    terms: Vec<Term>,
+    least: Option<[Term; 2]>,
+}
+
+/// A measurement of a site's formula.
+#[derive(Clone, Copy)]
+enum Term {
+    /// Known where the site was compiled.
+    Known(u64),
+    /// Argument `at`'s, or `fresh`'s where the operand is a construction of
+    /// no members and no write is held that may change it.
+    Arg {
+        at: usize,
+        measure: doc::Measure,
+        fresh: Option<u64>,
+    },
+    Result(doc::Measure),
+}
+
+impl Term {
+    #[inline(always)]
+    fn measure(self, args: &[Value], result: &Value, held: bool) -> Option<u64> {
+        match self {
+            Self::Known(units) => Some(units),
+            Self::Arg {
+                fresh: Some(units), ..
+            } if !held => Some(units),
+            Self::Arg { at, measure, .. } => match args.get(at) {
+                Some(value) => site_measure(value, measure),
+                None => Some(0),
+            },
+            Self::Result(measure) => site_measure(result, measure),
+        }
+    }
+}
+
+/// [`immediate_measure`] of `value`, a magnitude measured out of line: a
+/// call measures its sizes alone where the optimizer would otherwise
+/// compute every value's magnitude ahead of the terms that need it.
+#[inline(always)]
+fn site_measure(value: &Value, measure: doc::Measure) -> Option<u64> {
+    #[inline(never)]
+    fn magnitude(value: &Value) -> Option<u64> {
+        immediate_measure(value, doc::Measure::Magnitude)
+    }
+    match measure {
+        doc::Measure::Magnitude => magnitude(value),
+        _ => immediate_measure(value, measure),
+    }
+}
+
+impl SiteFormula {
+    /// What [`Fast::immediate`] charges a call of `args` that gave
+    /// `result`, the site's fresh operands measured as their values where
+    /// a write is `held`; `None` where a value it measures is one the
+    /// arena measures.
+    #[inline(always)]
+    pub(crate) fn units(&self, args: &[Value], result: &Value, held: bool) -> Option<u64> {
+        let mut sum = self.constant;
+        for term in &self.terms {
+            sum = sum.saturating_add(term.measure(args, result, held)?);
+        }
+        if let Some([left, right]) = self.least {
+            let least = left
+                .measure(args, result, held)?
+                .min(right.measure(args, result, held)?);
+            sum = sum.saturating_add(least);
+        }
+        Some(sum)
+    }
+}
+
 /// How a call the fast path answered is charged: an amount known when the
 /// library was prepared, or a plan to compute over the call's values.
 pub(crate) enum Charge<'p> {
@@ -532,6 +611,58 @@ impl Fast {
             }
             None => None,
         }
+    }
+
+    /// [`Self::immediate`] at one call site (FIG-6965), whose operands
+    /// `known` names are constants and `fresh` names constructions of no
+    /// members: the measurements those give folded once, where the site is
+    /// compiled, so that a call measures only its other values. `None` for
+    /// a formula that is not a sum of measurements, which
+    /// [`Self::immediate`] computes nothing for.
+    pub(crate) fn at_site(&self, known: &[Option<Value>], fresh: Fresh) -> Option<SiteFormula> {
+        let term = |&(source, measure): &(Source, doc::Measure)| match source {
+            Source::Arg(at) if fresh.empty(at) => Term::Arg {
+                at,
+                measure,
+                fresh: Some(empty_measure(measure)),
+            },
+            Source::Arg(at) => match known
+                .get(at)
+                .copied()
+                .flatten()
+                .and_then(|value| immediate_measure(&value, measure))
+            {
+                Some(units) => Term::Known(units),
+                None => Term::Arg {
+                    at,
+                    measure,
+                    fresh: None,
+                },
+            },
+            Source::Result => Term::Result(measure),
+            Source::Nothing => Term::Known(0),
+        };
+        let measurements = &self.shallow.measurements;
+        let (constant, pair) = match self.shallow.linear {
+            Some(Linear::Sum(constant)) => (constant, None),
+            Some(Linear::Minimum { constant, at }) => (constant, Some(at)),
+            None => return None,
+        };
+        let mut formula = SiteFormula {
+            constant,
+            terms: Vec::new(),
+            least: pair.map(|at| [term(&measurements[at]), term(&measurements[at + 1])]),
+        };
+        for (index, item) in measurements.iter().enumerate() {
+            if pair.is_some_and(|at| index == at || index == at + 1) {
+                continue;
+            }
+            match term(item) {
+                Term::Known(units) => formula.constant = formula.constant.saturating_add(units),
+                term => formula.terms.push(term),
+            }
+        }
+        Some(formula)
     }
 
     /// How to charge a call with `args` that returned `result`: what
