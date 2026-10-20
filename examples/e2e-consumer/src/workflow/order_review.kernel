@@ -1,9 +1,9 @@
 kernel 1
 numbers float
-effect review.request(input: Any) -> Any
-effect ledger.record(input: Any) -> Any
-effect processes.start(input: Any) -> Any
-effect processes.await(input: Any) -> Any
+effect review.request(input: Any) -> Any contract "1"
+effect ledger.record(input: Any) -> Any contract "1"
+effect processes.start(input: Any) -> Any contract "1"
+effect processes.await(input: Any) -> Any contract "1"
 use num.gt = @{num.gt}
 use eq = @{eq}
 use text.concat = @{text.concat}

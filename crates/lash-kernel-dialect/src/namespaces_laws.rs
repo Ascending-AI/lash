@@ -39,7 +39,18 @@ fn signature() -> Signature {
 fn operations(names: &[&str]) -> Operations {
     names
         .iter()
-        .map(|name| (operation(name), Offered::tool(*name, signature())))
+        .map(|name| {
+            (
+                operation(name),
+                Offered::tool(
+                    *name,
+                    lash_kernel_doc::OperationRequirement::new(
+                        signature(),
+                        lash_kernel_doc::ContractId::new("1"),
+                    ),
+                ),
+            )
+        })
         .collect()
 }
 

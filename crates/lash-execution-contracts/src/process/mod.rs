@@ -40,9 +40,10 @@ pub use effect_summary::{
 };
 pub use engine::{
     AdmittedProcessIdentity, InlineDefinition, InlineStarts, InspectedProcessDefinition,
-    PerformedEffects, ProcessDocument, ProcessDocumentProvider, ProcessDocumentRead,
-    ProcessDocumentRefRead, ProcessEngine, ProcessEngineAdmission, ProcessExecutionDocumentRead,
-    ProcessInfraError, ProcessRunOutcome, ProcessTraceClass, SettledRan,
+    OwnedOperation, OwnedOperations, PerformedEffects, ProcessDocument, ProcessDocumentProvider,
+    ProcessDocumentRead, ProcessDocumentRefRead, ProcessEngine, ProcessEngineAdmission,
+    ProcessExecutionDocumentRead, ProcessInfraError, ProcessRunOutcome, ProcessTraceClass,
+    SettledRan,
 };
 pub use engine_state::{
     CapacityCause, CapacityVerdict, EngineAction, EngineEvent, EngineState, EngineStateFormat,
@@ -123,7 +124,7 @@ pub use validation::{
 };
 
 pub mod link_check;
-pub use link_check::{FitPolicy, check_links};
+pub use link_check::{FitPolicy, check_links, check_runner};
 
 pub use registry_delegate::RegisteredProcess;
 

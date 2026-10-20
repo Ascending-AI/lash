@@ -134,8 +134,9 @@ fn document(body: &str) -> (String, EncodedPayload) {
 fn parsed(body: &str) -> lash_kernel_doc::Document {
     let embedding = lash_vm_worker::built_embedding(&WorkerTuning::standard())
         .expect("an embedding of every built dialect");
-    let mut text =
-        String::from("numbers by_spelling\nkernel 1\neffect host.echo(x?: Any) -> Any\n");
+    let mut text = String::from(
+        "numbers by_spelling\nkernel 1\neffect host.echo(x?: Any) -> Any contract \"1\"\n",
+    );
     for (name, id) in embedding.library().iter() {
         if ["num.add", "num.lt", "text.repeat"].contains(&name.to_string().as_str()) {
             text.push_str(&format!("use {name} = @{id}\n"));
@@ -627,12 +628,12 @@ fn a_typescript_cell_lowered_in_the_worker_parks_and_resumes() {
         source:
             "let total = 0; for (const step of [1, 2, 3]) { total = total + await host.echo(step); }"
                 .into(),
-        operations: lash_kernel_dialect::Namespaces::of_signatures(
+        operations: lash_kernel_dialect::Namespaces::of_effects(
             &[(
                 lash_kernel_doc::EffectName::new("host.echo").expect("effect name"),
                 echo,
             )]
-            .into(),
+            .into(), &lash_kernel_doc::ContractId::new("1"),
             &Default::default(),
         )
         .expect("the law's effects are operations")
@@ -746,12 +747,13 @@ fn a_python_cell_lowered_in_the_worker_runs_under_its_confinement() {
         dialect: "python".into(),
         source: "total = 0\nfor step in [1, 2, 3]:\n    total = total + await host.echo(step)\n"
             .into(),
-        operations: lash_kernel_dialect::Namespaces::of_signatures(
+        operations: lash_kernel_dialect::Namespaces::of_effects(
             &[(
                 lash_kernel_doc::EffectName::new("host.echo").expect("effect name"),
                 echo,
             )]
             .into(),
+            &lash_kernel_doc::ContractId::new("1"),
             &Default::default(),
         )
         .expect("the law's effects are operations")

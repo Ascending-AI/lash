@@ -42,8 +42,8 @@ impl DeferredToolProviderRegistration {
     /// Link this registration's resolver under `provider`, with its policy
     /// captured at environment creation. Pass this to `ProcessEnvBuilder::link`
     /// at `CALL_DYNAMIC_EFFECT`; later registrations cannot change it.
-    pub fn dynamic_link(&self, provider: crate::ProviderKey) -> crate::EffectLink {
-        crate::EffectLink::dynamic(provider, self.resolution_policy)
+    pub fn dynamic_link(&self, provider: crate::ProviderKey) -> crate::OperationLink {
+        crate::OperationLink::dynamic(provider, self.resolution_policy)
     }
 }
 

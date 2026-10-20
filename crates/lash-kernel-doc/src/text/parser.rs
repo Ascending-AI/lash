@@ -462,20 +462,15 @@ impl Parser {
     }
 
     /// An `effect` line after its keyword: the operation's name, the
-    /// signature it is required under and its contract. A line that states
-    /// no contract requires the signature's own
-    /// ([`ContractId::of_signature`]).
+    /// signature it is required under and its contract.
     fn effect_line(
         &mut self,
         effects: &mut BTreeMap<EffectName, OperationRequirement>,
     ) -> Parsed<()> {
         let name = self.qualified_name()?;
         let signature = self.signature()?;
-        let contract = if self.eat_word("contract") {
-            ContractId::new(self.text()?)
-        } else {
-            ContractId::of_signature(&signature)
-        };
+        self.expect_keyword("contract")?;
+        let contract = ContractId::new(self.text()?);
         self.once(
             effects.insert(
                 name.clone(),

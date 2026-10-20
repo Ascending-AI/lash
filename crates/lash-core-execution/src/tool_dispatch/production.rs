@@ -711,16 +711,24 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             .with_executable(prepared.input.binding.executable.clone());
         context.install_completion_key(self.completion_key.clone());
         let completion_context = context.clone();
-        if let Some(grant) = &prepared.input.grant {
-            context = context
-                .with_tool_execution_binding(grant.binding.clone())
-                .with_granted_provider(grant.provider.clone());
+        let payload = dispatch
+            .routes
+            .entry(&prepared.input.definition.manifest.id)
+            .and_then(|entry| entry.link.payload.as_ref());
+        match &prepared.input.grant {
+            Some(grant) => {
+                context = context
+                    .with_tool_execution_binding(grant.payload().cloned())
+                    .with_granted_provider(grant.provider().clone());
+            }
+            None => context = context.with_tool_execution_binding(payload.cloned()),
         }
         let authority = match &prepared.input.grant {
             Some(grant) => atomic_attempt::AttemptAuthority::Granted(grant),
             None => atomic_attempt::AttemptAuthority::Catalog {
                 manifest: &prepared.input.definition.manifest,
                 contract: &prepared.input.definition.contract,
+                payload,
             },
         };
         // The watch belongs inside X: replay consults X's recorded outcome,

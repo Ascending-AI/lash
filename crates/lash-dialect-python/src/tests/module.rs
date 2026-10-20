@@ -13,9 +13,12 @@ use super::machine;
 
 fn module(source: &str) -> Result<Lowered, lash_kernel_dialect::Diagnostic> {
     let effects = machine::effects();
-    let environment_namespaces =
-        lash_kernel_dialect::Namespaces::of_signatures(&effects, machine::controls())
-            .expect("the test's effects are operations");
+    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
+        &effects,
+        &lash_kernel_doc::ContractId::new("1"),
+        machine::controls(),
+    )
+    .expect("the test's effects are operations");
     let environment = Environment::new(machine::library(), &environment_namespaces);
     let lowered = crate::lower(source, &environment, Mode::Module)?;
     lash_kernel_doc::validate_document(&lowered.document, machine::library())
@@ -151,9 +154,12 @@ fn a_module_calls_a_namespaced_tool_by_its_dotted_path() {
             result: Type::Any,
         },
     )]);
-    let environment_namespaces =
-        lash_kernel_dialect::Namespaces::of_signatures(&effects, &Default::default())
-            .expect("the test's effects are operations");
+    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
+        &effects,
+        &lash_kernel_doc::ContractId::new("1"),
+        &Default::default(),
+    )
+    .expect("the test's effects are operations");
     let environment = Environment::new(machine::library(), &environment_namespaces);
     let lowered = crate::lower(
         "async def demo():\n    return await display.show_message(text=\"hi\")\n",
@@ -189,9 +195,12 @@ fn tool_keywords_name_the_declared_input_fields() {
         lash_kernel_doc::Type::Null,
     );
     let effects = BTreeMap::from([(show.clone(), signature.clone())]);
-    let environment_namespaces =
-        lash_kernel_dialect::Namespaces::of_signatures(&effects, machine::controls())
-            .expect("the test's effects are operations");
+    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
+        &effects,
+        &lash_kernel_doc::ContractId::new("1"),
+        machine::controls(),
+    )
+    .expect("the test's effects are operations");
     let environment = Environment::new(machine::library(), &environment_namespaces);
     for (call, expected) in [
         (
@@ -214,7 +223,18 @@ fn tool_keywords_name_the_declared_input_fields() {
             signature
         );
         let mut admission = lash_kernel_check::Environment::new(machine::library());
-        admission.effects = effects.clone();
+        admission.effects = (effects.clone())
+            .iter()
+            .map(|(effect, signature)| {
+                (
+                    effect.clone(),
+                    lash_kernel_doc::OperationRequirement::new(
+                        signature.clone(),
+                        lash_kernel_doc::ContractId::new("1"),
+                    ),
+                )
+            })
+            .collect();
         lash_kernel_check::admit(&lowered.document, &admission).expect("valid tool input");
         let mut calls = 0;
         // Cells and modules both call it by its dotted path.

@@ -88,15 +88,6 @@ impl Manifest {
             numbers,
         }
     }
-
-    /// The signature each effect is required under: what an environment
-    /// offers that serves exactly these requirements.
-    pub fn signatures(&self) -> BTreeMap<EffectName, Signature> {
-        self.effects
-            .iter()
-            .map(|(effect, requirement)| (effect.clone(), requirement.signature.clone()))
-            .collect()
-    }
 }
 
 /// The document's run-count ordinals by site: statement and block

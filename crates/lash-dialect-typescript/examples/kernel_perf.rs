@@ -482,9 +482,12 @@ fn main() -> Result<(), String> {
         EffectName::new("perf.finish").expect("a tool's name"),
         BTreeSet::from([EffectControl::Finish]),
     )]);
-    let environment_namespaces =
-        lash_kernel_dialect::Namespaces::of_signatures(&effects, &controls)
-            .expect("the test's effects are operations");
+    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
+        &effects,
+        &lash_kernel_doc::ContractId::new("1"),
+        &controls,
+    )
+    .expect("the test's effects are operations");
     let environment = Environment::new(&library, &environment_namespaces);
     if matches!(mode, Mode::Time) {
         println!(
@@ -1117,8 +1120,12 @@ fn host_json_probe() -> Result<(), String> {
     let library = NamedLibrary::from_registry(&registry).unwrap();
     let prepared = PreparedLibrary::new(Arc::clone(&registry));
     let effects = effects();
-    let env_namespaces =
-        lash_kernel_dialect::Namespaces::of_signatures(&effects, &Default::default()).unwrap();
+    let env_namespaces = lash_kernel_dialect::Namespaces::of_effects(
+        &effects,
+        &lash_kernel_doc::ContractId::new("1"),
+        &Default::default(),
+    )
+    .unwrap();
     let env = Environment::new(&library, &env_namespaces);
     let selected = std::env::args().nth(2);
     let iterations: usize = std::env::args()

@@ -11,8 +11,9 @@ use lash_kernel_dialect::{
     Offered, PackagePath, QualifiedOperation, Segment,
 };
 use lash_kernel_doc::{
-    Datum, EffectName, ErrorDatum, FunctionId, FunctionName, FunctionRegistry, Handle, Integer,
-    Name, Param, RecordType, RecordTypeField, Signature, Timestamp, Type,
+    ContractId, Datum, EffectName, ErrorDatum, FunctionId, FunctionName, FunctionRegistry, Handle,
+    Integer, Name, OperationRequirement, Param, RecordType, RecordTypeField, Signature, Timestamp,
+    Type,
 };
 use lash_kernel_package::{HeldPackages, Package, testing};
 use lash_kernel_vm::{
@@ -109,10 +110,11 @@ fn fixture() -> &'static Fixture {
                 result: Type::Any,
             },
         );
-        let mut operations = Namespaces::of_signatures(&effects, super::machine::controls())
-            .expect("the laws' tools are operations")
-            .operations()
-            .clone();
+        let mut operations =
+            Namespaces::of_effects(&effects, &ContractId::new("1"), super::machine::controls())
+                .expect("the laws' tools are operations")
+                .operations()
+                .clone();
         for (name, result) in [
             ("run", Type::List(Box::new(Type::Any))),
             ("explain", Type::Text),
@@ -123,7 +125,13 @@ fn fixture() -> &'static Fixture {
             .expect("an operation");
             operations.insert(
                 operation,
-                Offered::tool(format!("dataframe.{name}"), plan_signature(result)),
+                Offered::tool(
+                    format!("dataframe.{name}"),
+                    OperationRequirement::new(
+                        plan_signature(result),
+                        ContractId::new(format!("dataframe.{name}/1")),
+                    ),
+                ),
             );
         }
         Fixture {

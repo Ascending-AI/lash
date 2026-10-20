@@ -93,7 +93,8 @@ fn definition(name: &str, native: bool) -> FunctionDefinition {
 /// kernel-code body, `helper.twice`, and the header that names both.
 pub(crate) fn catalog() -> (BTreeMap<FunctionId, FunctionDefinition>, String) {
     let mut catalog = BTreeMap::new();
-    let mut header = String::from("kernel 1\nnumbers float\neffect fetch(url: Text) -> Any\n");
+    let mut header =
+        String::from("kernel 1\nnumbers float\neffect fetch(url: Text) -> Any contract \"1\"\n");
     for (name, native) in [("num.neg", true), ("helper.twice", false)] {
         let definition = definition(name, native);
         let function = definition.identity();
@@ -1133,7 +1134,7 @@ fn do_expressions_round_trip_through_text_json_and_graph() {
     let document = crate::parse_document(
         r#"kernel 1
 numbers float
-effect show(value: Any) -> Any
+effect show(value: Any) -> Any contract "1"
 main {
   do perform show({text: "x"}) as Any
   do {text: "discarded"}
@@ -1348,8 +1349,11 @@ fn a_body_performs_only_what_its_effects_list() {
             .reason,
         InvalidReason::EffectNotDeclared { effect: fetch }
     );
-    let beside_native =
-        parse_definition(&text("effect web.fetch(url: Text) -> Any\n", "native\n")).unwrap();
+    let beside_native = parse_definition(&text(
+        "effect web.fetch(url: Text) -> Any contract \"1\"\n",
+        "native\n",
+    ))
+    .unwrap();
     assert_eq!(
         *crate::validate_definition(&beside_native, &catalog)
             .unwrap_err()
@@ -1358,4 +1362,32 @@ fn a_body_performs_only_what_its_effects_list() {
             form: StatementForm::Perform
         }
     );
+}
+
+/// OP-SAME-SIGNATURE: a changed contract id under one signature is a
+/// different requirement. Two bodies that perform `web.fetch` under one
+/// signature, written against contracts `3` and `4`, state different
+/// requirements and are different definitions.
+#[test]
+fn a_changed_contract_under_one_signature_is_another_requirement() {
+    let listed = |contract: &str| {
+        parse_definition(&format!(
+            "function probe.fetch(url: Text) -> Any
+kernel 1
+charge 1
+\
+             effect web.fetch(url: Text) -> Any contract \"{contract}\"
+\
+             body {{ let page = perform web.fetch(url) as Any return page }}
+"
+        ))
+        .unwrap()
+    };
+    let (three, four) = (listed("3"), listed("4"));
+    let fetch = crate::EffectName::new("web.fetch").unwrap();
+    let required =
+        |definition: &crate::FunctionDefinition| definition.body().unwrap().effects[&fetch].clone();
+    assert_eq!(required(&three).signature, required(&four).signature);
+    assert_ne!(required(&three), required(&four));
+    assert_ne!(three.identity(), four.identity());
 }

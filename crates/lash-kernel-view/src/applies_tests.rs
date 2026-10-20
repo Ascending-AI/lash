@@ -5,9 +5,12 @@ use lash_kernel_doc::{Name, WorkflowDocumentEntry};
 
 fn lowered_holder(source: &str, typescript: bool, cell: bool) -> WorkflowDocument {
     let embedding = lash_vm_worker::built_embedding(&Default::default()).unwrap();
-    let namespaces =
-        lash_kernel_dialect::Namespaces::of_signatures(&Default::default(), &Default::default())
-            .expect("no effects are operations");
+    let namespaces = lash_kernel_dialect::Namespaces::of_effects(
+        &Default::default(),
+        &lash_kernel_doc::ContractId::new("1"),
+        &Default::default(),
+    )
+    .expect("no effects are operations");
     let env = Environment::new(embedding.library(), &namespaces);
     let mode = if cell {
         Mode::Cell(CellEnvironment::first())
@@ -209,7 +212,7 @@ fn writes_union_across_alias_diamonds_cycles_and_outside_values() {
     let view = kernel_view(
         r#"kernel 1
 numbers float
-effect read() -> Any
+effect read() -> Any contract "1"
 entry flow(input: Any) -> Any
 fn flow(input) {
   let left = fn() { return null }

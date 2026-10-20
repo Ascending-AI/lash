@@ -1,7 +1,7 @@
 kernel 1
 numbers float
-effect control.finish(input: Any) -> Any
-effect corpus.echo(input?: Json) -> Json
+effect control.finish(input: Any) -> Any contract "1"
+effect corpus.echo(input?: Json) -> Json contract "52910906e3f939a5ce2e34bd105cd37184ead8ac272080fcbff759b3b6db6560"
 
 main {
   finish let(t1 = perform control.finish("done") as Any then yield, null)

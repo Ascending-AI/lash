@@ -638,6 +638,10 @@ pub mod tools {
     pub use lash_core::turn_stop_from_tool_control;
     /// Per-call execution contract carried by [`ToolDefinition::with_execution_policy`].
     pub use lash_core::{Backoff, BoundedRetry, ExecutionPolicy, LimitCause};
+    /// Where a tool's contract id comes from: a package's declared id, or
+    /// one derived from the tool's semantic facts and its host's tag. The
+    /// id itself is [`crate::workflow::document::ContractId`].
+    pub use lash_core::{ContractSource, HostTag};
     /// The three capabilities a tool declares with
     /// [`ToolDefinition::with_declaration`], and what refuses a declaration
     /// or an outcome it does not admit.
@@ -658,6 +662,11 @@ pub mod tools {
     /// A finish tool: its call ends the turn with its whole input as the
     /// turn's value, typed by the schema it is built with.
     pub use lash_core::{FinishToolProvider, finish_tool, finish_tool_id};
+    /// The one pinned record of how a run's operation is served, in session
+    /// surfaces, deferred matches and process envs alike, and the one judge
+    /// every pinned call meets: the live tool's contract id must equal the
+    /// pinned one.
+    pub use lash_core::{Judgement, LinkSource, OperationLink, judge, operation_contract_changed};
     /// What a run's tool surface records and a provider reads: the provider
     /// keys tools are matched to, the surface entries, the run's config each
     /// provider method reads, and the refusal of a surface whose names collide.

@@ -129,7 +129,8 @@ pub fn effect_of(definition: &crate::ToolDefinition) -> crate::EffectName {
 }
 
 /// What an engine that performs each of `tools` declares (P3): each tool's
-/// effect, under the signature its schemas project to.
+/// effect, under the signature its schemas project to and the contract the
+/// tool serves.
 #[cfg(any(test, feature = "testing"))]
 #[must_use]
 pub fn performs(
@@ -140,10 +141,13 @@ pub fn performs(
         .map(|tool| {
             (
                 effect_of(tool),
-                lash_protocol_types::tool_signature(
-                    &tool.contract.input_schema.canonical,
-                    &tool.contract.output_schema.canonical,
-                ),
+                lash_kernel_doc::OperationRequirement {
+                    signature: lash_protocol_types::tool_signature(
+                        &tool.contract.input_schema.canonical,
+                        &tool.contract.output_schema.canonical,
+                    ),
+                    contract: tool.contract_id(),
+                },
             )
         })
         .collect()
@@ -893,8 +897,8 @@ impl<'run> crate::AttemptContext<'run> {
     ) -> Self {
         let context = context
             .clone()
-            .with_tool_execution_binding(grant.binding.clone())
-            .with_granted_provider(grant.provider.clone());
+            .with_tool_execution_binding(grant.payload().cloned())
+            .with_granted_provider(grant.provider().clone());
         Self::from_tool_context(
             &context,
             execution_scope_id.into(),

@@ -81,10 +81,13 @@ fn independent_source_reads_its_environment_from_the_base_document() {
     let mut changed = expected.clone();
     changed.manifest.effects.insert(
         k::EffectName::new("unused.effect").unwrap(),
-        k::OperationRequirement::of_signature(k::Signature {
-            params: vec![],
-            result: k::Type::Any,
-        }),
+        k::OperationRequirement::new(
+            k::Signature {
+                params: vec![],
+                result: k::Type::Any,
+            },
+            k::ContractId::new("1"),
+        ),
     );
     controls.push(changed);
     let mut changed = expected.clone();
@@ -150,9 +153,12 @@ fn smith_64_fixed_inputs_and_python_lowered_documents_reconstruct_without_helper
         registry.register(helper, None).unwrap();
     }
     let library = lash_kernel_dialect::NamedLibrary::from_registry(&registry).unwrap();
-    let environment_namespaces =
-        lash_kernel_dialect::Namespaces::of_signatures(&Default::default(), &Default::default())
-            .expect("the test's effects are operations");
+    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
+        &Default::default(),
+        &lash_kernel_doc::ContractId::new("1"),
+        &Default::default(),
+    )
+    .expect("the test's effects are operations");
     let environment = lash_kernel_dialect::Environment::new(&library, &environment_namespaces);
     for source in [
         "x = [1, 2]\nprint(x[0] + 3)",
@@ -827,10 +833,13 @@ fn inventory_document() -> k::Document {
     );
     document.manifest.effects.insert(
         k::EffectName::new("host.echo").unwrap(),
-        k::OperationRequirement::of_signature(k::Signature {
-            params: vec![],
-            result: inventory_types(),
-        }),
+        k::OperationRequirement::new(
+            k::Signature {
+                params: vec![],
+                result: inventory_types(),
+            },
+            k::ContractId::new("1"),
+        ),
     );
     document
 }
@@ -1435,14 +1444,17 @@ fn non_any_effect_results_keep_nested_optional_types_and_the_manifest_stays_unpr
     let effect = k::EffectName::new("tools.inspect").unwrap();
     document.manifest.effects.insert(
         effect.clone(),
-        k::OperationRequirement::of_signature(k::Signature {
-            params: vec![k::Param {
-                name: "input".into(),
-                ty: ty.clone(),
-                optional: true,
-            }],
-            result: k::Type::Any,
-        }),
+        k::OperationRequirement::new(
+            k::Signature {
+                params: vec![k::Param {
+                    name: "input".into(),
+                    ty: ty.clone(),
+                    optional: true,
+                }],
+                result: k::Type::Any,
+            },
+            k::ContractId::new("1"),
+        ),
     );
     document.main.push(k::Stmt::Do {
         value: (k::Action::Perform {
@@ -1469,9 +1481,12 @@ fn non_any_effect_results_keep_nested_optional_types_and_the_manifest_stays_unpr
 /// FIG-6332: printed helper identities need the document they came from.
 #[test]
 fn authored_import_of_printed_source_needs_its_base() {
-    let environment_namespaces =
-        lash_kernel_dialect::Namespaces::of_signatures(&Default::default(), &Default::default())
-            .expect("the test's effects are operations");
+    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
+        &Default::default(),
+        &lash_kernel_doc::ContractId::new("1"),
+        &Default::default(),
+    )
+    .expect("the test's effects are operations");
     let environment =
         lash_kernel_dialect::Environment::new(super::library(), &environment_namespaces);
     let module = lash_kernel_dialect::Mode::Module;
@@ -1572,7 +1587,7 @@ fn discarded_expressions_have_exact_source_inverses() {
     let document = k::parse_document(
         r#"kernel 1
 numbers float
-effect display.show(value: Any) -> Any
+effect display.show(value: Any) -> Any contract "1"
 fn child() { return null }
 main {
   do perform display.show({text: "x"}) as Any

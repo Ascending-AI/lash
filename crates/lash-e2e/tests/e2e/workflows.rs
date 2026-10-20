@@ -577,10 +577,8 @@ async fn generated(host: &lash_e2e::Node, text: &str) -> Result<Document> {
     }
     let mut document = parse_document(&text).context("the generated workflow parses")?;
     for (effect, requirement) in &mut document.manifest.effects {
-        *requirement = lash::workflow::document::OperationRequirement::of_signature(
-            serde_json::from_value(environment["effects"][effect.to_string()].clone())
-                .with_context(|| format!("the host offers `{effect}`"))?,
-        );
+        *requirement = serde_json::from_value(environment["effects"][effect.to_string()].clone())
+            .with_context(|| format!("the host offers `{effect}`"))?;
     }
     let required = host
         .post("/workflow/requirements", &serde_json::to_value(&document)?)

@@ -380,15 +380,15 @@ impl lash::tools::DeferredToolProvider for GrantedLeaves {
             .iter()
             .map(|path| {
                 let outcome = if *path == format!("tools.{GRANTED_LEAF}") {
-                    lash::tools::DeferredOutcome::Resolved {
-                        provider: lash::plugins::ToolProviderHandle::new(
+                    lash::tools::DeferredOutcome::resolved(
+                        lash::plugins::ToolProviderHandle::new(
                             lash::plugins::RegistryKind::Session,
                             "tools",
                             lash::tool_provider_key!("tools"),
                         ),
-                        definition: leaf_definition(GRANTED_LEAF),
-                        binding: None,
-                    }
+                        leaf_definition(GRANTED_LEAF),
+                        None,
+                    )
                 } else {
                     lash::tools::DeferredOutcome::Unavailable { note: None }
                 };

@@ -37,8 +37,12 @@ fn lower_against_control(source: &str) -> Result<Lowered, Diagnostic> {
         source,
         &Environment::new(
             super::library(),
-            &lash_kernel_dialect::Namespaces::of_signatures(&effects, &controls)
-                .expect("the test's effects are operations"),
+            &lash_kernel_dialect::Namespaces::of_effects(
+                &effects,
+                &lash_kernel_doc::ContractId::new("1"),
+                &controls,
+            )
+            .expect("the test's effects are operations"),
         ),
         lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
     )

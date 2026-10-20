@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "a delivered wait resumes its own task",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int\nmain { let x = perform echo(1) as Int finish x }\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int contract \"1\"\nmain { let x = perform echo(1) as Int finish x }\n",
       "expected": {
         "end": {
           "finished": {
@@ -41,7 +41,7 @@
     },
     {
       "name": "an outcome for a withdrawn handed-out wait is dropped",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int\nfn slow() { try { do sleep 0 } catch e { return e.kind } }\nmain { let h = spawn call slow() let first = perform echo(1) as Int do cancel h let cancelled = join h let last = perform echo(2) as Int finish cancelled }\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int contract \"1\"\nfn slow() { try { do sleep 0 } catch e { return e.kind } }\nmain { let h = spawn call slow() let first = perform echo(1) as Int do cancel h let cancelled = join h let last = perform echo(2) as Int finish cancelled }\n",
       "environment": {
         "deliveries": [
           [

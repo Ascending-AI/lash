@@ -124,9 +124,9 @@ fn coarse_partition() {
 fn coarse_eval() {
     let mut document = parse_document(&format!(
         "{HEADER}
-      effect one() -> Any effect two() -> Any effect send(x: Any) -> Any
-      effect test() -> Bool effect items() -> Any effect target() -> Any
-      effect index() -> Any effect value() -> Any
+      effect one() -> Any contract \"1\" effect two() -> Any contract \"1\" effect send(x: Any) -> Any contract \"1\"
+      effect test() -> Bool contract \"1\" effect items() -> Any contract \"1\" effect target() -> Any contract \"1\"
+      effect index() -> Any contract \"1\" effect value() -> Any contract \"1\"
       fn flow() {{
         let x = perform send([perform one() as Any, perform two() as Any]) as Any
         let y = if(true, perform one() as Any, perform two() as Any)

@@ -21,10 +21,13 @@
 //!   surface offers a provider a node does not serve, with no unsettled
 //!   call to it, is claimed and runs on that node; settling one of two
 //!   calls to a provider leaves the provider required.
-//! - SAME-SURFACE-DEPLOY-RUNS and SURFACE-CHANGE-OUTCOME (law 9, session
-//!   arm; S5): a recorded call runs on a node serving the exact recorded
-//!   surface, and parks, typed and with no body run, on a node that serves
-//!   the same provider key with the tool changed.
+//! - SAME-SURFACE-DEPLOY-RUNS (law 9, session arm; S5): a recorded call
+//!   runs on a node serving the exact recorded surface.
+//! - OP-LINK-ONE (session and cell arms): a recorded call whose tool is
+//!   served under another contract (its input retyped) raises
+//!   `operation_contract_changed` at its perform and runs no body; one
+//!   whose tool changed only its description or its retry bounds runs,
+//!   under the policy its link recorded.
 //!
 //! The host-start laws at the end run a process start on the same served
 //! node.
@@ -42,13 +45,25 @@ use lash_protocol_types::sync::MutexExt as _;
 
 use served::{Tier, WATCHDOG};
 
+/// How a later node serves a tool a run recorded.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Change {
+    /// As recorded.
+    None,
+    /// Its input retyped: another contract.
+    Retyped,
+    /// Its description reworded: the same contract.
+    Reworded,
+    /// A held tool served `Once`: its retry bounds alone changed.
+    Retried,
+}
+
 #[derive(Clone, Debug)]
 struct Spec {
     id: &'static str,
     name: &'static str,
     description: &'static str,
-    /// Whether its input is retyped: a structural change of the tool.
-    retyped: bool,
+    change: Change,
 }
 
 const fn spec(id: &'static str, name: &'static str, description: &'static str) -> Spec {
@@ -56,21 +71,18 @@ const fn spec(id: &'static str, name: &'static str, description: &'static str) -
         id,
         name,
         description,
-        retyped: false,
+        change: Change::None,
     }
 }
 
 impl Spec {
-    /// This tool with its input retyped.
-    fn retyped(self) -> Self {
-        Self {
-            retyped: true,
-            ..self
-        }
+    /// This tool served under `change`.
+    fn changed(self, change: Change) -> Self {
+        Self { change, ..self }
     }
 
     fn definition(&self) -> lash_core::ToolDefinition {
-        let input = if self.retyped {
+        let input = if self.change == Change::Retyped {
             serde_json::json!({
                 "type": "object",
                 "additionalProperties": false,
@@ -82,23 +94,29 @@ impl Spec {
         lash_core::ToolDefinition::raw(
             self.id,
             format!("tools.{}", self.name),
-            self.description,
+            if self.change == Change::Reworded {
+                "reworded since the run recorded it"
+            } else {
+                self.description
+            },
             input,
             serde_json::json!({ "type": "object", "additionalProperties": true }),
         )
         .expect("valid declared tool schemas")
         .with_execution(std::time::Duration::from_secs(120))
-        .with_execution_policy(if self.name.ends_with("_held") {
-            // A held call stranded by its node's stop runs again on the
-            // next node that serves it.
-            lash_core::ExecutionPolicy::repeatable(
-                std::num::NonZeroU32::new(2).expect("two attempts"),
-                1,
-                1,
-            )
-        } else {
-            lash_core::ExecutionPolicy::Once
-        })
+        .with_execution_policy(
+            if self.name.ends_with("_held") && self.change != Change::Retried {
+                // A held call stranded by its node's stop runs again on the
+                // next node that serves it.
+                lash_core::ExecutionPolicy::repeatable(
+                    std::num::NonZeroU32::new(2).expect("two attempts"),
+                    1,
+                    1,
+                )
+            } else {
+                lash_core::ExecutionPolicy::Once
+            },
+        )
     }
 }
 
@@ -188,13 +206,26 @@ impl lash_core::ToolProvider for Surface {
     }
 }
 
-/// The tool names of every request the model was asked, in order.
+/// The tool names of every request the model was asked, in order, and
+/// the messages each showed it.
 #[derive(Default)]
 struct Offered {
     requests: Mutex<Vec<Vec<String>>>,
+    shown: Mutex<Vec<String>>,
 }
 
 impl Offered {
+    /// Every message the model was shown, rendered.
+    fn shown(&self) -> String {
+        self.shown.lock_recover().join("\n")
+    }
+
+    fn show(&self, request: &LlmRequest) {
+        self.shown
+            .lock_recover()
+            .push(serde_json::to_string(&request.messages).expect("messages encode"));
+    }
+
     fn all(&self) -> Vec<Vec<String>> {
         self.requests.lock_recover().clone()
     }
@@ -224,6 +255,7 @@ fn model(offered: &Arc<Offered>) -> lash_core::facade_support::ProviderHandle {
                     .requests
                     .lock_recover()
                     .push(request.tools.iter().map(|tool| tool.name.clone()).collect());
+                offered.show(&request);
                 let last = request.messages.last().expect("a request has messages");
                 let rendered = serde_json::to_string(last).expect("a message encodes");
                 if last.role == LlmRole::User
@@ -803,45 +835,74 @@ async fn a_recorded_call_runs_on_a_node_serving_the_same_surface(tier: Tier) {
     core.shutdown().await.expect("the core shuts down");
 }
 
-/// SURFACE-CHANGE-OUTCOME (law 9, session arm; S5, §5a): a node serving the
-/// same provider key with the recorded tool retyped parks the recorded
-/// call, typed, and runs no body. The law asserts this node's outcome
-/// alone.
-async fn a_recorded_call_parks_on_a_node_serving_a_changed_tool(tier: Tier) {
-    let Some(deployment) = Deployment::new(tier).await else {
-        return;
-    };
-    strand_held_call(&deployment, "changed-surface").await;
-    let surface = Surface::answering(vec![quick(), held().retyped()]);
-    let core = deployment.boot(vec![Arc::new(lash::tools::SelectedToolsPlugin::new(
-        SURFACE,
-        Arc::clone(&surface) as _,
-    ))]);
-    let session = core
-        .session(session_id("changed-surface"))
-        .durable()
+/// What the `operation_contract_changed` failure's message says, as a
+/// cell's error shows it to the model: the code is the failure's data.
+const PINNED: &str = "the call is pinned to; nothing ran";
+
+/// OP-LINK-ONE (session arm; S5, §5a): a recorded call is judged by its
+/// contract alone. On a node serving the same provider key with the
+/// recorded tool retyped, the call's perform raises
+/// `operation_contract_changed`, typed, the turn settles and no body runs.
+/// With its description reworded the call runs; with its retry bounds
+/// alone changed (`Once` now) the stranded `Repeatable` call runs again
+/// under the policy its link recorded.
+async fn a_recorded_call_is_judged_by_its_contract_alone(tier: Tier) {
+    for change in [Change::Retyped, Change::Reworded, Change::Retried] {
+        let Some(deployment) = Deployment::new(tier).await else {
+            return;
+        };
+        let name = format!("changed-surface-{change:?}").to_lowercase();
+        strand_held_call(&deployment, &name).await;
+        let surface = Surface::answering(vec![quick(), held().changed(change)]);
+        let core = deployment.boot(vec![Arc::new(lash::tools::SelectedToolsPlugin::new(
+            SURFACE,
+            Arc::clone(&surface) as _,
+        ))]);
+        let session = core
+            .session(session_id(&name))
+            .durable()
+            .await
+            .expect("the session resolves");
+        let output = tokio::time::timeout(
+            WATCHDOG,
+            session
+                .attach_id(lash::TurnId::parse(&name).expect("a turn id"))
+                .output(),
+        )
         .await
-        .expect("the session resolves");
-    let park = tokio::time::timeout(WATCHDOG, async {
-        loop {
-            if let Some(park) = session.park_reason().await.expect("read the park") {
-                return park;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        .expect("deadlock watchdog: the resumed turn never settled")
+        .expect("the resumed turn settles");
+        served::assert_answered(&name, &output);
+        let failures = lash::testing::tool_calls_for_activity(&session, &output.activities)
+            .await
+            .into_iter()
+            .filter_map(|call| match call.output.outcome {
+                lash_core::ToolCallOutcome::Failure(failure) => Some(failure),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if change == Change::Retyped {
+            assert!(
+                surface.executed().is_empty(),
+                "no body ran for the call under another contract"
+            );
+            assert!(
+                failures
+                    .iter()
+                    .any(|failure| failure.code == "operation_contract_changed"
+                        && failure.message.contains(held().id)),
+                "the call's perform raised the contract change, naming its tool: {failures:?}"
+            );
+        } else {
+            assert_eq!(
+                surface.executed(),
+                [held().id],
+                "a {change:?} tool keeps its contract and the recorded call runs"
+            );
+            assert!(failures.is_empty(), "{failures:?}");
         }
-    })
-    .await
-    .expect("deadlock watchdog: the drifted call never parked");
-    let rendered = format!("{park:?}");
-    assert!(
-        rendered.contains("LashVmCellBindingDrift") && rendered.contains(held().id),
-        "the session parks on the drifted call, typed: {rendered}"
-    );
-    assert!(
-        surface.executed().is_empty(),
-        "no body ran for the drifted call"
-    );
-    core.shutdown().await.expect("the core shuts down");
+        core.shutdown().await.expect("the core shuts down");
+    }
 }
 
 /// The catalogue provider used by the cell drift laws.
@@ -889,11 +950,13 @@ impl Deployment {
         surface: &Arc<Surface>,
         prepared: Option<Arc<tokio::sync::Notify>>,
     ) -> lash::LashCore {
+        let offered = Arc::clone(&self.offered);
         let model = lash_core::testing::TestProvider::builder()
             .kind("cell-surface-model")
             .requires_streaming(true)
             .complete(move |request: LlmRequest| {
                 let prepared = prepared.clone();
+                offered.show(&request);
                 async move {
                     if let Some(prepared) = prepared {
                         prepared.notify_one();
@@ -973,91 +1036,96 @@ async fn cell_starts(deployment: &Deployment, name: &str) -> usize {
     starts
 }
 
-/// SURFACE-CHANGE-OUTCOME (law 9, cell arm; S5, §5a, R-3): an open
-/// catalog call parks on a build that retyped its tool, before another
-/// x_start and without entering the new provider. Deferred grants retain
-/// their resolved definition instead (FIG-6217).
-async fn a_recorded_cell_call_parks_on_a_node_serving_a_changed_tool(tier: Tier) {
-    for admitted in [false, true] {
-        let Some(deployment) = Deployment::new(tier).await else {
-            return;
-        };
-        let name = if admitted {
-            "changed-catalog-cell"
-        } else {
-            "changed-new-cell"
-        };
-        let original = Surface::new(vec![held()]);
-        let prepared = (!admitted).then(|| Arc::new(tokio::sync::Notify::new()));
-        let core = deployment.boot_cell(&original, prepared.clone());
-        let session = create(&core, name).await;
-        let handle = session
-            .send(lash::TurnInput::text("call the held tool"))
-            .id(lash::TurnId::parse(name).expect("a turn id"))
-            .await
-            .expect("the send is accepted");
-        tokio::time::timeout(WATCHDOG, async {
-            tokio::select! {
-                () = async {
-                    if let Some(prepared) = prepared {
-                        prepared.notified().await;
-                    } else {
-                        original.entered.notified().await;
-                    }
-                } => (),
-                outcome = handle.outcome() => panic!("the original call must start, admitted={admitted}: {outcome:?}"),
-            }
-        }).await.expect("the original call starts");
-        drop(session);
-        core.shutdown().await.expect("the original node stops");
-        let starts = cell_starts(&deployment, name).await;
-        assert_eq!(
-            starts,
-            usize::from(admitted),
-            "only an admitted original call has an x_start"
-        );
+/// OP-LINK-ONE (cell arm; S5, §5a, R-3): a parked cell's catalog call,
+/// not yet issued or admitted, is judged as a round's is. On a build that
+/// retyped its tool the perform raises `operation_contract_changed` without
+/// entering the new provider; on one that only
+/// reworded it or changed its retry bounds the call runs, under the policy
+/// its link recorded. Deferred grants retain their resolved definition
+/// instead (FIG-6217).
+async fn a_recorded_cell_call_is_judged_by_its_contract_alone(tier: Tier) {
+    for change in [Change::Retyped, Change::Reworded, Change::Retried] {
+        for admitted in [false, true] {
+            recorded_cell_call_under(tier, change, admitted).await;
+        }
+    }
+}
 
-        let changed = Surface::answering(vec![held().retyped()]);
-        let core = deployment.boot_cell(&changed, None);
-        let session = core
-            .session(session_id(name))
-            .durable()
-            .await
-            .expect("the session resolves");
-        let outcome = tokio::time::timeout(
-            WATCHDOG,
-            session
-                .attach_id(lash::TurnId::parse(name).expect("a turn id"))
-                .outcome(),
-        )
+async fn recorded_cell_call_under(tier: Tier, change: Change, admitted: bool) {
+    let Some(deployment) = Deployment::new(tier).await else {
+        return;
+    };
+    let name = format!(
+        "changed-{}-cell-{change:?}",
+        if admitted { "catalog" } else { "new" }
+    )
+    .to_lowercase();
+    let original = Surface::new(vec![held()]);
+    let prepared = (!admitted).then(|| Arc::new(tokio::sync::Notify::new()));
+    let core = deployment.boot_cell(&original, prepared.clone());
+    let session = create(&core, &name).await;
+    let handle = session
+        .send(lash::TurnInput::text("call the held tool"))
+        .id(lash::TurnId::parse(&name).expect("a turn id"))
         .await
-        .expect("the resumed cell answers or parks")
-        .expect("read the cell outcome");
+        .expect("the send is accepted");
+    tokio::time::timeout(WATCHDOG, async {
+        tokio::select! {
+            () = async {
+                if let Some(prepared) = prepared {
+                    prepared.notified().await;
+                } else {
+                    original.entered.notified().await;
+                }
+            } => (),
+            outcome = handle.outcome() => panic!("the original call must start, admitted={admitted}: {outcome:?}"),
+        }
+    }).await.expect("the original call starts");
+    drop(session);
+    core.shutdown().await.expect("the original node stops");
+    let starts = cell_starts(&deployment, &name).await;
+    assert_eq!(
+        starts,
+        usize::from(admitted),
+        "only an admitted original call has an x_start"
+    );
+
+    let changed = Surface::answering(vec![held().changed(change)]);
+    let core = deployment.boot_cell(&changed, None);
+    let session = core
+        .session(session_id(&name))
+        .durable()
+        .await
+        .expect("the session resolves");
+    let output = tokio::time::timeout(
+        WATCHDOG,
+        session
+            .attach_id(lash::TurnId::parse(&name).expect("a turn id"))
+            .output(),
+    )
+    .await
+    .expect("deadlock watchdog: the resumed cell never settled")
+    .expect("the resumed cell settles");
+    served::assert_answered(&name, &output);
+    let shown = deployment.offered.shown();
+    if change == Change::Retyped {
         assert!(
-            matches!(outcome, lash::SendOutcome::Parked { .. }),
-            "a changed cell tool must park, admitted={admitted}: {outcome:?}"
-        );
-        let park = session
-            .park_reason()
-            .await
-            .expect("read the park")
-            .expect("the cell is parked");
-        let rendered = format!("{park:?}");
-        assert!(
-            rendered.contains("LashVmCellBindingDrift") && rendered.contains(held().id),
-            "the cell parks typed on its retained tool: {rendered}"
+            shown.contains(PINNED) && shown.contains(held().id),
+            "the cell's perform raised the contract change, admitted={admitted}: {shown}"
         );
         assert!(
             changed.executed().is_empty(),
             "the changed provider never runs"
         );
+    } else {
         assert_eq!(
-            cell_starts(&deployment, name).await,
-            starts,
-            "drift precedes any new x_start"
+            changed.executed(),
+            [held().id],
+            "a {change:?} tool keeps its contract and the cell's call runs, admitted={admitted}"
         );
-        core.shutdown().await.expect("the changed node stops");
+        assert!(!shown.contains(PINNED), "{shown}");
     }
+    core.shutdown().await.expect("the changed node stops");
 }
 
 /// The environment a host start states in these laws: no tools and no
@@ -1249,8 +1317,8 @@ tiered_laws!(
     a_session_offered_an_unserved_provider_it_never_called_runs,
     settling_one_of_two_calls_to_a_provider_leaves_it_required,
     a_recorded_call_runs_on_a_node_serving_the_same_surface,
-    a_recorded_call_parks_on_a_node_serving_a_changed_tool,
-    a_recorded_cell_call_parks_on_a_node_serving_a_changed_tool,
+    a_recorded_call_is_judged_by_its_contract_alone,
+    a_recorded_cell_call_is_judged_by_its_contract_alone,
     a_host_start_observes_only_the_sessions_it_names,
     a_lost_host_start_acknowledgement_recovers_the_retained_process,
 );

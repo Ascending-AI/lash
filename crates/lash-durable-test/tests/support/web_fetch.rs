@@ -100,15 +100,15 @@ impl lash::tools::DeferredToolProvider for GrantFetch {
             .iter()
             .map(|path| {
                 let outcome = if *path == "web.fetch" {
-                    lash::tools::DeferredOutcome::Resolved {
-                        provider: lash::plugins::ToolProviderHandle::new(
+                    lash::tools::DeferredOutcome::resolved(
+                        lash::plugins::ToolProviderHandle::new(
                             lash::plugins::RegistryKind::Session,
                             "tools",
                             lash::tool_provider_key!("tools"),
                         ),
-                        definition: fetch_definition(),
-                        binding: None,
-                    }
+                        fetch_definition(),
+                        None,
+                    )
                 } else {
                     lash::tools::DeferredOutcome::Unavailable { note: None }
                 };

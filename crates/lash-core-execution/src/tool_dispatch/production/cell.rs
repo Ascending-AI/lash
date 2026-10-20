@@ -51,6 +51,9 @@ pub struct CellCall {
     pub tool_id: crate::ToolId,
     /// Its arguments.
     pub args: serde_json::Value,
+    /// The contract the cell's code requires of the call's operation: the
+    /// one its tool must serve (OP-CONTRACT-PIN).
+    pub contract: lash_kernel_doc::ContractId,
     /// The grant a deferred resolution pinned, for a tool outside the
     /// catalog.
     pub execution_grant: Option<Box<crate::ToolExecutionGrant>>,
@@ -59,13 +62,15 @@ pub struct CellCall {
 }
 
 impl CellCall {
-    /// The call `invocation` makes.
+    /// The call `invocation` makes, pinned to `contract`, the one the
+    /// cell's code requires.
     #[must_use]
-    pub fn of(invocation: &ToolInvocation) -> Self {
+    pub fn of(invocation: &ToolInvocation, contract: lash_kernel_doc::ContractId) -> Self {
         Self {
             id: invocation.id.clone(),
             tool_id: invocation.tool_id.clone(),
             args: invocation.args.clone(),
+            contract,
             execution_grant: invocation.execution_grant.clone(),
             issuing_language_node_id: invocation.issuing_language_node_id.clone(),
         }
@@ -78,6 +83,7 @@ impl CellCall {
             ToolInvocation::new(self.id.clone(), self.tool_id.clone(), self.args.clone());
         invocation.execution_grant = self.execution_grant.clone();
         invocation.issuing_language_node_id = self.issuing_language_node_id.clone();
+        invocation.contract = Some(self.contract.clone());
         invocation
     }
 
@@ -95,11 +101,13 @@ impl CellCall {
 
 impl CellCall {
     /// Writes what the call is dispatched as beside its arguments and its
-    /// identity: its tool, grant and issuing language node. A frozen request holds this once, with the guest's own
+    /// identity: its tool, pinned contract, grant and issuing language
+    /// node. A frozen request holds this once, with the guest's own
     /// arguments, never their tool JSON (FIG-5887 §3).
     pub fn encode_dispatch(&self, out: &mut TokenWriter) {
-        out.seq(3);
+        out.seq(4);
         out.text(self.tool_id.as_str());
+        self.contract.encode(out);
         encode_opt_tree(self.execution_grant.as_deref(), out);
         self.issuing_language_node_id.encode(out);
     }
@@ -115,11 +123,12 @@ impl CellCall {
         id: crate::ToolCallId,
         args: serde_json::Value,
     ) -> Result<Self, TokenError> {
-        input.expect_struct(3)?;
+        input.expect_struct(4)?;
         Ok(Self {
             id,
             tool_id: crate::ToolId::new(input.text()?),
             args,
+            contract: lash_kernel_doc::ContractId::decode(input)?,
             execution_grant: decode_opt_tree(input)?.map(Box::new),
             issuing_language_node_id: Option::decode(input)?,
         })
@@ -170,7 +179,9 @@ impl CellTools {
                 || call.tool_id.clone(),
                 |definition| definition.manifest.id.clone(),
             ),
-            call.execution_grant.as_deref().map(|grant| &grant.provider),
+            call.execution_grant
+                .as_deref()
+                .map(|grant| grant.provider()),
             now_ms,
         )
     }
@@ -362,15 +373,16 @@ impl CellMembers {
     }
 
     /// Whether this node can run `member` as it is admitted: under its
-    /// retained surface entry or deferred match. Drift parks before any
-    /// admission or attempt. An isolated tool's call runs only in the process engine its manifest names, and a manifest a
+    /// retained surface entry or deferred match. A missing tool parks
+    /// before any admission or attempt; one served under another contract
+    /// is admitted, and its body raises `operation_contract_changed`. An isolated tool's call runs only in the process engine its manifest names, and a manifest a
     /// replayed cell or a grant recorded may name one this node does not
     /// register. Runs no hook, preparation or body.
     ///
     /// # Errors
     ///
     /// [`RuntimeErrorCode::LashVmCellBindingDrift`](crate::RuntimeErrorCode::LashVmCellBindingDrift):
-    /// the recorded tool is missing or changed on this node.
+    /// the recorded tool is missing on this node.
     /// [`RuntimeErrorCode::IsolationEngineUnavailable`](crate::RuntimeErrorCode::IsolationEngineUnavailable):
     /// the node takes up none of the cell, which waits for a node that
     /// registers the engine.
@@ -383,7 +395,11 @@ impl CellMembers {
         let dispatch = context.dispatch();
         if let Some(grant) = call.execution_grant.as_deref() {
             dispatch.routes.require_deferred_grant(grant, &call.id)?;
-        } else if let Some(drift) = dispatch.routes.drift(&call.tool_id, &dispatch.config) {
+        } else if let Some(drift) = dispatch
+            .routes
+            .drift(&call.tool_id, Some(&call.contract), &dispatch.config)
+            .filter(crate::ToolSurfaceDrift::is_missing)
+        {
             return Err(drift.refusal(&call.id));
         }
         let Some(definition) =

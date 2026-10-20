@@ -1,8 +1,6 @@
 use super::*;
 use serde::{Deserialize, Serialize};
 
-pub(crate) const MCP_BINDING_KEY: &str = "lash.mcp";
-
 /// A socket supplies only inline attempts. MCP tasks need an authenticated
 /// durable source adapter; advertising task support does not supply one.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -11,88 +9,80 @@ pub(crate) enum RemoteCompletion {
     Inline,
 }
 
-/// Recorded with K1's manifest. Connection generations and JSON-RPC request
-/// ids are deliberately absent: a reconnect may redeliver the same attempt.
+/// The codec payload a link to an MCP tool records, in
+/// [`crate::MCP_BINDING_FORMAT`]: the server and the durable tool id its
+/// calls go to. Transport, peer and server version are instance facts: a
+/// call is served by whichever connection the server has now, and nothing
+/// compares them (the one dispatch check is the tool's contract id).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct McpCallTarget {
-    pub server: String,
-    pub native_tool: String,
-    pub transport_digest: String,
-    pub peer_digest: String,
-    pub tool_digest: String,
-    pub call_policy: crate::McpCallPolicy,
-    pub completion: RemoteCompletion,
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub(crate) enum McpLinkPayload {
+    Mcp { server: String, tool_id: String },
 }
 
 fn digest(value: &impl Serialize) -> Result<String, McpError> {
     let value = serde_json::to_value(value)
-        .map_err(|error| McpError::Config(format!("cannot record MCP binding: {error}")))?;
+        .map_err(|error| McpError::Config(format!("cannot tag an MCP tool: {error}")))?;
     let bytes = serde_json::to_vec(&value)
-        .map_err(|error| McpError::Config(format!("cannot record MCP binding: {error}")))?;
+        .map_err(|error| McpError::Config(format!("cannot tag an MCP tool: {error}")))?;
     Ok(blake3::hash(&bytes).to_hex().to_string())
 }
 
-pub(super) fn peer_digest(peer: &Peer<RoleClient>) -> Result<String, McpError> {
-    let info = peer
-        .peer_info()
-        .ok_or_else(|| McpError::Protocol("MCP server identity is unavailable".into()))?;
-    digest(&(
-        &info.protocol_version,
-        &info.server_info,
-        &info.capabilities,
-    ))
+/// The host tag of `tool`, imported as `tool_id`: its durable id and a
+/// digest of its name and schemas. Its description and annotations are not
+/// part of it, so rewording a tool changes no contract.
+pub(super) fn contract_tag(
+    tool_id: &str,
+    tool: &rmcp::model::Tool,
+) -> Result<lash_core::HostTag, McpError> {
+    let schemas = digest(&(&tool.name, &tool.input_schema, &tool.output_schema))?;
+    Ok(lash_core::HostTag::new(format!("{tool_id}#{schemas}")))
 }
 
-pub(super) fn bind_imported_tools(
+/// `tools` with the guidance `peer`'s discover instructions pin.
+pub(super) fn pinned_guidance(
     mut tools: BTreeMap<String, ImportedTool>,
     entry: &McpEntry,
     peer: &Peer<RoleClient>,
 ) -> Result<BTreeMap<String, ImportedTool>, McpError> {
-    let transport_digest = digest(&entry.config.transport)?;
-    let peer_digest = peer_digest(peer)?;
-    for tool in tools.values_mut() {
-        let binding = McpCallTarget {
-            server: entry.server_name.clone(),
-            native_tool: tool.original_name.clone(),
-            transport_digest: transport_digest.clone(),
-            peer_digest: peer_digest.clone(),
-            tool_digest: tool.tool_digest.clone(),
-            call_policy: entry.config.call_policy().clone(),
-            completion: tool.completion.clone(),
-        };
-        tool.definition.manifest.bindings.insert(
-            MCP_BINDING_KEY.into(),
-            serde_json::to_value(binding)
-                .map_err(|error| McpError::Config(format!("cannot record MCP binding: {error}")))?,
-        );
-    }
     super::guidance::pin_guidance(&mut tools, entry, peer)?;
     Ok(tools)
 }
 
-pub(super) fn tool_digest(tool: &rmcp::model::Tool) -> Result<String, McpError> {
-    digest(tool)
-}
-
-pub(crate) fn admitted_binding(
-    manifest: &lash_core::ToolManifest,
-) -> Result<McpCallTarget, ToolOutcome> {
-    let binding = manifest
-        .bindings
-        .get(MCP_BINDING_KEY)
-        .cloned()
-        .unwrap_or(Value::Null);
-    serde_json::from_value(binding.clone()).map_err(|_| {
-        McpCallFailure::InvalidExecutionBinding {
-            tool_id: manifest.id.to_string(),
-            binding,
+/// The server a call of `tool_id` goes to, as its link's payload names it.
+///
+/// # Errors
+///
+/// The payload is absent, not MCP's, or names another tool.
+pub(crate) fn linked_server(
+    binding: Option<&lash_core::ExecutionBinding>,
+    tool_id: &lash_core::ToolId,
+) -> Result<String, ToolOutcome> {
+    let payload = binding.map_or(&Value::Null, |binding| &binding.payload);
+    match serde_json::from_value::<McpLinkPayload>(payload.clone()) {
+        Ok(McpLinkPayload::Mcp {
+            server,
+            tool_id: linked,
+        }) if linked == tool_id.as_str() => Ok(server),
+        _ => Err(McpCallFailure::InvalidExecutionBinding {
+            tool_id: tool_id.to_string(),
+            binding: payload.clone(),
         }
-        .into()
-    })
+        .into()),
+    }
 }
 
 impl McpConnectionPool {
+    /// The payload a link to the imported tool `tool_id` records.
+    pub(crate) fn link_payload(&self, tool_id: &lash_core::ToolId) -> Option<Value> {
+        let target = self.lookup_by_id(tool_id)?;
+        serde_json::to_value(McpLinkPayload::Mcp {
+            server: target.entry.server_name.clone(),
+            tool_id: tool_id.to_string(),
+        })
+        .ok()
+    }
+
     pub(crate) fn prepare_mcp_call(
         &self,
         call: lash_core::ToolPrepareCall<'_>,
@@ -102,77 +92,54 @@ impl McpConnectionPool {
                 tool_id: call.tool_id.to_string(),
             })
         })?;
-        let binding = target.binding.ok_or_else(|| {
-            ToolOutcome::from(McpCallFailure::InvalidExecutionBinding {
-                tool_id: call.tool_id.to_string(),
-                binding: Value::Null,
-            })
-        })?;
-        if binding.completion != RemoteCompletion::Inline {
+        if target.completion != RemoteCompletion::Inline {
             return Err(McpCallFailure::UnsupportedRemoteCompletion {
-                server: binding.server,
+                server: target.entry.server_name.clone(),
                 tool_id: call.tool_id.to_string(),
             }
             .into());
         }
-        let payload = serde_json::to_value(&binding).map_err(|_| {
-            ToolOutcome::from(McpCallFailure::InvalidExecutionBinding {
-                tool_id: call.tool_id.to_string(),
-                binding: Value::Null,
-            })
-        })?;
-        Ok(
-            lash_core::PreparedToolCall::identity(call.tool_id, call.pending)
-                .with_prepared_payload(payload),
-        )
+        Ok(lash_core::PreparedToolCall::identity(
+            call.tool_id,
+            call.pending,
+        ))
     }
 
+    /// Run an admitted call on the server its link names, as that server
+    /// serves the tool now. An admitted call, `Once` included, may be
+    /// redelivered to a redeployed server whose tool kept its contract.
     pub(crate) async fn call_admitted_tool(&self, call: lash_core::ToolCall<'_>) -> ToolOutcome {
         if self.shut_down.load(Ordering::SeqCst) {
             return pool_shut_down_failure();
         }
         let manifest = call.manifest();
-        let binding = match admitted_binding(manifest) {
-            Ok(binding) => binding,
+        let server = match linked_server(call.context.tool_execution_binding(), &manifest.id) {
+            Ok(server) => server,
             Err(failure) => return failure,
         };
-        let declaration = manifest.declaration();
-        if declaration.may_defer
-            || declaration.isolated
-            || binding.completion != RemoteCompletion::Inline
-        {
-            return McpCallFailure::UnsupportedRemoteCompletion {
-                server: binding.server,
-                tool_id: manifest.id.to_string(),
-            }
-            .into();
-        }
-        let prepared = match call.context.decode_prepared_payload::<McpCallTarget>() {
-            Ok(prepared) => prepared,
-            Err(_) => {
-                return McpCallFailure::InvalidExecutionBinding {
-                    tool_id: manifest.id.to_string(),
-                    binding: call.context.prepared_payload().clone(),
-                }
-                .into();
-            }
-        };
-        if prepared != binding {
-            return McpCallFailure::ExecutionBindingChanged {
-                server: prepared.server,
-                tool_id: manifest.id.to_string(),
-            }
-            .into();
-        }
         let Some(target) = self.lookup_by_id(&manifest.id) else {
             return McpCallFailure::UnknownToolId {
                 tool_id: manifest.id.to_string(),
             }
             .into();
         };
-        if target.binding.as_ref() != Some(&binding) {
-            return McpCallFailure::ExecutionBindingChanged {
-                server: binding.server,
+        if target.entry.server_name != server {
+            return McpCallFailure::InvalidExecutionBinding {
+                tool_id: manifest.id.to_string(),
+                binding: call
+                    .context
+                    .tool_execution_binding()
+                    .map_or(Value::Null, |binding| binding.payload.clone()),
+            }
+            .into();
+        }
+        let declaration = manifest.declaration();
+        if declaration.may_defer
+            || declaration.isolated
+            || target.completion != RemoteCompletion::Inline
+        {
+            return McpCallFailure::UnsupportedRemoteCompletion {
+                server,
                 tool_id: manifest.id.to_string(),
             }
             .into();

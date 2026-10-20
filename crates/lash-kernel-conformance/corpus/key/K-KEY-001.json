@@ -291,7 +291,7 @@
     },
     {
       "name": "host handles are not legal keys",
-      "document": "kernel 1\nnumbers by_spelling\neffect resource() -> Handle(\"db\")\nmain { let h = perform resource() as Handle(\"db\") try { print set{h} } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect resource() -> Handle(\"db\") contract \"1\"\nmain { let h = perform resource() as Handle(\"db\") try { print set{h} } catch e { finish e.kind } finish null }\n",
       "expected": {
         "prints": [],
         "trace": [

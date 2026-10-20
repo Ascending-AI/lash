@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "unused effect is refused",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int\nmain { finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int contract \"1\"\nmain { finish null }\n",
       "expected": {
         "end": "refused"
       }

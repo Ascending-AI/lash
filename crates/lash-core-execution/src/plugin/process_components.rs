@@ -345,54 +345,47 @@ impl ProcessComponentRegistry {
         &self.host
     }
 
-    /// Check that these components serve every link of `env` (P1): the
-    /// link's provider, built under the env's config, serves its tool with
-    /// the surface the link retained, a `call_dynamic` link's provider is a
-    /// component's deferred provider, which matches its target per call,
-    /// and a resolved link's provider serves the definition it retains under
-    /// a binding a component reads.
+    /// The link check of `env` against the effects a process `performed`
+    /// (P1): `env` links exactly those effects, each to a tool these
+    /// components serve under `env`'s config, under the contract the
+    /// process pins, fitting the effect's signature under its policy in
+    /// `fits` ([`lash_execution_contracts::process::check_links`]). A
+    /// `call_dynamic` link's provider is a component's deferred provider,
+    /// which matches its target per call, and a link's codec payload is
+    /// read by a component.
     ///
     /// # Errors
     ///
-    /// [`ProcessEnvRefusal::ToolNotServed`],
-    /// [`ProcessEnvRefusal::LinkedSurfaceChanged`] or
-    /// [`ProcessEnvRefusal::BindingUnreadable`] naming the effect, or the
-    /// refusal of a component that does not compose.
-    pub fn check_served(&self, env: &Arc<ProcessEnv>) -> Result<(), ProcessEnvRefusal> {
-        if env.effects().is_empty() {
-            return Ok(());
-        }
-        let composition = self.compose(env, None)?;
-        for (effect, link) in env.effects() {
-            match composition.step_link(env, effect) {
-                StepLink::Served { .. } => {}
-                StepLink::Unreadable { codec, reason } => {
-                    return Err(ProcessEnvRefusal::BindingUnreadable {
-                        effect: effect.to_string(),
-                        tool: link.tool().to_string(),
-                        codec: codec.to_string(),
-                        reason,
-                    });
-                }
-                StepLink::Drifted {
-                    kind: crate::ToolSurfaceDriftKind::Changed,
-                    ..
-                } => {
-                    return Err(ProcessEnvRefusal::LinkedSurfaceChanged {
-                        effect: effect.to_string(),
-                        tool: link.tool().to_string(),
-                    });
-                }
-                StepLink::Drifted { .. } | StepLink::Unlinked => {
-                    return Err(ProcessEnvRefusal::ToolNotServed {
-                        effect: effect.to_string(),
-                        tool: link.tool().to_string(),
-                        provider: format!("{}/{}", link.provider.owner(), link.provider.key()),
-                    });
+    /// The pair's typed [`ProcessEnvRefusal`], or the refusal of a
+    /// component that does not compose.
+    pub fn check_links(
+        &self,
+        env: &Arc<ProcessEnv>,
+        performed: &lash_execution_contracts::process::PerformedEffects,
+        owned: &lash_execution_contracts::process::OwnedOperations,
+        fits: &BTreeMap<lash_kernel_doc::EffectName, lash_execution_contracts::process::FitPolicy>,
+    ) -> Result<(), ProcessEnvRefusal> {
+        let mut served = BTreeMap::new();
+        if !env.effects().is_empty() {
+            let composition = self.compose(env, None)?;
+            for (effect, link) in env.effects() {
+                match composition.served_link(env, link) {
+                    Ok(Some(definition)) => {
+                        served.insert(effect.clone(), definition);
+                    }
+                    Ok(None) => {}
+                    Err((codec, reason)) => {
+                        return Err(ProcessEnvRefusal::BindingUnreadable {
+                            effect: effect.to_string(),
+                            tool: link.tool.to_string(),
+                            codec: codec.to_string(),
+                            reason,
+                        });
+                    }
                 }
             }
         }
-        Ok(())
+        lash_execution_contracts::process::check_links(env, performed, owned, fits, &served)
     }
 
     /// Install `factory` under `key`.
@@ -937,20 +930,22 @@ pub struct ProcessComposition {
 pub enum StepLink {
     /// The env links no such effect.
     Unlinked,
-    /// The link's provider serves the tool as the env retained it: the call
-    /// is admitted under `manifest` and binds `binding`.
+    /// The link's provider serves the tool under the contract the call is
+    /// pinned to: the call is admitted under `manifest`, which carries the
+    /// link's policy, binds `binding`, and reads the link's codec `payload`.
     Served {
         manifest: Box<ToolManifest>,
         binding: Box<crate::tool_run::AdmittedBinding>,
+        payload: Option<Box<crate::ExecutionBinding>>,
     },
-    /// The link's provider does not serve the tool, or serves it changed
-    /// since the env retained its surface: the call settles typed, without
-    /// a body.
+    /// The link's provider does not serve the tool, or serves it under
+    /// another contract than the call is pinned to: the call settles typed,
+    /// without a body.
     Drifted {
         tool: crate::ToolId,
         kind: crate::ToolSurfaceDriftKind,
     },
-    /// A resolved link's binding cannot be read here (S8): its codec is not
+    /// A link's codec payload cannot be read here (S8): its codec is not
     /// registered, or does not read its format. The call's process parks
     /// before it is admitted.
     Unreadable {
@@ -960,81 +955,100 @@ pub enum StepLink {
 }
 
 impl ProcessComposition {
+    /// What this node serves `link` of `env` as: the tool its provider
+    /// serves now, or the definition the link serves itself, admitted under
+    /// the link ([`crate::OperationLink::admitted`]). `Ok(None)` when it is
+    /// not served here.
+    ///
+    /// # Errors
+    ///
+    /// The link's codec payload, by its codec and why it cannot be read
+    /// here (S8).
+    fn served_link(
+        &self,
+        env: &Arc<crate::ProcessEnv>,
+        link: &crate::OperationLink,
+    ) -> Result<Option<crate::ToolDefinition>, (crate::ProviderKey, String)> {
+        if let Some(payload) = &link.payload {
+            self.check_binding(payload)
+                .map_err(|reason| (payload.codec.clone(), reason))?;
+        }
+        let live = match &link.source {
+            // The `call_dynamic` endpoint is no provider's advertisement: it
+            // is served wherever the deferred provider it links is
+            // registered.
+            crate::LinkSource::Dynamic { .. } => {
+                if self.registry.deferred_provider(&link.provider).is_none() {
+                    return Ok(None);
+                }
+                None
+            }
+            // A resolved link's provider serves the definition the link
+            // retains, advertised or not.
+            crate::LinkSource::Resolved { .. } => None,
+            crate::LinkSource::Advertised => {
+                let config = super::OwnerConfigView::components(Arc::clone(env));
+                let Some(served) = self.registry.served(&link.provider, &link.tool, &config) else {
+                    return Ok(None);
+                };
+                Some(served)
+            }
+        };
+        if self
+            .composition
+            .tool_run_binding(&link.tool, Some(&link.provider))
+            .is_err()
+        {
+            return Ok(None);
+        }
+        Ok(link.admitted(live.as_ref()))
+    }
+
     /// How this node serves the linked call of `effect` under `env` (D3):
-    /// the link's provider, by its key, serving the linked tool with the
-    /// surface the link retained, judged now, before the call's `x_start`.
-    /// A resolved link's provider serves the definition the link retains,
-    /// advertised or not, once this node reads its binding.
+    /// the link's provider, by its key, serving the linked tool under
+    /// `contract`, the one the performing code requires, judged now by the
+    /// one judge, before the call's `x_start`. The call is admitted under
+    /// the link's policy.
     #[must_use]
     pub fn step_link(
         &self,
         env: &Arc<crate::ProcessEnv>,
         effect: &lash_kernel_doc::EffectName,
+        contract: &lash_kernel_doc::ContractId,
     ) -> StepLink {
         let Some(link) = env.effects().get(effect) else {
             return StepLink::Unlinked;
         };
-        let config = super::OwnerConfigView::components(Arc::clone(env));
         let drifted = |kind| StepLink::Drifted {
-            tool: link.tool().clone(),
+            tool: link.tool.clone(),
             kind,
         };
-        let dynamic = matches!(link.kind, crate::LinkKind::Dynamic(_));
-        if dynamic != (effect.as_str() == crate::CALL_DYNAMIC_EFFECT)
-            || (dynamic && link.dynamic_endpoint().is_none())
-        {
-            return drifted(crate::ToolSurfaceDriftKind::Changed);
+        let dynamic = matches!(link.source, crate::LinkSource::Dynamic { .. });
+        if dynamic != (effect.as_str() == crate::CALL_DYNAMIC_EFFECT) {
+            return drifted(crate::ToolSurfaceDriftKind::Missing);
         }
-        // The `call_dynamic` endpoint is no provider's advertisement: it is
-        // served wherever the deferred provider it links is registered.
-        if let Some(endpoint) = link.dynamic_endpoint() {
-            if self.registry.deferred_provider(&link.provider).is_none() {
-                return drifted(crate::ToolSurfaceDriftKind::Missing);
-            }
-            return match self
-                .composition
-                .tool_run_binding(link.tool(), Some(&link.provider))
-            {
-                Ok(binding) => StepLink::Served {
-                    manifest: Box::new(endpoint.manifest),
-                    binding: Box::new(binding),
-                },
-                Err(_) => drifted(crate::ToolSurfaceDriftKind::Missing),
-            };
-        }
-        let definition = match &link.kind {
-            crate::LinkKind::Resolved(resolved) => {
-                if crate::ProcessSurface::of(&resolved.definition) != link.surface {
-                    return drifted(crate::ToolSurfaceDriftKind::Changed);
-                }
-                if let Some(binding) = &resolved.binding
-                    && let Err(reason) = self.check_binding(binding)
-                {
-                    return StepLink::Unreadable {
-                        codec: binding.codec.clone(),
-                        reason,
-                    };
-                }
-                resolved.definition.clone()
-            }
-            crate::LinkKind::Tool | crate::LinkKind::Dynamic(_) => {
-                let Some(definition) = self.registry.served(&link.provider, link.tool(), &config)
-                else {
-                    return drifted(crate::ToolSurfaceDriftKind::Missing);
-                };
-                if crate::ProcessSurface::of(&definition) != link.surface {
-                    return drifted(crate::ToolSurfaceDriftKind::Changed);
-                }
-                definition
-            }
+        let served = match self.served_link(env, link) {
+            Ok(served) => served,
+            Err((codec, reason)) => return StepLink::Unreadable { codec, reason },
         };
+        let Some(served) = served else {
+            return drifted(crate::ToolSurfaceDriftKind::Missing);
+        };
+        match crate::judge(contract, link, Some(&served)) {
+            crate::Judgement::Served => {}
+            crate::Judgement::Missing => return drifted(crate::ToolSurfaceDriftKind::Missing),
+            crate::Judgement::ContractChanged { pinned, live } => {
+                return drifted(crate::ToolSurfaceDriftKind::ContractChanged { pinned, live });
+            }
+        }
         match self
             .composition
-            .tool_run_binding(link.tool(), Some(&link.provider))
+            .tool_run_binding(&link.tool, Some(&link.provider))
         {
             Ok(binding) => StepLink::Served {
-                manifest: Box::new(definition.manifest),
+                manifest: Box::new(served.manifest),
                 binding: Box::new(binding),
+                payload: link.payload.clone().map(Box::new),
             },
             Err(_) => drifted(crate::ToolSurfaceDriftKind::Missing),
         }
@@ -1042,23 +1056,28 @@ impl ProcessComposition {
 
     /// How this node serves the call of the tool `matched` resolved a
     /// `call_dynamic` path to (P6): the provider the match records, by its
-    /// key, bound as the match routes it. One not registered here settles
-    /// the call typed, without a body, as a missing linked tool does (D3).
+    /// key, bound as the match routes it, under the policy its link
+    /// recorded. One not registered here settles the call typed, without a
+    /// body, as a missing linked tool does (D3).
     #[must_use]
     pub fn matched_link(&self, matched: &crate::DeferredMatch) -> StepLink {
-        let Some((provider, definition, _)) = matched.resolved() else {
+        let Some(link) = matched.resolved() else {
+            return StepLink::Unlinked;
+        };
+        let Some(definition) = link.admitted(None) else {
             return StepLink::Unlinked;
         };
         match self
             .composition
-            .tool_run_binding(&definition.manifest.id, Some(provider))
+            .tool_run_binding(&link.tool, Some(&link.provider))
         {
             Ok(binding) => StepLink::Served {
-                manifest: Box::new(definition.manifest.clone()),
+                manifest: Box::new(definition.manifest),
                 binding: Box::new(binding),
+                payload: link.payload.clone().map(Box::new),
             },
             Err(_) => StepLink::Drifted {
-                tool: definition.manifest.id.clone(),
+                tool: link.tool.clone(),
                 kind: crate::ToolSurfaceDriftKind::Missing,
             },
         }
@@ -1073,10 +1092,10 @@ impl ProcessComposition {
     /// Why the binding cannot be read here: an unserved codec, or a format
     /// it does not read. The call's process parks.
     pub fn check_matched_binding(&self, matched: &crate::DeferredMatch) -> Result<(), String> {
-        let Some((_, _, Some(binding))) = matched.resolved() else {
+        let Some(payload) = matched.resolved().and_then(|link| link.payload.as_ref()) else {
             return Ok(());
         };
-        self.check_binding(binding)
+        self.check_binding(payload)
     }
 
     /// Check that `binding`'s codec is a provider registered here that
@@ -1146,13 +1165,10 @@ impl ProcessComposition {
             .await
             .remove(path)
             .unwrap_or(crate::DeferredOutcome::Unavailable { note: None });
-        if let crate::DeferredOutcome::Resolved {
-            provider, binding, ..
-        } = &outcome
-        {
-            config.validate_provider(provider)?;
-            if let Some(binding) = binding {
-                config.validate_provider(&binding.codec)?;
+        if let crate::DeferredOutcome::Resolved { link } = &outcome {
+            config.validate_provider(&link.provider)?;
+            if let Some(payload) = &link.payload {
+                config.validate_provider(&payload.codec)?;
             }
         }
         Ok(crate::DeferredMatch {
@@ -1163,11 +1179,11 @@ impl ProcessComposition {
 
     /// The tools a process's linked calls run on, as this node's components
     /// serve them under `env`'s config (FIG-6074): each distinct tool an
-    /// effect is linked to whose served projection is the surface its link
-    /// retains, routed to its link's provider. A linked tool this node does
-    /// not serve, or serves with another surface, is left out: a call of it
-    /// settles as a typed tool failure when its step is admitted, before any
-    /// body starts. The components' catalog contributors run over the
+    /// effect is linked to, admitted under its link and routed to its
+    /// link's provider. A linked tool this node does not serve is left out;
+    /// each call is judged against its code's contract when its step is
+    /// admitted, and one that is missing or served under another contract
+    /// settles as a typed tool failure before any body starts. The components' catalog contributors run over the
     /// linked tools as `owner`'s, under `extensions`: one that refuses
     /// refuses the catalog.
     ///
@@ -1185,20 +1201,22 @@ impl ProcessComposition {
         let config = super::OwnerConfigView::components(Arc::clone(env));
         let mut entries = BTreeMap::<crate::ToolId, crate::SurfaceEntry>::new();
         for link in env.effects().values() {
-            if entries.contains_key(link.tool()) {
+            if entries.contains_key(&link.tool) {
                 continue;
             }
-            let Some(definition) = self.registry.served(&link.provider, link.tool(), &config)
+            let Some(served) = self.registry.served(&link.provider, &link.tool, &config) else {
+                continue;
+            };
+            let Some(definition) = link
+                .admitted(Some(&served))
+                .filter(|definition| definition.manifest.id == link.tool)
             else {
                 continue;
             };
-            if crate::ProcessSurface::of(&definition) != link.surface {
-                continue;
-            }
             entries.insert(
-                link.tool().clone(),
+                link.tool.clone(),
                 crate::SurfaceEntry {
-                    provider: link.provider.clone(),
+                    link: link.clone(),
                     definition,
                 },
             );

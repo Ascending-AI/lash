@@ -142,10 +142,13 @@ pub async fn request_process_successor(
         .performed_effects(kind, &request.payload)
         .await
         .map_err(link)?;
-    super::check_links(&new_env, &performed, &successor.fits).map_err(link)?;
     engines
-        .components()
-        .check_served(&std::sync::Arc::new(new_env.clone()))
+        .check_links(
+            kind,
+            &std::sync::Arc::new(new_env.clone()),
+            &performed,
+            &successor.fits,
+        )
         .map_err(link)?;
     // An admitted step keeps the match its admission recorded.
     let row =

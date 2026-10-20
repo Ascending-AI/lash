@@ -19,7 +19,7 @@ const LOOKUP_TOOL: &str = "core-node-knowledge-lookup";
 /// `lookup()`: one `perform` of the knowledge component's `Read` tool.
 const LOOKUP: &str = r#"kernel 1
 numbers float
-effect tools.lookup(input: Json) -> Json
+effect tools.lookup(input: Json) -> Json contract "1"
 entry lookup() -> Any
 
 fn lookup() {
@@ -43,6 +43,8 @@ fn lookup_definition() -> lash_core::ToolDefinition {
         serde_json::json!({ "type": "object" }),
     )
     .expect("the lookup tool's schemas")
+    // The contract the laws' kernel texts pin.
+    .declared_contract(lash_core::ContractId::new("1"))
     .with_execution(Duration::from_secs(120))
     .with_execution_policy(lash_core::ExecutionPolicy::Read)
 }

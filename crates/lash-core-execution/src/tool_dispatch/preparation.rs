@@ -306,7 +306,13 @@ pub(super) async fn prepare_with_provider(
     grant: Option<&ToolExecutionGrant>,
     pending: crate::sansio::PendingToolCall,
 ) -> Result<crate::PreparedToolCall, crate::ToolOutcome> {
-    let execution_binding = grant.and_then(|grant| grant.binding.clone());
+    let execution_binding = match grant {
+        Some(grant) => grant.payload().cloned(),
+        None => context
+            .routes
+            .entry(&manifest.id)
+            .and_then(|entry| entry.link.payload.clone()),
+    };
     let prepare_context = ToolPrepareContext::with_execution_binding(
         context.owner.runtime_owner(),
         Arc::clone(&context.sessions),
@@ -319,7 +325,7 @@ pub(super) async fn prepare_with_provider(
     .with_dispatch_catalog(Arc::clone(&context.tool_catalog))
     .with_process_originator(context.process_originator.clone());
     let prepare_context = match grant {
-        Some(grant) => prepare_context.with_granted_provider(grant.provider.clone()),
+        Some(grant) => prepare_context.with_granted_provider(grant.provider().clone()),
         None => prepare_context,
     };
     let prepare_call = ToolPrepareCall {

@@ -99,30 +99,20 @@ impl DurableProcessWorker {
         };
         // The target of a `call_dynamic` call runs on its recorded match,
         // and a resolved link's call on the resolution its env retains: the
-        // matched tool, on the provider and binding the record names.
+        // matched tool, on the provider and payload its link names.
         let resolution = match &matched {
             Some(matched) => matched.resolved(),
-            None => step.effects.get(&effect).and_then(|link| {
-                link.resolution().map(|resolved| {
-                    (
-                        &link.provider,
-                        &resolved.definition,
-                        resolved.binding.as_ref(),
-                    )
-                })
-            }),
-        };
-        if let Some((provider, definition, binding)) = resolution {
+            None => step.effects.get(&effect),
+        }
+        .and_then(crate::ToolExecutionGrant::of_link);
+        if let Some(grant) = resolution {
             let call = lash_core_execution::sansio::PendingToolCall {
                 call_id: execution.call().clone(),
                 provider_call_id: None,
-                tool_name: definition.manifest.tool(),
+                tool_name: grant.manifest().tool(),
                 args: input,
                 replay: None,
             };
-            let grant =
-                crate::ToolExecutionGrant::from_definition(provider.clone(), definition.clone())
-                    .with_execution_binding(binding.cloned());
             let result = step.tools.granted_body(&call, &execution, grant)(token).await;
             return tool_step_output(&process.id, &call, result);
         }
@@ -229,7 +219,7 @@ impl DurableProcessWorker {
         }
         let started = lash_trace::StepBodyStarted {
             process_id: process.id.clone(),
-            at: site.clone(),
+            at: site.as_ref().clone(),
             call_id: execution.call().clone(),
             attempt: execution.attempt(),
         };
@@ -479,6 +469,7 @@ impl ProcessSteps for WorkerSteps {
             StepRequest::Tool {
                 step,
                 effect,
+                contract,
                 matched,
                 ..
             } => {
@@ -511,7 +502,10 @@ impl ProcessSteps for WorkerSteps {
                         }
                         link
                     }
-                    None => tools.context.step_link(effect).map_err(unavailable)?,
+                    None => tools
+                        .context
+                        .step_link(effect, contract)
+                        .map_err(unavailable)?,
                 };
                 match link {
                     crate::plugin::StepLink::Unlinked => Err(StepRefusal::UnknownTool {
@@ -526,7 +520,11 @@ impl ProcessSteps for WorkerSteps {
                     }
                     // The body's limit and the park's deadline are pinned
                     // separately, as a round member's are.
-                    crate::plugin::StepLink::Served { manifest, binding } => {
+                    // It is admitted under the policy its link recorded,
+                    // which the served manifest carries (C1).
+                    crate::plugin::StepLink::Served {
+                        manifest, binding, ..
+                    } => {
                         let pin = MemberPin::admitted(
                             manifest.id.clone(),
                             manifest.execution_policy,
@@ -538,7 +536,8 @@ impl ProcessSteps for WorkerSteps {
                         admission.binding = Some(*binding);
                         Ok(admission)
                     }
-                    // The linked tool is missing or changed here (D3): the
+                    // The linked tool is missing here, or served under
+                    // another contract than the call is pinned to (D3): the
                     // step settles with a typed tool failure, which its
                     // engine receives as a catchable error, and no body
                     // starts, on this attempt or a retry.
@@ -551,28 +550,31 @@ impl ProcessSteps for WorkerSteps {
                             .execution_budgets
                             .tool_check_phase();
                         let effect = effect.to_string();
-                        let (code, cause) = match kind {
+                        let (code, cause, message) = match &kind {
                             crate::ToolSurfaceDriftKind::Missing => (
                                 "linked_tool_missing",
                                 crate::ToolFailureCause::LinkedToolMissing {
                                     effect: effect.clone(),
                                     tool: tool.clone(),
                                 },
+                                format!(
+                                    "the effect `{effect}` is linked to tool `{tool}`, which is \
+                                     missing from what this node's provider serves since the \
+                                     process's env linked it; nothing ran"
+                                ),
                             ),
-                            crate::ToolSurfaceDriftKind::Changed => (
-                                "linked_tool_changed",
-                                crate::ToolFailureCause::LinkedToolChanged {
+                            crate::ToolSurfaceDriftKind::ContractChanged { pinned, live } => (
+                                "operation_contract_changed",
+                                crate::ToolFailureCause::OperationContractChanged {
                                     effect: effect.clone(),
                                     tool: tool.clone(),
+                                    pinned: pinned.clone(),
+                                    live: live.clone(),
                                 },
+                                lash_core::operation_contract_changed(&effect, &tool, pinned, live)
+                                    .message,
                             ),
                         };
-                        let message = format!(
-                            "the effect `{effect}` is linked to tool `{tool}`, which is {} \
-                             what this node's provider serves since the process's env \
-                             retained it; nothing ran",
-                            kind.describe()
-                        );
                         let mut admission = StepAdmission::new(
                             tool,
                             crate::ExecutionPolicy::Once,

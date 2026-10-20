@@ -26,10 +26,6 @@ pub(crate) enum McpCallFailure {
         tool_id: String,
         binding: Value,
     },
-    ExecutionBindingChanged {
-        server: String,
-        tool_id: String,
-    },
     UnsupportedRemoteCompletion {
         server: String,
         tool_id: String,
@@ -147,10 +143,6 @@ impl std::fmt::Display for McpCallFailure {
                 f,
                 "MCP tool id `{tool_id}` requires an execution binding for its admitted server and tool"
             ),
-            Self::ExecutionBindingChanged { server, tool_id } => write!(
-                f,
-                "MCP admitted binding for `{server}` tool `{tool_id}` is unavailable or changed"
-            ),
             Self::UnsupportedRemoteCompletion { server, tool_id } => write!(
                 f,
                 "MCP tool `{tool_id}` on `{server}` requires a durable remote completion adapter; a socket supports inline attempts only"
@@ -245,12 +237,6 @@ impl From<McpCallFailure> for ToolFailure {
             F::InvalidExecutionBinding { .. } => (
                 C::InvalidRequest,
                 "mcp_invalid_execution_binding",
-                S::Plugin,
-                None,
-            ),
-            F::ExecutionBindingChanged { .. } => (
-                C::Unavailable,
-                "mcp_execution_binding_changed",
                 S::Plugin,
                 None,
             ),

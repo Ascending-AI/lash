@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "an effect in a callback remains an ordinary action",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int\nmain { let callback = fn() { let x = perform echo(1) as Int return x } let x = apply callback() finish x }\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int contract \"1\"\nmain { let callback = fn() { let x = perform echo(1) as Int return x } let x = apply callback() finish x }\n",
       "expected": {
         "end": {
           "finished": {

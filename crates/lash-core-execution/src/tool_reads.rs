@@ -115,6 +115,9 @@ pub struct ReadRoute {
     /// The tool as the run's surface retained it.
     pub definition: ToolDefinition,
     reads: Arc<dyn ToolReads>,
+    /// The failure every read raises when the provider serves the tool
+    /// under another contract than the run pinned: nothing is read.
+    contract_changed: Option<crate::ToolFailure>,
 }
 
 impl ReadRoute {
@@ -127,7 +130,21 @@ impl ReadRoute {
             provider,
             definition,
             reads,
+            contract_changed: None,
         }
+    }
+
+    /// This route, whose reads raise `contract_changed` when it is set.
+    pub(crate) fn with_drift(mut self, contract_changed: Option<crate::ToolFailure>) -> Self {
+        self.contract_changed = contract_changed;
+        self
+    }
+
+    /// The `operation_contract_changed` failure a read through this route
+    /// raises, when the provider serves the tool under another contract
+    /// than the run pinned.
+    pub fn contract_changed(&self) -> Option<&crate::ToolFailure> {
+        self.contract_changed.as_ref()
     }
 
     /// One read of the tool with `args`, under `config`, bounded by

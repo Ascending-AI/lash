@@ -1344,6 +1344,8 @@ struct SurfaceResume {
     ran: Arc<Mutex<Vec<String>>>,
     park: Option<lash::SessionParkReason>,
     status: Option<lash::TurnStatus>,
+    /// The codes of the run's failed tool calls, when it answered.
+    failures: Vec<String>,
 }
 
 /// Run one input that has the model call `tool` on a deployment offering
@@ -1416,16 +1418,28 @@ async fn resume_on_a_changed_surface(tool: &'static str, label: CommitLabel) -> 
         .park_reason()
         .await
         .expect("the session's park reads");
-    let status = match park {
-        Some(_) => None,
-        None => Some(
-            durable
+    let (status, failures) = match park {
+        Some(_) => (None, Vec::new()),
+        None => {
+            let output = durable
                 .attach_id(run())
                 .output()
                 .await
-                .expect("the run has a committed answer")
-                .status(),
-        ),
+                .expect("the run has a committed answer");
+            let failures = durable
+                .read_turn_tool_calls(&run())
+                .await
+                .expect("the run's tool calls read")
+                .into_iter()
+                .filter_map(|call| match call.output.outcome {
+                    lash_core::ToolCallOutcome::Failure(failure) => {
+                        Some(format!("{}: {}", failure.code, failure.message))
+                    }
+                    _ => None,
+                })
+                .collect();
+            (Some(output.status()), failures)
+        }
     };
     core_b.shutdown().await.expect("the resuming core stops");
     SurfaceResume {
@@ -1433,6 +1447,7 @@ async fn resume_on_a_changed_surface(tool: &'static str, label: CommitLabel) -> 
         ran,
         park,
         status,
+        failures,
     }
 }
 
@@ -1478,29 +1493,31 @@ async fn a_resume_offers_the_recorded_surface_and_runs_an_unchanged_call_on_sqli
     assert_eq!(*law.ran.lock_recover(), [format!("tools.{STABLE_TOOL}")]);
 }
 
-/// RESUME-USES-RECORDED-SURFACE (law 3), the changed tool: the resumed
-/// run's call to `changing_tool`, whose recorded entry this node's provider
-/// no longer serves as recorded, parks the session, typed, before any body
-/// runs.
+/// RESUME-USES-RECORDED-SURFACE (law 3) and OP-LINK-ONE, the changed tool:
+/// the resumed run's call to `changing_tool`, which this node's provider
+/// serves with another input and so under another contract, raises
+/// `operation_contract_changed` naming the tool before any body runs. The
+/// session does not park; the run answers.
 #[tokio::test]
-async fn a_resumed_call_to_a_changed_tool_parks_typed_on_sqlite_memory() {
+async fn a_resumed_call_to_a_changed_tool_raises_the_contract_change_on_sqlite_memory() {
     let law = resume_on_a_changed_surface(CHANGING_TOOL, CommitLabel::MODEL_START).await;
-    let park = format!("{:?}", law.park);
+    assert_eq!(law.park, None, "a contract change does not park");
+    assert_eq!(law.status, Some(lash::TurnStatus::Answered));
     assert!(
-        park.contains("LashVmCellBindingDrift") && park.contains(CHANGING_TOOL),
-        "the call parks with the typed drift naming the tool: {park}"
+        law.failures.iter().any(
+            |failure| failure.starts_with("operation_contract_changed: ")
+                && failure.contains(CHANGING_TOOL)
+        ),
+        "the call raised the contract change naming the tool: {:?}",
+        law.failures
     );
     assert!(law.ran.lock_recover().is_empty(), "no body ran");
-    // Each pass that meets the drift resumes from the same recorded
-    // `model.start`, so every request it sends offers the recorded surface.
     let offered = law.observed.descriptions();
-    assert!(!offered.is_empty());
-    for specs in &offered {
-        assert!(
-            specs.contains("changing_tool revision 1") && !specs.contains("revision 2"),
-            "{specs}"
-        );
-    }
+    assert!(
+        offered[0].contains("changing_tool revision 1") && !offered[0].contains("revision 2"),
+        "the resumed request offers the recorded surface: {}",
+        offered[0]
+    );
 }
 
 /// RESUME-USES-RECORDED-SURFACE (law 3), the second cut: a run cut after

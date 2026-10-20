@@ -47,7 +47,7 @@
     },
     {
       "name": "host handles compare both kind and identifier",
-      "document": "kernel 1\nnumbers by_spelling\neffect resource() -> Any\nuse eq = @b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954\nmain { let a = perform resource() as Handle(\"a\") let b = perform resource() as Handle(\"a\") let c = perform resource() as Handle(\"b\") let d = perform resource() as Handle(\"a\") finish [eq(a, b), eq(a, c), eq(a, d)] }\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect resource() -> Any contract \"1\"\nuse eq = @b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954\nmain { let a = perform resource() as Handle(\"a\") let b = perform resource() as Handle(\"a\") let c = perform resource() as Handle(\"b\") let d = perform resource() as Handle(\"a\") finish [eq(a, b), eq(a, c), eq(a, d)] }\n",
       "expected": {
         "prints": [],
         "trace": [

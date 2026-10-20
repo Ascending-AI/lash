@@ -11,8 +11,8 @@ use lash_kernel_dialect::{
     QualifiedOperation,
 };
 use lash_kernel_doc::{
-    Datum, EffectName, ErrorDatum, FunctionId, FunctionRegistry, Handle, Integer, Name, Param,
-    Signature, Timestamp, Type,
+    ContractId, Datum, EffectName, ErrorDatum, FunctionId, FunctionRegistry, Handle, Integer, Name,
+    OperationRequirement, Param, Signature, Timestamp, Type,
 };
 use lash_kernel_package::{HeldPackages, Package, testing};
 use lash_kernel_vm::{
@@ -81,10 +81,11 @@ fn fixture() -> &'static Fixture {
         let registry: Arc<FunctionRegistry> =
             Arc::clone(embedding.registry().expect("the worker registry"));
         let view = held.view(&held.own()).expect("the node's own set");
-        let mut operations = Namespaces::of_signatures(&effects(), super::controls())
-            .expect("the laws' tools are operations")
-            .operations()
-            .clone();
+        let mut operations =
+            Namespaces::of_effects(&effects(), &ContractId::new("1"), super::controls())
+                .expect("the laws' tools are operations")
+                .operations()
+                .clone();
         for (name, result) in [
             ("run", Type::List(Box::new(Type::Any))),
             ("explain", Type::Text),
@@ -103,7 +104,13 @@ fn fixture() -> &'static Fixture {
             };
             operations.insert(
                 operation,
-                Offered::tool(format!("dataframe.{name}"), signature),
+                Offered::tool(
+                    format!("dataframe.{name}"),
+                    OperationRequirement::new(
+                        signature,
+                        ContractId::new(format!("dataframe.{name}/1")),
+                    ),
+                ),
             );
         }
         Fixture {

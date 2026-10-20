@@ -851,7 +851,8 @@ async fn bound_and_executed(
     let provider = &tools
         .entry(&tool)
         .expect("the surface offers the tool")
-        .provider;
+        .provider()
+        .clone();
     let binding = composition
         .tool_run_binding(&tool, Some(provider))
         .expect("the surface binds the tool");
@@ -1217,8 +1218,14 @@ async fn a_process_components_read_tool_reads_through_its_reader() {
             )
             .expect("the linked tools build");
         let config = crate::OwnerConfigView::components(Arc::clone(&env));
+        let lookup = crate::ToolId::from(LOOKUP_TOOL);
+        let pinned = tools
+            .entry(&lookup)
+            .expect("the lookup tool is linked")
+            .definition
+            .contract_id();
         let route = tools
-            .read_route(&crate::ToolId::from(LOOKUP_TOOL), &config)
+            .read_route(&lookup, &pinned, &config)
             .expect("the read routes to the component's reader");
         let args = serde_json::json!({ "topic": "lash" });
         let answer = route

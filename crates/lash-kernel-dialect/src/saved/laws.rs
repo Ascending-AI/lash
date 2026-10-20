@@ -403,10 +403,13 @@ fn a_bundle_is_its_functions_closure_and_is_refused_unless_its_members_agree() {
     let mut effects = body.clone();
     effects.effects.push((
         lash_kernel_doc::EffectName::new("echo").expect("an effect name"),
-        lash_kernel_doc::OperationRequirement::of_signature(lash_kernel_doc::Signature {
-            params: Vec::new(),
-            result: lash_kernel_doc::Type::Any,
-        }),
+        lash_kernel_doc::OperationRequirement::new(
+            lash_kernel_doc::Signature {
+                params: Vec::new(),
+                result: lash_kernel_doc::Type::Any,
+            },
+            lash_kernel_doc::ContractId::new("1"),
+        ),
     ));
     assert!(matches!(read(effects), Err(BundleRefusal::RequiredEffects)));
     let mut renamed = body;
@@ -523,7 +526,8 @@ fn installing_refuses_a_second_requirement_of_one_effect() {
         params: Vec::new(),
         result: lash_kernel_doc::Type::Any,
     };
-    let interim = OperationRequirement::of_signature(signature.clone());
+    let interim =
+        OperationRequirement::new(signature.clone(), lash_kernel_doc::ContractId::new("1"));
     let declared = OperationRequirement {
         signature: signature.clone(),
         contract: lash_kernel_doc::ContractId::new("3"),
@@ -546,8 +550,9 @@ fn installing_refuses_a_second_requirement_of_one_effect() {
             &functions,
             &BTreeSet::from([Name::new("load")]),
             &lash_kernel_doc::FunctionRepresentation::Bare,
-            &crate::Namespaces::of_signatures(
+            &crate::Namespaces::of_effects(
                 &BTreeMap::from([(fetch.clone(), signature.clone())]),
+                &lash_kernel_doc::ContractId::new("1"),
                 &BTreeMap::new(),
             )
             .expect("an operation"),

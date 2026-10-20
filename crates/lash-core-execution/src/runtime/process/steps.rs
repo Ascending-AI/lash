@@ -161,7 +161,7 @@ pub struct ProcessStepTools {
     pub catalog: Arc<ToolCatalog>,
     /// The effects the process's env links: what each step's effect path
     /// runs.
-    pub effects: Arc<std::collections::BTreeMap<lash_kernel_doc::EffectName, crate::EffectLink>>,
+    pub effects: Arc<std::collections::BTreeMap<lash_kernel_doc::EffectName, crate::OperationLink>>,
     /// The round tools over it, owned by the process.
     pub tools: Arc<dyn RoundTools>,
     /// The same composition and namespaces the round tools run under.
@@ -173,13 +173,15 @@ pub struct ProcessStepTools {
 /// bindings are still judged at every admission.
 #[async_trait::async_trait]
 pub trait ProcessStepContext: Send + Sync {
-    /// Judge the linked tool against its retained surface and current provider.
+    /// Judge the linked tool, as its provider serves it now, against
+    /// `contract`, the one the performing code requires.
     ///
     /// # Errors
     /// The prepared runtime cannot answer the binding.
     fn step_link(
         &self,
         effect: &lash_kernel_doc::EffectName,
+        contract: &lash_kernel_doc::ContractId,
     ) -> Result<crate::plugin::StepLink, PluginError>;
     /// Judge a recorded dynamic match and its execution binding.
     ///
@@ -650,15 +652,19 @@ pub fn dynamic_target(
         input,
         site,
         matched: None,
+        ..
     } = resolution
     else {
         return None;
     };
-    matched.resolved()?;
+    // The target serves the definition its match retains: its call is
+    // pinned to that definition's contract.
+    let contract = matched.definition()?.contract_id();
     let call = serde_json::from_value::<crate::DynamicCall>(input.clone()).ok()?;
     Some(StepRequest::Tool {
         step: step.clone(),
         effect: effect.clone(),
+        contract,
         input: call.args,
         site: site.clone(),
         matched: Some(Box::new(matched)),

@@ -115,9 +115,7 @@ pub(crate) use lash_protocol_types::{
     session_model::ToolCallLimitExceeded, session_model::message::BaseRenderCache,
     session_model::message::MessageSequence,
 };
-pub(crate) use lash_protocol_types::{
-    tool_contract::ToolDefinition, tool_contract::ToolId, tool_contract::ToolManifest,
-};
+pub(crate) use lash_protocol_types::{tool_contract::ToolDefinition, tool_contract::ToolId};
 
 pub(crate) type SessionHistoryRecord =
     lash_protocol_types::session_model::SessionHistoryRecord<ProtocolEvent>;

@@ -59,8 +59,9 @@ fn library() -> &'static Library {
             .unwrap_or_else(|error| panic!("text definitions: {error}"));
         lash_kernel_lib::register_collections(&mut registry)
             .unwrap_or_else(|error| panic!("collection bodies: {error}"));
-        let mut header =
-            String::from("kernel 1\nnumbers by_spelling\neffect echo(x: Any) -> Any\n");
+        let mut header = String::from(
+            "kernel 1\nnumbers by_spelling\neffect echo(x: Any) -> Any contract \"1\"\n",
+        );
         for (id, function) in registry.iter() {
             header.push_str(&format!("use {} = @{id}\n", function.definition().name));
         }
@@ -78,7 +79,7 @@ impl Smith {
     /// from an executor defect. Projection handles are supplied at start.
     pub fn admit(&self) -> Result<lash_kernel_check::Admitted, lash_kernel_check::Refusal> {
         let mut env = lash_kernel_check::Environment::new(library().registry.as_ref());
-        env.effects = self.document.manifest.signatures();
+        env.effects = self.document.manifest.effects.clone();
         env.bindings.insert(Name::new("projection"));
         lash_kernel_check::admit(&self.document, &env)
     }

@@ -191,11 +191,15 @@ impl ToolRegistry {
                         ),
                     });
                 }
+                let payload = provider
+                    .link_payload(&manifest, config)
+                    .map(|(format, payload)| crate::ExecutionBinding {
+                        codec: key.clone(),
+                        format,
+                        payload,
+                    });
                 let definition = served_definition(provider.as_ref(), manifest, config)?;
-                entries.push(SurfaceEntry {
-                    provider: key.clone(),
-                    definition,
-                });
+                entries.push(SurfaceEntry::advertised(key.clone(), definition, payload));
             }
         }
         Ok(entries)
@@ -238,37 +242,40 @@ fn served_definition(
     })
 }
 
-/// How a tool of a run's recorded surface differs from what its provider
-/// serves on this node.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// How a pinned call's linked tool is served on this node, when it is not
+/// served under the pinned contract ([`crate::judge`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ToolSurfaceDriftKind {
     /// The recorded provider is not registered here, a catalogue tool is
     /// absent under the run's config, or a deferred grant's recorded
-    /// deferred provider or binding codec is not registered here.
+    /// deferred provider or payload codec is not registered here. The call
+    /// parks.
     Missing,
-    /// The provider serves the tool with another dispatch surface.
-    Changed,
+    /// The provider serves the tool under another contract id than the
+    /// call is pinned to. The call's `perform` raises
+    /// `operation_contract_changed`, and no body runs.
+    ContractChanged {
+        pinned: lash_kernel_doc::ContractId,
+        live: lash_kernel_doc::ContractId,
+    },
 }
 
 impl ToolSurfaceDriftKind {
-    pub fn describe(self) -> &'static str {
+    pub fn describe(&self) -> &'static str {
         match self {
             Self::Missing => "missing from",
-            Self::Changed => "changed in",
+            Self::ContractChanged { .. } => "under another contract in",
         }
     }
 }
 
-/// One tool of a recorded surface whose served definition drifted on this
-/// node.
+/// One pinned tool of a recorded surface that this node does not serve
+/// under its pin.
 ///
-/// Drift is judged per call, structurally, on what decides how a call links
-/// and dispatches ([`crate::tool_dispatch_surface`]); a reworded description
-/// or new examples are not drift, since the prompt is served from the
-/// recorded surface. A node executes a recorded match only if it serves the
-/// exact retained surface; outcomes may differ between two builds while
-/// they coexist. A deferred grant retains its resolved definition and is
-/// judged only for registered providers and a readable binding.
+/// Drift is judged per call by the one judge ([`crate::judge`]): the live
+/// tool's contract id must equal the pinned one, and nothing else about it
+/// is compared. A reworded description, a new transport or a changed retry
+/// bound is not drift; the call runs under the policy its link recorded.
 #[derive(Clone, Debug)]
 pub struct ToolSurfaceDrift {
     pub kind: ToolSurfaceDriftKind,
@@ -276,18 +283,15 @@ pub struct ToolSurfaceDrift {
 }
 
 impl ToolSurfaceDrift {
-    /// Judges `recorded` against `served`, what its provider serves it as on
-    /// this node: `None` when it serves it undrifted.
-    pub fn judge(recorded: &ToolDefinition, served: Option<&ToolDefinition>) -> Option<Self> {
-        let kind = match served {
-            None => ToolSurfaceDriftKind::Missing,
-            Some(served)
-                if crate::tool_dispatch_surface(&served.manifest, &served.contract)
-                    != crate::tool_dispatch_surface(&recorded.manifest, &recorded.contract) =>
-            {
-                ToolSurfaceDriftKind::Changed
+    /// The drift `judgement` found for the call of `recorded`: `None` when
+    /// the tool is served under its pin.
+    pub fn of(recorded: &ToolDefinition, judgement: crate::Judgement) -> Option<Self> {
+        let kind = match judgement {
+            crate::Judgement::Served => return None,
+            crate::Judgement::Missing => ToolSurfaceDriftKind::Missing,
+            crate::Judgement::ContractChanged { pinned, live } => {
+                ToolSurfaceDriftKind::ContractChanged { pinned, live }
             }
-            Some(_) => return None,
         };
         Some(Self {
             kind,
@@ -295,8 +299,14 @@ impl ToolSurfaceDrift {
         })
     }
 
-    /// The refusal a call on the drifted tool meets: nothing was dispatched,
-    /// and the call parks, typed, as a code cell's drifted binding does.
+    /// Whether the linked tool is missing here: the call parks.
+    pub fn is_missing(&self) -> bool {
+        self.kind == ToolSurfaceDriftKind::Missing
+    }
+
+    /// The refusal a call on the missing tool meets: nothing was
+    /// dispatched, and the call parks, typed, as a code cell's missing
+    /// binding does.
     pub fn refusal(&self, call_id: &crate::ToolCallId) -> crate::RuntimeEffectControllerError {
         crate::RuntimeEffectControllerError::new(
             crate::RuntimeErrorCode::LashVmCellBindingDrift,
@@ -308,6 +318,46 @@ impl ToolSurfaceDrift {
             ),
         )
     }
+
+    /// The failure the call's `perform` of `effect` raises when its tool is
+    /// served under another contract; `None` for a missing tool.
+    pub fn failure(&self, effect: &str) -> Option<crate::ToolFailure> {
+        let ToolSurfaceDriftKind::ContractChanged { pinned, live } = &self.kind else {
+            return None;
+        };
+        Some(operation_contract_changed(
+            effect,
+            &self.recorded.manifest.id,
+            pinned,
+            live,
+        ))
+    }
+}
+
+/// The failure a `perform` of `effect` raises when its linked `tool` is
+/// served under the contract `live`, not the `pinned` one its call is
+/// pinned to: `operation_contract_changed`, which the program may catch.
+/// No body ran.
+pub fn operation_contract_changed(
+    effect: &str,
+    tool: &ToolId,
+    pinned: &lash_kernel_doc::ContractId,
+    live: &lash_kernel_doc::ContractId,
+) -> crate::ToolFailure {
+    crate::ToolFailure::runtime(
+        crate::ToolFailureClass::InvalidRequest,
+        "operation_contract_changed",
+        format!(
+            "`{effect}` is linked to tool `{tool}`, which this node's provider serves under \
+             contract `{live}`, not the contract `{pinned}` the call is pinned to; nothing ran"
+        ),
+    )
+    .with_cause(crate::ToolFailureCause::OperationContractChanged {
+        effect: effect.to_owned(),
+        tool: tool.clone(),
+        pinned: pinned.clone(),
+        live: live.clone(),
+    })
 }
 
 /// The calls a run's recorded surface or a process's links admit, routed:
@@ -385,10 +435,18 @@ impl SurfaceTools {
     }
 
     /// How `tool`'s recorded entry drifted on this node under `config`, if
-    /// it did; `None` for an undrifted tool or one no entry offers.
-    pub fn drift(&self, tool: &ToolId, config: &OwnerConfigView) -> Option<ToolSurfaceDrift> {
+    /// it did, for a call pinned to `pinned`: the contract the performing
+    /// code requires, or, for a model round's call, which no code performs,
+    /// the one the entry's recorded definition serves. `None` for an
+    /// undrifted tool or one no entry offers.
+    pub fn drift(
+        &self,
+        tool: &ToolId,
+        pinned: Option<&lash_kernel_doc::ContractId>,
+        config: &OwnerConfigView,
+    ) -> Option<ToolSurfaceDrift> {
         let entry = self.routes.get(tool)?;
-        self.drift_entry(entry, config)
+        self.drift_entry(entry, pinned, config)
     }
 
     /// Where a read of `tool` goes on this node under `config`: the
@@ -402,6 +460,7 @@ impl SurfaceTools {
     pub fn read_route(
         &self,
         tool: &ToolId,
+        pinned: &lash_kernel_doc::ContractId,
         config: &OwnerConfigView,
     ) -> Result<crate::ReadRoute, crate::RuntimeEffectControllerError> {
         let refused = |why: String| {
@@ -414,37 +473,45 @@ impl SurfaceTools {
             .routes
             .get(tool)
             .ok_or_else(|| refused("names no tool of the run's surface".to_owned()))?;
-        if let Some(drift) = self.drift_entry(entry, config) {
+        let drift = self.drift_entry(entry, Some(pinned), config);
+        if let Some(drift) = drift.as_ref().filter(|drift| drift.is_missing()) {
             return Err(refused(format!(
                 "names a tool {} what this node's provider serves since the run's tool surface \
                  was recorded",
                 drift.kind.describe()
             )));
         }
-        let reads = self.registry.reads(&entry.provider).ok_or_else(|| {
+        let reads = self.registry.reads(entry.provider()).ok_or_else(|| {
             refused(format!(
                 "goes to provider `{}`, which registers no reader on this node",
-                entry.provider
+                entry.provider()
             ))
         })?;
         Ok(crate::ReadRoute::new(
-            entry.provider.clone(),
+            entry.provider().clone(),
             entry.definition.clone(),
             Arc::clone(reads),
-        ))
+        )
+        .with_drift(drift.and_then(|drift| drift.failure(&entry.definition.manifest.tool()))))
     }
 
-    /// A catalogue entry is judged against its provider's current
-    /// catalogue. Deferred grants never take this path.
+    /// A catalogue entry is judged by the one judge against what its
+    /// provider serves now, pinned to `pinned`, else to the contract of the
+    /// definition the entry recorded. Deferred grants never take this path.
     fn drift_entry(
         &self,
         entry: &SurfaceEntry,
+        pinned: Option<&lash_kernel_doc::ContractId>,
         config: &OwnerConfigView,
     ) -> Option<ToolSurfaceDrift> {
-        let served = self
-            .registry
-            .served(&entry.provider, &entry.definition.manifest.id, config);
-        ToolSurfaceDrift::judge(&entry.definition, served.as_ref())
+        let served = self.registry.served(entry.provider(), entry.tool(), config);
+        let pinned = pinned
+            .cloned()
+            .unwrap_or_else(|| entry.definition.contract_id());
+        ToolSurfaceDrift::of(
+            &entry.definition,
+            crate::judge(&pinned, &entry.link, served.as_ref()),
+        )
     }
 
     /// A deferred grant's committed definition is its authority, never a
@@ -458,21 +525,18 @@ impl SurfaceTools {
         let missing = || {
             ToolSurfaceDrift {
                 kind: ToolSurfaceDriftKind::Missing,
-                recorded: ToolDefinition {
-                    manifest: grant.manifest().clone(),
-                    contract: grant.contract().clone(),
-                },
+                recorded: grant.definition().clone(),
             }
             .refusal(call)
         };
-        if !self.registry.serves(&grant.provider)
+        if !self.registry.serves(grant.provider())
             || !matches!(self.deferred_provider(), Ok(Some(_)))
         {
             return Err(missing());
         }
-        if let Some(binding) = &grant.binding {
-            let codec = self.registry.provider(&binding.codec).ok_or_else(missing)?;
-            binding
+        if let Some(payload) = grant.payload() {
+            let codec = self.registry.provider(&payload.codec).ok_or_else(missing)?;
+            payload
                 .check_readable(codec.readable_binding_formats())
                 .map_err(|source| {
                     crate::RuntimeEffectControllerError::new(
@@ -498,7 +562,7 @@ impl SurfaceTools {
     ) -> Option<&'a crate::plugin::ToolProviderHandle> {
         match route {
             crate::tool_provider::ToolExecutionRoute::Catalog => {
-                self.routes.get(tool).map(|route| &route.provider)
+                self.routes.get(tool).map(SurfaceEntry::provider)
             }
             crate::tool_provider::ToolExecutionRoute::Granted { provider } => Some(provider),
         }
@@ -515,6 +579,7 @@ impl SurfaceTools {
                     .routes
                     .get(tool)
                     .ok_or_else(|| ToolOutcome::err_fmt(format_args!("Unknown tool id: {tool}")))?
+                    .link
                     .provider
             }
             crate::tool_provider::ToolExecutionRoute::Granted { provider } => provider,

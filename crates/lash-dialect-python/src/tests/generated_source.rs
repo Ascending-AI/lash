@@ -88,10 +88,13 @@ fn independent_source_reads_its_environment_from_the_base_document() {
     let mut changed = expected.clone();
     changed.manifest.effects.insert(
         k::EffectName::new("unused.effect").unwrap(),
-        k::OperationRequirement::of_signature(k::Signature {
-            params: vec![],
-            result: k::Type::Any,
-        }),
+        k::OperationRequirement::new(
+            k::Signature {
+                params: vec![],
+                result: k::Type::Any,
+            },
+            k::ContractId::new("1"),
+        ),
     );
     controls.push(changed);
     let mut changed = expected.clone();
@@ -170,9 +173,12 @@ fn smith_and_dialect_batches_reconstruct_without_installed_helpers() {
     )
     .unwrap();
     let library = lash_kernel_dialect::NamedLibrary::from_registry(&built.registry).unwrap();
-    let env_namespaces =
-        lash_kernel_dialect::Namespaces::of_signatures(&Default::default(), &Default::default())
-            .expect("the test's effects are operations");
+    let env_namespaces = lash_kernel_dialect::Namespaces::of_effects(
+        &Default::default(),
+        &lash_kernel_doc::ContractId::new("1"),
+        &Default::default(),
+    )
+    .expect("the test's effects are operations");
     let env = lash_kernel_dialect::Environment::new(&library, &env_namespaces);
     let ts_batch = [
         "const x = [1,2]; console.log(x[0] + 3);",
@@ -521,10 +527,13 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
     let mut performing = document.clone();
     performing.manifest.effects.insert(
         k::EffectName::new("tools.deep").unwrap(),
-        k::OperationRequirement::of_signature(k::Signature {
-            params: vec![],
-            result: k::Type::Any,
-        }),
+        k::OperationRequirement::new(
+            k::Signature {
+                params: vec![],
+                result: k::Type::Any,
+            },
+            k::ContractId::new("1"),
+        ),
     );
     assert_eq!(
         crate::read(&source, &performing, Default::default())
@@ -891,10 +900,13 @@ fn inventory_document() -> k::Document {
     );
     document.manifest.effects.insert(
         k::EffectName::new("host.echo").unwrap(),
-        k::OperationRequirement::of_signature(k::Signature {
-            params: vec![],
-            result: inventory_types(),
-        }),
+        k::OperationRequirement::new(
+            k::Signature {
+                params: vec![],
+                result: inventory_types(),
+            },
+            k::ContractId::new("1"),
+        ),
     );
     document
 }
@@ -1602,14 +1614,17 @@ fn non_any_effect_results_keep_nested_optional_types_and_the_manifest_stays_unpr
     let effect = k::EffectName::new("tools.inspect").unwrap();
     document.manifest.effects.insert(
         effect.clone(),
-        k::OperationRequirement::of_signature(k::Signature {
-            params: vec![k::Param {
-                name: "input".into(),
-                ty: ty.clone(),
-                optional: true,
-            }],
-            result: k::Type::Any,
-        }),
+        k::OperationRequirement::new(
+            k::Signature {
+                params: vec![k::Param {
+                    name: "input".into(),
+                    ty: ty.clone(),
+                    optional: true,
+                }],
+                result: k::Type::Any,
+            },
+            k::ContractId::new("1"),
+        ),
     );
     document.main.push(k::Stmt::Do {
         value: (k::Action::Perform {
@@ -1690,7 +1705,7 @@ fn discarded_expressions_have_exact_source_inverses() {
     let document = k::parse_document(
         r#"kernel 1
 numbers float
-effect display.show(value: Any) -> Any
+effect display.show(value: Any) -> Any contract "1"
 fn child() { return null }
 main {
   do perform display.show({text: "x"}) as Any

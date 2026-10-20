@@ -53,7 +53,8 @@ const BOUNDS: Bounds = Bounds {
 };
 fn program(source: &str) -> Program {
     let registry = Arc::new(registry());
-    let mut text = String::from("kernel 1\nnumbers by_spelling\neffect echo(x: Any) -> Any\n");
+    let mut text =
+        String::from("kernel 1\nnumbers by_spelling\neffect echo(x: Any) -> Any contract \"1\"\n");
     for (id, function) in registry.iter() {
         text.push_str(&format!("use {} = @{id}\n", function.definition().name));
     }

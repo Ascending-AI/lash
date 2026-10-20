@@ -441,9 +441,12 @@ fn write(
         steps: vec![lash_execution_contracts::process::StepRequest::Tool {
             step: lash_execution_contracts::process::StepName(step.to_owned()),
             effect: lash_core_execution::testing::effect_of(&write_definition()),
+            contract: write_definition().contract_id(),
             input: serde_json::json!({ "x": x }),
             site: site.map(|(node_id, occurrence)| {
-                lash_protocol_types::effect_identity_fixture(node_id, occurrence)
+                Box::new(lash_protocol_types::effect_identity_fixture(
+                    node_id, occurrence,
+                ))
             }),
             matched: None,
         }],
@@ -592,7 +595,7 @@ fn effects_advance_to(
             && let Some(lash_execution_contracts::process::StepRequest::Tool { site, .. }) =
                 steps.first_mut()
         {
-            *site = Some(node_site(n));
+            *site = Some(Box::new(node_site(n)));
         }
         action
     };

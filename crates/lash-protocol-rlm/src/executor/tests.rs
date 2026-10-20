@@ -565,11 +565,11 @@ impl lash_core::DeferredToolProvider for GrantsWebFetch {
             .iter()
             .map(|path| {
                 let outcome = if *path == "web.fetch" {
-                    lash_core::DeferredOutcome::Resolved {
-                        provider: lash_core::testing::test_tools_provider(),
-                        definition: definition("tool:web_fetch", "web.fetch"),
-                        binding: None,
-                    }
+                    lash_core::DeferredOutcome::resolved(
+                        lash_core::testing::test_tools_provider(),
+                        definition("tool:web_fetch", "web.fetch"),
+                        None,
+                    )
                 } else {
                     lash_core::DeferredOutcome::Unavailable { note: None }
                 };
@@ -976,11 +976,11 @@ async fn a_deferred_grant_performs_and_an_unavailable_note_raises_through_namesp
                 .iter()
                 .filter_map(|path| {
                     let outcome = match *path {
-                        "alpha.lookup" => lash_core::DeferredOutcome::Resolved {
-                            provider: lash_core::testing::test_tools_provider(),
-                            definition: definition("tool:alpha_lookup", "alpha.lookup"),
-                            binding: None,
-                        },
+                        "alpha.lookup" => lash_core::DeferredOutcome::resolved(
+                            lash_core::testing::test_tools_provider(),
+                            definition("tool:alpha_lookup", "alpha.lookup"),
+                            None,
+                        ),
                         "beta.gone" => lash_core::DeferredOutcome::Unavailable {
                             note: Some("beta is retired; use alpha".to_owned()),
                         },

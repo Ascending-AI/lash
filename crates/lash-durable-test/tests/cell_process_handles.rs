@@ -380,11 +380,11 @@ impl lash::tools::DeferredToolProvider for Resolver {
         };
         BTreeMap::from([(
             "inbox.send_item".to_owned(),
-            lash::tools::DeferredOutcome::Resolved {
-                provider: session_provider("inbox"),
-                definition: send_item(id),
-                binding: Some(binding),
-            },
+            lash::tools::DeferredOutcome::resolved(
+                session_provider("inbox"),
+                send_item(id),
+                Some(binding),
+            ),
         )])
     }
 }

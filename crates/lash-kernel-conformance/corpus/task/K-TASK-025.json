@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "reverse committed outcome delivery determines schedule",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\nfn child(value) { print value let answer = perform echo(value) as Int print answer return answer }\n\nmain {\nlet a = spawn call child(1)\nlet b = spawn call child(2)\nlet tasks = [a, b]\nlet answer = join all tasks\nfinish answer\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int contract \"1\"\nfn child(value) { print value let answer = perform echo(value) as Int print answer return answer }\n\nmain {\nlet a = spawn call child(1)\nlet b = spawn call child(2)\nlet tasks = [a, b]\nlet answer = join all tasks\nfinish answer\n}\n",
       "expected": {
         "prints": [
           {

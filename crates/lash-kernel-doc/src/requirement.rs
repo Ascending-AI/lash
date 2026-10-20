@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::ast::Node;
 use crate::function::FunctionDefinition;
-use crate::graph_tokens::{encode_body, logical_digest};
 use crate::name::{EffectName, FunctionId};
 use crate::native::FunctionCatalog;
 use crate::types::Signature;
@@ -31,17 +30,6 @@ impl ContractId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
-
-    /// The contract a requirement states while operations neither declare
-    /// nor derive one: the digest of the signature's canonical bytes, so two
-    /// requirements agree exactly when their signatures do.
-    pub fn of_signature(signature: &Signature) -> Self {
-        Self(
-            blake3::Hash::from(logical_digest(&encode_body(signature)))
-                .to_hex()
-                .to_string(),
-        )
-    }
 }
 
 impl fmt::Display for ContractId {
@@ -51,9 +39,11 @@ impl fmt::Display for ContractId {
 }
 
 /// An operation as code requires it: the signature it performs the
-/// operation under and the contract it was written against. A manifest
-/// states one for each operation the document performs or reaches, and a
-/// library body one for each operation it performs itself.
+/// operation under and the contract it was written against, which the
+/// operation's runner declares or derives. A manifest states one for each
+/// operation the document performs or reaches, and a library body one for
+/// each operation it performs itself. A changed contract under one
+/// signature is a different requirement (OP-SAME-SIGNATURE).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct OperationRequirement {
@@ -62,12 +52,12 @@ pub struct OperationRequirement {
 }
 
 impl OperationRequirement {
-    /// The requirement of an operation performed under `signature`, its
-    /// contract [`ContractId::of_signature`].
-    pub fn of_signature(signature: Signature) -> Self {
+    /// The requirement of an operation performed under `signature` and
+    /// pinned to `contract`.
+    pub fn new(signature: Signature, contract: ContractId) -> Self {
         Self {
-            contract: ContractId::of_signature(&signature),
             signature,
+            contract,
         }
     }
 }

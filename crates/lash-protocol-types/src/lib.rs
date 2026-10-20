@@ -126,10 +126,10 @@ pub use tool_catalog::{
 #[cfg(feature = "schema-validation")]
 pub use tool_contract::validate_tool_input;
 pub use tool_contract::{
-    Backoff, BoundedRetry, ExecutionPolicy, IntoOperation, LimitCause, ModelTool, ParkBound,
-    QualifiedOperation, RegistrationRefused, ToolArgumentProjectionPolicy, ToolBound, ToolBounds,
-    ToolContract, ToolDefinition, ToolDiscovery, ToolDraft, ToolId, ToolManifest,
-    ToolOutputContract, digest_tag, schema_for, standard_name,
+    Backoff, BoundedRetry, ContractSource, ExecutionPolicy, HostTag, IntoOperation, LimitCause,
+    ModelTool, ParkBound, QualifiedOperation, RegistrationRefused, ToolArgumentProjectionPolicy,
+    ToolBound, ToolBounds, ToolContract, ToolDefinition, ToolDiscovery, ToolDraft, ToolId,
+    ToolManifest, ToolOutputContract, digest_tag, schema_for, standard_name,
 };
 pub use tool_declaration::{
     DeclarationRefusal, FinishDeclaration, OutcomeShape, ToolDeclaration, TurnControlKind,

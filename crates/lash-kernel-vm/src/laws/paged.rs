@@ -276,7 +276,7 @@ fn rejected_and_failed_outcomes_keep_their_distinct_charges_after_open() {
     for cold in [false, true] {
         for rejected in [false, true] {
             let mut embedder = Embedder::new(
-                "effect typed() -> Int main { try { let v = perform typed() as Int return v } catch e { return 1 } }",
+                "effect typed() -> Int contract \"1\" main { try { let v = perform typed() as Int return v } catch e { return 1 } }",
             );
             let Step::Parked(park) = embedder.run() else {
                 panic!("must park");

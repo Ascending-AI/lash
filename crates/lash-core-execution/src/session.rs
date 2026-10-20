@@ -51,43 +51,6 @@ struct ToolCatalogArtifact {
     derived: ToolCatalogDerived,
 }
 
-/// The part of a tool definition that decides how a call links and
-/// dispatches: its identity, binding, argument projection, retry policy,
-/// declaration (its turn controls, with the schema a Finish value must
-/// match) and schemas. The description and examples reach only the model's
-/// prompt, which a redrive serves from the journaled environment sync.
-#[derive(serde::Serialize, PartialEq)]
-pub struct ToolDispatchSurface<'a> {
-    id: &'a crate::ToolId,
-    /// The tool's operation, by its effect name.
-    operation: String,
-    bindings: &'a std::collections::BTreeMap<String, serde_json::Value>,
-    argument_projection: &'a crate::ToolArgumentProjectionPolicy,
-    execution_policy: &'a crate::ExecutionPolicy,
-    declaration: &'a crate::ToolDeclaration,
-    input_schema: &'a crate::SchemaContract,
-    output_schema: &'a crate::SchemaContract,
-    output_contract: &'a crate::ToolOutputContract,
-}
-
-/// The dispatch surface of `manifest` under `contract`.
-pub fn tool_dispatch_surface<'a>(
-    manifest: &'a crate::ToolManifest,
-    contract: &'a crate::ToolContract,
-) -> ToolDispatchSurface<'a> {
-    ToolDispatchSurface {
-        id: &manifest.id,
-        operation: manifest.tool(),
-        bindings: &manifest.bindings,
-        argument_projection: &manifest.argument_projection,
-        execution_policy: &manifest.execution_policy,
-        declaration: manifest.declaration(),
-        input_schema: &contract.input_schema,
-        output_schema: &contract.output_schema,
-        output_contract: &contract.output_contract,
-    }
-}
-
 #[cfg(feature = "testing")]
 #[derive(Clone)]
 pub struct ToolCatalogHandle(Arc<ToolCatalogArtifact>);
@@ -462,7 +425,7 @@ impl Session {
         Ok(self
             .active_tool_surface_entry()?
             .tools()
-            .drift(tool_id, &config))
+            .drift(tool_id, None, &config))
     }
 
     fn tool_catalog_cache_entry(

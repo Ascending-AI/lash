@@ -144,9 +144,12 @@ fn a_missing_helper_is_named() {
     let library = lash_kernel_dialect::NamedLibrary::new();
     let effects = std::collections::BTreeMap::new();
     let bindings = std::collections::BTreeSet::new();
-    let environment_namespaces =
-        lash_kernel_dialect::Namespaces::of_signatures(&effects, &Default::default())
-            .expect("the test's effects are operations");
+    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
+        &effects,
+        &lash_kernel_doc::ContractId::new("1"),
+        &Default::default(),
+    )
+    .expect("the test's effects are operations");
     let environment = lash_kernel_dialect::Environment::new(&library, &environment_namespaces);
     let diagnostic = crate::lower(
         "print(1)\n",
@@ -458,9 +461,12 @@ fn every_advertised_repair_form_lowers() {
 #[test]
 fn a_host_source_policy_allows_a_larger_python_cell() {
     let source = format!("#{}", "x".repeat(crate::MAX_SOURCE_BYTES));
-    let environment_namespaces =
-        lash_kernel_dialect::Namespaces::of_signatures(&Default::default(), &Default::default())
-            .expect("the test's effects are operations");
+    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
+        &Default::default(),
+        &lash_kernel_doc::ContractId::new("1"),
+        &Default::default(),
+    )
+    .expect("the test's effects are operations");
     let environment =
         lash_kernel_dialect::Environment::new(machine::library(), &environment_namespaces);
     let cell = lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first());

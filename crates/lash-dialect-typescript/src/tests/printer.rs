@@ -118,10 +118,11 @@ fn roundtrip(document: &k::Document, registry: &Arc<k::FunctionRegistry>, librar
         bindings: &bindings,
         functions: &BTreeMap::new(),
     });
-    let signatures = document.manifest.signatures();
-    let environment_namespaces =
-        lash_kernel_dialect::Namespaces::of_signatures(&signatures, &Default::default())
-            .expect("the test's effects are operations");
+    let environment_namespaces = lash_kernel_dialect::Namespaces::of_requirements(
+        &document.manifest.effects,
+        &Default::default(),
+    )
+    .expect("the test's effects are operations");
     let environment = Environment::new(library, &environment_namespaces);
     let (lowered, _) = crate::read(&source, document, Default::default())
         .unwrap_or_else(|error| panic!("{error}\n{source}"));
@@ -244,7 +245,7 @@ main {
 }"#,
         ),
         document(
-            r#"effect web.fetch(url: Text) -> Any
+            r#"effect web.fetch(url: Text) -> Any contract "1"
 fn worker() {
   try { let page = perform web.fetch("cancel") as Any }
   finally { print "cleanup" do sleep 0.0 }
@@ -263,7 +264,7 @@ main {
         document(r#"main { try { throw "error" } finally { print "finally" } }"#),
         document(r#"main { fail "failed" }"#),
         document(
-            r#"effect views.projection() -> Handle("view")
+            r#"effect views.projection() -> Handle("view") contract "1"
 main {
   let h = perform views.projection() as Handle("view")
   let answer = read(h, "lookup")
@@ -293,8 +294,8 @@ main {{
 
     // The actual gate-3 edit vocabulary applied to its frontend fixture.
     let mut draft = Draft::open(document(
-        r#"effect web.fetch(url: Text) -> Any
-effect web.notify(text: Text) -> Any
+        r#"effect web.fetch(url: Text) -> Any contract "1"
+effect web.notify(text: Text) -> Any contract "1"
 main {
   let t1 = "https://a"
   let page = perform web.fetch(t1) as Any
@@ -305,7 +306,7 @@ main {
     ))
     .unwrap();
     let mut environment = lash_kernel_check::Environment::new(&library);
-    environment.effects = draft.document().manifest.signatures();
+    environment.effects = draft.document().manifest.effects.clone();
     let main = |path: &[u32]| k::Site::new(k::Unit::Main, path.to_vec());
     draft
         .apply(

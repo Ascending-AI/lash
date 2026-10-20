@@ -83,7 +83,10 @@ fn environment(library: &Library) -> Environment<'_> {
     let mut environment = Environment::new(&library.catalog);
     environment.effects.insert(
         effect("fetch"),
-        signature(&[("url", Type::Text)], Type::Any),
+        lash_kernel_doc::OperationRequirement::new(
+            signature(&[("url", Type::Text)], Type::Any),
+            lash_kernel_doc::ContractId::new("1"),
+        ),
     );
     environment
 }
@@ -106,7 +109,7 @@ fn every_form(library: &Library) -> String {
     format!(
         r#"kernel 1
 numbers float
-effect fetch(url: Text) -> Any
+effect fetch(url: Text) -> Any contract "1"
 use num.neg = @{neg}
 use helper.twice = @{twice}
 use helper.outer = @{outer}
@@ -457,7 +460,7 @@ fn execution_sites_name_the_action_its_statement_and_its_loops() {
     let library = library();
     let text = r#"kernel 1
 numbers float
-effect fetch(url: Text) -> Any
+effect fetch(url: Text) -> Any contract "1"
 
 main {
   for x in [[1]] {
@@ -619,8 +622,8 @@ fn a_refusal_names_everything_the_environment_is_missing() {
     let text = format!(
         r#"kernel 1
 numbers float
-effect fetch(url: Text) -> Any
-effect store(key: Text) -> Int
+effect fetch(url: Text) -> Any contract "1"
+effect store(key: Text) -> Int contract "1"
 use num.neg = @{neg}
 use helper.twice = @{twice}
 
@@ -638,9 +641,13 @@ main {{
     let mut environment = Environment::new(&empty);
     // `store` is provided, but takes an integer and promises less.
     let provided = signature(&[("key", Type::Int)], Type::Any);
-    environment
-        .effects
-        .insert(effect("store"), provided.clone());
+    environment.effects.insert(
+        effect("store"),
+        lash_kernel_doc::OperationRequirement::new(
+            provided.clone(),
+            lash_kernel_doc::ContractId::new("1"),
+        ),
+    );
 
     let mut functions = [(library.neg, "num.neg"), (library.twice, "helper.twice")];
     functions.sort();
@@ -718,17 +725,18 @@ fn an_effect_signature_refusal_names_the_output_openness_difference() {
     let expected = signature(&open, &closed);
     let provided = signature(&closed, &closed);
     let mut document = document(
-        "kernel 1\nnumbers float\neffect chat.message_to_self(input?: Any) -> Any\n\nmain {\n  let sent = perform chat.message_to_self() as Any\n}\n",
+        "kernel 1\nnumbers float\neffect chat.message_to_self(input?: Any) -> Any contract \"1\"\n\nmain {\n  let sent = perform chat.message_to_self() as Any\n}\n",
     );
     document.manifest.effects.insert(
         effect("chat.message_to_self"),
-        lash_kernel_doc::OperationRequirement::of_signature(expected),
+        lash_kernel_doc::OperationRequirement::new(expected, lash_kernel_doc::ContractId::new("1")),
     );
     let catalog = BTreeMap::new();
     let mut environment = Environment::new(&catalog);
-    environment
-        .effects
-        .insert(effect("chat.message_to_self"), provided);
+    environment.effects.insert(
+        effect("chat.message_to_self"),
+        lash_kernel_doc::OperationRequirement::new(provided, lash_kernel_doc::ContractId::new("1")),
+    );
     let refusal =
         admit(&document, &environment).expect_err("a closed input cannot take the open input");
     let reason = refusal
@@ -780,7 +788,7 @@ fn an_effect_signature_that_takes_more_and_returns_less_serves() {
     let library = library();
     let text = r#"kernel 1
 numbers float
-effect store(key: Text) -> Number
+effect store(key: Text) -> Number contract "1"
 
 main {
   let n = perform store("k") as Int
@@ -795,7 +803,10 @@ main {
         Type::Int,
     );
     provided.params[1].optional = true;
-    environment.effects.insert(effect("store"), provided);
+    environment.effects.insert(
+        effect("store"),
+        lash_kernel_doc::OperationRequirement::new(provided, lash_kernel_doc::ContractId::new("1")),
+    );
     admit(&document(text), &environment).unwrap_or_else(|refusal| panic!("{refusal}"));
 }
 
@@ -918,7 +929,7 @@ fn an_argument_that_cannot_fit_its_parameter_is_refused() {
     let library = library();
     let environment = environment(&library);
     let header = format!(
-        "kernel 1\nnumbers float\neffect fetch(url: Text) -> Any\nuse num.neg = @{}\n",
+        "kernel 1\nnumbers float\neffect fetch(url: Text) -> Any contract \"1\"\nuse num.neg = @{}\n",
         library.neg
     );
     let mismatch = |callee: &str, param: &str, expected: Type, found: Type, site: &[u32]| Refused {
@@ -955,10 +966,14 @@ fn an_argument_that_cannot_fit_its_parameter_is_refused() {
 fn a_perform_result_the_signature_cannot_give_is_refused() {
     let library = library();
     let mut environment = Environment::new(&library.catalog);
-    environment
-        .effects
-        .insert(effect("count"), signature(&[], Type::Int));
-    let text = "kernel 1\nnumbers float\neffect count() -> Int\n\n\
+    environment.effects.insert(
+        effect("count"),
+        lash_kernel_doc::OperationRequirement::new(
+            signature(&[], Type::Int),
+            lash_kernel_doc::ContractId::new("1"),
+        ),
+    );
+    let text = "kernel 1\nnumbers float\neffect count() -> Int contract \"1\"\n\n\
                 main {\n  let c = perform count() as Text\n}\n";
     assert_eq!(
         refusals(text, &environment),
@@ -992,7 +1007,7 @@ fn a_manifest_that_is_not_the_derived_one_is_refused() {
     };
 
     let text = format!(
-        "kernel 1\nnumbers float\neffect fetch(url: Text) -> Any\nuse num.neg = @{}\n\n\
+        "kernel 1\nnumbers float\neffect fetch(url: Text) -> Any contract \"1\"\nuse num.neg = @{}\n\n\
          main {{\n  return 1\n}}\n",
         library.neg
     );
@@ -1085,8 +1100,8 @@ fn a_record_field_written_after_its_let_is_not_typed_by_it() {
 fn an_optional_result_field_does_not_serve_a_required_one() {
     let library = library();
     let mut environment = Environment::new(&library.catalog);
-    let wanted = "kernel 1\nnumbers float\neffect get() -> Record{x: Int}\nmain { let r = perform get() as Record{x: Int} }\n";
-    let offered = "kernel 1\nnumbers float\neffect get() -> Record{x?: Int}\nmain { let r = perform get() as Record{x?: Int} }\n";
+    let wanted = "kernel 1\nnumbers float\neffect get() -> Record{x: Int} contract \"1\"\nmain { let r = perform get() as Record{x: Int} }\n";
+    let offered = "kernel 1\nnumbers float\neffect get() -> Record{x?: Int} contract \"1\"\nmain { let r = perform get() as Record{x?: Int} }\n";
     // The empty record is allowed by the provided result, but cannot
     // satisfy the required x in the expected result.
     let provided = document(offered).manifest.effects[&effect("get")]
@@ -1095,7 +1110,13 @@ fn an_optional_result_field_does_not_serve_a_required_one() {
     let expected = document(wanted).manifest.effects[&effect("get")]
         .signature
         .clone();
-    environment.effects.insert(effect("get"), provided.clone());
+    environment.effects.insert(
+        effect("get"),
+        lash_kernel_doc::OperationRequirement::new(
+            provided.clone(),
+            lash_kernel_doc::ContractId::new("1"),
+        ),
+    );
     assert_eq!(
         refusals(wanted, &environment),
         [Refused {
@@ -1123,11 +1144,14 @@ fn records_that_differ_only_in_optional_fields_share_a_value() {
     // though an x that is present cannot be both Int and Text.
     let library = library();
     let mut environment = Environment::new(&library.catalog);
-    let text = "kernel 1\nnumbers float\neffect count() -> Record{x?: Int}\nmain { let c = perform count() as Record{x?: Text} }\n";
+    let text = "kernel 1\nnumbers float\neffect count() -> Record{x?: Int} contract \"1\"\nmain { let c = perform count() as Record{x?: Text} }\n";
     let doc = document(text);
     environment.effects.insert(
         effect("count"),
-        doc.manifest.effects[&effect("count")].signature.clone(),
+        lash_kernel_doc::OperationRequirement::new(
+            doc.manifest.effects[&effect("count")].signature.clone(),
+            lash_kernel_doc::ContractId::new("1"),
+        ),
     );
     admit(&doc, &environment).unwrap_or_else(|refusal| panic!("{refusal}"));
 }
@@ -1257,8 +1281,8 @@ fn cached_library_refusals_keep_the_uncached_errors_and_view() {
 /// harmless name and type differences, and escapes field names as pointers.
 #[test]
 fn an_effect_signature_mismatch_locates_the_first_incompatible_nested_type() {
-    let expected = document("kernel 1\nnumbers float\neffect check(input: Record{\"a/b~c\": List(Int)}) -> Int\nmain { finish null }\n").manifest.effects[&effect("check")].signature.clone();
-    let provided = document("kernel 1\nnumbers float\neffect check(input: Record{\"a/b~c\": List(Text)}) -> Text\nmain { finish null }\n").manifest.effects[&effect("check")].signature.clone();
+    let expected = document("kernel 1\nnumbers float\neffect check(input: Record{\"a/b~c\": List(Int)}) -> Int contract \"1\"\nmain { finish null }\n").manifest.effects[&effect("check")].signature.clone();
+    let provided = document("kernel 1\nnumbers float\neffect check(input: Record{\"a/b~c\": List(Text)}) -> Text contract \"1\"\nmain { finish null }\n").manifest.effects[&effect("check")].signature.clone();
     let mismatch = crate::signature_mismatch(&provided, &expected).expect("input mismatch first");
     assert_eq!(
         mismatch,
@@ -1354,9 +1378,13 @@ fn the_manifest_lists_every_requirement_reached_through_bodies() {
         )])
     );
     let mut environment = Environment::new(&catalog);
-    environment
-        .effects
-        .insert(effect("web.fetch"), requirement.signature);
+    environment.effects.insert(
+        effect("web.fetch"),
+        lash_kernel_doc::OperationRequirement::new(
+            requirement.signature,
+            lash_kernel_doc::ContractId::new("1"),
+        ),
+    );
     admit(&document(&text), &environment).unwrap_or_else(|refusal| panic!("{refusal}"));
 }
 
@@ -1389,16 +1417,20 @@ fn one_effect_under_two_requirements_is_refused_naming_both() {
     let (catalog, fetch, outer, requirement) = reached_perform();
     // The document's own perform requires the signature's interim contract.
     let text = format!(
-        "kernel 1\nnumbers float\neffect web.fetch(value?: Any) -> Any\n\
+        "kernel 1\nnumbers float\neffect web.fetch(value?: Any) -> Any contract \"1\"\n\
          use probe.outer = @{outer}\nuse probe.fetch = @{fetch}\n\
          main {{ let own = perform web.fetch(1) as Any let x = invoke probe.outer(own) finish x }}\n"
     );
     let own = document(&text).manifest.effects[&effect("web.fetch")].clone();
     assert_ne!(own, requirement);
     let mut environment = Environment::new(&catalog);
-    environment
-        .effects
-        .insert(effect("web.fetch"), requirement.signature.clone());
+    environment.effects.insert(
+        effect("web.fetch"),
+        lash_kernel_doc::OperationRequirement::new(
+            requirement.signature.clone(),
+            lash_kernel_doc::ContractId::new("1"),
+        ),
+    );
     assert_eq!(
         refusals(&text, &environment),
         [Refused {

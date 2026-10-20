@@ -173,12 +173,10 @@ fn a_saved_function_relinks_to_the_cell_set_with_the_earlier_one_retained() {
     let mut document = Document::new(NumberPolicy::Float, Vec::new());
     let functions = BTreeMap::from([(relinked.name.clone(), relinked)]);
     let roots = BTreeSet::from([Name::new("keep")]);
-    let namespaces = crate::Namespaces::of_signatures(
+    let namespaces = crate::Namespaces::of_requirements(
         &BTreeMap::from([(
             EffectName::new("dataframe.run").expect("an effect"),
-            Owns::run("plan: Any", "dataframe.run/1")
-                .requirement()
-                .signature,
+            Owns::run("plan: Any", "dataframe.run/1").requirement(),
         )]),
         &BTreeMap::new(),
     )

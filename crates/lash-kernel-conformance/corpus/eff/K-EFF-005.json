@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "Int decodes 1.0 exactly",
-      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any\nmain { let value = perform source() as Int finish value }\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Int finish value }\n",
       "expected": {
         "prints": [],
         "trace": [
@@ -39,7 +39,7 @@
     },
     {
       "name": "Int decodes 1e3 exactly",
-      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any\nmain { let value = perform source() as Int finish value }\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Int finish value }\n",
       "expected": {
         "prints": [],
         "trace": [
@@ -75,7 +75,7 @@
     },
     {
       "name": "Int decodes 18446744073709551617e2 exactly",
-      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any\nmain { let value = perform source() as Int finish value }\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Int finish value }\n",
       "expected": {
         "prints": [],
         "trace": [
@@ -111,7 +111,7 @@
     },
     {
       "name": "Float rounds original integer token ties to even",
-      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any\nmain { let value = perform source() as Float finish value }\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Float finish value }\n",
       "expected": {
         "prints": [],
         "trace": [

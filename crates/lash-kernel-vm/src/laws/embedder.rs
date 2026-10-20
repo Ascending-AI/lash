@@ -320,8 +320,8 @@ pub(crate) fn library_with(native_twice: bool, probes: Option<Probes>) -> Librar
         }
     }
     let mut header = String::from(
-        "kernel 1\neffect echo(x?: Any) -> Any\neffect boom(x?: Any) -> Any\n\
-         effect num(x: Text) -> Any\n",
+        "kernel 1\neffect echo(x?: Any) -> Any contract \"1\"\neffect boom(x?: Any) -> Any contract \"1\"\n\
+         effect num(x: Text) -> Any contract \"1\"\n",
     );
     for (name, id) in &ids {
         header.push_str(&format!("use {name} = @{id}\n"));

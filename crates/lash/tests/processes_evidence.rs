@@ -1378,7 +1378,7 @@ mod named_component_laws {
         assert_eq!(
             env.effects()
                 .iter()
-                .map(|(effect, link)| (effect.to_string(), link.tool().to_string()))
+                .map(|(effect, link)| (effect.to_string(), link.tool.to_string()))
                 .collect::<Vec<_>>(),
             [(format!("tools.{A_TOOL}"), format!("tool:{A_TOOL}"))],
             "the env links exactly the effect the process performs"
@@ -1609,11 +1609,11 @@ mod named_component_laws {
     }
 
     /// D7 over effects (P7): a linked effect is within the host's offer when
-    /// the offer holds the linked tool id with the same dispatch surface.
-    /// The model-facing name, the binding path and the provider that serves
-    /// it are not authority; another id or a changed surface is excess.
+    /// the offer holds the linked tool id. The model-facing name, the
+    /// provider that serves it and its contract are not authority (the
+    /// contract is judged at each perform); another id is excess.
     #[test]
-    fn linked_effects_obey_the_offered_tool_identity_and_surface() {
+    fn linked_effects_obey_the_offered_tool_identity() {
         use lash::plugins::ToolCatalog;
         use lash::process::authority::{ExcessLink, tools_excess, tools_within};
         let env = ProcessEnv::builder(lash::MaxToolCalls::new(2))
@@ -1661,10 +1661,9 @@ mod named_component_laws {
         )
         .expect("the tool's schemas")
         .with_execution(std::time::Duration::from_secs(60));
-        assert_eq!(
-            tools_excess(&env, &ToolCatalog::from_tool_definitions(vec![changed])),
-            excess,
-            "a changed surface under the same id does not offer the link"
+        assert!(
+            tools_within(&env, &ToolCatalog::from_tool_definitions(vec![changed])),
+            "a changed contract under the same id is judged at the perform, not here"
         );
         assert!(!tools_within(
             &env,

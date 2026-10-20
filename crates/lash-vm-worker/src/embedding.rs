@@ -680,8 +680,12 @@ pub(crate) mod tests {
                     source,
                     &lash_kernel_dialect::Environment::new(
                         embedding.library(),
-                        &lash_kernel_dialect::Namespaces::of_signatures(&effects, &controls)
-                            .expect("the test's effects are operations"),
+                        &lash_kernel_dialect::Namespaces::of_effects(
+                            &effects,
+                            &lash_kernel_doc::ContractId::new("1"),
+                            &controls,
+                        )
+                        .expect("the test's effects are operations"),
                     ),
                     Mode::Cell(lash_kernel_dialect::CellEnvironment {
                         bindings: &bindings,
@@ -707,8 +711,9 @@ pub(crate) mod tests {
         let mut tuning = WorkerTuning::standard();
         tuning.typescript_source_bytes = source.len();
         let embedding = typescript_only(&tuning).unwrap();
-        let environment_namespaces = lash_kernel_dialect::Namespaces::of_signatures(
+        let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
             &Default::default(),
+            &lash_kernel_doc::ContractId::new("1"),
             &Default::default(),
         )
         .expect("the test's effects are operations");
@@ -731,8 +736,9 @@ pub(crate) mod tests {
         let python_source = format!("#{}", "x".repeat(1 << 20));
         tuning.python_source_bytes = python_source.len();
         let embedding = crate::built_embedding(&tuning).unwrap();
-        let environment_namespaces = lash_kernel_dialect::Namespaces::of_signatures(
+        let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
             &Default::default(),
+            &lash_kernel_doc::ContractId::new("1"),
             &Default::default(),
         )
         .expect("the test's effects are operations");

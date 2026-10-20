@@ -19,23 +19,23 @@ pub struct ExcessLink {
     pub tool: ToolId,
 }
 
-/// The process's linked effects whose tool `offered` does not offer as the
-/// link retains it. A link and an offered tool compare by tool id and
-/// dispatch surface ([`crate::process::ProcessSurface`]) alone: the
-/// model-facing name, the binding path and the provider key that serves it
-/// are not authority, so neither makes a link excess.
+/// The process's linked effects whose tool `offered` does not offer. A link
+/// and an offered tool compare by tool id alone: the model-facing name, the
+/// provider key and the policy are not authority, and the contract a call
+/// runs under is its code's, judged at each perform by the one judge
+/// ([`crate::tools::judge`]), so none makes a link excess.
 pub fn tools_excess(env: &ProcessEnv, offered: &ToolCatalog) -> BTreeSet<ExcessLink> {
-    let offered = offered
-        .entries()
-        .iter()
-        .map(|entry| lash_core::ProcessSurface::of_parts(&entry.manifest, &entry.contract))
-        .collect::<Vec<_>>();
     env.effects()
         .iter()
-        .filter(|(_, link)| !offered.contains(&link.surface))
+        .filter(|(_, link)| {
+            !offered
+                .entries()
+                .iter()
+                .any(|entry| entry.manifest.id == link.tool)
+        })
         .map(|(effect, link)| ExcessLink {
             effect: effect.to_string(),
-            tool: link.tool().clone(),
+            tool: link.tool.clone(),
         })
         .collect()
 }

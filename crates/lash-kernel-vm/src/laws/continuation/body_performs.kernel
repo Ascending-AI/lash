@@ -8,13 +8,13 @@ use pkg.fetch
 function pkg.fetch(x: Any) -> Any
 kernel 1
 charge 1
-effect echo(x?: Any) -> Any
+effect echo(x?: Any) -> Any contract "1"
 body { let v = perform echo(x) as Any return v }
 
 function pkg.fetch_nested(x: Any) -> Any
 kernel 1
 charge 1
-effect echo(x?: Any) -> Any
+effect echo(x?: Any) -> Any contract "1"
 body { let v = [perform echo(x) as Any] return v[0] }
 
 function pkg.wrap(x: Any) -> Any
@@ -25,7 +25,7 @@ body { let v = invoke pkg.fetch(x) return v }
 function pkg.fetch_yield(x: Any) -> Any
 kernel 1
 charge 1
-effect echo(x?: Any) -> Any
+effect echo(x?: Any) -> Any contract "1"
 body { let v = perform echo(x) as Any then yield return v }
 
 function pkg.await(x: Any) -> Any
@@ -36,13 +36,13 @@ body { do yield return x }
 function pkg.each(x: Any) -> Any
 kernel 1
 charge 1
-effect echo(x?: Any) -> Any
+effect echo(x?: Any) -> Any contract "1"
 body { let out = [] for item in x { let v = perform echo(item) as Any set out[list.len(out)] = v } return out }
 
 function pkg.guarded(x: Any) -> Any
 kernel 1
 charge 1
-effect echo(x?: Any) -> Any
+effect echo(x?: Any) -> Any contract "1"
 body { try { let v = perform echo(x) as Any return v } finally { do perform echo("cleanup") as Any } }
 
 function pkg.start(x: Any) -> Any
@@ -53,7 +53,7 @@ body { let h = spawn invoke pkg.fetch(x) return h }
 function pkg.discard(x: Any) -> Any
 kernel 1
 charge 1
-effect echo(x?: Any) -> Any
+effect echo(x?: Any) -> Any contract "1"
 body { do perform echo(x) as Any return null }
 
 function pkg.noop(x: Any) -> Any

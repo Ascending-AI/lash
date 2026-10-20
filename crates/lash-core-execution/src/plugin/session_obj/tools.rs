@@ -92,7 +92,7 @@ impl PluginSession {
         for (effect, provider) in surface
             .tools()
             .iter()
-            .map(|(operation, entry)| (operation.effect_name().to_string(), &entry.provider))
+            .map(|(operation, entry)| (operation.effect_name().to_string(), entry.provider()))
             .chain(
                 surface
                     .deferred()

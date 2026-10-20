@@ -96,8 +96,12 @@ fn lower_with(
         source,
         &Environment::new(
             library(),
-            &lash_kernel_dialect::Namespaces::of_signatures(effects, controls())
-                .expect("the test's effects are operations"),
+            &lash_kernel_dialect::Namespaces::of_effects(
+                effects,
+                &lash_kernel_doc::ContractId::new("1"),
+                controls(),
+            )
+            .expect("the test's effects are operations"),
         ),
         lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment {
             bindings,
@@ -300,7 +304,18 @@ fn start(
         panic!("{refused}\n{text}");
     }
     let mut environment = lash_kernel_check::Environment::new(library());
-    environment.effects = effects;
+    environment.effects = (effects)
+        .iter()
+        .map(|(effect, signature)| {
+            (
+                effect.clone(),
+                lash_kernel_doc::OperationRequirement::new(
+                    signature.clone(),
+                    lash_kernel_doc::ContractId::new("1"),
+                ),
+            )
+        })
+        .collect();
     environment.bindings = names;
     if let Err(refusal) = lash_kernel_check::admit(&lowered.document, &environment) {
         panic!("{refusal:?}\n{text}");
@@ -893,8 +908,12 @@ fn paged_arithmetic_keeps_held_definitions_and_exact_charge() {
             ARITHMETIC_RESUME,
             &Environment::new(
                 named,
-                &lash_kernel_dialect::Namespaces::of_signatures(&effects, &Default::default())
-                    .expect("the test's effects are operations"),
+                &lash_kernel_dialect::Namespaces::of_effects(
+                    &effects,
+                    &lash_kernel_doc::ContractId::new("1"),
+                    &Default::default(),
+                )
+                .expect("the test's effects are operations"),
             ),
             lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
         )

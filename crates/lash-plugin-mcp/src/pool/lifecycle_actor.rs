@@ -656,7 +656,7 @@ impl LifecycleActor {
             .and_then(|entry| {
                 let tools =
                     import_tools(&server_name, tools, entry.config.call_max_total_timeout())?;
-                admission::bind_imported_tools(tools, &entry, &peer)
+                admission::pinned_guidance(tools, &entry, &peer)
             }) {
             Ok(imported) => imported,
             Err(error) => {
@@ -733,7 +733,7 @@ impl LifecycleActor {
                                 tools,
                                 entry.config.call_max_total_timeout(),
                             )?;
-                            admission::bind_imported_tools(tools, &entry, &peer)
+                            admission::pinned_guidance(tools, &entry, &peer)
                         })
                         .and_then(|tools| self.entry.upgrade()
                             .ok_or(McpError::PoolShutDown)?

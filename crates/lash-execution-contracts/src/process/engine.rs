@@ -93,10 +93,26 @@ impl From<ProcessAwaitOutput> for ProcessRunOutcome {
 /// of I0, FIG-5194). See [`super::engine_state`] for the advance contract
 /// and cancel.
 ///
-/// The effects a process performs, each with the kernel signature its code
-/// was checked against (P3).
+/// The effects a process performs, each with the requirement its code
+/// states: the kernel signature it was checked against and the contract it
+/// pins (P3, OP-CONTRACT-PIN).
 pub type PerformedEffects =
-    std::collections::BTreeMap<lash_kernel_doc::EffectName, lash_kernel_doc::Signature>;
+    std::collections::BTreeMap<lash_kernel_doc::EffectName, lash_kernel_doc::OperationRequirement>;
+
+/// What the package that owns an operation's path declares of it: the
+/// requirement and intents every runner of it must serve (PKG-RUNNER).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OwnedOperation {
+    /// The owning package's path, dotted.
+    pub package: String,
+    /// Its declared signature and contract id.
+    pub requirement: lash_kernel_doc::OperationRequirement,
+    /// The intents it declares, by wire name.
+    pub intents: std::collections::BTreeSet<String>,
+}
+
+/// The performed operations whose paths a package owns, by effect.
+pub type OwnedOperations = std::collections::BTreeMap<lash_kernel_doc::EffectName, OwnedOperation>;
 
 /// Whether an engine is an internal process or a user-facing workflow.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -336,6 +352,11 @@ pub enum ProcessDocumentRefRead {
 /// document, answer `Unsupported`.
 #[async_trait::async_trait]
 pub trait ProcessDocumentProvider: Send + Sync {
+    /// The operations among `performed` whose paths a package owns, in the
+    /// package view the engine's documents run under, each with what its
+    /// package declares (PKG-RUNNER).
+    fn owned_operations(&self, performed: &PerformedEffects) -> OwnedOperations;
+
     /// The document of the definition `payload` names: a start payload or a
     /// definition value, as [`ProcessEngine::start_artifacts`] reads it.
     async fn document(

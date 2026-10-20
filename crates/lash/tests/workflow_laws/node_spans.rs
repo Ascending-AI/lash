@@ -15,7 +15,7 @@ use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider, SpanData
 /// concurrently spawned tasks.
 const NODES: &str = r#"kernel 1
 numbers float
-effect tools.echo(input: Any) -> Any
+effect tools.echo(input: Any) -> Any contract "1"
 entry nodes(name: Text) -> Any
 
 fn work(item) {
@@ -129,12 +129,10 @@ async fn publish_nodes(
     let echo = lash::workflow::document::EffectName::new("tools.echo").expect("an effect name");
     let mut document =
         lash::workflow::document::parse_document(NODES).expect("the document parses");
-    document.manifest.effects.insert(
-        echo.clone(),
-        lash::workflow::document::OperationRequirement::of_signature(
-            checked.checker().effects[&echo].clone(),
-        ),
-    );
+    document
+        .manifest
+        .effects
+        .insert(echo.clone(), checked.checker().effects[&echo].clone());
     let draft = Draft::open(document).expect("the document opens");
     let publication = published(
         artifacts

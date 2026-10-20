@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "operands evaluated before a nested wait keep their values across a resume",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\n\nmain {\nlet xs = [1] let r = (xs[0], perform echo(1) as Int, xs[0]) finish r\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int contract \"1\"\n\nmain {\nlet xs = [1] let r = (xs[0], perform echo(1) as Int, xs[0]) finish r\n}\n",
       "expected": {
         "prints": [],
         "end": {

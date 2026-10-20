@@ -463,9 +463,9 @@ fn ordinary_three_effect_workflow_has_no_generic_body_forms() {
     let document = k::parse_document(
         r#"kernel 1
 numbers float
-effect research.search(input: Any) -> Any
-effect research.synthesize(input: Any) -> Any
-effect display.show_message(input: Any) -> Any
+effect research.search(input: Any) -> Any contract "1"
+effect research.synthesize(input: Any) -> Any contract "1"
+effect display.show_message(input: Any) -> Any contract "1"
 entry deep_research() -> Any
 fn deep_research() {
   let search_input = {topic: "Reducing customer onboarding drop-off", max_sources: 3}
@@ -823,10 +823,13 @@ fn effect_calls_keep_arities_result_annotations_and_atomic_boundaries() {
     let mut document = k::Document::new(k::NumberPolicy::Float, vec![]);
     document.manifest.effects.insert(
         effect.clone(),
-        k::OperationRequirement::of_signature(k::Signature {
-            params: vec![],
-            result: k::Type::Any,
-        }),
+        k::OperationRequirement::new(
+            k::Signature {
+                params: vec![],
+                result: k::Type::Any,
+            },
+            k::ContractId::new("1"),
+        ),
     );
     for (args, result) in [
         (vec![], k::Type::Any),

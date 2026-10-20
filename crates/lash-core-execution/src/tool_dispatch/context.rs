@@ -152,7 +152,7 @@ impl<'run> ToolDispatchContext<'run> {
         tool: &crate::ToolId,
         granted: Option<&'a crate::plugin::ToolProviderHandle>,
     ) -> Option<&'a crate::plugin::ToolProviderHandle> {
-        granted.or_else(|| self.routes.entry(tool).map(|entry| &entry.provider))
+        granted.or_else(|| self.routes.entry(tool).map(crate::SurfaceEntry::provider))
     }
 
     /// How the surface entry offering the model-facing tool `name` drifted
@@ -164,7 +164,7 @@ impl<'run> ToolDispatchContext<'run> {
             .routes
             .entries()
             .find(|entry| entry.definition.manifest.tool() == name)?;
-        self.routes.drift(entry.tool(), &self.config)
+        self.routes.drift(entry.tool(), None, &self.config)
     }
 
     pub fn process_scope(&self) -> crate::ProcessOpScope<'_> {

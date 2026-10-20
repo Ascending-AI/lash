@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "single handle joiners wake in joining order",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\nfn value() { let n = perform echo(1) as Int return n } fn waiter(h, label) { do join h print label }\nmain {\nlet child = spawn call value() let a = spawn call waiter(child, \"a\") let b = spawn call waiter(child, \"b\") let tasks = [child, a, b] do join all tasks\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int contract \"1\"\nfn value() { let n = perform echo(1) as Int return n } fn waiter(h, label) { do join h print label }\nmain {\nlet child = spawn call value() let a = spawn call waiter(child, \"a\") let b = spawn call waiter(child, \"b\") let tasks = [child, a, b] do join all tasks\n}\n",
       "expected": {
         "prints": [
           {

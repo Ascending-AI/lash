@@ -32,6 +32,7 @@ fn write_step(step: &str, x: i64) -> lash_execution_contracts::process::StepRequ
     lash_execution_contracts::process::StepRequest::Tool {
         step: lash_execution_contracts::process::StepName(step.to_owned()),
         effect: lash_core_execution::testing::effect_of(&write_definition()),
+        contract: write_definition().contract_id(),
         input: serde_json::json!({ "x": x }),
         site: None,
         matched: None,

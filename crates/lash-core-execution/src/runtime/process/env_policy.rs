@@ -155,13 +155,13 @@ impl<'a> ProcessEnvCx<'a> {
     /// `components`, linking each effect the target performs to the tool the
     /// run's recorded surface matched it to or, for one the surface does not
     /// offer, the tool the declaring cell's committed deferred match resolved
-    /// it to ([`recorded_grants`](Self::recorded_grants)), with that match's
-    /// definition and execution binding. Each is served by the declared
-    /// process twin of its recorded provider among `components`: the same
-    /// owner and local key in the process registry. A binding is routed to
-    /// its codec's twin there, its format and payload kept as recorded.
-    /// Nothing is re-resolved: an effect neither offers is refused, as is
-    /// one no component serves or whose binding no component reads.
+    /// it to ([`recorded_grants`](Self::recorded_grants)). Each recorded
+    /// [`crate::OperationLink`] is copied, served by the declared process
+    /// twin of its recorded provider among `components`: the same owner and
+    /// local key in the process registry. A payload is routed to its codec's
+    /// twin there, its format and payload kept as recorded. Nothing is
+    /// re-resolved: an effect neither offers is refused, as is one no
+    /// component serves or whose payload no component reads.
     ///
     /// # Errors
     ///
@@ -176,7 +176,6 @@ impl<'a> ProcessEnvCx<'a> {
         let performed = &self.target.performed;
         let base = ProcessEnv::from_run(run, Default::default(), components.clone())?;
         let composition = self.engines.components().compose(&base, None)?;
-        let config = crate::plugin::OwnerConfigView::components(Arc::new(base));
         let twin = |provider: &crate::ProviderKey| {
             composition
                 .registry
@@ -193,74 +192,50 @@ impl<'a> ProcessEnvCx<'a> {
             let offered = surface
                 .entries()
                 .find(|entry| entry.definition.manifest.operation.effect_name() == *effect);
-            let link = match (offered, self.recorded_grants.get(effect)) {
-                (Some(entry), _) => {
-                    let tool = entry.tool();
-                    let missing = || ProcessEnvRefusal::CaptureMissing {
-                        effect: effect.to_string(),
-                        tool: tool.to_string(),
-                    };
-                    let provider = twin(&entry.provider).ok_or_else(missing)?;
-                    let served = composition
-                        .registry
-                        .served(&provider, tool, &config)
-                        .ok_or_else(missing)?;
-                    let retained = crate::ProcessSurface::of(&entry.definition);
-                    if crate::ProcessSurface::of(&served) != retained {
-                        return Err(ProcessEnvRefusal::LinkedSurfaceChanged {
-                            effect: effect.to_string(),
-                            tool: tool.to_string(),
-                        });
-                    }
-                    crate::EffectLink {
-                        provider,
-                        surface: retained,
-                        kind: crate::LinkKind::Tool,
-                    }
-                }
-                (None, Some(grant)) => {
-                    let tool = &grant.manifest().id;
-                    let provider =
-                        twin(&grant.provider).ok_or_else(|| ProcessEnvRefusal::CaptureMissing {
-                            effect: effect.to_string(),
-                            tool: tool.to_string(),
-                        })?;
-                    let binding = grant
-                        .binding
-                        .clone()
-                        .map(|binding| {
-                            let codec = twin(&binding.codec).ok_or_else(|| {
-                                ProcessEnvRefusal::BindingUnreadable {
-                                    effect: effect.to_string(),
-                                    tool: tool.to_string(),
-                                    codec: binding.codec.to_string(),
-                                    reason: "it has no process twin: no component the env names \
-                                             declares it"
-                                        .to_owned(),
-                                }
-                            })?;
-                            Ok(crate::ExecutionBinding { codec, ..binding })
-                        })
-                        .transpose()?;
-                    crate::EffectLink::resolved(
-                        provider,
-                        crate::ToolDefinition {
-                            manifest: grant.manifest().clone(),
-                            contract: grant.contract().clone(),
-                        },
-                        binding,
-                    )
-                }
+            let recorded = match (offered, self.recorded_grants.get(effect)) {
+                (Some(entry), _) => &entry.link,
+                (None, Some(grant)) => grant.link(),
                 (None, None) => {
                     return Err(ProcessEnvRefusal::EffectNotLinked {
                         effect: effect.to_string(),
                     });
                 }
             };
+            // The link is copied: only its provider and its payload's codec
+            // move to their process twins.
+            let tool = &recorded.tool;
+            let provider =
+                twin(&recorded.provider).ok_or_else(|| ProcessEnvRefusal::CaptureMissing {
+                    effect: effect.to_string(),
+                    tool: tool.to_string(),
+                })?;
+            let payload = recorded
+                .payload
+                .clone()
+                .map(|payload| {
+                    let codec = twin(&payload.codec).ok_or_else(|| {
+                        ProcessEnvRefusal::BindingUnreadable {
+                            effect: effect.to_string(),
+                            tool: tool.to_string(),
+                            codec: payload.codec.to_string(),
+                            reason: "it has no process twin: no component the env names \
+                                     declares it"
+                                .to_owned(),
+                        }
+                    })?;
+                    Ok(crate::ExecutionBinding { codec, ..payload })
+                })
+                .transpose()?;
+            let link = crate::OperationLink {
+                provider,
+                payload,
+                ..recorded.clone()
+            };
             effects.insert(effect.clone(), link);
         }
         let candidate = ProcessEnv::from_run(run, effects, components)?;
-        self.engines.capture_env(performed, &candidate)
+        self.engines
+            .capture_env(&self.target.engine_kind, performed, &candidate)
     }
 
     /// Restrict the enclosing process's environment to the effects the
@@ -296,6 +271,7 @@ impl ProcessEngineRegistry {
     /// A missing effect, an unfit link, or a component that cannot serve it.
     pub fn capture_env(
         &self,
+        kind: &str,
         performed: &lash_execution_contracts::process::PerformedEffects,
         candidate: &ProcessEnv,
     ) -> Result<ProcessEnv, ProcessEnvRefusal> {
@@ -307,10 +283,8 @@ impl ProcessEngineRegistry {
                 }
                 refusal => refusal,
             })?;
-        crate::check_links(&env, performed, &Default::default())?;
         self.components().admit(&env)?;
-        self.components()
-            .check_served(&Arc::new(env.clone()))
+        self.check_links(kind, &Arc::new(env.clone()), performed, &Default::default())
             .map_err(|refusal| match refusal {
                 ProcessEnvRefusal::ToolNotServed { effect, tool, .. } => {
                     ProcessEnvRefusal::CaptureMissing { effect, tool }

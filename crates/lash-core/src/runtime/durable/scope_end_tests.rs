@@ -1362,6 +1362,7 @@ impl lash_execution_contracts::process::ProcessEngine for LawEngine {
                     steps: vec![lash_execution_contracts::process::StepRequest::Tool {
                         step: lash_execution_contracts::process::StepName("forever".into()),
                         effect: lash_core_execution::testing::effect(HANGING_TOOL),
+                        contract: crate::ContractId::new("fixture"),
                         input: serde_json::Value::Null,
                         site: None,
                         matched: None,

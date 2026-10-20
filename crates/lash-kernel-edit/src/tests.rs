@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 fn doc(body: &str) -> Document {
     let mut document = parse_document(&format!(
-        "kernel 1\nnumbers float\neffect send(value: Any) -> Any\nmain {{ {body} }}"
+        "kernel 1\nnumbers float\neffect send(value: Any) -> Any contract \"1\"\nmain {{ {body} }}"
     ))
     .unwrap();
     let required = lash_kernel_check::requirements(&document, &FunctionRegistry::new());
@@ -42,14 +42,17 @@ fn env(registry: &FunctionRegistry) -> Environment<'_> {
     let mut env = Environment::new(registry);
     env.effects.insert(
         EffectName::new("send").unwrap(),
-        Signature {
-            params: vec![Param {
-                name: Name::new("value"),
-                ty: Type::Any,
-                optional: false,
-            }],
-            result: Type::Any,
-        },
+        lash_kernel_doc::OperationRequirement::new(
+            Signature {
+                params: vec![Param {
+                    name: Name::new("value"),
+                    ty: Type::Any,
+                    optional: false,
+                }],
+                result: Type::Any,
+            },
+            lash_kernel_doc::ContractId::new("1"),
+        ),
     );
     env
 }
@@ -759,7 +762,7 @@ fn canvas_step_inline_library_arguments() {
         r#"do perform tools.inbox.send_item(invoke ts.boundary({title: "card"})) as Any"#,
     ] {
         let original = parse_document(&format!(
-            "kernel 1\nnumbers float\nuse ts.boundary = @{boundary}\neffect tools.inbox.send_item(value: Any) -> Any\nmain {{ {statement} finish null }}"
+            "kernel 1\nnumbers float\nuse ts.boundary = @{boundary}\neffect tools.inbox.send_item(value: Any) -> Any contract \"1\"\nmain {{ {statement} finish null }}"
         )).unwrap();
         let index = original.main.len() as u32 - 2;
         let action = site(&[index, 0]);
@@ -861,7 +864,7 @@ fn canvas_step_effectful_arguments_refuse() {
         "invoke helper.callback(fn() { return null })",
     ] {
         let mut original = parse_document(&format!(
-            "kernel 1\nnumbers float\nuse helper.wait = @{wait}\nuse helper.indirect = @{indirect}\nuse helper.callback = @{callback}\neffect send(value: Any) -> Any\nfn other() {{ let got = perform send(null) as Any return got }}\nmain {{ do perform send({argument}) as Any }}"
+            "kernel 1\nnumbers float\nuse helper.wait = @{wait}\nuse helper.indirect = @{indirect}\nuse helper.callback = @{callback}\neffect send(value: Any) -> Any contract \"1\"\nfn other() {{ let got = perform send(null) as Any return got }}\nmain {{ do perform send({argument}) as Any }}"
         )).unwrap();
         original.manifest.functions =
             lash_kernel_check::requirements(&original, &registry).functions;
@@ -1378,8 +1381,8 @@ fn extract_reachable() {
     let source = parse_document(
         r#"kernel 1
 numbers float
-effect send(value: Any) -> Any
-effect unused(value: Any) -> Any
+effect send(value: Any) -> Any contract "1"
+effect unused(value: Any) -> Any contract "1"
 entry hello(to: Any) -> Any
 entry other(to: Any) -> Any
 private secret
@@ -1531,7 +1534,13 @@ fn canvas_refusal_wire() {
         }),
     ];
     let registry = FunctionRegistry::new();
-    let signature = env(&registry).effects.values().next().unwrap().clone();
+    let signature = env(&registry)
+        .effects
+        .values()
+        .next()
+        .unwrap()
+        .signature
+        .clone();
     let function = lash_kernel_doc::parse_definition(
         "function sample.fn(value: Any) -> Any\nkernel 1\ncharge 1\nbody { return value }",
     )
@@ -1636,7 +1645,7 @@ fn sites(document: &Document) -> Vec<Site> {
 fn a_site_names_the_same_node_for_writing_as_for_reading() {
     let source = r#"kernel 1
 numbers float
-effect fetch(url: Text) -> Any
+effect fetch(url: Text) -> Any contract "1"
 
 fn start(count) {
   let page = perform fetch("u") as Any
@@ -1727,7 +1736,7 @@ fn set_argument_on_do_keeps_computed_values_in_the_expression() {
     ] {
         // The declared callee spelling also keeps the setup independent of edits.
         let source = format!(
-            "kernel 1\nnumbers float\neffect send(value: Any) -> Any\nfn child() {{ return null }}\nmain {{ let h = spawn call child() let hs = [h] do {original} finish null }}"
+            "kernel 1\nnumbers float\neffect send(value: Any) -> Any contract \"1\"\nfn child() {{ return null }}\nmain {{ let h = spawn call child() let hs = [h] do {original} finish null }}"
         );
         let document = parse_document(&source).unwrap();
         let mut working = Working::open(&document);

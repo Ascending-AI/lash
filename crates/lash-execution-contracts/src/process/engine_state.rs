@@ -191,6 +191,9 @@ pub enum StepRequest {
         /// The effect it performs, by its path (P3): the process env's link
         /// of it names the tool that runs, never the engine.
         effect: lash_kernel_doc::EffectName,
+        /// The contract the performing code requires of the effect
+        /// (OP-CONTRACT-PIN): the call runs only on a tool serving it.
+        contract: lash_kernel_doc::ContractId,
         /// The tool's input.
         input: serde_json::Value,
         /// The site of the engine's workflow document it runs for, when the
@@ -198,7 +201,7 @@ pub enum StepRequest {
         /// site's `process.effect_outcome`, and the start of its admitted
         /// body is observed there ([`lash_trace::StepBodyStarted`]).
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<lash_protocol_types::EffectId>,
+        site: Option<Box<lash_protocol_types::EffectId>>,
         /// The recorded match a `call_dynamic` call runs on (P6): set only
         /// by lash, on the step it issues once the call's resolution
         /// committed, which runs the matched tool with the call's `args`
@@ -265,7 +268,7 @@ impl StepRequest {
     #[must_use]
     pub fn site(&self) -> Option<&lash_protocol_types::EffectId> {
         match self {
-            Self::Tool { site, .. } => site.as_ref(),
+            Self::Tool { site, .. } => site.as_deref(),
             Self::Engine { .. } => None,
         }
     }
@@ -317,9 +320,10 @@ pub struct EngineStepRun {
     /// (D4): never this build's defaults.
     pub engine_settings: Option<super::EngineSettings>,
     /// The effects the process's env links (P3): what its linked calls
-    /// may perform, each with the surface it was checked against.
-    pub effects:
-        std::sync::Arc<std::collections::BTreeMap<lash_kernel_doc::EffectName, crate::EffectLink>>,
+    /// may perform, each by its link.
+    pub effects: std::sync::Arc<
+        std::collections::BTreeMap<lash_kernel_doc::EffectName, crate::OperationLink>,
+    >,
     /// The activation's clock reading when the body started.
     pub now: DurableInstant,
     /// The activation's clock, for a body that waits.

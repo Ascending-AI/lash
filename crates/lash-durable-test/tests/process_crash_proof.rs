@@ -144,6 +144,7 @@ fn step(name: &str, tool: &str) -> StepRequest {
     StepRequest::Tool {
         step: StepName(name.to_owned()),
         effect: lash_core_execution::testing::effect(tool),
+        contract: lash_core::ContractId::new("fixture"),
         input: json!({ "step": name }),
         site: None,
         matched: None,
@@ -155,6 +156,7 @@ fn carried_step(name: &str, tool: &str, script: &Value) -> StepRequest {
     StepRequest::Tool {
         step: StepName(name.to_owned()),
         effect: lash_core_execution::testing::effect(tool),
+        contract: lash_core::ContractId::new("fixture"),
         input: json!({ "step": name, "doc": script["doc"] }),
         site: None,
         matched: None,

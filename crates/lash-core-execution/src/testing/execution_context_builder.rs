@@ -348,13 +348,14 @@ impl<'run> TestExecutionContextBuilder<'run> {
             .into_iter()
             .filter_map(|manifest| {
                 let contract = self.provider.resolve_contract(&manifest.tool(), &config)?;
-                Some(crate::SurfaceEntry {
-                    provider: key.clone(),
-                    definition: crate::ToolDefinition {
+                Some(crate::SurfaceEntry::advertised(
+                    key.clone(),
+                    crate::ToolDefinition {
                         manifest,
                         contract: (*contract).clone(),
                     },
-                })
+                    None,
+                ))
             })
             .collect::<Vec<_>>();
         let mut providers = vec![(key, Arc::clone(&self.provider))];

@@ -366,9 +366,9 @@ mod tests {
         let mut registry = FunctionRegistry::new();
         let mut helpers = Vec::new();
         for definition in [
-            "function pkg.fetch(x: Any) -> Any\nkernel 1\ncharge 1\neffect echo(x?: Any) -> Any\n\
+            "function pkg.fetch(x: Any) -> Any\nkernel 1\ncharge 1\neffect echo(x?: Any) -> Any contract \"1\"\n\
              body { let v = perform echo(x) as Any return v }\n",
-            "function pkg.visit(f: Fn(x: Any) -> Any, x: Any) -> Any\nkernel 1\ncharge 1\neffect echo(x?: Any) -> Any\n\
+            "function pkg.visit(f: Fn(x: Any) -> Any, x: Any) -> Any\nkernel 1\ncharge 1\neffect echo(x?: Any) -> Any contract \"1\"\n\
              body { let y = apply f(x) let v = perform echo(y) as Any return v }\n",
         ] {
             let definition = parse_definition(definition).unwrap();

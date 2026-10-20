@@ -199,6 +199,27 @@ impl ProductionToolHandlers<'_> {
         let Some(mut definition) = self.leaf_definition(&invocation) else {
             return Ok((MemberEnd::Final(self.unavailable_call(call)), Vec::new()));
         };
+        // A call whose linked tool is served under another contract than it
+        // is pinned to raises `operation_contract_changed` at its perform,
+        // whether it was admitted before or not; no body runs (OP-LINK-ONE).
+        if invocation.execution_grant.is_none() {
+            let dispatch = self.context.dispatch();
+            if let Some(failure) = dispatch
+                .routes
+                .drift(
+                    &invocation.tool_id,
+                    invocation.contract.as_ref(),
+                    &dispatch.config,
+                )
+                .and_then(|drift| drift.failure(&call.tool_name))
+            {
+                let output = ToolCallOutput::failure(failure);
+                return Ok((
+                    MemberEnd::Final(self.observed_unadmitted(call, output)),
+                    Vec::new(),
+                ));
+            }
+        }
         // Every attempt settles under the declaration the call's admission
         // pinned, on whichever owner runs it: a host that retyped the tool
         // since changes later calls, never this one.
@@ -209,7 +230,7 @@ impl ProductionToolHandlers<'_> {
             let granted = invocation
                 .execution_grant
                 .as_deref()
-                .map(|grant| &grant.provider);
+                .map(|grant| grant.provider());
             let binding = self
                 .context
                 .dispatch()
@@ -884,6 +905,7 @@ impl RoundTools for ProductionRoundTools {
         calls.iter().find_map(|call| {
             dispatch
                 .drift_of(&call.tool_name)
+                .filter(crate::ToolSurfaceDrift::is_missing)
                 .map(|drift| drift.refusal(&call.call_id).into_runtime_error())
         })
     }

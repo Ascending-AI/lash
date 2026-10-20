@@ -275,14 +275,16 @@ fn admit_entry(
     for (effect, expected) in effects {
         let reason = match environment.effects.get(&effect) {
             None => Some(RefusalReason::MissingEffect { effect }),
-            Some(provided) => signature_mismatch(provided, &expected).map(|mismatch| {
-                RefusalReason::EffectSignature {
-                    effect,
-                    expected,
-                    provided: provided.clone(),
-                    mismatch: Box::new(mismatch),
-                }
-            }),
+            Some(provided) => {
+                signature_mismatch(&provided.signature, &expected.signature).map(|mismatch| {
+                    RefusalReason::EffectSignature {
+                        effect,
+                        expected: expected.signature,
+                        provided: provided.signature.clone(),
+                        mismatch: Box::new(mismatch),
+                    }
+                })
+            }
         };
         if let Some(reason) = reason {
             errors.push(Refused { site: None, reason });

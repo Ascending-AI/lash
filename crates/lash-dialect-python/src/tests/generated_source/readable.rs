@@ -1048,10 +1048,13 @@ fn effect_calls_preserve_names_atomic_arguments_and_result_types() {
             });
             doc.manifest.effects.insert(
                 effect.clone(),
-                k::OperationRequirement::of_signature(k::Signature {
-                    params: vec![],
-                    result: k::Type::Any,
-                }),
+                k::OperationRequirement::new(
+                    k::Signature {
+                        params: vec![],
+                        result: k::Type::Any,
+                    },
+                    k::ContractId::new("1"),
+                ),
             );
             let printed = roundtrip(&doc, true);
             assert!(
@@ -1175,10 +1178,13 @@ fn generic_member_assignments_decode_native_await_rhs() {
             });
             doc.manifest.effects.insert(
                 k::EffectName::new("host.echo").unwrap(),
-                k::OperationRequirement::of_signature(k::Signature {
-                    params: vec![],
-                    result: k::Type::Any,
-                }),
+                k::OperationRequirement::new(
+                    k::Signature {
+                        params: vec![],
+                        result: k::Type::Any,
+                    },
+                    k::ContractId::new("1"),
+                ),
             );
             roundtrip(&doc, true);
         }

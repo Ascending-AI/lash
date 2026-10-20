@@ -1295,6 +1295,7 @@ PACKAGE_DEPS = {
     "lash-internal-vm-runtime": {
         "build": {},
         "dev": {
+            "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "lash_vm_releases": "//crates/lash-vm-releases:lash-vm-releases",
             "tokio": "//third-party/rust:p0381"
         },

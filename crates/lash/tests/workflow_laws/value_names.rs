@@ -48,9 +48,12 @@ fn lower(format: SourceFormat, source: &str) -> (Document, Captions) {
             result: k::Type::Any,
         },
     )]);
-    let environment_namespaces =
-        lash::dialect::Namespaces::of_signatures(&effects, &Default::default())
-            .expect("the test's effects are operations");
+    let environment_namespaces = lash::dialect::Namespaces::of_effects(
+        &effects,
+        &lash::workflow::document::ContractId::new("1"),
+        &Default::default(),
+    )
+    .expect("the test's effects are operations");
     let environment = lash::dialect::Environment::new(embedding.library(), &environment_namespaces);
     let mode = lash::dialect::Mode::Module;
     let lowered = match format {

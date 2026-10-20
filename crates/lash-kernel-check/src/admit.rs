@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::{
     Document, DocumentId, EffectName, FunctionCatalog, FunctionDefinition, InvalidReason, Name,
-    Signature, Unit, validate_definition, validate_document,
+    OperationRequirement, Unit, validate_definition, validate_document,
 };
 
 use crate::flow;
@@ -18,8 +18,9 @@ use crate::typing::Typer;
 
 /// What an embedder provides a document with (`K-ADM-001` to `K-ADM-004`).
 pub struct Environment<'a> {
-    /// The effects it can run, each with its signature.
-    pub effects: BTreeMap<EffectName, Signature>,
+    /// The effects it can run, each with the requirement it offers them
+    /// under: its signature and the contract its runner serves.
+    pub effects: BTreeMap<EffectName, OperationRequirement>,
     /// The library functions it holds, by identity.
     pub functions: &'a dyn FunctionCatalog,
     /// The session bindings `main` starts with (`K-SES-001`).
@@ -149,14 +150,14 @@ pub fn admit(document: &Document, environment: &Environment<'_>) -> Result<Admit
             None => Some(RefusalReason::MissingEffect {
                 effect: effect.clone(),
             }),
-            Some(provided) => {
-                serves(provided, expected).map(|mismatch| RefusalReason::EffectSignature {
+            Some(provided) => serves(&provided.signature, expected).map(|mismatch| {
+                RefusalReason::EffectSignature {
                     effect: effect.clone(),
                     expected: expected.clone(),
-                    provided: provided.clone(),
+                    provided: provided.signature.clone(),
                     mismatch: Box::new(mismatch),
-                })
-            }
+                }
+            }),
         };
         if let Some(reason) = reason {
             errors.push(refused(None, reason));

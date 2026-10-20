@@ -34,12 +34,12 @@ pub struct Offered {
 }
 
 impl Offered {
-    /// An operation the catalog tool `tool` serves under `signature`: no
-    /// controls, not a read, its contract the signature's.
+    /// An operation the catalog tool `tool` serves under `requirement`, the
+    /// tool's signature and the contract it serves: no controls, not a read.
     #[must_use]
-    pub fn tool(tool: impl Into<String>, signature: lash_kernel_doc::Signature) -> Self {
+    pub fn tool(tool: impl Into<String>, requirement: OperationRequirement) -> Self {
         Self {
-            requirement: OperationRequirement::of_signature(signature),
+            requirement,
             controls: BTreeSet::new(),
             read: false,
             source: OfferedSource::Catalog { tool: tool.into() },
@@ -326,28 +326,53 @@ impl Namespaces {
         Self::build(&crate::NoPackages, operations)
     }
 
-    /// The tree of the operations `signatures` names, each served by the
-    /// catalog tool of its effect name, and those of `controls` declaring
-    /// theirs: what an embedder that types its effects itself, with no tool
-    /// catalog, lowers against.
+    /// The tree of the operations `signatures` names, each served under
+    /// `contract` by the catalog tool of its effect name, and those of
+    /// `controls` declaring theirs: what an embedder that types and serves
+    /// its effects itself, with no tool catalog, lowers against.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::of_requirements`].
+    pub fn of_effects(
+        signatures: &BTreeMap<EffectName, lash_kernel_doc::Signature>,
+        contract: &lash_kernel_doc::ContractId,
+        controls: &BTreeMap<EffectName, BTreeSet<EffectControl>>,
+    ) -> Result<Self, NamespaceRefusal> {
+        let requirements = signatures
+            .iter()
+            .map(|(effect, signature)| {
+                (
+                    effect.clone(),
+                    OperationRequirement::new(signature.clone(), contract.clone()),
+                )
+            })
+            .collect();
+        Self::of_requirements(&requirements, controls)
+    }
+
+    /// The tree of the operations `requirements` names, each offered under
+    /// its requirement by the catalog tool of its effect name, and those of
+    /// `controls` declaring theirs: what a document is read back against
+    /// its own manifest.
     ///
     /// # Errors
     ///
     /// [`NamespaceRefusal::NotAnOperation`] for an effect name that is no
     /// canonical operation; otherwise as [`Self::build`].
-    pub fn of_signatures(
-        signatures: &BTreeMap<EffectName, lash_kernel_doc::Signature>,
+    pub fn of_requirements(
+        requirements: &BTreeMap<EffectName, OperationRequirement>,
         controls: &BTreeMap<EffectName, BTreeSet<EffectControl>>,
     ) -> Result<Self, NamespaceRefusal> {
         let mut operations = Operations::new();
-        for (effect, signature) in signatures {
+        for (effect, requirement) in requirements {
             let operation = QualifiedOperation::from_effect(effect).map_err(|error| {
                 NamespaceRefusal::NotAnOperation {
                     effect: effect.to_string(),
                     message: error.to_string(),
                 }
             })?;
-            let offered = Offered::tool(effect.as_str(), signature.clone())
+            let offered = Offered::tool(effect.as_str(), requirement.clone())
                 .with_controls(controls.get(effect).cloned().unwrap_or_default());
             operations.insert(operation, offered);
         }

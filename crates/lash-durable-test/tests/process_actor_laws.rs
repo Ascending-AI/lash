@@ -228,6 +228,7 @@ impl ProcessEngine for LawEngine {
                 steps: vec![StepRequest::Tool {
                     step: StepName("refused".to_owned()),
                     effect: lash_core_execution::testing::effect(REFUSED_TOOL),
+                    contract: lash_core::ContractId::new("fixture"),
                     input: json!({}),
                     site: None,
                     matched: None,

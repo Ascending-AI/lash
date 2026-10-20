@@ -351,8 +351,9 @@ fn tool_discovery_resolves_lexical_values_before_namespaces() {
         "#,
             &lash_kernel_dialect::Environment::new(
                 super::library(),
-                &lash_kernel_dialect::Namespaces::of_signatures(
+                &lash_kernel_dialect::Namespaces::of_effects(
                     &Default::default(),
+                    &lash_kernel_doc::ContractId::new("1"),
                     &Default::default(),
                 )
                 .expect("the test's effects are operations"),
@@ -382,8 +383,9 @@ fn tool_discovery_survives_refusals_and_ignores_bare_calls() {
                 source,
                 &lash_kernel_dialect::Environment::new(
                     super::library(),
-                    &lash_kernel_dialect::Namespaces::of_signatures(
+                    &lash_kernel_dialect::Namespaces::of_effects(
                         &Default::default(),
+                        &lash_kernel_doc::ContractId::new("1"),
                         &Default::default(),
                     )
                     .expect("the test's effects are operations"),

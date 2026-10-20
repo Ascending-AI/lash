@@ -1,6 +1,6 @@
 kernel 1
 numbers float
-effect corpus.echo(input?: Json) -> Json
+effect corpus.echo(input?: Json) -> Json contract "52910906e3f939a5ce2e34bd105cd37184ead8ac272080fcbff759b3b6db6560"
 use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
 use ts.await = @18a30299db399e09c5772b4431f1c4baf6e139a164f476b6fe173b1447d54a6f

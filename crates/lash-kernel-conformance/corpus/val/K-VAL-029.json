@@ -188,7 +188,7 @@
     },
     {
       "name": "host handles have no order",
-      "document": "kernel 1\nnumbers by_spelling\neffect resource() -> Handle(\"db\")\nuse compare = @a64b7137573be490848eb987237515f1e79671eabf043408caf9a83196c7cb77\nmain { let h = perform resource() as Handle(\"db\") try { print compare(h, h) } catch e { finish e.kind } finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect resource() -> Handle(\"db\") contract \"1\"\nuse compare = @a64b7137573be490848eb987237515f1e79671eabf043408caf9a83196c7cb77\nmain { let h = perform resource() as Handle(\"db\") try { print compare(h, h) } catch e { finish e.kind } finish null }\n",
       "expected": {
         "prints": [],
         "trace": [

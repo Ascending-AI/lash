@@ -21,6 +21,10 @@
 /// version_guard(items(DEFERRED_MATCH_PREFIX_VERSION, journal_deferred_matches))
 const DEFERRED_MATCH_PREFIX_VERSION: &str = "deferred_match:v1:";
 
+/// The contract an unavailable call path is offered under: no runner serves
+/// it, so no live contract is ever compared with it.
+const UNAVAILABLE_CONTRACT: &str = "lash.unavailable";
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_core::{DeferredMatch, DeferredOutcome, DeferredResolveContext};
@@ -55,8 +59,13 @@ pub(crate) fn offer_unavailable_notes(
             }],
             result: lash_kernel_doc::Type::Any,
         };
+        // A note has no runner: its offer states the fixed contract of an
+        // operation no runner serves, and a perform of it raises the note.
         let offered = lash_kernel_dialect::Offered {
-            requirement: lash_kernel_doc::OperationRequirement::of_signature(signature),
+            requirement: lash_kernel_doc::OperationRequirement {
+                signature,
+                contract: lash_kernel_doc::ContractId::new(UNAVAILABLE_CONTRACT),
+            },
             controls: BTreeSet::new(),
             read: false,
             source: lash_kernel_dialect::OfferedSource::Unavailable { note: note.clone() },
@@ -178,11 +187,11 @@ pub(crate) async fn journal_deferred_matches(
                 })
                 .collect::<Vec<_>>();
             for matched in &matches {
-                if let Some((provider, _, binding)) = matched.resolved() {
+                if let Some(link) = matched.resolved() {
                     config
-                        .validate_provider(provider)
+                        .validate_provider(&link.provider)
                         .map_err(lash_core::RuntimeEffectControllerError::from)?;
-                    if let Some(binding) = binding {
+                    if let Some(binding) = &link.payload {
                         config
                             .validate_provider(&binding.codec)
                             .map_err(lash_core::RuntimeEffectControllerError::from)?;
@@ -224,7 +233,11 @@ pub(crate) fn offer_deferred_matches(
 ) -> Result<BTreeMap<lash_core::ToolId, lash_core::ToolExecutionGrant>, DeferredResolutionError> {
     let mut grants = BTreeMap::new();
     for (path, matched) in matches {
-        let Some((provider, definition, binding)) = matched.resolved() else {
+        let Some(link) = matched.resolved() else {
+            continue;
+        };
+        let (provider, binding) = (&link.provider, link.payload.as_ref());
+        let Some(definition) = link.resolution() else {
             continue;
         };
         ctx.owner_config()
@@ -256,8 +269,7 @@ pub(crate) fn offer_deferred_matches(
                 definition.manifest.operation.clone(),
                 lash_vm_runtime::offered_tool(
                     &definition.manifest,
-                    &definition.contract.input_schema.canonical,
-                    &definition.contract.output_schema.canonical,
+                    &definition.contract,
                     lash_kernel_dialect::OfferedSource::Deferred {
                         tool: definition.manifest.id.to_string(),
                     },
@@ -274,9 +286,14 @@ pub(crate) fn offer_deferred_matches(
             .map_err(|_| DeferredResolutionError::ProviderUnserved {
                 provider: provider.clone(),
             })?;
-        let execution_grant =
-            lash_core::ToolExecutionGrant::from_definition(provider, definition.clone())
-                .with_execution_binding(binding.cloned());
+        let Some(execution_grant) =
+            lash_core::ToolExecutionGrant::of_link(&lash_core::OperationLink {
+                provider,
+                ..link.clone()
+            })
+        else {
+            continue;
+        };
         grants.insert(execution_grant.manifest().id.clone(), execution_grant);
     }
     Ok(grants)

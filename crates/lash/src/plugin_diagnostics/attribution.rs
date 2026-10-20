@@ -300,7 +300,7 @@ fn matches_recorded(key: &ContributionKey, record: &RecordedAttribution) -> bool
         }
         RecordedAttribution::Owner(owner) => key.owner() == owner.plugin_id,
         RecordedAttribution::Surface(entry) => {
-            matches!(key, ContributionKey::Callback(key) if *key == entry.provider.callback_identity())
+            matches!(key, ContributionKey::Callback(key) if *key == entry.provider().callback_identity())
         }
         RecordedAttribution::Prompt(section) => match key {
             ContributionKey::PromptSection(key) => *key == section.section,

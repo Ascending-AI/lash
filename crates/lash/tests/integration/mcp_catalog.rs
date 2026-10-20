@@ -194,8 +194,20 @@ async fn recorded_tool_surface_is_preserved_when_advertised_tools_change() {
             manifest: entry.manifest.clone(),
             contract: (*entry.contract).clone(),
         });
-    let drift = lash_core::ToolSurfaceDrift::judge(&recorded_definition, served.as_ref())
-        .expect("a recorded tool the advertisement dropped drifts");
+    let link = lash_core::OperationLink::advertised(
+        lash::plugins::ToolProviderHandle::new(
+            lash::plugins::RegistryKind::Session,
+            "mcp",
+            lash::tool_provider_key!("tools"),
+        ),
+        &recorded_definition,
+        None,
+    );
+    let drift = lash_core::ToolSurfaceDrift::of(
+        &recorded_definition,
+        lash_core::judge(&recorded_definition.contract_id(), &link, served.as_ref()),
+    )
+    .expect("a recorded tool the advertisement dropped drifts");
     assert_eq!(drift.kind, lash_core::ToolSurfaceDriftKind::Missing);
     // The server's guidance section renders the guidance the offered
     // manifests pin: the recorded catalog carries the creating peer's

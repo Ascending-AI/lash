@@ -65,9 +65,12 @@ fn sites(document: &Document) -> Vec<Site> {
 async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps() {
     let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
     let registry = embedding.registry().expect("registry");
-    let environment_namespaces =
-        lash::dialect::Namespaces::of_signatures(&Default::default(), &Default::default())
-            .expect("the test's effects are operations");
+    let environment_namespaces = lash::dialect::Namespaces::of_effects(
+        &Default::default(),
+        &lash::workflow::document::ContractId::new("1"),
+        &Default::default(),
+    )
+    .expect("the test's effects are operations");
     let environment = lash::dialect::Environment::new(embedding.library(), &environment_namespaces);
     let ts = lash::typescript::lower(
         "const answer = [1, 2].map(x => x + 1);",
@@ -170,14 +173,17 @@ async fn exported_reading_preserves_dependency_identities_for_admission() {
         unavailable,
         k::FunctionName::new("missing.helper").expect("qualified name"),
     );
-    let mismatched = k::parse_document("kernel 1\nnumbers float\neffect remote.answer() -> Int\nmain { let got = perform remote.answer() as Int finish got }\n").expect("mismatched dependency document");
+    let mismatched = k::parse_document("kernel 1\nnumbers float\neffect remote.answer() -> Int contract \"1\"\nmain { let got = perform remote.answer() as Int finish got }\n").expect("mismatched dependency document");
     let mut checker = lash::workflow::graph::Environment::new(registry.as_ref());
     checker.effects.insert(
         k::EffectName::new("remote.answer").expect("effect name"),
-        k::Signature {
-            params: vec![],
-            result: k::Type::Text,
-        },
+        lash::workflow::document::OperationRequirement::new(
+            k::Signature {
+                params: vec![],
+                result: k::Type::Text,
+            },
+            lash::workflow::document::ContractId::new("1"),
+        ),
     );
     let service = lash::vm::WorkerService::default();
     for (document, expected_code) in [
@@ -306,16 +312,19 @@ async fn exact_host_import_does_not_resolve_ambiguous_library_labels() {
 fn an_entry_signature_refusal_retains_the_same_output_difference_as_main() {
     use lash::workflow::graph::{Environment, RefusalReason, SignatureSide};
     let document = k::parse_document(
-        "kernel 1\nnumbers float\neffect notify() -> Record{message: Text}\nentry worker() -> Any\nfn worker() { let sent = perform notify() as Any return sent }\nmain { finish null }\n",
+        "kernel 1\nnumbers float\neffect notify() -> Record{message: Text} contract \"1\"\nentry worker() -> Any\nfn worker() { let sent = perform notify() as Any return sent }\nmain { finish null }\n",
     ).expect("document");
     let functions = k::FunctionRegistry::default();
     let mut environment = Environment::new(&functions);
     environment.effects.insert(
         k::EffectName::new("notify").expect("effect"),
-        k::Signature {
-            params: vec![],
-            result: k::Type::Any,
-        },
+        lash::workflow::document::OperationRequirement::new(
+            k::Signature {
+                params: vec![],
+                result: k::Type::Any,
+            },
+            lash::workflow::document::ContractId::new("1"),
+        ),
     );
     for entry in [
         WorkflowDocumentEntry::Main,
@@ -357,7 +366,7 @@ fn a_definition_links_its_executed_closure_without_main_or_passed_templates() {
     let document = k::parse_document(
         r#"kernel 1
 numbers float
-effect count() -> Int
+effect count() -> Int contract "1"
 entry worker() -> Any
 entry broken() -> Any
 fn broken() { return missing }

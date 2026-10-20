@@ -42,7 +42,7 @@ pub fn embed<M: Machine>(
     let mut environment = lash_kernel_check::Environment::new(registry.as_ref());
     // This embedder's table provides exactly the effect signatures declared
     // by its document. The matching row is consumed at the admitted park.
-    environment.effects = document.manifest.signatures();
+    environment.effects = document.manifest.effects.clone();
     lash_kernel_check::admit(&document, &environment).map_err(|e| e.to_string())?;
     let program = Program {
         closure: PageId([7; 32]),

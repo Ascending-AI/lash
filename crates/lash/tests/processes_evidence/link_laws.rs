@@ -7,9 +7,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash::plugins::{FormatVersion, PluginError};
-use lash::process::{
-    EffectLink, LinkKind, ProcessConfigKey, ProcessEnv, ProcessEnvRefusal, ProcessSurface,
-};
+use lash::process::{ProcessConfigKey, ProcessEnv, ProcessEnvRefusal};
+use lash::tools::{LinkSource, OperationLink};
 
 /// Serves `search_a` at `search.run`.
 const SEARCH_A: ProcessConfigKey<()> = ProcessConfigKey::new("link-search-a", FormatVersion::ONE);
@@ -67,9 +66,10 @@ fn search_b() -> lash::tools::ToolDefinition {
 }
 
 /// A search that also takes an optional limit, and adds a field to its
-/// result: it serves an effect typed from [`search_a`], not identically.
+/// result: it serves an effect typed from [`search_a`], not identically,
+/// and states [`search_a`]'s contract, so only its fit differs.
 fn search_wide() -> lash::tools::ToolDefinition {
-    search_tool(
+    let mut wide = search_tool(
         "search_wide",
         object(
             serde_json::json!({
@@ -85,7 +85,11 @@ fn search_wide() -> lash::tools::ToolDefinition {
             }),
             &["hits"],
         ),
-    )
+    );
+    wide.manifest.contract = lash_core::ContractSource::Declared {
+        id: search_a().contract_id(),
+    };
+    wide
 }
 
 /// Each search tool answers its own name, its id's, as its hits; only the
@@ -180,7 +184,7 @@ fn env(component: ProcessConfigKey<()>, tools: &[lash::tools::ToolDefinition]) -
 /// `search(q)` performs `search.run` once, typed as [`search_a`] projects.
 const SEARCH: &str = r#"kernel 1
 numbers float
-effect search.run(input: Any) -> Any
+effect search.run(input: Any) -> Any contract "1"
 entry search() -> Any
 
 fn search() {
@@ -206,11 +210,12 @@ async fn payload(
     for (effect, tool) in typed {
         document.manifest.effects.insert(
             lash::workflow::document::EffectName::new(*effect).expect("an effect name"),
-            lash::workflow::document::OperationRequirement::of_signature(
+            lash::workflow::document::OperationRequirement::new(
                 lash_protocol_types::tool_signature(
                     &tool.contract.input_schema.canonical,
                     &tool.contract.output_schema.canonical,
                 ),
+                tool.contract_id(),
             ),
         );
     }
@@ -373,8 +378,8 @@ async fn a_compatible_tool_links_unless_the_host_asks_for_an_exact_fit() {
 /// `orchestrate()` starts `worker` by reference; only `worker` searches.
 const ORCHESTRATE: &str = r#"kernel 1
 numbers float
-effect processes.start(input: Any) -> Any
-effect search.run(input: Any) -> Any
+effect processes.start(input: Any) -> Any contract "1"
+effect search.run(input: Any) -> Any contract "1"
 entry orchestrate() -> Any
 entry worker() -> Any
 
@@ -398,7 +403,7 @@ main {
 /// `relay(f)` calls through a value while it holds `worker`.
 const RELAY: &str = r#"kernel 1
 numbers float
-effect search.run(input: Any) -> Any
+effect search.run(input: Any) -> Any contract "1"
 entry relay(f: Any) -> Any
 
 fn worker() {
@@ -489,7 +494,8 @@ async fn an_env_links_exactly_what_its_entry_performs() {
     );
 }
 
-/// R9/P6: Dynamic may only implement the fixed endpoint, even with another surface.
+/// R9/P6: Dynamic may only implement the fixed endpoint, even for an
+/// ordinary tool.
 #[test]
 fn dynamic_links_cannot_disguise_ordinary_effects() {
     let tool = search_a();
@@ -498,23 +504,31 @@ fn dynamic_links_cannot_disguise_ordinary_effects() {
         .component(SEARCH_A, &())
         .link(
             effect.clone(),
-            EffectLink {
-                provider: SEARCH_A.tool_provider(lash::tool_provider_key!("tools")),
-                surface: ProcessSurface::of(&tool),
-                kind: LinkKind::Dynamic(Default::default()),
+            OperationLink {
+                source: LinkSource::Dynamic {
+                    execution: std::time::Duration::from_secs(60),
+                },
+                ..OperationLink::advertised(
+                    SEARCH_A.tool_provider(lash::tool_provider_key!("tools")),
+                    &tool,
+                    None,
+                )
             },
         )
         .build()
-        .expect("a policy-bearing dynamic link with an ordinary tool's surface");
+        .expect("a policy-bearing dynamic link to an ordinary tool");
     let performed = BTreeMap::from([(
         effect,
-        lash_protocol_types::tool_signature(
-            &tool.contract.input_schema.canonical,
-            &tool.contract.output_schema.canonical,
+        lash::workflow::document::OperationRequirement::new(
+            lash_protocol_types::tool_signature(
+                &tool.contract.input_schema.canonical,
+                &tool.contract.output_schema.canonical,
+            ),
+            tool.contract_id(),
         ),
     )]);
     assert!(
-        matches!(lash_execution_contracts::process::check_links(&forged, &performed, &BTreeMap::new()),
+        matches!(lash_execution_contracts::process::check_links(&forged, &performed, &BTreeMap::new(), &BTreeMap::new(), &BTreeMap::new()),
         Err(ProcessEnvRefusal::EffectUnfit { effect, .. }) if effect == "search.run")
     );
 }

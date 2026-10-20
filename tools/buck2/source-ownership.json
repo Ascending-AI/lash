@@ -461,6 +461,11 @@
         "tests/support/served.rs",
         "tests/support/sim.rs"
       ],
+      "operation_contract_laws": [
+        "tests/operation_contract_laws.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
+      ],
       "plugin_state_storage_laws": [
         "tests/plugin_state_storage_laws.rs",
         "tests/support/dialect.rs",

@@ -44,7 +44,7 @@ impl ProductionToolHandlers<'_> {
         let granted = invocation
             .execution_grant
             .as_deref()
-            .map(|grant| &grant.provider);
+            .map(|grant| grant.provider());
         let binding = self
             .context
             .dispatch()

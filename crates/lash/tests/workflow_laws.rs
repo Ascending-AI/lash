@@ -48,7 +48,7 @@ main {
 /// one `tools.echo` of the shared closure, joined together.
 const FAN: &str = r#"kernel 1
 numbers float
-effect tools.echo(input: Any) -> Any
+effect tools.echo(input: Any) -> Any contract "1"
 entry fan(a: Any, b: Any, c: Any) -> Any
 
 fn fan(a, b, c) {
@@ -74,7 +74,7 @@ main {
 /// the echo answered.
 const ECHOED: &str = r#"kernel 1
 numbers float
-effect tools.echo(input: Any) -> Any
+effect tools.echo(input: Any) -> Any contract "1"
 entry echoed(name: Text) -> Any
 
 fn echoed(name) {
@@ -93,8 +93,8 @@ main {
 /// function reference, awaits it and returns what it ended with.
 const SUPERVISOR: &str = r#"kernel 1
 numbers float
-effect processes.start(input: Any) -> Any
-effect processes.await(input: Any) -> Any
+effect processes.start(input: Any) -> Any contract "1"
+effect processes.await(input: Any) -> Any contract "1"
 entry supervisor(value: Any) -> Any
 entry worker(value: Any) -> Any
 
@@ -146,6 +146,8 @@ fn echo_definitions() -> Vec<lash::tools::ToolDefinition> {
             serde_json::json!({}),
         )
         .expect("tool schema")
+        // The contract the laws' kernel texts pin.
+        .declared_contract(lash_core::ContractId::new("1"))
         .with_execution(std::time::Duration::from_secs(120)),
     ]
 }
@@ -379,7 +381,7 @@ async fn a_host_start_with_a_narrow_environment_is_refused_typed() {
     let mut document = lash::workflow::document::parse_document(
         r#"kernel 1
 numbers float
-effect processes.list(input: Any) -> Any
+effect processes.list(input: Any) -> Any contract "1"
 entry list() -> Any
 fn list() {
   let input = {}
@@ -397,12 +399,10 @@ main { finish null }
         .expect("environment")
         .expect("kernel environment");
     let effect = lash::workflow::document::EffectName::new("processes.list").expect("effect");
-    document.manifest.effects.insert(
-        effect.clone(),
-        lash::workflow::document::OperationRequirement::of_signature(
-            checked.checker().effects[&effect].clone(),
-        ),
-    );
+    document
+        .manifest
+        .effects
+        .insert(effect.clone(), checked.checker().effects[&effect].clone());
     let publication = published(
         artifacts
             .publish_workflow(
@@ -492,12 +492,10 @@ async fn a_host_captures_exactly_the_published_entrys_environment() {
         .cloned()
         .collect::<Vec<_>>()
     {
-        document.manifest.effects.insert(
-            effect.clone(),
-            lash::workflow::document::OperationRequirement::of_signature(
-                checked.checker().effects[&effect].clone(),
-            ),
-        );
+        document
+            .manifest
+            .effects
+            .insert(effect.clone(), checked.checker().effects[&effect].clone());
     }
     let publication = published(
         artifacts
@@ -571,7 +569,7 @@ async fn a_host_captures_exactly_the_published_entrys_environment() {
     let await_effect =
         lash::workflow::document::EffectName::new("processes.await").expect("effect");
     let link = links.get_mut(&await_effect).expect("await link");
-    let tool = link.tool().to_string();
+    let tool = link.tool.to_string();
     link.provider = lash::plugins::ToolProviderHandle::new(
         lash::plugins::RegistryKind::Process,
         link.provider.owner(),
@@ -813,7 +811,7 @@ async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
     let source = GUARDED
         .replace(
             "entry guarded",
-            "effect tools.echo(input: Any) -> Any\nentry guarded",
+            "effect tools.echo(input: Any) -> Any contract \"1\"\nentry guarded",
         )
         .replace(
             "do sleep 5",
@@ -826,12 +824,10 @@ async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
         .expect("environment")
         .expect("kernel");
     let echo = lash::workflow::document::EffectName::new("tools.echo").expect("effect");
-    document.manifest.effects.insert(
-        echo.clone(),
-        lash::workflow::document::OperationRequirement::of_signature(
-            checked.checker().effects[&echo].clone(),
-        ),
-    );
+    document
+        .manifest
+        .effects
+        .insert(echo.clone(), checked.checker().effects[&echo].clone());
     let publication = published(
         artifacts
             .publish_workflow(
@@ -1135,14 +1131,12 @@ async fn a_fan_out_overlay_holds_one_row_for_each_elements_effect() {
     // The document states the signature the host offers the effect under.
     document.manifest.effects.insert(
         echo.clone(),
-        lash::workflow::document::OperationRequirement::of_signature(
-            checked
-                .checker()
-                .effects
-                .get(&echo)
-                .expect("the host offers the tool")
-                .clone(),
-        ),
+        checked
+            .checker()
+            .effects
+            .get(&echo)
+            .expect("the host offers the tool")
+            .clone(),
     );
     let entry = Name::new("fan");
     let publication = published(
@@ -1299,18 +1293,16 @@ async fn a_process_starts_another_entry_of_its_document_by_function_reference_an
         .await
         .expect("environment")
         .expect("kernel environment");
-    let text = SUPERVISOR.replace("entry supervisor", "effect tools.echo(input: Any) -> Any\nentry supervisor")
+    let text = SUPERVISOR.replace("entry supervisor", "effect tools.echo(input: Any) -> Any contract \"1\"\nentry supervisor")
         .replace("return [value, \"worked\"]", "let request = {value: value}\n  let echoed = perform tools.echo(request) as Any\n  return [echoed, \"worked\"]")
         .replace("fn supervisor(value) {", "fn supervisor(value) {\n  do sleep 1000");
     let mut document = lash::workflow::document::parse_document(&text).expect("document");
     for effect in ["processes.start", "processes.await", "tools.echo"] {
         let name = lash::workflow::document::EffectName::new(effect).expect("effect name");
-        document.manifest.effects.insert(
-            name.clone(),
-            lash::workflow::document::OperationRequirement::of_signature(
-                checked.checker().effects[&name].clone(),
-            ),
-        );
+        document
+            .manifest
+            .effects
+            .insert(name.clone(), checked.checker().effects[&name].clone());
     }
     let worker =
         lash_vm_runtime::definition_of_entry(&document, document.identity(), &Name::new("worker"))
@@ -1697,12 +1689,10 @@ async fn a_sealed_env_linking_a_retired_components_effect_parks_with_the_typed_r
         .expect("the environment reads")
         .expect("the kernel environment");
     let echo = lash::workflow::document::EffectName::new("tools.echo").expect("effect");
-    document.manifest.effects.insert(
-        echo.clone(),
-        lash::workflow::document::OperationRequirement::of_signature(
-            checked.checker().effects[&echo].clone(),
-        ),
-    );
+    document
+        .manifest
+        .effects
+        .insert(echo.clone(), checked.checker().effects[&echo].clone());
     let publication = published(
         artifacts
             .publish_workflow(
@@ -1935,7 +1925,7 @@ async fn typescript_import_reports_missing_tools_as_admission_refusals() {
     use lash::workflow::{WorkflowAdmissionRefusal, WorkflowImport};
     let core = core().await;
     let document = lash::workflow::document::parse_document(
-        "kernel 1\nnumbers float\neffect missing.tool(input: Any) -> Any\nentry job() -> Any\nfn job() { return null }\nmain { finish null }\n",
+        "kernel 1\nnumbers float\neffect missing.tool(input: Any) -> Any contract \"1\"\nentry job() -> Any\nfn job() { return null }\nmain { finish null }\n",
     ).expect("document parses");
     let source = lash::typescript::print(&document, None, Default::default())
         .expect("the printer accepts the document");

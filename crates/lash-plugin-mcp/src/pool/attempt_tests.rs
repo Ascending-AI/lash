@@ -26,8 +26,23 @@ async fn prepare(
         .unwrap()
 }
 
+/// The context of an attempt prepared as `prepared`, through a link whose
+/// codec payload is `payload`.
+fn linked(
+    prepared: &lash_core::PreparedToolCall,
+    payload: Value,
+) -> lash_core::testing::ToolCallFixture<'static> {
+    lash_core::testing::ToolCallFixture::mock()
+        .prepared_call(prepared)
+        .execution_binding(Some(crate::plugin::mcp_binding(payload)))
+}
+
+/// C2's decided loosening: transport, peer and server version are instance
+/// facts. An admitted call, `Once` included, is redelivered to the server
+/// as it serves the tool now; its redeployed description changes no
+/// contract, so nothing refuses it (OP-LINK-ONE).
 #[tokio::test]
-async fn l12_mcp_cold_registry_cannot_replace_the_recorded_preparation_binding() {
+async fn mcp_redelivers_an_admitted_call_to_a_redeployed_server_that_kept_the_contract() {
     use lash_core::ToolProvider;
     let scratch = tempfile::tempdir().unwrap();
     let pool = connect_mock(
@@ -39,73 +54,56 @@ async fn l12_mcp_cold_registry_cannot_replace_the_recorded_preparation_binding()
     )
     .await;
     let provider = crate::McpToolProvider::new(Arc::clone(&pool));
+    let config = lash_core::OwnerConfigView::default();
     let original = provider
-        .tool_manifests(&lash_core::OwnerConfigView::default())
+        .tool_manifests(&config)
         .expect("fixture provider advertises")
         .remove(0);
+    let (format, payload) = provider
+        .link_payload(&original, &config)
+        .expect("an MCP tool's link records the server it calls");
+    assert_eq!(format, crate::MCP_BINDING_FORMAT);
+    assert_eq!(
+        payload,
+        json!({"kind": "mcp", "server": "mock", "tool_id": original.id})
+    );
+    let pinned = pool.advertised_tools()[0].contract_id();
     let prepared = prepare(&provider, &original).await;
-    let grant = crate::McpDeferredToolProvider::new(Arc::clone(&pool));
-    let grant_fixture = lash_core::testing::ToolCallFixture::mock()
-        .prepared_call(&prepared)
-        .execution_binding(Some(crate::plugin::mcp_binding(
-            json!({"kind": "mcp", "server": "mock", "tool_id": original.id}),
-        )));
-    let grant_context = grant_fixture.attempt("mcp-canonical-grant-law");
-    let lash_core::ToolAttemptOutcome::Done { result, .. } = grant
-        .execute(lash_core::ToolCall::new(
-            &original,
-            &lash_core::ToolContract::default(),
-            &json!({}),
-            &grant_context,
-        ))
-        .await
-    else {
-        panic!("a catalog grant finishes inline")
-    };
-    assert!(ToolOutcome::from_output(result.into_output()).is_success());
     let recorded = serde_json::to_value(&prepared).unwrap();
-    let mut replacement = original.clone();
-    replacement
-        .bindings
-        .get_mut(admission::MCP_BINDING_KEY)
-        .unwrap()["tool_digest"] = json!("cold-registry-revision");
-    pool.catalog
-        .write_recover()
-        .servers
-        .get_mut("mock")
-        .unwrap()
-        .tools
-        .values_mut()
-        .next()
-        .unwrap()
-        .definition
-        .manifest = replacement;
-    let rebuilt = provider
-        .tool_manifests(&lash_core::OwnerConfigView::default())
-        .expect("fixture provider advertises")
-        .remove(0);
+    {
+        let mut catalog = pool.catalog.write_recover();
+        let tool = catalog
+            .servers
+            .get_mut("mock")
+            .unwrap()
+            .tools
+            .values_mut()
+            .next()
+            .unwrap();
+        tool.definition.manifest.description = "Redeployed wording.".into();
+    }
+    assert_eq!(
+        pool.advertised_tools()[0].contract_id(),
+        pinned,
+        "a description changes no contract"
+    );
     let restored: lash_core::PreparedToolCall = serde_json::from_value(recorded).unwrap();
-    let fixture = lash_core::testing::ToolCallFixture::mock().prepared_call(&restored);
-    let context = fixture.attempt("mcp-cold-binding-law");
+    let fixture = linked(&restored, payload);
+    let context = fixture.attempt("mcp-redeployed-redelivery");
     let lash_core::ToolAttemptOutcome::Done { result, .. } = provider
         .execute(lash_core::ToolCall::new(
-            &rebuilt,
+            &original,
             &lash_core::ToolContract::default(),
             &json!({}),
             &context,
         ))
         .await
     else {
-        panic!("binding refusal finishes inline")
+        panic!("an inline MCP call finishes inline")
     };
-    let result = ToolOutcome::from_output(result.into_output());
-    assert_eq!(failure(&result).code, "mcp_execution_binding_changed");
+    assert!(ToolOutcome::from_output(result.into_output()).is_success());
     pool.shutdown_all().await;
-    assert_eq!(
-        received(scratch.path()).matches("tools/call").count(),
-        1,
-        "the cold refusal sends no fresh request"
-    );
+    assert_eq!(received(scratch.path()).matches("tools/call").count(), 1);
 }
 
 #[tokio::test]
@@ -152,8 +150,11 @@ async fn l02_mcp_redelivery_preserves_the_lash_call_identity_on_the_wire() {
     }
 }
 
+/// A call runs only on the server its link's payload names: an absent or
+/// corrupt payload, or one naming another tool, is refused before anything
+/// is sent.
 #[tokio::test]
-async fn l12_mcp_refuses_changed_or_corrupt_admitted_bindings_before_send() {
+async fn mcp_refuses_a_missing_or_corrupt_link_payload_before_send() {
     use lash_core::ToolProvider;
     let scratch = tempfile::tempdir().unwrap();
     let pool = connect_mock(
@@ -170,13 +171,17 @@ async fn l12_mcp_refuses_changed_or_corrupt_admitted_bindings_before_send() {
         .expect("fixture provider advertises")
         .remove(0);
     let prepared = prepare(&provider, &original).await;
-    let fixture = lash_core::testing::ToolCallFixture::mock().prepared_call(&prepared);
-    let context = fixture.attempt("mcp-binding-refusal-law");
-    let key = admission::MCP_BINDING_KEY;
-    for payload in [Value::Null, json!({"server": "mock"})] {
-        let missing = prepared.clone().with_prepared_payload(payload);
-        let fixture = lash_core::testing::ToolCallFixture::mock().prepared_call(&missing);
-        let context = fixture.attempt("mcp-canonical-refusal-law");
+    let unbound = lash_core::testing::ToolCallFixture::mock().prepared_call(&prepared);
+    let mut fixtures = vec![unbound];
+    for payload in [
+        Value::Null,
+        json!({"server": "mock"}),
+        json!({"kind": "mcp", "server": "mock", "tool_id": "mcp:mock/other"}),
+    ] {
+        fixtures.push(linked(&prepared, payload));
+    }
+    for fixture in &fixtures {
+        let context = fixture.attempt("mcp-link-payload-refusal");
         let lash_core::ToolAttemptOutcome::Done { result, .. } = provider
             .execute(lash_core::ToolCall::new(
                 &original,
@@ -186,96 +191,13 @@ async fn l12_mcp_refuses_changed_or_corrupt_admitted_bindings_before_send() {
             ))
             .await
         else {
-            panic!("a missing canonical binding refuses inline")
+            panic!("a payload refusal finishes inline")
         };
         assert_eq!(
             failure(&ToolOutcome::from_output(result.into_output())).code,
             "mcp_invalid_execution_binding"
         );
     }
-    for field in [
-        "server",
-        "native_tool",
-        "transport_digest",
-        "peer_digest",
-        "tool_digest",
-        "call_policy",
-    ] {
-        let mut admitted = original.clone();
-        let mut binding = admitted.bindings[key].clone();
-        if field == "call_policy" {
-            binding[field]["call_timeout_ms"] = json!(987);
-        } else {
-            binding[field] = json!("unavailable");
-        }
-        admitted.bindings.insert(key.into(), binding);
-        let attempt = provider
-            .execute(lash_core::ToolCall::new(
-                &admitted,
-                &lash_core::ToolContract::default(),
-                &json!({}),
-                &context,
-            ))
-            .await;
-        let lash_core::ToolAttemptOutcome::Done { result, .. } = attempt else {
-            panic!("binding refusal must finish inline")
-        };
-        let result = ToolOutcome::from_output(result.into_output());
-        assert_eq!(
-            failure(&result).code,
-            "mcp_execution_binding_changed",
-            "{field}"
-        );
-        assert_eq!(
-            failure(&result).raw.as_ref().unwrap().to_json_value()["kind"],
-            json!("execution_binding_changed")
-        );
-    }
-    for binding in [Value::Null, json!({"server": "mock"})] {
-        let mut admitted = original.clone();
-        admitted.bindings.insert(key.into(), binding);
-        let attempt = provider
-            .execute(lash_core::ToolCall::new(
-                &admitted,
-                &lash_core::ToolContract::default(),
-                &json!({}),
-                &context,
-            ))
-            .await;
-        let lash_core::ToolAttemptOutcome::Done { result, .. } = attempt else {
-            panic!("corrupt binding must finish inline")
-        };
-        let result = ToolOutcome::from_output(result.into_output());
-        assert_eq!(failure(&result).code, "mcp_invalid_execution_binding");
-    }
-    let mut replacement = original.clone();
-    replacement.bindings.get_mut(key).unwrap()["tool_digest"] = json!("new-server-revision");
-    pool.catalog
-        .write_recover()
-        .servers
-        .get_mut("mock")
-        .unwrap()
-        .tools
-        .values_mut()
-        .next()
-        .unwrap()
-        .definition
-        .manifest = replacement;
-    let attempt = provider
-        .execute(lash_core::ToolCall::new(
-            &original,
-            &lash_core::ToolContract::default(),
-            &json!({}),
-            &context,
-        ))
-        .await;
-    let lash_core::ToolAttemptOutcome::Done { result, .. } = attempt else {
-        panic!("a refreshed tool cannot replace an admitted binding")
-    };
-    assert_eq!(
-        failure(&ToolOutcome::from_output(result.into_output())).code,
-        "mcp_execution_binding_changed"
-    );
     pool.shutdown_all().await;
     assert!(
         !received(scratch.path())
@@ -303,7 +225,10 @@ async fn l07_l08_mcp_inline_transports_refuse_defer_and_isolation_before_send() 
         .expect("fixture provider advertises")
         .remove(0);
     let prepared = prepare(&provider, &original).await;
-    let fixture = lash_core::testing::ToolCallFixture::mock().prepared_call(&prepared);
+    let fixture = linked(
+        &prepared,
+        json!({"kind": "mcp", "server": "mock", "tool_id": original.id}),
+    );
     let context = fixture.attempt("mcp-unsupported-law");
     for mode in ["deferred", "isolated"] {
         let mut manifest = original.clone();
@@ -423,7 +348,10 @@ async fn l22_mcp_transport_timeout_is_an_inline_body_failure() {
         .expect("fixture provider advertises")
         .remove(0);
     let prepared = prepare(&provider, &manifest).await;
-    let fixture = lash_core::testing::ToolCallFixture::mock().prepared_call(&prepared);
+    let (_, payload) = provider
+        .link_payload(&manifest, &lash_core::OwnerConfigView::default())
+        .expect("the tool's link payload");
+    let fixture = linked(&prepared, payload);
     let context = fixture.attempt("mcp-body-timeout-law");
     let args = json!({});
     let contract = lash_core::ToolContract::default();

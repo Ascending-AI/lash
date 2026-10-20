@@ -116,8 +116,8 @@ fn program(numbers: NumberPolicy) -> Program {
     let text = format!(
         r#"kernel 1
 numbers {numbers}
-effect tools.work(index: Int) -> Any
-effect tools.sum(values: List(Any)) -> Any
+effect tools.work(index: Int) -> Any contract "1"
+effect tools.sum(values: List(Any)) -> Any contract "1"
 fn worker(index) {{
   try {{
     let reply = perform tools.work(index) as Record{{token: Int, n: Union(Int, List(Float))}}
@@ -1049,6 +1049,7 @@ impl KernelEffects for LawHost {
                 id: call.clone(),
                 tool_id: tool.clone(),
                 args,
+                contract: lash_kernel_doc::ContractId::new("1"),
                 execution_grant: None,
                 issuing_language_node_id: None,
             },

@@ -481,15 +481,17 @@ pub use deferred_provider::{
 };
 pub use lash_core_store::obligations::{ObligationToken, RegistryKind};
 pub use lash_core_store::tool_surface::{
-    CALL_DYNAMIC_EFFECT, DeferredMatch, DeferredOutcome, DeferredResolutionPolicy, DynamicCall,
-    EffectLink, ExecutionBinding, ExecutionBindingUnreadable, LinkKind, ProcessSurface,
-    ProviderKey, RecordedSurface, ResolvedLink, SurfaceCollision, SurfaceDuplicateTool,
-    SurfaceEntry, SurfaceRefusal, call_dynamic_endpoint,
+    CALL_DYNAMIC_CONTRACT, CALL_DYNAMIC_EFFECT, DeferredMatch, DeferredOutcome,
+    DeferredResolutionPolicy, DynamicCall, ExecutionBinding, ExecutionBindingUnreadable, Judgement,
+    LinkSource, OperationLink, ProviderKey, RecordedSurface, SurfaceCollision,
+    SurfaceDuplicateTool, SurfaceEntry, SurfaceRefusal, call_dynamic_endpoint, judge,
 };
 pub use lash_kernel_doc::EffectName;
 pub use protocol_build::{FleetWriterFormats, ProtocolBuildInput};
 pub use tool_reads::{ReadCall, ReadError, ReadRoute, ToolProviderRegistration, ToolReads};
-pub use tool_registry::{SurfaceTools, ToolRegistry, ToolSurfaceDrift, ToolSurfaceDriftKind};
+pub use tool_registry::{
+    SurfaceTools, ToolRegistry, ToolSurfaceDrift, ToolSurfaceDriftKind, operation_contract_changed,
+};
 pub use tool_result::{CancelHint, PendingCompletion, PendingResolver, ToolOutcome};
 
 pub(crate) mod facade_ops {}
@@ -910,7 +912,7 @@ pub use runtime::request_process_successor;
 
 pub use session::{
     CellEndHandoff, EndedCell, ExecRequest, ExecutionEnvironmentSyncError, HeldResponse,
-    RuntimeExecutionContext, SessionError, ToolDispatchSurface, tool_dispatch_surface,
+    RuntimeExecutionContext, SessionError,
 };
 pub use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,

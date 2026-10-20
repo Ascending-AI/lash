@@ -36,13 +36,8 @@ pub use crate::process_feed::{
     ProcessObservationStreamItem,
 };
 pub use crate::process_history::{ProcessEventsRead, ProcessHistoryContinuation};
-/// What an env links each effect a process performs to: the tool, the
-/// component provider that serves it and the dispatch surface the link
-/// was checked against, and the effects an engine declares it performs.
-pub use lash_core::EffectLink;
 pub use lash_core::EnclosingProcess;
 pub use lash_core::HoldEnvError;
-pub use lash_core::LinkKind;
 pub use lash_core::ProcessComponentConfig;
 pub use lash_core::ProcessComponentEntry;
 pub use lash_core::ProcessComponentId;
@@ -58,9 +53,7 @@ pub use lash_core::ProcessEnvRefusal;
 pub use lash_core::ProcessLimits;
 pub use lash_core::ProcessModel;
 pub use lash_core::ProcessStartChoice;
-pub use lash_core::ProcessSurface;
 pub use lash_core::ResolvedInlineStart;
-pub use lash_core::ResolvedLink;
 pub use lash_core::ResolvedStartTarget;
 /// The environment and engine settings a process runs under, which its
 /// starter states (FIG-6034), and the process components an environment
@@ -73,13 +66,18 @@ pub use lash_core::plugin::{
 /// The fixed `call_dynamic` endpoint a process links to its env's
 /// deferred provider ([`EffectLink::dynamic`]), the effect path it is
 /// performed under and the input it takes.
-pub use lash_core::{CALL_DYNAMIC_EFFECT, DynamicCall, call_dynamic_endpoint};
+pub use lash_core::{
+    CALL_DYNAMIC_CONTRACT, CALL_DYNAMIC_EFFECT, DynamicCall, call_dynamic_endpoint,
+};
 pub use lash_execution_contracts::process::DeclaredDefinitionLaunch;
 pub use lash_execution_contracts::process::DeclaredInlineLaunch;
 pub use lash_execution_contracts::process::DeclaredLaunch;
 pub use lash_execution_contracts::process::EngineLaunch;
 pub use lash_execution_contracts::process::EngineSettings;
 pub use lash_execution_contracts::process::PerformedEffects;
+/// What the package that owns an operation's path declares of it, as a
+/// runner on that path must serve it (PKG-RUNNER).
+pub use lash_execution_contracts::process::{OwnedOperation, OwnedOperations};
 /// Explicit environment choices for a start policy. None is a default:
 /// a host states which it uses.
 pub mod env {

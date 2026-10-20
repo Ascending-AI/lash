@@ -1,27 +1,39 @@
 //! Authority carried by a recorded deferred match.
-use crate::{ToolContract, ToolDefinition, ToolManifest};
+use crate::{OperationLink, ToolContract, ToolDefinition, ToolManifest};
 use serde::{Deserialize, Serialize};
 
 /// The authority to execute a tool a recorded deferred match resolved,
-/// outside the run's recorded surface: the provider the match names, the
-/// definition its calls are admitted under and the match's execution
-/// binding, which the provider reads from its prepare and execute contexts.
-// `PartialEq` but not `Eq`: the binding's payload is a `serde_json::Value`,
-// whose float arm has no total equality.
+/// outside the run's recorded surface: the match's [`OperationLink`], whose
+/// provider prepares and executes its calls under the definition it
+/// retains, and whose payload the provider reads from its prepare and
+/// execute contexts.
+// `PartialEq` but not `Eq`: the payload is a `serde_json::Value`, whose float
+// arm has no total equality.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "OperationLink", into = "OperationLink")]
 pub struct ToolExecutionGrant {
-    /// The declared provider that prepares and executes this grant's calls:
-    /// the one identity its calls bind to and dispatch through.
-    pub provider: crate::plugin::ToolProviderHandle,
-    /// Tool identity and model-facing metadata authorized by the grant.
-    pub(crate) manifest: ToolManifest,
-    /// Contract used to validate granted call arguments without consulting the
-    /// current Tool Catalog.
-    pub(crate) contract: Box<ToolContract>,
-    /// The match's execution binding, passed to prepare and execute contexts.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub binding: Option<crate::ExecutionBinding>,
+    /// A [`crate::LinkSource::Resolved`] link: the one identity its calls
+    /// bind to and dispatch through.
+    link: OperationLink,
+    definition: ToolDefinition,
+}
+
+impl TryFrom<OperationLink> for ToolExecutionGrant {
+    type Error = String;
+
+    fn try_from(link: OperationLink) -> Result<Self, Self::Error> {
+        let definition = link
+            .resolution()
+            .cloned()
+            .ok_or_else(|| format!("a grant of tool `{}` retains no definition", link.tool))?;
+        Ok(Self { link, definition })
+    }
+}
+
+impl From<ToolExecutionGrant> for OperationLink {
+    fn from(grant: ToolExecutionGrant) -> Self {
+        grant.link
+    }
 }
 
 impl ToolExecutionGrant {
@@ -32,37 +44,58 @@ impl ToolExecutionGrant {
         definition: ToolDefinition,
     ) -> Self {
         Self {
-            provider,
-            manifest: definition.manifest(),
-            contract: Box::new(definition.contract()),
-            binding: None,
+            link: OperationLink::resolved(provider, definition.clone(), None),
+            definition,
         }
+    }
+
+    /// The grant a committed deferred match's `link` makes; `None` for a
+    /// link that retains no definition.
+    pub fn of_link(link: &OperationLink) -> Option<Self> {
+        Self::try_from(link.clone()).ok()
+    }
+
+    /// The grant's link.
+    pub fn link(&self) -> &OperationLink {
+        &self.link
+    }
+
+    /// The declared provider that prepares and executes this grant's calls.
+    pub fn provider(&self) -> &crate::plugin::ToolProviderHandle {
+        &self.link.provider
+    }
+
+    /// The definition the grant's calls are admitted under.
+    pub fn definition(&self) -> &ToolDefinition {
+        &self.definition
     }
 
     /// Returns the tool identity and model-facing metadata authorized by this grant.
     pub fn manifest(&self) -> &ToolManifest {
-        &self.manifest
+        &self.definition.manifest
     }
 
     /// Returns the contract used to validate granted call arguments.
     pub fn contract(&self) -> &ToolContract {
-        &self.contract
+        &self.definition.contract
     }
 
-    /// The grant with the match's execution binding.
-    pub fn with_execution_binding(mut self, binding: Option<crate::ExecutionBinding>) -> Self {
-        self.binding = binding;
+    /// The match's codec payload, passed to prepare and execute contexts.
+    pub fn payload(&self) -> Option<&crate::ExecutionBinding> {
+        self.link.payload.as_ref()
+    }
+
+    /// The grant with the match's codec payload.
+    #[must_use]
+    pub fn with_execution_binding(mut self, payload: Option<crate::ExecutionBinding>) -> Self {
+        self.link.payload = payload;
         self
     }
 
     /// The callbacks a call under this grant runs on: its provider, then
-    /// its binding's codec when it carries one. What a cell holding the
+    /// its payload's codec when it carries one. What a cell holding the
     /// grant owes until it ends (S7).
     pub fn callbacks(&self) -> impl Iterator<Item = crate::plugin::PluginCallbackIdentity> + '_ {
-        std::iter::once(self.provider.callback_identity()).chain(
-            self.binding
-                .iter()
-                .map(|binding| binding.codec.callback_identity()),
-        )
+        self.link.callbacks()
     }
 }

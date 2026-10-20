@@ -170,8 +170,9 @@ fn restored_session_bindings_cannot_mask_builtins() {
             "1\n",
             &Environment::new(
                 machine::library(),
-                &lash_kernel_dialect::Namespaces::of_signatures(
+                &lash_kernel_dialect::Namespaces::of_effects(
                     &Default::default(),
+                    &lash_kernel_doc::ContractId::new("1"),
                     &Default::default(),
                 )
                 .expect("the test's effects are operations"),
@@ -212,7 +213,7 @@ fn tool_discovery_resolves_lexical_values_before_namespaces() {
         "text = 'phantom.call()'\ndef order(items):\n    items.sort(key=lambda item: item['key'])\nprevious.sort()\n[2, 1].sort()\nprint(text)\n# phantom.comment()\nawait items.sort({})\nawait other.fetch({})\n",
         &lash_kernel_dialect::Environment::new(
 machine::library(),
-&lash_kernel_dialect::Namespaces::of_signatures(&Default::default(), &Default::default()).expect("the test's effects are operations"),
+&lash_kernel_dialect::Namespaces::of_effects(&Default::default(), &lash_kernel_doc::ContractId::new("1"), &Default::default()).expect("the test's effects are operations"),
 ),
         lash_kernel_dialect::CellEnvironment { bindings: &bindings, functions: &Default::default() },
     ).expect("discover calls in their scopes");

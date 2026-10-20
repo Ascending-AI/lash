@@ -26,9 +26,12 @@ fn views() -> [(&'static str, WorkflowView); 2] {
     let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
     let registry = embedding.registry().expect("registry");
     let effects = echo();
-    let environment_namespaces =
-        lash::dialect::Namespaces::of_signatures(&effects, &Default::default())
-            .expect("the test's effects are operations");
+    let environment_namespaces = lash::dialect::Namespaces::of_effects(
+        &effects,
+        &lash::workflow::document::ContractId::new("1"),
+        &Default::default(),
+    )
+    .expect("the test's effects are operations");
     let environment = lash::dialect::Environment::new(embedding.library(), &environment_namespaces);
     let typescript = lash::typescript::lower(
         "export async function flow(count: number) {

@@ -68,6 +68,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+lash-kernel-package = { workspace = true, features = ["testing"] }
 # The laws' runs pin a dialect's release, so their build holds one.
 lash-vm-releases = { workspace = true, features = ["dialect-typescript"] }
 tokio = { workspace = true, features = ["macros", "rt"] }

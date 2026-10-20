@@ -35,8 +35,12 @@ fn lower(
     bindings: &[&str],
     names: &[&str],
 ) -> Result<Lowered, lash_kernel_dialect::Diagnostic> {
-    let namespaces = Namespaces::of_signatures(&effects(names), &BTreeMap::new())
-        .expect("the law's effects are operations");
+    let namespaces = Namespaces::of_effects(
+        &effects(names),
+        &lash_kernel_doc::ContractId::new("1"),
+        &BTreeMap::new(),
+    )
+    .expect("the law's effects are operations");
     let bindings = bindings
         .iter()
         .map(|name| Name::new(*name))
@@ -124,7 +128,7 @@ fn a_code_export_beside_an_operation_of_its_package_prints_and_reads_back() {
         r#"kernel 1
 numbers float
 use dataframe.col = @{col}
-effect dataframe.run(input: Any) -> Any
+effect dataframe.run(input: Any) -> Any contract "1"
 main {{
   let column = dataframe.col("value")
   let ran = perform dataframe.run(column) as Any

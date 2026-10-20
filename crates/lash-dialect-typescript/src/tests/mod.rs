@@ -97,9 +97,12 @@ fn lower_against(
     effects: &BTreeMap<EffectName, Signature>,
 ) -> Result<Lowered, Diagnostic> {
     let bindings: BTreeSet<_> = bindings.iter().map(|name| (*name).into()).collect();
-    let environment_namespaces =
-        lash_kernel_dialect::Namespaces::of_signatures(effects, controls())
-            .expect("the test's effects are operations");
+    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
+        effects,
+        &lash_kernel_doc::ContractId::new("1"),
+        controls(),
+    )
+    .expect("the test's effects are operations");
     let environment = Environment::new(library(), &environment_namespaces);
     let lowered = crate::lower(
         source,
@@ -159,9 +162,12 @@ fn main_of(lowered: Result<Lowered, Diagnostic>) -> String {
 #[test]
 fn a_host_source_policy_allows_a_larger_typescript_cell() {
     let source = format!("//{}", "x".repeat(crate::MAX_SOURCE_BYTES));
-    let environment_namespaces =
-        lash_kernel_dialect::Namespaces::of_signatures(&Default::default(), &Default::default())
-            .expect("the test's effects are operations");
+    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
+        &Default::default(),
+        &lash_kernel_doc::ContractId::new("1"),
+        &Default::default(),
+    )
+    .expect("the test's effects are operations");
     let environment = Environment::new(library(), &environment_namespaces);
     let cell = Mode::Cell(CellEnvironment::first());
     assert!(crate::lower(&source, &environment, cell).is_err());

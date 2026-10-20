@@ -25,9 +25,9 @@ fn names(effects: &[&str]) -> BTreeSet<String> {
 fn calls_spawns_and_applied_closures_are_linked() {
     let text = r#"kernel 1
 numbers float
-effect a.run(input: Any) -> Any
-effect b.run(input: Any) -> Any
-effect c.run(input: Any) -> Any
+effect a.run(input: Any) -> Any contract "1"
+effect b.run(input: Any) -> Any contract "1"
+effect c.run(input: Any) -> Any contract "1"
 entry start() -> Any
 
 fn first() {
@@ -71,8 +71,8 @@ main {
 fn a_passed_reference_links_nothing_of_its_function() {
     let text = r#"kernel 1
 numbers float
-effect processes.start(input: Any) -> Any
-effect search.run(input: Any) -> Any
+effect processes.start(input: Any) -> Any contract "1"
+effect search.run(input: Any) -> Any contract "1"
 entry orchestrate() -> Any
 entry worker() -> Any
 
@@ -105,7 +105,7 @@ main {
 fn an_uncertifiable_value_call_is_refused() {
     let text = r#"kernel 1
 numbers float
-effect search.run(input: Any) -> Any
+effect search.run(input: Any) -> Any contract "1"
 entry start(f: Any) -> Any
 
 fn worker() {
@@ -157,7 +157,7 @@ fn helper_callbacks_through_values_are_certified_or_refused() {
                 r#"kernel 1
 numbers float
 use helper.run = @{id}
-effect search.run(input: Any) -> Any
+effect search.run(input: Any) -> Any contract "1"
 entry start() -> Any
 fn worker() {{ let got = perform search.run(null) as Any return got }}
 fn start() {{
@@ -212,7 +212,7 @@ main {{ finish null }}
             r#"kernel 1
 numbers float
 use helper.keep = @{id}
-effect search.run(input: Any) -> Any
+effect search.run(input: Any) -> Any contract "1"
 entry start() -> Any
 fn worker() {{ let got = perform search.run(null) as Any return got }}
 fn start() {{ let held = invoke helper.keep(&worker) return held }}

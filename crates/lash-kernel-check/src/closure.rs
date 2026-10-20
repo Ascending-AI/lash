@@ -20,7 +20,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::{
-    Document, EffectName, FunctionCatalog, FunctionId, Literal, Name, Signature, Site, Type, Unit,
+    Document, EffectName, FunctionCatalog, FunctionId, Literal, Name, OperationRequirement, Site,
+    Type, Unit,
 };
 
 use crate::graph::{
@@ -68,7 +69,7 @@ pub fn entry_effects(
     graph: &Graph,
     catalog: &dyn FunctionCatalog,
     entry: &Name,
-) -> Result<BTreeMap<EffectName, Signature>, EntryEffectsRefusal> {
+) -> Result<BTreeMap<EffectName, OperationRequirement>, EntryEffectsRefusal> {
     if !document.entries.contains_key(entry) {
         return Err(EntryEffectsRefusal::UnknownEntry {
             entry: entry.clone(),
@@ -92,7 +93,7 @@ pub fn main_effects(
     document: &Document,
     graph: &Graph,
     catalog: &dyn FunctionCatalog,
-) -> Result<BTreeMap<EffectName, Signature>, EntryEffectsRefusal> {
+) -> Result<BTreeMap<EffectName, OperationRequirement>, EntryEffectsRefusal> {
     linked_effects(document, graph, catalog, Unit::Main)
 }
 
@@ -103,7 +104,7 @@ fn linked_effects(
     graph: &Graph,
     catalog: &dyn FunctionCatalog,
     root: Unit,
-) -> Result<BTreeMap<EffectName, Signature>, EntryEffectsRefusal> {
+) -> Result<BTreeMap<EffectName, OperationRequirement>, EntryEffectsRefusal> {
     let Linked {
         reached,
         effects,
@@ -118,7 +119,7 @@ fn linked_effects(
     effects
         .into_iter()
         .map(|effect| match document.manifest.effects.get(&effect) {
-            Some(required) => Ok((effect, required.signature.clone())),
+            Some(required) => Ok((effect, required.clone())),
             None => Err(EntryEffectsRefusal::UndeclaredEffect { effect }),
         })
         .collect()

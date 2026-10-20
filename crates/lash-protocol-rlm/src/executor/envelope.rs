@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_dialect::Written;
 use lash_kernel_dialect::{Offered, OfferedSource, QualifiedOperation};
-use lash_kernel_doc::{Datum, EffectName, IdentifiedDocument, Signature, Site};
+use lash_kernel_doc::{Datum, EffectName, IdentifiedDocument, Site};
 use lash_vm_runtime::HostBoundary;
 
 use super::host::{CellHostLedgers, HostGraph, LedgerCall, LedgerCallState};
@@ -32,7 +32,9 @@ const LASH_CODEMODE_CELL_SEGMENT_CODE_DOMAIN_VERSION: &str = "lash-codemode-cell
 #[serde(deny_unknown_fields)]
 pub struct RecordedEffect {
     pub tool: lash_core::ToolId,
-    pub signature: Signature,
+    /// The requirement the cell was lowered against: the tool's signature
+    /// and the contract it served.
+    pub requirement: lash_kernel_doc::OperationRequirement,
     /// The turn controls the tool declared when the cell was lowered: what
     /// the cell's control admission reads at every park.
     pub controls: lash_core::TurnControls,
@@ -128,7 +130,7 @@ impl CellEnvelope {
                     RecordedEffect {
                         controls: controls(&tool),
                         tool,
-                        signature: offered.requirement.signature.clone(),
+                        requirement: offered.requirement.clone(),
                     },
                 ))
             })
@@ -145,9 +147,7 @@ impl CellEnvelope {
                 .offer_operation(
                     operation,
                     Offered {
-                        requirement: lash_kernel_doc::OperationRequirement::of_signature(
-                            effect.signature.clone(),
-                        ),
+                        requirement: effect.requirement.clone(),
                         controls: lash_vm_runtime::effect_controls(&effect.controls),
                         read: false,
                         source: OfferedSource::Catalog {
@@ -472,7 +472,7 @@ impl TokenCodec for EffectTable {
             name.encode(out);
             out.seq(3);
             out.text(effect.tool.as_str());
-            effect.signature.encode(out);
+            effect.requirement.encode(out);
             encode_tree(&effect.controls, out);
         }
         out.map(self.grants.len() as u64);
@@ -501,7 +501,7 @@ impl TokenCodec for EffectTable {
             input.expect_struct(3)?;
             let effect = RecordedEffect {
                 tool: lash_core::ToolId::new(input.text()?),
-                signature: Signature::decode(input)?,
+                requirement: lash_kernel_doc::OperationRequirement::decode(input)?,
                 controls: decode_tree(input)?,
             };
             if effects

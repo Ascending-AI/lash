@@ -63,11 +63,14 @@ pub enum ToolFailureCause {
         effect: String,
         tool: crate::ToolId,
     },
-    /// A process step's linked tool is served on this node with another
-    /// surface than its env retained (D3). The body did not run.
-    LinkedToolChanged {
+    /// A call's linked tool is served on this node under another contract
+    /// id than the call is pinned to (`operation_contract_changed`). The
+    /// body did not run.
+    OperationContractChanged {
         effect: String,
         tool: crate::ToolId,
+        pinned: lash_kernel_doc::ContractId,
+        live: lash_kernel_doc::ContractId,
     },
     /// A process's `call_dynamic` call whose input is not a call path with
     /// its arguments. Nothing was resolved.

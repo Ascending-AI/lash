@@ -650,7 +650,7 @@ async fn a_process_runs_under_its_own_recorded_environment_after_its_session_is_
     let linked: BTreeSet<String> = env
         .effects()
         .values()
-        .map(|link| link.tool().to_string())
+        .map(|link| link.tool.to_string())
         .collect();
     assert!(own.catalog.is_subset(&linked), "{own:#?} within {linked:?}");
     for name in [WAIT, READ, LATER] {

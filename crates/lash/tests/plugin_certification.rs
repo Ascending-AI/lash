@@ -454,15 +454,15 @@ async fn deferred_state_free_provider_is_full_under_a_supporting_protocol() {
                 .map(|path| {
                     (
                         (*path).into(),
-                        DeferredOutcome::Resolved {
-                            provider: ToolProviderHandle::new(
+                        DeferredOutcome::resolved(
+                            ToolProviderHandle::new(
                                 RegistryKind::Session,
                                 "host",
                                 lash::tool_provider_key!("tools"),
                             ),
-                            definition: definition(),
-                            binding: None,
-                        },
+                            definition(),
+                            None,
+                        ),
                     )
                 })
                 .collect()
@@ -643,15 +643,15 @@ mod deferred_laws {
                 .map(|path| {
                     (
                         (*path).into(),
-                        DeferredOutcome::Resolved {
-                            provider: ToolProviderHandle::new(
+                        DeferredOutcome::resolved(
+                            ToolProviderHandle::new(
                                 RegistryKind::Session,
                                 "host",
                                 lash::tool_provider_key!("tools"),
                             ),
-                            definition: self.definition.clone(),
-                            binding: None,
-                        },
+                            self.definition.clone(),
+                            None,
+                        ),
                     )
                 })
                 .collect()

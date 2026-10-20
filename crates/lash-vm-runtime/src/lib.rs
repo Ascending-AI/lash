@@ -25,7 +25,8 @@ mod projection;
 
 pub use boundary::{
     BoundaryError, HostBoundary, MAX_PROJECTED_TYPE_NODES, MAX_RESOLVED_REFERENCES, SchemaConflict,
-    SchemaProjectionRefusal, effect_controls, offered_tool, tool_input, type_of_schema,
+    SchemaProjectionRefusal, effect_controls, offered_tool, owned_operation, tool_input,
+    type_of_schema,
 };
 pub use formats::{
     KERNEL_DOCUMENT_SCHEMA_VERSION, KERNEL_PARKED_STATE_VERSION, KERNEL_SAVED_FUNCTION_VERSION,

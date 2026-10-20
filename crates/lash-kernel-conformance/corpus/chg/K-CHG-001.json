@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "park and rebuild preserve the pinned charge",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int\nmain { let x = perform echo(1) as Int finish x }\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int contract \"1\"\nmain { let x = perform echo(1) as Int finish x }\n",
       "expected": {
         "end": {
           "finished": {

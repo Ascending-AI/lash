@@ -35,11 +35,29 @@ impl crate::ToolProvider for Answer {
         crate::ToolOutcome::ok(serde_json::json!({})).into()
     }
 }
-fn registry(changed: bool, recorded: bool) -> crate::ProcessEngineRegistry {
-    registry_of(changed, recorded, tool())
+/// How the recorded component serves the tool on this node.
+#[derive(Clone, Copy, PartialEq)]
+enum Served {
+    AsRecorded,
+    /// Under another retry policy: a fact of the link, not the contract.
+    OtherPolicy,
+    /// Under another output schema: another contract.
+    OtherContract,
+}
+/// `definition` with another output schema: the tool under its next
+/// contract.
+fn next_contract(mut definition: crate::ToolDefinition) -> crate::ToolDefinition {
+    definition.contract.output_schema = lash_protocol_types::SchemaContract::admit(
+        serde_json::json!({"type":"object", "additionalProperties":false, "required":["hits"], "properties":{"hits":{"type":"string"}, "next":{"type":"string"}}}),
+    )
+    .unwrap();
+    definition
+}
+fn registry(served: Served, recorded: bool) -> crate::ProcessEngineRegistry {
+    registry_of(served, recorded, tool())
 }
 fn registry_of(
-    changed: bool,
+    change: Served,
     recorded: bool,
     served: crate::ToolDefinition,
 ) -> crate::ProcessEngineRegistry {
@@ -49,12 +67,19 @@ fn registry_of(
             continue;
         }
         let mut definition = served.clone();
-        if key.component() == RECORDED.component() && changed {
-            definition = definition.with_execution_policy(crate::ExecutionPolicy::repeatable(
-                std::num::NonZeroU32::new(2).unwrap(),
-                1,
-                1,
-            ));
+        if key.component() == RECORDED.component() {
+            match change {
+                Served::AsRecorded => {}
+                Served::OtherPolicy => {
+                    definition =
+                        definition.with_execution_policy(crate::ExecutionPolicy::repeatable(
+                            std::num::NonZeroU32::new(2).unwrap(),
+                            1,
+                            1,
+                        ));
+                }
+                Served::OtherContract => definition = next_contract(definition),
+            }
         }
         components
             .register(
@@ -84,9 +109,12 @@ fn target() -> ResolvedStartTarget {
         args: Default::default(),
         performed: std::collections::BTreeMap::from([(
             crate::EffectName::new("search.run").unwrap(),
-            lash_protocol_types::tool_signature(
-                &tool().contract.input_schema.canonical,
-                &tool().contract.output_schema.canonical,
+            lash_kernel_doc::OperationRequirement::new(
+                lash_protocol_types::tool_signature(
+                    &tool().contract.input_schema.canonical,
+                    &tool().contract.output_schema.canonical,
+                ),
+                tool().contract_id(),
             ),
         )]),
     }
@@ -98,47 +126,53 @@ fn components(recorded: bool) -> Vec<ProcessComponentEntry> {
         .map(|key| ProcessComponentEntry::new(key, &(), []).unwrap())
         .collect()
 }
-/// CAPTURE-IS-IDENTITY: a second provider cannot replace the recorded key or surface.
+/// CAPTURE-IS-IDENTITY: a second provider cannot replace the recorded key
+/// or link, and the captured link keeps the policy the run recorded; a
+/// component serving the tool under another contract is refused (OP-LINK-ONE).
 #[tokio::test]
-async fn capture_keeps_recorded_provider_and_surface() {
+async fn capture_keeps_recorded_provider_and_link() {
     let run = ResolvedRun::snapshot(crate::PersistedSessionConfig::new(
         crate::TurnBudget::Unbounded,
         crate::MaxToolCalls::new(4),
         crate::NoProgressBudget::bounded(4),
     ));
     let surface = SurfaceTools::of_entries(
-        [crate::SurfaceEntry {
-            provider: crate::plugin::ToolProviderHandle::new(
+        [crate::SurfaceEntry::advertised(
+            crate::plugin::ToolProviderHandle::new(
                 crate::RegistryKind::Session,
                 RECORDED.component(),
                 crate::tool_provider_key!("tools"),
             ),
-            definition: tool(),
-        }],
+            tool(),
+            None,
+        )],
         Arc::new(crate::ToolRegistry::default()),
     );
     let target = target();
     let starter = crate::ExecutionOwner::Process {
         process_id: crate::ProcessIdMint::sequential_id_for_testing(1),
     };
-    let engines = registry(false, true);
-    let cx = ProcessEnvCx::new(
-        &starter,
-        &target,
-        None,
-        Some(&run),
-        Some(&surface),
-        None,
-        &engines,
-    );
-    let captured = cx.capture(&run, &surface, components(true)).await.unwrap();
-    let link = &captured.effects()[&crate::EffectName::new("search.run").unwrap()];
-    assert_eq!(
-        link.provider,
-        RECORDED.tool_provider(crate::tool_provider_key!("tools"))
-    );
-    assert_eq!(link.surface, crate::ProcessSurface::of(&tool()));
-    let engines = registry(true, true);
+    for served in [Served::AsRecorded, Served::OtherPolicy] {
+        let engines = registry(served, true);
+        let cx = ProcessEnvCx::new(
+            &starter,
+            &target,
+            None,
+            Some(&run),
+            Some(&surface),
+            None,
+            &engines,
+        );
+        let captured = cx.capture(&run, &surface, components(true)).await.unwrap();
+        let link = &captured.effects()[&crate::EffectName::new("search.run").unwrap()];
+        assert_eq!(
+            link.provider,
+            RECORDED.tool_provider(crate::tool_provider_key!("tools"))
+        );
+        assert_eq!(link.tool, tool().manifest.id);
+        assert_eq!(link.policy, tool().manifest.execution_policy);
+    }
+    let engines = registry(Served::OtherContract, true);
     let cx = ProcessEnvCx::new(
         &starter,
         &target,
@@ -150,9 +184,9 @@ async fn capture_keeps_recorded_provider_and_surface() {
     );
     assert!(matches!(
         cx.capture(&run, &surface, components(true)).await,
-        Err(ProcessEnvRefusal::LinkedSurfaceChanged { .. })
+        Err(ProcessEnvRefusal::ContractChanged { .. })
     ));
-    let engines = registry(false, false);
+    let engines = registry(Served::AsRecorded, false);
     let cx = ProcessEnvCx::new(
         &starter,
         &target,
@@ -167,10 +201,76 @@ async fn capture_keeps_recorded_provider_and_surface() {
         Err(ProcessEnvRefusal::CaptureMissing { .. })
     ));
 }
+/// OP-CONTRACT-PIN: a child start is judged against the requirement its own
+/// code states, never the contract its parent's link was captured under.
+/// The parent recorded the tool at its first contract and its component
+/// now serves the next: a child whose code requires the next contract
+/// links, and one whose code still requires the first is refused, naming
+/// both ids.
+#[tokio::test]
+async fn a_child_start_is_judged_against_its_own_requirement() {
+    let run = ResolvedRun::snapshot(crate::PersistedSessionConfig::new(
+        crate::TurnBudget::Unbounded,
+        crate::MaxToolCalls::new(4),
+        crate::NoProgressBudget::bounded(4),
+    ));
+    let surface = SurfaceTools::of_entries(
+        [crate::SurfaceEntry::advertised(
+            crate::plugin::ToolProviderHandle::new(
+                crate::RegistryKind::Session,
+                RECORDED.component(),
+                crate::tool_provider_key!("tools"),
+            ),
+            tool(),
+            None,
+        )],
+        Arc::new(crate::ToolRegistry::default()),
+    );
+    let starter = crate::ExecutionOwner::Process {
+        process_id: crate::ProcessIdMint::sequential_id_for_testing(1),
+    };
+    let engines = registry(Served::OtherContract, true);
+    let next = next_contract(tool());
+    let mut child = target();
+    child.performed = std::collections::BTreeMap::from([(
+        crate::EffectName::new("search.run").unwrap(),
+        lash_kernel_doc::OperationRequirement::new(
+            lash_protocol_types::tool_signature(
+                &next.contract.input_schema.canonical,
+                &next.contract.output_schema.canonical,
+            ),
+            next.contract_id(),
+        ),
+    )]);
+    for (code, linked) in [(&child, true), (&target(), false)] {
+        let cx = ProcessEnvCx::new(
+            &starter,
+            code,
+            None,
+            Some(&run),
+            Some(&surface),
+            None,
+            &engines,
+        );
+        let captured = cx.capture(&run, &surface, components(true)).await;
+        if linked {
+            assert!(captured.is_ok(), "{captured:?}");
+        } else {
+            assert!(
+                matches!(
+                    &captured,
+                    Err(ProcessEnvRefusal::ContractChanged { pinned, live, .. })
+                        if *pinned == tool().contract_id() && *live == next.contract_id()
+                ),
+                "{captured:?}"
+            );
+        }
+    }
+}
 /// P1: an invalid pair refuses at the hold before a declaration can be minted.
 #[tokio::test]
 async fn launch_holding_checks_links_and_exact_fit() {
-    let engines = registry(false, true);
+    let engines = registry(Served::AsRecorded, true);
     let scope = crate::ExecutionScope::runtime_operation("link-law");
     let target = target();
     let choice = ProcessStartChoice {
@@ -206,8 +306,11 @@ async fn an_exact_fit_is_required_before_a_launch_is_held() {
         "search", "search.run", "Search",
         serde_json::json!({"type":"object", "additionalProperties":false, "required":["q"], "properties":{"q":{"type":"string"}, "limit":{"type":"integer"}}}),
         serde_json::json!({"type":"object", "additionalProperties":false, "required":["hits"], "properties":{"hits":{"type":"string"}, "extra":{"type":"string"}}}),
-    ).unwrap().with_execution(std::time::Duration::from_secs(60));
-    let engines = registry_of(false, true, wider.clone());
+    ).unwrap()
+    // The wider tool states the contract the code requires: only its fit differs.
+    .declared_contract(tool().contract_id())
+    .with_execution(std::time::Duration::from_secs(60));
+    let engines = registry_of(Served::AsRecorded, true, wider.clone());
     let effect = crate::EffectName::new("search.run").unwrap();
     let env = ProcessEnv::builder(crate::MaxToolCalls::new(4))
         .component(RECORDED, &())
@@ -221,7 +324,13 @@ async fn an_exact_fit_is_required_before_a_launch_is_held() {
         .performed_effects(&target.engine_kind, &target.payload)
         .await
         .unwrap();
-    crate::check_links(&env, &performed, &Default::default())
+    engines
+        .check_links(
+            &target.engine_kind,
+            &Arc::new(env.clone()),
+            &performed,
+            &Default::default(),
+        )
         .expect("the wider tool is compatible");
     let choice = ProcessStartChoice {
         fits: std::collections::BTreeMap::from([(
@@ -272,9 +381,12 @@ impl lash_execution_contracts::process::ProcessEngine for SearchEngine {
     ) -> Result<lash_execution_contracts::process::PerformedEffects, crate::ProcessEnvRefusal> {
         Ok(std::collections::BTreeMap::from([(
             crate::EffectName::new("search.run").unwrap(),
-            lash_protocol_types::tool_signature(
-                &tool().contract.input_schema.canonical,
-                &tool().contract.output_schema.canonical,
+            lash_kernel_doc::OperationRequirement::new(
+                lash_protocol_types::tool_signature(
+                    &tool().contract.input_schema.canonical,
+                    &tool().contract.output_schema.canonical,
+                ),
+                tool().contract_id(),
             ),
         )]))
     }

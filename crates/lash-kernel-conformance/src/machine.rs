@@ -167,11 +167,23 @@ fn refused() -> Observations {
 pub(crate) fn case_program(library: &PreparedLibrary, case: &Case) -> Option<Program> {
     let document = parse_document(&case.document).ok()?;
     let mut admission = lash_kernel_check::Environment::new(library.registry().as_ref());
-    admission.effects = case
-        .environment
-        .effects
-        .clone()
-        .unwrap_or_else(|| document.manifest.signatures());
+    // A case's environment states signatures; admission compares no
+    // contract, so each is offered under one fixed contract.
+    admission.effects = match &case.environment.effects {
+        Some(effects) => effects
+            .iter()
+            .map(|(effect, signature)| {
+                (
+                    effect.clone(),
+                    lash_kernel_doc::OperationRequirement::new(
+                        signature.clone(),
+                        lash_kernel_doc::ContractId::new("conformance"),
+                    ),
+                )
+            })
+            .collect(),
+        None => document.manifest.effects.clone(),
+    };
     lash_kernel_check::admit(&document, &admission).ok()?;
     Some(Program {
         closure: crate::pages::CLOSURE,

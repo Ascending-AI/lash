@@ -877,11 +877,11 @@ impl lash_core::DeferredToolProvider for Resolver {
             let earlier = resolved.iter().any(|(seen, _)| seen == path);
             resolved.push(((*path).to_owned(), at));
             let outcome = match *path {
-                RESOLVED_PATH => lash_core::DeferredOutcome::Resolved {
-                    provider: DYNAMIC_COMPONENT.tool_provider(lash::tool_provider_key!("deferred")),
-                    definition: dynamic_target(if earlier { "dyn_second" } else { "dyn_first" }),
-                    binding: None,
-                },
+                RESOLVED_PATH => lash_core::DeferredOutcome::resolved(
+                    DYNAMIC_COMPONENT.tool_provider(lash::tool_provider_key!("deferred")),
+                    dynamic_target(if earlier { "dyn_second" } else { "dyn_first" }),
+                    None,
+                ),
                 REFUSED_PATH => lash_core::DeferredOutcome::Refused {
                     reason: dynamic_host_explanation(),
                 },
@@ -900,7 +900,7 @@ impl lash_core::DeferredToolProvider for Resolver {
 /// `call_dynamic`, and answers what it answered.
 const RESOLVING: &str = r#"kernel 1
 numbers float
-effect lash.call_dynamic(input: Record{args?: Json, path: Text}) -> Json
+effect lash.call_dynamic(input: Record{args?: Json, path: Text}) -> Json contract "lash.call_dynamic/1"
 entry dynamic() -> Any
 
 fn dynamic() {
@@ -918,7 +918,7 @@ main {
 /// each failure, and answers both.
 const DECIDING: &str = r#"kernel 1
 numbers float
-effect lash.call_dynamic(input: Record{args?: Json, path: Text}) -> Json
+effect lash.call_dynamic(input: Record{args?: Json, path: Text}) -> Json contract "lash.call_dynamic/1"
 entry dynamic() -> Any
 
 fn dynamic() {

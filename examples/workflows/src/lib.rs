@@ -223,21 +223,12 @@ pub fn render(root: &Path) -> Result<BTreeMap<String, String>> {
     let registry = embedding.registry()?;
     let mut boundary = lash::vm::HostBoundary::new();
     for tool in tools()? {
-        boundary.offer_tool(
-            &tool.manifest,
-            &tool.contract.input_schema.canonical,
-            &tool.contract.output_schema.canonical,
-        )?;
+        boundary.offer_tool(&tool.manifest, &tool.contract)?;
     }
     let mut effects = boundary
         .operations()
         .iter()
-        .map(|(operation, offered)| {
-            (
-                operation.effect_name(),
-                offered.requirement.signature.clone(),
-            )
-        })
+        .map(|(operation, offered)| (operation.effect_name(), offered.requirement.clone()))
         .collect::<BTreeMap<_, _>>();
     // The original source-shape probes name these host effects. They are
     // fixture declarations; the example's offered toolbox stays in tools().
@@ -251,33 +242,39 @@ pub fn render(root: &Path) -> Result<BTreeMap<String, String>> {
     ] {
         effects.insert(
             k::EffectName::new(name)?,
-            k::Signature {
-                params: vec![k::Param {
-                    name: "input".into(),
-                    ty: k::Type::Any,
-                    optional: false,
-                }],
-                result: k::Type::Any,
-            },
+            k::OperationRequirement::new(
+                k::Signature {
+                    params: vec![k::Param {
+                        name: "input".into(),
+                        ty: k::Type::Any,
+                        optional: false,
+                    }],
+                    result: k::Type::Any,
+                },
+                k::ContractId::new("1"),
+            ),
         );
     }
     // Finish belongs only to cells; it is not a process tool offered by the example.
     effects.insert(
         k::EffectName::new("control.finish")?,
-        k::Signature {
-            params: vec![k::Param {
-                name: Name::new("input"),
-                ty: k::Type::Any,
-                optional: false,
-            }],
-            result: k::Type::Any,
-        },
+        k::OperationRequirement::new(
+            k::Signature {
+                params: vec![k::Param {
+                    name: Name::new("input"),
+                    ty: k::Type::Any,
+                    optional: false,
+                }],
+                result: k::Type::Any,
+            },
+            k::ContractId::new("1"),
+        ),
     );
     let controls = BTreeMap::from([(
         k::EffectName::new("control.finish")?,
         BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
     )]);
-    let env_namespaces = lash_kernel_dialect::Namespaces::of_signatures(&effects, &controls)?;
+    let env_namespaces = lash_kernel_dialect::Namespaces::of_requirements(&effects, &controls)?;
     let env = Environment::new(embedding.library(), &env_namespaces);
     let mut checker = Checker::new(registry.as_ref());
     checker.effects = effects.clone();
@@ -435,7 +432,7 @@ fn edit(
     #[derive(Serialize, Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Replay {
-        context: BTreeMap<k::EffectName, k::Signature>,
+        context: BTreeMap<k::EffectName, k::OperationRequirement>,
         transaction: Transaction,
     }
     let json = serde_json::to_string_pretty(&Replay {

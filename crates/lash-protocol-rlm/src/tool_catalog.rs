@@ -413,8 +413,7 @@ mod tests {
         boundary
             .offer_tool(
                 &catalog.entries()[0].manifest,
-                &catalog.entries()[0].contract.input_schema.canonical,
-                &catalog.entries()[0].contract.output_schema.canonical,
+                &catalog.entries()[0].contract,
             )
             .expect("pinned contract is offered as an operation");
         let offered = boundary
@@ -520,8 +519,7 @@ mod tests {
         boundary
             .offer_tool(
                 &catalog.entries()[0].manifest,
-                &catalog.entries()[0].contract.input_schema.canonical,
-                &catalog.entries()[0].contract.output_schema.canonical,
+                &catalog.entries()[0].contract,
             )
             .expect("the tool is offered as its operation");
         assert!(

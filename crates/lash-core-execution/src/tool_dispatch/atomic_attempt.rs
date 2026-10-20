@@ -100,6 +100,8 @@ pub(super) enum AttemptAuthority<'a> {
     Catalog {
         manifest: &'a ToolManifest,
         contract: &'a crate::ToolContract,
+        /// The codec payload the call's surface entry's link recorded.
+        payload: Option<&'a crate::ExecutionBinding>,
     },
     /// An execution grant admitted the call. The grant *is* the authority, so
     /// the catalog lookup is skipped entirely.
@@ -126,6 +128,10 @@ impl<'a> AttemptAuthority<'a> {
                 .map(|entry| Self::Catalog {
                     manifest: &entry.manifest,
                     contract: &entry.contract,
+                    payload: context
+                        .routes
+                        .entry(tool_id)
+                        .and_then(|entry| entry.link.payload.as_ref()),
                 }),
         }
     }
@@ -172,14 +178,16 @@ impl<'a> AttemptAuthority<'a> {
         ))
     }
 
-    /// Only a grant carries a binding, and it must be applied before the
-    /// completion context is cloned so a parking attempt keeps it.
+    /// The call's link payload, applied before the completion context is
+    /// cloned so a parking attempt keeps it.
     fn apply_execution_binding<'run>(&self, tool_context: ToolContext<'run>) -> ToolContext<'run> {
         match self {
-            Self::Catalog { .. } => tool_context,
+            Self::Catalog { payload, .. } => {
+                tool_context.with_tool_execution_binding(payload.cloned())
+            }
             Self::Granted(grant) => tool_context
-                .with_tool_execution_binding(grant.binding.clone())
-                .with_granted_provider(grant.provider.clone()),
+                .with_tool_execution_binding(grant.payload().cloned())
+                .with_granted_provider(grant.provider().clone()),
         }
     }
 }
@@ -236,7 +244,7 @@ fn body_state(
     }
     let granted = match authority {
         AttemptAuthority::Catalog { .. } => None,
-        AttemptAuthority::Granted(grant) => Some(&grant.provider),
+        AttemptAuthority::Granted(grant) => Some(grant.provider()),
     };
     let proposal = context
         .composition

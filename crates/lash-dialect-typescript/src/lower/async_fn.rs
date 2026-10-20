@@ -228,12 +228,18 @@ impl Lowerer<'_> {
         }
     }
 
-    /// The signature `effect`, an offered operation, is performed under.
-    fn signature_of(&self, effect: &EffectName) -> &Signature {
+    /// The requirement `effect`, an offered operation, is performed under:
+    /// its signature and the contract its offer states.
+    fn requirement_of(&self, effect: &EffectName) -> &lash_kernel_doc::OperationRequirement {
         match self.namespaces.operation(effect) {
-            Some((_, offered)) => &offered.requirement.signature,
+            Some((_, offered)) => &offered.requirement,
             None => unreachable!("a wait's effect is an offered operation"),
         }
+    }
+
+    /// The signature `effect`, an offered operation, is performed under.
+    fn signature_of(&self, effect: &EffectName) -> &Signature {
+        &self.requirement_of(effect).signature
     }
 
     /// The refusal of a call whose dotted path names an operation the
@@ -342,16 +348,14 @@ impl Lowerer<'_> {
     fn wait_action(&mut self, wait: Wait, args: Vec<Expr>, then_yield: bool) -> Lowering<Operand> {
         match wait {
             Wait::Effect(effect) => {
-                let signature = self.signature_of(&effect).clone();
+                let requirement = self.requirement_of(&effect).clone();
+                let signature = requirement.signature.clone();
                 // The perform states the result type the tool declares, so
                 // an `Int` or a `Float` is decoded as declared, and what
                 // it gives is known to be that type.
                 let result = signature.result.clone();
                 let ty = Ty::decoded(&result);
-                self.performed.insert(
-                    effect.clone(),
-                    lash_kernel_doc::OperationRequirement::of_signature(signature),
-                );
+                self.performed.insert(effect.clone(), requirement);
                 let mut copied = Vec::with_capacity(args.len());
                 for expr in args {
                     // The boundary gives a literal back as it is: it holds

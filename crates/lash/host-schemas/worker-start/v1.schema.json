@@ -1642,7 +1642,7 @@
     },
     "OperationRequirement": {
       "additionalProperties": false,
-      "description": "An operation as code requires it: the signature it performs the\noperation under and the contract it was written against. A manifest\nstates one for each operation the document performs or reaches, and a\nlibrary body one for each operation it performs itself.",
+      "description": "An operation as code requires it: the signature it performs the\noperation under and the contract it was written against, which the\noperation's runner declares or derives. A manifest states one for each\noperation the document performs or reaches, and a library body one for\neach operation it performs itself. A changed contract under one\nsignature is a different requirement (OP-SAME-SIGNATURE).",
       "properties": {
         "contract": {
           "$ref": "#/$defs/ContractId"

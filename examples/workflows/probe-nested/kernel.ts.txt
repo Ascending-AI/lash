@@ -1,7 +1,7 @@
 kernel 1
 numbers float
-effect display.add_item(input: Any) -> Any
-effect gmail.list_recent(input: Any) -> Any
+effect display.add_item(input: Any) -> Any contract "1"
+effect gmail.list_recent(input: Any) -> Any contract "1"
 use bool.not = @740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d
 use brand.of = @bd9a21264286394a5cd731fecaa03951fb50517689667675c0788623eb529dc1
 use collection.holds_none = @a58e0ba0d11b84096fd0264a5a281ef308aa5fe9a7bf26dd7b662b283fa491fe

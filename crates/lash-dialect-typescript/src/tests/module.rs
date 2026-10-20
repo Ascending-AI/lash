@@ -13,9 +13,12 @@ use crate::DiagnosticCode;
 
 fn module(source: &str) -> Result<Lowered, crate::Diagnostic> {
     let effects = super::machine::effects();
-    let environment_namespaces =
-        lash_kernel_dialect::Namespaces::of_signatures(&effects, super::controls())
-            .expect("the test's effects are operations");
+    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
+        &effects,
+        &lash_kernel_doc::ContractId::new("1"),
+        super::controls(),
+    )
+    .expect("the test's effects are operations");
     let environment = Environment::new(super::library(), &environment_namespaces);
     let lowered = crate::lower(source, &environment, Mode::Module)?;
     lash_kernel_doc::validate_document(&lowered.document, super::library())
@@ -47,9 +50,12 @@ fn filtering_records_then_mapping_the_result_admits() {
         .get_mut(&EffectName::new("host.echo").unwrap())
         .unwrap()
         .result = Type::List(Box::new(Type::Any));
-    let environment_namespaces =
-        lash_kernel_dialect::Namespaces::of_signatures(&effects, super::controls())
-            .expect("the test's effects are operations");
+    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
+        &effects,
+        &lash_kernel_doc::ContractId::new("1"),
+        super::controls(),
+    )
+    .expect("the test's effects are operations");
     let environment = Environment::new(super::library(), &environment_namespaces);
     let lowered = crate::lower(
         r#"

@@ -130,9 +130,12 @@ fn spans_map_sites_and_label_comments_are_trivia() {
     );
 
     let effects = super::machine::effects();
-    let environment_namespaces =
-        lash_kernel_dialect::Namespaces::of_signatures(&effects, super::controls())
-            .expect("the test's effects are operations");
+    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
+        &effects,
+        &lash_kernel_doc::ContractId::new("1"),
+        super::controls(),
+    )
+    .expect("the test's effects are operations");
     let environment =
         lash_kernel_dialect::Environment::new(super::library(), &environment_namespaces);
     let module = |source: &str| {

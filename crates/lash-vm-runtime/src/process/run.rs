@@ -38,7 +38,7 @@ use super::{
     EFFECT_ARGUMENTS, EFFECT_UNKNOWN, KernelProcessEngine, KernelProcessFailureCode,
     KernelRecordedSettings, caused_failure, failure,
 };
-use crate::{HostBoundary, ProjectionCatalog};
+use crate::ProjectionCatalog;
 
 /// Why a `kernel_run` reached neither a park nor an end: the run left
 /// nothing, and the same run is asked again.
@@ -287,16 +287,6 @@ async fn kernel_run(
             ));
         }
     };
-    let boundary = match HostBoundary::of_links(&run.effects) {
-        Ok(boundary) => boundary,
-        Err(error) => {
-            return ended(failure(
-                KernelProcessFailureCode::BoundaryInvalid,
-                error.to_string(),
-                None,
-            ));
-        }
-    };
     let args = match entry_args(&document, &process_input) {
         Ok(args) => args,
         Err(message) => {
@@ -441,7 +431,7 @@ async fn kernel_run(
                     if let (Some(trace), Request::Effect(effect)) = (&trace, &request) {
                         trace.origin(&effect.identity, &effect.origin);
                     }
-                    issue(&boundary, run.now.0, request)
+                    issue(&run.effects, &document.manifest.effects, run.now.0, request)
                 })
                 .collect::<Vec<_>>();
             if let Some(trace) = &trace {
@@ -770,8 +760,19 @@ pub(super) fn admission_of(request: &Request) -> (lash_protocol_types::WaitId, A
     }
 }
 
-/// Resolves one wait the machine asked for against the host boundary.
-fn issue(boundary: &HostBoundary, now_ms: i64, request: Request) -> Issued {
+/// Resolves one wait the machine asked for against the effects the
+/// process's env links, under the contract the document requires of it.
+/// The link check at the start fitted each to the document's requirement,
+/// and a process links no turn control.
+fn issue(
+    effects: &std::collections::BTreeMap<lash_kernel_doc::EffectName, lash_core::OperationLink>,
+    required: &std::collections::BTreeMap<
+        lash_kernel_doc::EffectName,
+        lash_kernel_doc::OperationRequirement,
+    >,
+    now_ms: i64,
+    request: Request,
+) -> Issued {
     let (wait, admission) = admission_of(&request);
     let request = match request {
         Request::Sleep(sleep) => {
@@ -784,14 +785,18 @@ fn issue(boundary: &HostBoundary, now_ms: i64, request: Request) -> Issued {
         }
         Request::Effect(request) => request,
     };
-    if boundary.effect(&request.effect).is_none() {
+    let contract = required
+        .get(&request.effect)
+        .filter(|_| effects.contains_key(&request.effect))
+        .map(|requirement| requirement.contract.clone());
+    let Some(contract) = contract else {
         return Issued::Refused {
             wait,
             admission,
             kind: EFFECT_UNKNOWN.to_owned(),
             message: format!("the host offers no effect `{}`", request.effect),
         };
-    }
+    };
     let input = crate::tool_input(
         &request.args,
         |input| {
@@ -810,6 +815,7 @@ fn issue(boundary: &HostBoundary, now_ms: i64, request: Request) -> Issued {
             wait,
             admission,
             effect: request.effect.clone(),
+            contract,
             input,
         },
         Err(message) => Issued::Refused {

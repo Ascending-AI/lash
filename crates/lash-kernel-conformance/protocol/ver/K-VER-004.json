@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "migration redeclares definitions and documents with typed refusals",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(n: Int) -> Int\nmain { do perform echo(1) as Int finish null }\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(n: Int) -> Int contract \"1\"\nmain { do perform echo(1) as Int finish null }\n",
       "expected": {
         "prints": [],
         "trace": [

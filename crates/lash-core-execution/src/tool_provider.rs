@@ -1694,6 +1694,18 @@ pub trait ToolProvider: Send + Sync + 'static {
     fn readable_binding_formats(&self) -> &'static [crate::FormatVersion] {
         &[]
     }
+    /// The codec payload a link to the advertised tool `manifest` records:
+    /// its format, one of [`Self::readable_binding_formats`], and the
+    /// payload, which every call through the link reads back from its
+    /// context ([`AttemptContext::tool_execution_binding`]) and nothing
+    /// compares. `None`, the default, records none.
+    fn link_payload(
+        &self,
+        _manifest: &ToolManifest,
+        _config: &OwnerConfigView,
+    ) -> Option<(crate::FormatVersion, serde_json::Value)> {
+        None
+    }
     /// The start of the process an isolated call (its manifest names an
     /// isolation engine) runs: the engine's payload, the environment and the
     /// engine settings (D6). Admission asks once and records the answer; a

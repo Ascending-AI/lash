@@ -512,11 +512,11 @@ impl lash::tools::DeferredToolProvider for GrantingResolver {
                     // a restored cell that asked it again would see it.
                     lash::tools::DeferredOutcome::Unavailable { note: None }
                 } else if *path == format!("tools.{GRANTED}") {
-                    lash::tools::DeferredOutcome::Resolved {
-                        provider: codec.clone(),
-                        definition: granted(GRANTED),
-                        binding: binding.clone(),
-                    }
+                    lash::tools::DeferredOutcome::resolved(
+                        codec.clone(),
+                        granted(GRANTED),
+                        binding.clone(),
+                    )
                 } else if *path == format!("tools.{REFUSED}") {
                     lash::tools::DeferredOutcome::Refused {
                         reason: REFUSED_REASON.to_owned(),

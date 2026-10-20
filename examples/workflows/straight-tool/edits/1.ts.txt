@@ -1,7 +1,7 @@
 --- before
 -kernel 1
 -numbers float
--effect corpus.echo(input?: Json) -> Json
+-effect corpus.echo(input?: Json) -> Json contract "52910906e3f939a5ce2e34bd105cd37184ead8ac272080fcbff759b3b6db6560"
 -use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 -use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
 -use ts.await = @18a30299db399e09c5772b4431f1c4baf6e139a164f476b6fe173b1447d54a6f
@@ -19,7 +19,7 @@
 +++ after
 +kernel 1
 +numbers float
-+effect corpus.echo(input?: Json) -> Json
++effect corpus.echo(input?: Json) -> Json contract "52910906e3f939a5ce2e34bd105cd37184ead8ac272080fcbff759b3b6db6560"
 +use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 +use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
 +use ts.await = @18a30299db399e09c5772b4431f1c4baf6e139a164f476b6fe173b1447d54a6f
@@ -37,8 +37,8 @@
 
 Correspondence:
 {
-  "base": "6da3145cff05797d022c20fe1ba051f78165ed5d5bb997e75bc7b584f4eee01e",
-  "result": "4b2701bb49527fb72d5322d0a58060b7e5a03ded2c3f864ad71c161a838c8c80",
+  "base": "1ec60b75e754b02a62486afd1c2672688a55117000da9b9eb69f1841dc93e219",
+  "result": "6425c867924ed80ba4fddf4795a53d7df3353c501ddafe7ca0c3940f603b27e5",
   "entries": [
     {
       "from": {

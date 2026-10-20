@@ -8,7 +8,7 @@ pub use lash_kernel_check::{
     type_of_schema,
 };
 use lash_kernel_dialect::{EffectControl, Offered, OfferedSource, Operations, QualifiedOperation};
-use lash_kernel_doc::{ContractId, EffectName, OperationRequirement, Type};
+use lash_kernel_doc::{EffectName, OperationRequirement, Type};
 use lash_protocol_types::ToolId;
 
 /// Why a boundary could not be stated.
@@ -42,20 +42,42 @@ pub fn effect_controls(controls: &lash_protocol_types::TurnControls) -> BTreeSet
         .collect()
 }
 
+/// What the package that owns `effect`'s path in `view` declares of it
+/// (PKG-RUNNER); `None` on a path no package of the view owns.
+#[must_use]
+pub fn owned_operation(
+    view: &lash_kernel_package::PackageView<'_>,
+    effect: &EffectName,
+) -> Option<lash_execution_contracts::process::OwnedOperation> {
+    let operation = QualifiedOperation::from_effect(effect).ok()?;
+    let export = view.operation(&operation)?;
+    Some(lash_execution_contracts::process::OwnedOperation {
+        package: operation.package.to_string(),
+        requirement: export.requirement.clone(),
+        intents: export
+            .intents
+            .iter()
+            .map(|intent| intent.0.clone())
+            .collect(),
+    })
+}
+
 /// A tool as an offered operation: it takes the tool's input as one record
-/// and gives its output, both typed from the tool's JSON schemas.
+/// and gives its output, both typed from the tool's JSON schemas, under the
+/// contract the tool serves.
 #[must_use]
 pub fn offered_tool(
     manifest: &lash_protocol_types::ToolManifest,
-    input: &lash_protocol_types::JsonSchema,
-    output: &lash_protocol_types::JsonSchema,
+    contract: &lash_protocol_types::ToolContract,
     source: OfferedSource,
 ) -> Offered {
-    let signature = lash_protocol_types::tool_signature(input, output);
     Offered {
         requirement: OperationRequirement {
-            contract: ContractId::of_signature(&signature),
-            signature,
+            signature: lash_protocol_types::tool_signature(
+                &contract.input_schema.canonical,
+                &contract.output_schema.canonical,
+            ),
+            contract: manifest.contract_id(contract),
         },
         controls: effect_controls(&manifest.declaration().controls),
         read: manifest.execution_policy == lash_protocol_types::ExecutionPolicy::Read,
@@ -87,7 +109,8 @@ impl HostBoundary {
         Ok(())
     }
 
-    /// Offers the catalog tool `manifest` describes as its operation.
+    /// Offers the catalog tool `manifest` describes, under its schema
+    /// `contract`, as its operation.
     ///
     /// # Errors
     ///
@@ -95,15 +118,13 @@ impl HostBoundary {
     pub fn offer_tool(
         &mut self,
         manifest: &lash_protocol_types::ToolManifest,
-        input: &lash_protocol_types::JsonSchema,
-        output: &lash_protocol_types::JsonSchema,
+        contract: &lash_protocol_types::ToolContract,
     ) -> Result<(), BoundaryError> {
         self.offer_operation(
             manifest.operation.clone(),
             offered_tool(
                 manifest,
-                input,
-                output,
+                contract,
                 OfferedSource::Catalog {
                     tool: manifest.id.to_string(),
                 },
@@ -126,56 +147,7 @@ impl HostBoundary {
             if !entry.manifest.declaration().controls.is_empty() {
                 continue;
             }
-            boundary.offer_tool(
-                &entry.manifest,
-                &entry.contract.input_schema.canonical,
-                &entry.contract.output_schema.canonical,
-            )?;
-        }
-        Ok(boundary)
-    }
-
-    /// Every effect a process's env links, under its path, typed from the
-    /// surface the link retained (P3): what a run of that env may perform.
-    /// A linked tool that declares a turn control is not offered, as
-    /// [`Self::of_catalog`] offers none.
-    ///
-    /// # Errors
-    ///
-    /// [`BoundaryError`] when a path is no canonical operation.
-    pub fn of_links(
-        effects: &BTreeMap<EffectName, lash_core::EffectLink>,
-    ) -> Result<Self, BoundaryError> {
-        let mut boundary = Self::new();
-        for (effect, link) in effects {
-            if !link.surface.declaration.controls.is_empty() {
-                continue;
-            }
-            let operation = QualifiedOperation::from_effect(effect).map_err(|error| {
-                BoundaryError::EffectName {
-                    name: effect.to_string(),
-                    message: error.to_string(),
-                }
-            })?;
-            let signature = lash_protocol_types::tool_signature(
-                &link.surface.input_schema.canonical,
-                &link.surface.output_schema.canonical,
-            );
-            boundary.offer_operation(
-                operation,
-                Offered {
-                    requirement: OperationRequirement {
-                        contract: ContractId::of_signature(&signature),
-                        signature,
-                    },
-                    controls: BTreeSet::new(),
-                    read: link.surface.execution_policy
-                        == lash_protocol_types::ExecutionPolicy::Read,
-                    source: OfferedSource::Catalog {
-                        tool: link.tool().to_string(),
-                    },
-                },
-            )?;
+            boundary.offer_tool(&entry.manifest, &entry.contract)?;
         }
         Ok(boundary)
     }
@@ -412,6 +384,81 @@ mod tests {
             Ok(Type::Json)
         );
         assert!(type_of_schema(&serde_json::json!({"oneOf": []})).is_err());
+    }
+
+    /// PKG-RUNNER: on a path a package owns, a tool runs the operation only
+    /// when it declares the package's contract id and intents and serves
+    /// its signature. On the `dataframe` fixture's `run`, a runner that
+    /// declares `dataframe.run/1` passes the contract and intent gates; one
+    /// declaring another id, or deriving its id, is refused, naming the
+    /// tool and `dataframe`.
+    #[test]
+    fn a_runner_on_a_packaged_path_serves_the_packages_contract() {
+        let lash = lash_vm_releases::built().expect("lash's packages");
+        let kernel = lash
+            .iter()
+            .find(|package| package.path().to_string() == "kernel")
+            .expect("the kernel package");
+        let dataframe =
+            lash_kernel_package::testing::dataframe(kernel).expect("the fixture builds");
+        let held =
+            lash_kernel_package::HeldPackages::install(lash.iter().cloned().chain([dataframe]))
+                .expect("one registration");
+        let view = held.view(&held.own()).expect("the node's own set");
+        let effect = EffectName::new("dataframe.run").expect("an effect name");
+        let owner = owned_operation(&view, &effect).expect("the fixture owns `run`");
+        assert_eq!(owner.package, "dataframe");
+        assert_eq!(
+            owner.requirement.contract,
+            lash_kernel_doc::ContractId::new("dataframe.run/1")
+        );
+        let runner = |contract: Option<&str>| {
+            let draft = lash_core::ToolDefinition::raw(
+                "tool:dataframe_runner",
+                "dataframe.run",
+                "Runs a plan.",
+                serde_json::json!({}),
+                serde_json::json!({ "type": "array" }),
+            )
+            .expect("valid declared tool schemas");
+            match contract {
+                Some(id) => draft.declared_contract(lash_kernel_doc::ContractId::new(id)),
+                None => draft,
+            }
+            .with_execution(std::time::Duration::from_secs(30))
+        };
+        let check = |runner: lash_core::ToolDefinition| {
+            lash_execution_contracts::process::check_runner(
+                &effect,
+                &owner,
+                &runner.manifest,
+                &runner.contract,
+            )
+        };
+        // A runner declaring the package's id and intents passes those
+        // gates; a tool's input projects to one `input` record, which does
+        // not serve `run(plan: Any)`, so its signature is what refuses it.
+        let declared = check(runner(Some("dataframe.run/1")));
+        assert!(
+            matches!(
+                &declared,
+                Err(lash_execution_contracts::process::ProcessEnvRefusal::RunnerNotPackaged { reason, .. })
+                    if reason.starts_with("its signature")
+            ),
+            "{declared:?}"
+        );
+        for refused in [runner(Some("dataframe.run/2")), runner(None)] {
+            let refusal = check(refused).expect_err("another or a derived id is refused");
+            let rendered = refusal.to_string();
+            assert!(
+                matches!(
+                    refusal,
+                    lash_execution_contracts::process::ProcessEnvRefusal::RunnerNotPackaged { .. }
+                ) && rendered.contains("tool:dataframe_runner")
+                    && rendered.contains("dataframe"),
+                "{rendered}"
+            );
+        }
     }
 
     /// Law 11 (FIG-5781): a process cannot end a session turn, so the

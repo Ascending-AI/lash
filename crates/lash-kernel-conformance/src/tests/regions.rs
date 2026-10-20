@@ -913,7 +913,7 @@ fn program_case(name: &str, text: &str, call_depth: u32) -> Case {
     document.manifest.functions = lash_kernel_check::requirements(&document, &registry).functions;
     // A refused program runs in no plan, and the law would compare nothing.
     let mut admission = lash_kernel_check::Environment::new(&registry);
-    admission.effects = document.manifest.signatures();
+    admission.effects = document.manifest.effects.clone();
     lash_kernel_check::admit(&document, &admission)
         .unwrap_or_else(|refusal| panic!("{name} must be admitted: {refusal:?}"));
     let mut environment = Environment::default();

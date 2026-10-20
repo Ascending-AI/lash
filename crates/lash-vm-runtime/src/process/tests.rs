@@ -166,6 +166,7 @@ fn effect(wait: u64, identity: EffectId) -> Issued {
         wait: lash_kernel_doc::testkit::wait_id(wait),
         admission: admitted(identity),
         effect: lash_kernel_doc::EffectName::new("tools.fetch").expect("an effect name"),
+        contract: lash_kernel_doc::ContractId::new("1"),
         input: serde_json::json!({ "wait": wait }),
     }
 }
@@ -476,7 +477,7 @@ fn a_refused_effect_is_raised_without_a_step_and_a_withdrawn_wait_is_never_deliv
 fn workflow_admission_refusals_have_stable_local_codes() {
     use super::workflow::WorkflowAdmissionRefusal;
     let document = lash_kernel_doc::parse_document(
-        "kernel 1\nnumbers float\neffect fetch(url: Text) -> Any\neffect store(key: Text) -> Any\n\nmain {\n  let a = perform fetch(\"u\") as Any\n  let b = perform store(\"k\") as Any\n}\n",
+        "kernel 1\nnumbers float\neffect fetch(url: Text) -> Any contract \"1\"\neffect store(key: Text) -> Any contract \"1\"\n\nmain {\n  let a = perform fetch(\"u\") as Any\n  let b = perform store(\"k\") as Any\n}\n",
     ).expect("document");
     let functions = BTreeMap::new();
     let refusal =
@@ -518,8 +519,8 @@ fn workflow_admission_checks_only_the_selected_entry() {
     let document = lash_kernel_doc::parse_document(
         r#"kernel 1
 numbers float
-effect a.run(input: Any) -> Any
-effect b.run(input: Any) -> Any
+effect a.run(input: Any) -> Any contract "1"
+effect b.run(input: Any) -> Any contract "1"
 entry worker() -> Any
 fn worker() { let got = perform b.run(null) as Any return got }
 main { let got = perform a.run(null) as Any finish got }
@@ -530,9 +531,7 @@ main { let got = perform a.run(null) as Any finish got }
     let mut environment = lash_kernel_check::Environment::new(&functions);
     environment.effects.insert(
         lash_kernel_doc::EffectName::new("b.run").unwrap(),
-        document.manifest.effects[&lash_kernel_doc::EffectName::new("b.run").unwrap()]
-            .signature
-            .clone(),
+        document.manifest.effects[&lash_kernel_doc::EffectName::new("b.run").unwrap()].clone(),
     );
     super::WorkflowDocument::admit(
         document,

@@ -272,10 +272,13 @@ fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
             operation(),
             RecordedEffect {
                 tool: lash_core::ToolId::new("read"),
-                signature: lash_kernel_doc::Signature {
-                    params: Vec::new(),
-                    result: lash_kernel_doc::Type::Any,
-                },
+                requirement: lash_kernel_doc::OperationRequirement::new(
+                    lash_kernel_doc::Signature {
+                        params: Vec::new(),
+                        result: lash_kernel_doc::Type::Any,
+                    },
+                    lash_kernel_doc::ContractId::new("1"),
+                ),
                 controls: lash_core::TurnControls::default(),
             },
         )]

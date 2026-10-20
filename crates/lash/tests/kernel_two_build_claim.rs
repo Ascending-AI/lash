@@ -773,7 +773,7 @@ const HOLD_TOOL: &str = "kernel_claim_hold";
 /// `worker()` performs the hold tool once and answers what it answered.
 const HOLDING_WORKER: &str = r#"kernel 1
 numbers float
-effect hold.run(input: Any) -> Any
+effect hold.run(input: Any) -> Any contract "1"
 entry worker() -> Any
 
 fn worker() {
@@ -798,12 +798,24 @@ fn hold_definition() -> lash::tools::ToolDefinition {
         serde_json::json!({ "type": "string" }),
     )
     .expect("the hold tool's schemas")
+    // The contract the laws' kernel texts pin.
+    .declared_contract(lash_core::ContractId::new("1"))
     .with_execution(Duration::from_secs(120))
     .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(4).unwrap(),
         1,
         1,
     ))
+}
+
+/// The hold tool as a later build serves it: its schemas unchanged, under
+/// the contract `contract` it declares.
+fn hold_definition_under(contract: &str) -> lash::tools::ToolDefinition {
+    let mut definition = hold_definition();
+    definition.manifest.contract = lash_core::ContractSource::Declared {
+        id: lash_core::ContractId::new(contract),
+    };
+    definition
 }
 
 /// The hold tool's deliveries, per process run. It outlives every build.
@@ -960,13 +972,12 @@ async fn payload_under(
         .expect("the core reads workflow documents");
     let mut document = lash::workflow::document::parse_document(text).expect("the document parses");
     for (effect, requirement) in &mut document.manifest.effects {
-        *requirement = lash::workflow::document::OperationRequirement::of_signature(
-            environment
-                .effects()
-                .get(effect)
-                .unwrap_or_else(|| panic!("the environment offers `{effect}`"))
-                .clone(),
-        );
+        *requirement = environment
+            .checker()
+            .effects
+            .get(effect)
+            .unwrap_or_else(|| panic!("the environment offers `{effect}`"))
+            .clone();
     }
     document.manifest.functions =
         lash::workflow::graph::requirements(&document, environment.functions()).functions;
@@ -1183,7 +1194,7 @@ async fn process_step_crosses_deploy() {
 /// answered or the error it caught.
 const SLEEPING_HOLD_WORKER: &str = r#"kernel 1
 numbers float
-effect hold.run(input: Any) -> Any
+effect hold.run(input: Any) -> Any contract "1"
 entry worker() -> Any
 
 fn worker() {
@@ -1203,12 +1214,11 @@ main {
 }
 "#;
 
-/// SURFACE-CHANGE-OUTCOME (law 9, process arm; D3, §5a): build N starts a
-/// process whose env retained the hold tool's surface, and stops while the
-/// process sleeps. A later build serving the same provider key with the
-/// tool changed (its execution policy) delivers the call the process issues
-/// once it wakes a typed, catchable `linked_tool_changed` error, and runs
-/// no body. The law asserts this build's own outcome; a build serving the
+/// OP-CONTRACT-PIN (process arm; D3, §5a): build N starts a process whose
+/// code pins the hold tool's contract `1`, and stops while the process
+/// sleeps. A later build serving the same provider key with the tool under
+/// contract `2` delivers the call the process issues once it wakes a typed,
+/// catchable `operation_contract_changed` error, and runs no body. The law asserts this build's own outcome; a build serving the
 /// retained surface runs the recorded call (`process_step_crosses_deploy`).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_changed_tool_answers_a_new_process_call_with_a_typed_catchable_error() {
@@ -1230,7 +1240,7 @@ async fn a_changed_tool_answers_a_new_process_call_with_a_typed_catchable_error(
     drop(first);
     unowned(&backend, &process).await;
 
-    let changed = hold_definition().with_execution_policy(lash_core::ExecutionPolicy::Once);
+    let changed = hold_definition_under("2");
     let (_, later) = with_components(
         &stores,
         "surface-changed",
@@ -1252,7 +1262,7 @@ async fn a_changed_tool_answers_a_new_process_call_with_a_typed_catchable_error(
     );
     let caught = output.value_for_projection().to_string();
     assert!(
-        caught.contains("linked_tool_changed") && caught.contains(HOLD_TOOL),
+        caught.contains("operation_contract_changed") && caught.contains(HOLD_TOOL),
         "the call answered the typed drift error naming its tool: {caught}"
     );
     assert_eq!(
@@ -1265,7 +1275,8 @@ async fn a_changed_tool_answers_a_new_process_call_with_a_typed_catchable_error(
 
 // --- SUCCESSOR-PAIR-CARRIES-WAITS (FIG-6121 law 17, D2) --------------------
 
-/// Law 9: takeover checks an already admitted call before its body is resumed.
+/// Law 9 (OP-LINK-ONE): takeover judges an already admitted call by its pinned
+/// contract before its body is resumed.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_admitted_call_on_a_changed_surface_settles_typed_without_restarting() {
     let stores: Arc<dyn StoreSet> =
@@ -1286,11 +1297,7 @@ async fn an_admitted_call_on_a_changed_surface_settles_typed_without_restarting(
     first.shutdown().await.unwrap();
     drop(first);
     unowned(&backend, &process).await;
-    let changed = hold_definition().with_execution_policy(lash_core::ExecutionPolicy::repeatable(
-        std::num::NonZeroU32::new(3).unwrap(),
-        1,
-        1,
-    ));
+    let changed = hold_definition_under("2");
     let (_, later) = with_components(
         &stores,
         "admitted-changed",
@@ -1311,7 +1318,7 @@ async fn an_admitted_call_on_a_changed_surface_settles_typed_without_restarting(
         output
             .value_for_projection()
             .to_string()
-            .contains("linked_tool_changed"),
+            .contains("operation_contract_changed"),
         "{output:?}"
     );
     assert_eq!(

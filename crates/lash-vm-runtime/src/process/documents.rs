@@ -1070,7 +1070,7 @@ mod tests {
                 .expect("one package registration"),
         );
         let document = lash_kernel_doc::parse_document(&format!(
-            "kernel 1\nnumbers float\nuse fixture.helper = @{helper}\neffect ping(x: Any) -> Any\nentry work() -> Any\nfn work() {{ let n = invoke fixture.helper() let x = perform ping(n) as Any return x }}\nmain {{ }}",
+            "kernel 1\nnumbers float\nuse fixture.helper = @{helper}\neffect ping(x: Any) -> Any contract \"1\"\nentry work() -> Any\nfn work() {{ let n = invoke fixture.helper() let x = perform ping(n) as Any return x }}\nmain {{ }}",
         )).expect("document");
         let identity = document.identity();
         let store = Arc::new(Stored(Mutex::new(Some(document.canonical_bytes()))));

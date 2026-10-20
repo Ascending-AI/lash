@@ -495,6 +495,32 @@ impl ProcessEngineRegistry {
             .await
     }
 
+    /// Check that `env` links exactly `performed`, what a run on the `kind`
+    /// engine performs, each to a tool its components serve under the
+    /// contract the code requires and, on a path a package owns in the
+    /// engine's package view, as the package declares it (P1, PKG-RUNNER),
+    /// fitting under `fits` ([`ProcessComponentRegistry::check_links`]).
+    ///
+    /// # Errors
+    ///
+    /// The pair's typed [`crate::ProcessEnvRefusal`].
+    pub fn check_links(
+        &self,
+        kind: &str,
+        env: &Arc<crate::ProcessEnv>,
+        performed: &PerformedEffects,
+        fits: &std::collections::BTreeMap<
+            lash_kernel_doc::EffectName,
+            lash_execution_contracts::process::FitPolicy,
+        >,
+    ) -> Result<(), crate::ProcessEnvRefusal> {
+        let owned = self
+            .document_provider(kind)
+            .map(|documents| documents.owned_operations(performed))
+            .unwrap_or_default();
+        self.components().check_links(env, performed, &owned, fits)
+    }
+
     /// Resolve the engine a `ProcessInput::Engine` start names, refusing a kind
     /// this host never registered.
     ///

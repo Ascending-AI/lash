@@ -359,9 +359,12 @@ fn judge(execution: Execution, meta: &Metadata) -> Observed {
 fn lower(source: &str) -> Result<Lowered, lash_dialect_typescript::Diagnostic> {
     let effects = finish_effect();
     let bindings = BTreeSet::new();
-    let environment_namespaces =
-        lash_kernel_dialect::Namespaces::of_signatures(&effects, finish_control())
-            .expect("the test's effects are operations");
+    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
+        &effects,
+        &lash_kernel_doc::ContractId::new("1"),
+        finish_control(),
+    )
+    .expect("the test's effects are operations");
     let environment = Environment::new(library(), &environment_namespaces);
     lash_dialect_typescript::lower(
         source,
@@ -556,9 +559,12 @@ pub(crate) fn printing_relowers(relative: &str) -> bool {
     .into_iter()
     .map(Name::new)
     .collect();
-    let environment_namespaces =
-        lash_kernel_dialect::Namespaces::of_signatures(&effects, finish_control())
-            .expect("the test's effects are operations");
+    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
+        &effects,
+        &lash_kernel_doc::ContractId::new("1"),
+        finish_control(),
+    )
+    .expect("the test's effects are operations");
     let environment = Environment::new(library(), &environment_namespaces);
     let Ok(original) = lash_dialect_typescript::lower(
         &source,

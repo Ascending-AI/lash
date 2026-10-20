@@ -839,11 +839,14 @@ impl Processes {
                 lash_execution_contracts::plugin_error::PluginError::ProcessEnvRefused { refusal },
             )
         };
+        let kind = resolved.draft.engine_kind().as_str();
         let performed = engines
-            .performed_effects(resolved.draft.engine_kind().as_str(), &payload)
+            .performed_effects(kind, &payload)
             .await
             .map_err(refused)?;
-        engines.capture_env(&performed, candidate).map_err(refused)
+        engines
+            .capture_env(kind, &performed, candidate)
+            .map_err(refused)
     }
 
     /// The link check of a start of the `kind` engine on `payload` under
@@ -877,10 +880,8 @@ impl Processes {
             .performed_effects(kind, payload)
             .await
             .map_err(refused)?;
-        lash_execution_contracts::process::check_links(env, &performed, fits).map_err(refused)?;
         engines
-            .components()
-            .check_served(&std::sync::Arc::new(env.clone()))
+            .check_links(kind, &std::sync::Arc::new(env.clone()), &performed, fits)
             .map_err(refused)?;
         Ok(())
     }

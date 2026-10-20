@@ -78,9 +78,12 @@ pub(super) fn main() -> Result<(), String> {
         EffectName::new("perf.finish").expect("tool name"),
         BTreeSet::from([EffectControl::Finish]),
     )]);
-    let environment_namespaces =
-        lash_kernel_dialect::Namespaces::of_signatures(&effects, &controls)
-            .expect("the test's effects are operations");
+    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
+        &effects,
+        &lash_kernel_doc::ContractId::new("1"),
+        &controls,
+    )
+    .expect("the test's effects are operations");
     let environment = Environment::new(&library, &environment_namespaces);
     let registry_ns = began.elapsed().as_nanos();
     let lower = Instant::now();

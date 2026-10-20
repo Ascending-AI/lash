@@ -374,6 +374,73 @@ fn is_inline(value: &bool) -> bool {
     *value
 }
 
+/// A host's version label for a tool on a path no package owns: one input
+/// of the tool's derived contract id. A host whose tool changes behaviour
+/// under the same schemas changes its tag. Empty unless stated.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(transparent)]
+pub struct HostTag(String);
+
+impl HostTag {
+    /// The tag `text`.
+    pub fn new(text: impl Into<String>) -> Self {
+        Self(text.into())
+    }
+
+    /// The tag's text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+/// Where a tool's contract id comes from: what its host stated, never the
+/// id it derives ([`ToolDefinition::contract_id`]).
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ContractSource {
+    /// A package operation's declared id (`contract 3`): required on a path
+    /// a package owns, and authoritative there.
+    Declared { id: lash_kernel_doc::ContractId },
+    /// Derived from the tool's semantic facts and `tag`: a tool on a path no
+    /// package owns.
+    Derived {
+        #[serde(default, skip_serializing_if = "HostTag::is_empty")]
+        tag: HostTag,
+    },
+}
+
+impl Default for ContractSource {
+    fn default() -> Self {
+        Self::Derived {
+            tag: HostTag::default(),
+        }
+    }
+}
+
+impl ContractSource {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
 /// Tool metadata exposed to prompts, catalogs, and UI. Catalog membership —
 /// being present in a [`ToolProvider`]'s manifest list — is the execution gate;
 /// there is no per-manifest tier. Its schemas stay in [`ToolContract`]; how
@@ -407,6 +474,10 @@ pub struct ToolManifest {
         skip_serializing_if = "is_default_tool_execution_policy"
     )]
     pub execution_policy: ExecutionPolicy,
+    /// Where the tool's contract id comes from, as its host stated it; the
+    /// id itself is computed ([`ToolDefinition::contract_id`]).
+    #[serde(default, skip_serializing_if = "ContractSource::is_default")]
+    pub contract: ContractSource,
     /// How long one run of the tool's body may take, set by its host.
     execution: std::time::Duration,
     /// How long a call may stay parked waiting for its completion, set by
@@ -441,6 +512,8 @@ struct ManifestRecord {
     #[serde(default = "default_tool_execution_policy")]
     execution_policy: ExecutionPolicy,
     #[serde(default)]
+    contract: ContractSource,
+    #[serde(default)]
     execution: Option<std::time::Duration>,
     #[serde(default)]
     park: Option<ParkBound>,
@@ -472,6 +545,7 @@ impl<'de> serde::Deserialize<'de> for ToolManifest {
             bindings: record.bindings,
             argument_projection: record.argument_projection,
             execution_policy: record.execution_policy,
+            contract: record.contract,
             execution,
             park: None,
             declaration: ToolDeclaration::default(),
@@ -486,6 +560,40 @@ impl<'de> serde::Deserialize<'de> for ToolManifest {
 const STANDARD_NAME_BUDGET: usize = 64;
 
 impl ToolManifest {
+    /// The contract id this tool serves under `contract`, its schema
+    /// contract: the declared id, or one derived from the input schema,
+    /// output schema, output contract, declared intents and host tag, and
+    /// from nothing else. Computed from the current fields on each read,
+    /// never stored.
+    #[must_use]
+    pub fn contract_id(&self, contract: &ToolContract) -> lash_kernel_doc::ContractId {
+        match &self.contract {
+            ContractSource::Declared { id } => id.clone(),
+            ContractSource::Derived { tag } => {
+                #[derive(serde::Serialize)]
+                struct DerivedContract<'a> {
+                    input_schema: &'a SchemaContract,
+                    output_schema: &'a SchemaContract,
+                    output_contract: &'a ToolOutputContract,
+                    intents: &'a [crate::ToolIntentKind],
+                    tag: &'a HostTag,
+                }
+                let facts = DerivedContract {
+                    input_schema: &contract.input_schema,
+                    output_schema: &contract.output_schema,
+                    output_contract: &contract.output_contract,
+                    intents: &self.declaration.intents,
+                    tag,
+                };
+                let bytes = serde_json::to_vec(&facts).unwrap_or_default();
+                lash_kernel_doc::ContractId::new(crate::core_support::blake3_domain_hash_hex(
+                    DERIVED_CONTRACT_DOMAIN,
+                    bytes,
+                ))
+            }
+        }
+    }
+
     /// The tool's model-facing name in Standard mode: its operation's
     /// segments joined with `__` (`inbox__send_item`). A canonical segment
     /// holds no `__`, so distinct operations get distinct names. A name over
@@ -772,6 +880,8 @@ pub struct ToolDraft {
     description: String,
     bindings: std::collections::BTreeMap<String, serde_json::Value>,
     contract: ToolContract,
+    /// Where the tool's contract id comes from.
+    source: ContractSource,
     /// The turn controls a [`ToolDefinition::control`] draft declares.
     controls: crate::TurnControls,
 }
@@ -802,6 +912,22 @@ impl ToolDraft {
         }
     }
 
+    /// States the host's tag: the version label its derived contract id
+    /// hashes beside the tool's semantic facts. Empty by default.
+    #[must_use]
+    pub fn host_tag(mut self, tag: HostTag) -> Self {
+        self.source = ContractSource::Derived { tag };
+        self
+    }
+
+    /// States the tool's contract id: a package operation's declared id,
+    /// which a tool served on the package's path must carry.
+    #[must_use]
+    pub fn declared_contract(mut self, id: lash_kernel_doc::ContractId) -> Self {
+        self.source = ContractSource::Declared { id };
+        self
+    }
+
     /// Sets how long one run of the tool's body may take: the bound every
     /// tool's host sets, which makes the draft a definition.
     pub fn with_execution(self, execution: std::time::Duration) -> ToolDefinition {
@@ -814,6 +940,7 @@ impl ToolDraft {
                 bindings: self.bindings,
                 argument_projection: ToolArgumentProjectionPolicy::default(),
                 execution_policy: default_tool_execution_policy(),
+                contract: self.source,
                 execution,
                 park: None,
                 declaration: ToolDeclaration::default().with_controls(self.controls),
@@ -907,6 +1034,7 @@ impl ToolDefinition {
         Ok(ToolDraft {
             description,
             controls: crate::TurnControls::none(),
+            source: ContractSource::default(),
             bindings: std::collections::BTreeMap::new(),
             contract: ToolContract {
                 identity: Some(ToolContractIdentity {
@@ -1114,6 +1242,12 @@ impl ToolDefinition {
         ToolContract::default_input_schema()
     }
 
+    /// The contract id this tool serves ([`ToolManifest::contract_id`]).
+    #[must_use]
+    pub fn contract_id(&self) -> lash_kernel_doc::ContractId {
+        self.manifest.contract_id(&self.contract)
+    }
+
     /// Tool identity.
     pub fn id(&self) -> &ToolId {
         &self.manifest.id
@@ -1158,6 +1292,9 @@ impl ToolDefinition {
     }
 }
 
+/// version_surface = "coexist"
+/// version_guard(items(DERIVED_CONTRACT_DOMAIN, contract_id))
+const DERIVED_CONTRACT_DOMAIN: &str = "lash-derived-tool-contract/v1";
 /// The JSON Schema of `T`, as schemars generates it.
 pub fn schema_for<T>() -> serde_json::Value
 where
@@ -1213,5 +1350,72 @@ mod authored_examples_tests {
         );
         let schema = serde_json::to_value(schemars::schema_for!(ToolContract)).expect("schema");
         assert!(schema["properties"].get("examples").is_none());
+    }
+}
+
+#[cfg(test)]
+mod contract_id_tests {
+    use super::*;
+
+    fn draft(description: &str, output: serde_json::Value) -> ToolDraft {
+        ToolDefinition::raw(
+            "tool:law",
+            "tools.law",
+            description,
+            serde_json::json!({ "type": "object" }),
+            output,
+        )
+        .expect("valid declared tool schemas")
+    }
+
+    const BOUND: std::time::Duration = std::time::Duration::from_secs(30);
+
+    /// OP-CONTRACT-SEMANTIC: a derived contract id is computed from the
+    /// input schema, output schema, output contract, declared intents and
+    /// host tag, and from nothing else; after any builder method it equals
+    /// the formula over the definition's current fields, whatever was read
+    /// before and in whatever order the fields were set.
+    #[test]
+    fn a_derived_contract_id_reads_the_semantic_fields_alone() {
+        let object = serde_json::json!({ "type": "object" });
+        let base = draft("one", object.clone()).with_execution(BOUND);
+        let id = base.contract_id();
+        let unrelated = draft("reworded", object.clone())
+            .with_execution(BOUND)
+            .with_execution(std::time::Duration::from_secs(90))
+            .with_execution_policy(ExecutionPolicy::Once);
+        assert_eq!(unrelated.contract_id(), id, "description, bound and policy");
+
+        let output = ToolOutputContract::from_input_schema("x", None);
+        let intents = ToolDeclaration::default().with_intents([crate::ToolIntentKind::ALL[0]]);
+        let tag = HostTag::new("v2");
+        let changed = [
+            base.clone().with_output_contract(output.clone()),
+            base.clone()
+                .with_declaration(intents.clone(), None)
+                .expect("a valid declaration"),
+            draft("one", serde_json::json!({ "type": "array" })).with_execution(BOUND),
+            draft("one", object.clone())
+                .host_tag(tag.clone())
+                .with_execution(BOUND),
+        ];
+        for definition in &changed {
+            assert_ne!(definition.contract_id(), id, "{definition:?}");
+        }
+        // Every part set, in two orders, with a read between.
+        let one = changed[3]
+            .clone()
+            .with_output_contract(output.clone())
+            .with_declaration(intents.clone(), None)
+            .expect("a valid declaration");
+        let first = draft("other", object)
+            .host_tag(tag)
+            .with_execution(BOUND)
+            .with_declaration(intents, None)
+            .expect("a valid declaration");
+        let read = first.contract_id();
+        let other = first.with_output_contract(output);
+        assert_ne!(other.contract_id(), read, "the read is never stale");
+        assert_eq!(other.contract_id(), one.contract_id());
     }
 }

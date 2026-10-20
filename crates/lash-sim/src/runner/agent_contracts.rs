@@ -425,7 +425,7 @@ async fn facade_final_value_execution(
         vec![provider_response],
         expected_final_value.clone(),
         None,
-        ProcessSurface::Absent,
+        ProcessTools::Absent,
     )
     .await
 }
@@ -435,7 +435,7 @@ async fn facade_final_value_execution(
 /// declare that the same way their mirrored facade agent scenarios do, rather
 /// than every fixed contract paying for a surface it never names.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum ProcessSurface {
+enum ProcessTools {
     Absent,
     Installed,
 }
@@ -454,7 +454,7 @@ async fn facade_final_value_execution_with_process_surface(
         vec![provider_response],
         expected_final_value.clone(),
         None,
-        ProcessSurface::Installed,
+        ProcessTools::Installed,
     )
     .await
 }
@@ -474,7 +474,7 @@ async fn facade_final_value_execution_with_tools(
         provider_responses,
         expected_final_value.clone(),
         tools,
-        ProcessSurface::Absent,
+        ProcessTools::Absent,
     )
     .await
 }
@@ -486,7 +486,7 @@ async fn facade_final_value_execution_inner(
     provider_responses: Vec<&'static str>,
     expected_final_value: Value,
     tools: Option<Arc<dyn lash_core::ToolProvider>>,
-    process_surface: ProcessSurface,
+    process_surface: ProcessTools,
 ) -> Result<Value, FixedScriptRunnerError> {
     let events = Arc::new(RuntimeProofRecordingEvents::default());
     let (engine, backend) = contract_world().await?;
@@ -512,7 +512,7 @@ async fn facade_final_value_execution_inner(
                 .build()
                 .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?,
         );
-    if process_surface == ProcessSurface::Installed {
+    if process_surface == ProcessTools::Installed {
         builder = with_contract_processes(builder, tools, None);
     } else if let Some(tools) = tools {
         builder = builder.tools(lash::tool_provider_key!("tools"), tools);

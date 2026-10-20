@@ -1,6 +1,6 @@
 kernel 1
 numbers float
-effect corpus.capture(input: Record{list: List(Any)}) -> Json
+effect corpus.capture(input: Record{list: List(Any)}) -> Json contract "8be2f3c2bb16abe57355aa08cb729511defddba2c4adeb4b1744edd4e7d329e1"
 use bool.not = @740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d
 use brand.of = @bd9a21264286394a5cd731fecaa03951fb50517689667675c0788623eb529dc1
 use collection.function_check = @a76697deec5c174c74ed173a04b4207532f093c3fa95ae478cdebc9c38466e0c

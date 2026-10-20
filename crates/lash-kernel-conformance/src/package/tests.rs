@@ -396,7 +396,7 @@ fn conf_meter_performing_callback_plan_emits_the_bodys_events() {
     let (held, registry) = installed();
     let id = registry.named("ts.array.forEach").next().unwrap();
     let document = format!(
-        "kernel 1\nnumbers by_spelling\neffect echo(value: Any) -> Null\nuse ts.array.forEach = @{id}\nmain {{ let visit = fn(context, args) {{ let value = args[0] do perform echo(value) as Null return null }} let callbacks = [visit] let xs = [1, 2] do invoke ts.array.forEach(xs, callbacks) finish null }}"
+        "kernel 1\nnumbers by_spelling\neffect echo(value: Any) -> Null contract \"1\"\nuse ts.array.forEach = @{id}\nmain {{ let visit = fn(context, args) {{ let value = args[0] do perform echo(value) as Null return null }} let callbacks = [visit] let xs = [1, 2] do invoke ts.array.forEach(xs, callbacks) finish null }}"
     );
     let mut case = close(case("metered callback performs twice", document), &registry);
     case.environment.deliveries = (0..2)

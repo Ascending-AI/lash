@@ -821,19 +821,19 @@ mod tests {
                 .map(|path| {
                     (
                         (*path).into(),
-                        DeferredOutcome::Resolved {
-                            provider: ToolProviderHandle::new(
+                        DeferredOutcome::resolved(
+                            ToolProviderHandle::new(
                                 RegistryKind::Session,
                                 "host",
                                 lash::tool_provider_key!("tools"),
                             ),
-                            definition: if *path == "workflows.create" {
+                            if *path == "workflows.create" {
                                 self.workflow.clone()
                             } else {
                                 self.definition.clone()
                             },
-                            binding: None,
-                        },
+                            None,
+                        ),
                     )
                 })
                 .collect()

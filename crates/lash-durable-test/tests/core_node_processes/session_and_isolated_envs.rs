@@ -294,6 +294,7 @@ fn explicit_engine_advance(
                 steps: vec![lash_execution_contracts::process::StepRequest::Tool {
                     step: lash_execution_contracts::process::StepName("b".to_owned()),
                     effect: lash_core_execution::testing::effect("b.run"),
+                    contract: b_runs()[0].contract_id(),
                     input: payload,
                     site: None,
                     matched: None,

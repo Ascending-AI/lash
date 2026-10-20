@@ -97,9 +97,12 @@ impl Runner {
                 result: Type::Any,
             },
         )]);
-        let env_namespaces =
-            lash_kernel_dialect::Namespaces::of_signatures(&effects, &Default::default())
-                .map_err(|e| e.to_string())?;
+        let env_namespaces = lash_kernel_dialect::Namespaces::of_effects(
+            &effects,
+            &lash_kernel_doc::ContractId::new("1"),
+            &Default::default(),
+        )
+        .map_err(|e| e.to_string())?;
         let env = Environment::new(&self.library, &env_namespaces);
         let lowered = match case.dialect.as_str() {
             "typescript" => lash_dialect_typescript::lower(
@@ -127,7 +130,18 @@ impl Runner {
             }
         };
         let mut admission = lash_kernel_check::Environment::new(&self.library);
-        admission.effects = effects;
+        admission.effects = (effects)
+            .iter()
+            .map(|(effect, signature)| {
+                (
+                    effect.clone(),
+                    lash_kernel_doc::OperationRequirement::new(
+                        signature.clone(),
+                        lash_kernel_doc::ContractId::new("1"),
+                    ),
+                )
+            })
+            .collect();
         lash_kernel_check::admit(&lowered.document, &admission).map_err(|e| format!("{e:?}"))?;
         Ok(Lowered::Program(Program {
             closure: crate::pages::CLOSURE,

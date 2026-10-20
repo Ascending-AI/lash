@@ -124,9 +124,12 @@ fn main() -> Result<()> {
     )]);
     let bindings = BTreeSet::new();
     let functions = BTreeMap::new();
-    let environment_namespaces =
-        lash_kernel_dialect::Namespaces::of_signatures(&effects, &controls)
-            .context("the spike's effects are operations")?;
+    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
+        &effects,
+        &lash_kernel_doc::ContractId::new("1"),
+        &controls,
+    )
+    .context("the spike's effects are operations")?;
     let environment =
         lash_kernel_dialect::Environment::new(embedding.library(), &environment_namespaces);
     let lowered = embedding
@@ -152,7 +155,7 @@ fn main() -> Result<()> {
         &unregistered
     };
     let environment = lash_kernel_check::Environment {
-        effects: document.manifest.signatures(),
+        effects: document.manifest.effects.clone(),
         functions: catalog,
         bindings: BTreeSet::new(),
     };

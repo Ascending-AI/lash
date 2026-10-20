@@ -123,7 +123,7 @@ fn a_code_export_beside_an_operation_of_its_package_prints_and_reads_back() {
         r#"kernel 1
 numbers float
 use dataframe.col = @{col}
-effect dataframe.run(input: Any) -> Any
+effect dataframe.run(input: Any) -> Any contract "1"
 main {{
   let column = dataframe.col("value")
   let ran = perform dataframe.run(column) as Any

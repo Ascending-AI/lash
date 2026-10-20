@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "main effect carries statement site and occurrence",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\n\nmain {\ndo perform echo(1) as Int\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int contract \"1\"\n\nmain {\ndo perform echo(1) as Int\n}\n",
       "expected": {
         "prints": [],
         "end": {

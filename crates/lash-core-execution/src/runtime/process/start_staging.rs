@@ -1183,11 +1183,14 @@ async fn link_start(
         .performed_effects(kind, payload)
         .await
         .map_err(refused)?;
-    super::check_links(env, &performed, &std::collections::BTreeMap::new()).map_err(refused)?;
     stores
         .engines
-        .components()
-        .check_served(&Arc::new(env.clone()))
+        .check_links(
+            kind,
+            &Arc::new(env.clone()),
+            &performed,
+            &std::collections::BTreeMap::new(),
+        )
         .map_err(refused)?;
     Ok(())
 }

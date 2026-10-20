@@ -394,6 +394,8 @@ pub(crate) enum Issued {
         wait: lash_protocol_types::WaitId,
         admission: Admission,
         effect: lash_kernel_doc::EffectName,
+        /// The contract the document requires of `effect`.
+        contract: lash_kernel_doc::ContractId,
         input: serde_json::Value,
     },
     /// A `perform` the boundary refuses: the error is raised at the

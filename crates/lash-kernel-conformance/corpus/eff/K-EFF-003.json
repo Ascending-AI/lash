@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "separate effect results never share identity",
-      "document": "kernel 1\nnumbers by_spelling\neffect items() -> List(Int)\nmain {\nlet a = perform items() as List(Int) let b = perform items() as List(Int) set a[0] = 2 finish b\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect items() -> List(Int) contract \"1\"\nmain {\nlet a = perform items() as List(Int) let b = perform items() as List(Int) set a[0] = 2 finish b\n}\n",
       "expected": {
         "prints": [],
         "end": {

@@ -1,7 +1,7 @@
 --- before
 -kernel 1
 -numbers by_spelling
--effect corpus.echo(input?: Json) -> Json
+-effect corpus.echo(input?: Json) -> Json contract "52910906e3f939a5ce2e34bd105cd37184ead8ac272080fcbff759b3b6db6560"
 -use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 -use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
 -use py.reply = @9069f1a97a82e155fe11114065351d42262bd0be81a4a8c41f522dfbb431d5d5
@@ -20,7 +20,7 @@
 +++ after
 +kernel 1
 +numbers by_spelling
-+effect corpus.echo(input?: Json) -> Json
++effect corpus.echo(input?: Json) -> Json contract "52910906e3f939a5ce2e34bd105cd37184ead8ac272080fcbff759b3b6db6560"
 +use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 +use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
 +use py.reply = @9069f1a97a82e155fe11114065351d42262bd0be81a4a8c41f522dfbb431d5d5
@@ -39,8 +39,8 @@
 
 Correspondence:
 {
-  "base": "3b77ec99e3285ade47c2c62aa1c766fffd451eee85b2086442828eb4756f60c1",
-  "result": "eb407098d86bdb7102e2254a624885e9cca83d6369a4b4fc31d466ee597d8930",
+  "base": "c2dc2261174815326673d067b946a1ef798102a220d3bfc3afd5f2676fa8675a",
+  "result": "b73d7d3cdc6992c1f3cb214fd7a4975d642d440dac74f85cf69a2d5435bc1e90",
   "entries": [
     {
       "from": {

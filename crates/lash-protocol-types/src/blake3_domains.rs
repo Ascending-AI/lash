@@ -24,6 +24,7 @@ pub(crate) const BLAKE3_DOMAINS: &[&str] = &[
     "lash-composition-tool/v2",
     "lash-config-transaction/v1",
     "lash-create-session-request/v1",
+    "lash-derived-tool-contract/v1",
     "lash-draft-node/v3",
     "lash-frame-node/v3",
     "lash-google-upload-credential-scope/v2",

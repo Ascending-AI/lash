@@ -290,7 +290,8 @@ const MCP_PLUGIN_ID: &str = "mcp";
 pub const MCP_RUN_OPTIONS: lash_core::RunOptionsKey<lash_tool_support::ToolSelectionConfig> =
     lash_core::RunOptionsKey::new(MCP_PLUGIN_ID);
 
-/// The execution binding format MCP's deferred provider writes and reads:
+/// The format of the codec payload an MCP tool's link records, which both
+/// MCP providers write and read:
 /// `{"kind": "mcp", "server": <server>, "tool_id": <tool id>}`.
 /// version_surface = "coexist"
 /// version_guard(items(MCP_BINDING_FORMAT, mcp_binding))
@@ -315,31 +316,6 @@ impl McpDeferredToolProvider {
             .advertised_tools()
             .into_iter()
             .find(|tool| tool.manifest.id == *id)
-    }
-
-    fn validate_execution_binding(
-        tool_id: &ToolId,
-        binding: Option<&lash_core::ExecutionBinding>,
-    ) -> Result<(), ToolOutcome> {
-        let payload = binding.map_or(&serde_json::Value::Null, |binding| &binding.payload);
-        let valid = payload
-            .get("kind")
-            .and_then(serde_json::Value::as_str)
-            .is_some_and(|kind| kind == "mcp")
-            && payload
-                .get("tool_id")
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|bound_id| bound_id == tool_id.as_str());
-        if valid {
-            return Ok(());
-        }
-        Err(
-            crate::call_failure::McpCallFailure::InvalidExecutionBinding {
-                tool_id: tool_id.to_string(),
-                binding: payload.clone(),
-            }
-            .into(),
-        )
     }
 }
 
@@ -368,6 +344,21 @@ impl ToolProvider for McpToolProvider {
             .into_iter()
             .find(|tool| tool.manifest.tool() == name)
             .map(|tool| Arc::new(tool.contract()))
+    }
+
+    fn readable_binding_formats(&self) -> &'static [lash_core::FormatVersion] {
+        &[MCP_BINDING_FORMAT]
+    }
+
+    /// The server and durable tool id a call of `manifest`'s tool goes to.
+    fn link_payload(
+        &self,
+        manifest: &ToolManifest,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<(lash_core::FormatVersion, serde_json::Value)> {
+        self.pool
+            .link_payload(&manifest.id)
+            .map(|payload| (MCP_BINDING_FORMAT, payload))
     }
 
     async fn prepare_tool_call(
@@ -433,35 +424,10 @@ impl ToolProvider for McpDeferredToolProvider {
         &self,
         call: lash_core::ToolPrepareCall<'_>,
     ) -> Result<lash_core::PreparedToolCall, ToolOutcome> {
-        Self::validate_execution_binding(&call.tool_id, call.context.tool_execution_binding())?;
         self.pool.prepare_mcp_call(call)
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        if let Err(result) =
-            Self::validate_execution_binding(call.tool_id(), call.context.tool_execution_binding())
-        {
-            return result.into();
-        }
-        let binding = match crate::pool::admitted_binding(call.manifest()) {
-            Ok(binding) => binding,
-            Err(failure) => return failure.into(),
-        };
-        let payload = call
-            .context
-            .tool_execution_binding()
-            .map_or(&serde_json::Value::Null, |binding| &binding.payload);
-        if payload.get("server").and_then(serde_json::Value::as_str)
-            != Some(binding.server.as_str())
-        {
-            return ToolOutcome::from(
-                crate::call_failure::McpCallFailure::InvalidExecutionBinding {
-                    tool_id: call.tool_id().to_string(),
-                    binding: payload.clone(),
-                },
-            )
-            .into();
-        }
         self.pool.call_admitted_tool(call).await.into()
     }
 }
@@ -480,12 +446,16 @@ pub(crate) fn mcp_binding(payload: serde_json::Value) -> lash_core::ExecutionBin
     }
 }
 
-/// Admit the same payload a Run's prepare phase records for an MCP call.
+/// Admit the same payload a Run's prepare phase records for an MCP call,
+/// through the link the provider states for the tool.
 #[cfg(test)]
 pub(crate) async fn prepared_test_call(
     provider: &McpToolProvider,
     manifest: &ToolManifest,
 ) -> lash_core::testing::ToolCallFixture<'static> {
+    let payload = provider
+        .link_payload(manifest, &lash_core::OwnerConfigView::default())
+        .map(|(_, payload)| mcp_binding(payload));
     let context = lash_core::ToolPrepareContext::for_testing(
         lash_core::RuntimeOwner::Session("mcp-admitted-test".into()),
         Arc::new(lash_core::testing::MockSessionManager::default()),
@@ -505,7 +475,9 @@ pub(crate) async fn prepared_test_call(
         })
         .await
         .expect("admit the discovered MCP binding");
-    lash_core::testing::ToolCallFixture::mock().prepared_call(&prepared)
+    lash_core::testing::ToolCallFixture::mock()
+        .prepared_call(&prepared)
+        .execution_binding(payload)
 }
 
 #[cfg(test)]
@@ -603,7 +575,7 @@ mod tests {
     #[tokio::test]
     async fn mcp_law_binding_and_catalog_name_keep_request_causes() {
         let id = lash_core::ToolId::new("mcp:fixture/work");
-        let binding = McpDeferredToolProvider::validate_execution_binding(&id, None).unwrap_err();
+        let binding = crate::pool::linked_server(None, &id).unwrap_err();
         let context = lash_core::testing::mock_attempt_context();
         let missing = McpConnectionPool::empty()
             .call_tool("missing", &json!({}), &context)

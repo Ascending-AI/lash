@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "a read the host cannot answer stops the run at its statement",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int\nmain { print 1 let x = perform echo(1) as Int print x finish x }\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int contract \"1\"\nmain { print 1 let x = perform echo(1) as Int print x finish x }\n",
       "environment": {
         "reads": [
           "echo"

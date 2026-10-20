@@ -264,10 +264,8 @@ pub(crate) async fn hold_launch_performing(
             (env, Some(held))
         }
     };
-    super::check_links(&env, performed, &choice.fits).map_err(HoldEnvError::Refused)?;
     engines
-        .components()
-        .check_served(&std::sync::Arc::new(env))
+        .check_links(kind, &std::sync::Arc::new(env), performed, &choice.fits)
         .map_err(HoldEnvError::Refused)?;
     let env_ref = match held {
         Some(env_ref) => env_ref,

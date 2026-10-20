@@ -746,14 +746,11 @@ impl<'a> Printer<'a> {
         }
     }
 
-    /// A requirement's signature, and its contract unless that is the
-    /// signature's own ([`crate::ContractId::of_signature`]).
+    /// A requirement's signature and its contract.
     fn requirement(&mut self, requirement: &OperationRequirement) {
         self.signature(&requirement.signature);
-        if requirement.contract != crate::ContractId::of_signature(&requirement.signature) {
-            self.out.push_str(" contract ");
-            write_quoted(requirement.contract.as_str(), '"', &mut self.out);
-        }
+        self.out.push_str(" contract ");
+        write_quoted(requirement.contract.as_str(), '"', &mut self.out);
     }
 
     fn signature(&mut self, signature: &Signature) {

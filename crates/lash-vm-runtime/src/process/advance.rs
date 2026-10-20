@@ -369,6 +369,7 @@ fn run_settled(
                         wait,
                         admission,
                         effect,
+                        contract,
                         input,
                     } => {
                         let step = StepName(format!("effect.{}", state.effects));
@@ -384,8 +385,9 @@ fn run_settled(
                         steps.push(StepRequest::Tool {
                             step,
                             effect,
+                            contract,
                             input,
-                            site: Some(identity),
+                            site: Some(Box::new(identity)),
                             matched: None,
                         });
                     }

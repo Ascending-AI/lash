@@ -60,7 +60,8 @@ fn program(operation: &str) -> Program {
     register_machine_functions(&mut registry).unwrap();
     super::super::register_text_json(&mut registry).unwrap();
     let registry = Arc::new(registry);
-    let mut text = String::from("kernel 1\nnumbers by_spelling\neffect echo(x: Any) -> Any\n");
+    let mut text =
+        String::from("kernel 1\nnumbers by_spelling\neffect echo(x: Any) -> Any contract \"1\"\n");
     for (id, function) in registry.iter() {
         text.push_str(&format!("use {} = @{id}\n", function.definition().name));
     }

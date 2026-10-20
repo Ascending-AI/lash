@@ -63,8 +63,12 @@ fn every_entry_body_statement_and_action_is_mapped() {
         source,
         &lash_kernel_dialect::Environment::new(
             super::library(),
-            &lash_kernel_dialect::Namespaces::of_signatures(&effects, super::controls())
-                .expect("the test's effects are operations"),
+            &lash_kernel_dialect::Namespaces::of_effects(
+                &effects,
+                &lash_kernel_doc::ContractId::new("1"),
+                super::controls(),
+            )
+            .expect("the test's effects are operations"),
         ),
         lash_kernel_dialect::Mode::Module,
     )

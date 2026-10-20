@@ -59,8 +59,12 @@ fn each_dialect(law: impl Fn(&CaptionDialect<'_>) -> Result<(), crate::HarnessEr
             PYTHON,
         ),
     ];
-    let namespaces = lash_kernel_dialect::Namespaces::of_signatures(&effects, &controls)
-        .expect("the test's effects are operations");
+    let namespaces = lash_kernel_dialect::Namespaces::of_effects(
+        &effects,
+        &lash_kernel_doc::ContractId::new("1"),
+        &controls,
+    )
+    .expect("the test's effects are operations");
     for (package, library, format, corpus) in &dialects {
         let corpus = CaptionCorpus::from_json(corpus).expect("caption corpus");
         let dialect = CaptionDialect {
@@ -424,14 +428,17 @@ fn signature_targets() {
     let mut environment = lash_kernel_check::Environment::new(&registry);
     environment.effects.insert(
         send.clone(),
-        Signature {
-            params: vec![Param {
-                name: Name::new("value"),
-                ty: Type::Any,
-                optional: false,
-            }],
-            result: Type::Any,
-        },
+        lash_kernel_doc::OperationRequirement::new(
+            Signature {
+                params: vec![Param {
+                    name: Name::new("value"),
+                    ty: Type::Any,
+                    optional: false,
+                }],
+                result: Type::Any,
+            },
+            lash_kernel_doc::ContractId::new("1"),
+        ),
     );
     let mut draft = Draft::open(document.clone()).expect("a draft");
     let insert = Operation::InsertStep {
@@ -617,7 +624,7 @@ fn admitted() -> Vec<(String, Option<String>)> {
 /// those beneath which the edit wrote.
 fn rekey() {
     let mut document = parse_document(concat!(
-        "kernel 1\nnumbers float\neffect send(value: Any) -> Any\n",
+        "kernel 1\nnumbers float\neffect send(value: Any) -> Any contract \"1\"\n",
         "entry helper(item: Record{title: Text}) -> Any\n",
         "fn helper(item) { return null }\n",
         "main {\n",
@@ -640,14 +647,17 @@ fn rekey() {
     let mut environment = lash_kernel_check::Environment::new(&registry);
     environment.effects.insert(
         EffectName::new("send").expect("a tool's name"),
-        Signature {
-            params: vec![Param {
-                name: Name::new("value"),
-                ty: Type::Any,
-                optional: false,
-            }],
-            result: Type::Any,
-        },
+        lash_kernel_doc::OperationRequirement::new(
+            Signature {
+                params: vec![Param {
+                    name: Name::new("value"),
+                    ty: Type::Any,
+                    optional: false,
+                }],
+                result: Type::Any,
+            },
+            lash_kernel_doc::ContractId::new("1"),
+        ),
     );
     let captionable = CaptionKind::captionable(&document);
     let kinds: BTreeSet<CaptionKind> = captionable.iter().map(|(_, kind)| *kind).collect();
@@ -838,7 +848,18 @@ fn rekey_imported(dialect: &CaptionDialect<'_>) -> Result<(), crate::HarnessErro
         let effects = dialect.environment.namespaces.signatures();
         let (effect, signature) = effects.iter().next().expect("the corpus tool");
         let environment = lash_kernel_check::Environment {
-            effects: effects.clone(),
+            effects: (effects.clone())
+                .iter()
+                .map(|(effect, signature)| {
+                    (
+                        effect.clone(),
+                        lash_kernel_doc::OperationRequirement::new(
+                            signature.clone(),
+                            lash_kernel_doc::ContractId::new("1"),
+                        ),
+                    )
+                })
+                .collect(),
             functions: dialect.environment.library,
             bindings: BTreeSet::new(),
         };
@@ -920,7 +941,18 @@ fn rekey_canvas_edits(dialect: &CaptionDialect<'_>) -> Result<(), crate::Harness
             .map_err(|diagnostic| fail(&case.name, format!("{diagnostic:?}")))?;
         let document = lowered.document.document();
         let environment = lash_kernel_check::Environment {
-            effects: dialect.environment.namespaces.signatures(),
+            effects: (dialect.environment.namespaces.signatures())
+                .iter()
+                .map(|(effect, signature)| {
+                    (
+                        effect.clone(),
+                        lash_kernel_doc::OperationRequirement::new(
+                            signature.clone(),
+                            lash_kernel_doc::ContractId::new("1"),
+                        ),
+                    )
+                })
+                .collect(),
             functions: dialect.environment.library,
             bindings: BTreeSet::new(),
         };

@@ -105,8 +105,7 @@ fn workbench_effects() -> lash::vm::HostBoundary {
         };
         let offered = lash::vm::offered_tool(
             &definition.manifest,
-            &contract.input_schema.canonical,
-            &contract.output_schema.canonical,
+            &contract,
             lash::dialect::OfferedSource::Catalog {
                 tool: definition.manifest.id.to_string(),
             },

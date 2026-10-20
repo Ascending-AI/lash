@@ -1,6 +1,6 @@
 kernel 1
 numbers by_spelling
-effect corpus.echo(input?: Json) -> Json
+effect corpus.echo(input?: Json) -> Json contract "52910906e3f939a5ce2e34bd105cd37184ead8ac272080fcbff759b3b6db6560"
 use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
 use lt = @a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0

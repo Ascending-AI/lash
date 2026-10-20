@@ -1,6 +1,6 @@
 kernel 1
 numbers by_spelling
-effect corpus.capture(input: Record{list: List(Any)}) -> Json
+effect corpus.capture(input: Record{list: List(Any)}) -> Json contract "8be2f3c2bb16abe57355aa08cb729511defddba2c4adeb4b1744edd4e7d329e1"
 use abs = @627d3fa925484d12b13ecfa198a1a07f3d88fb6f75df2c907ff4b9373105ead9
 use add = @7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537
 use bool.not = @740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d

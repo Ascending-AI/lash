@@ -1,6 +1,6 @@
 kernel 1
 numbers by_spelling
-effect echo(value: Int) -> Int
+effect echo(value: Int) -> Int contract "1"
 
 fn child(value) {
   let answer = perform echo(value) as Int

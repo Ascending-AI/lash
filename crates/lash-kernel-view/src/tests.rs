@@ -203,7 +203,7 @@ fn an_inserted_effect_is_an_execution_site_at_the_correspondences_new_anchor() {
     let document = parse_document(
         r#"kernel 1
 numbers float
-effect mail.send(to: Text) -> Bool
+effect mail.send(to: Text) -> Bool contract "1"
 entry notify(to: Text) -> Any
 
 fn notify(to) {
@@ -220,7 +220,7 @@ main {
     let mut draft = Draft::open(document.clone()).expect("draft");
     let functions = FunctionRegistry::default();
     let mut environment = Environment::new(&functions);
-    environment.effects = document.manifest.signatures();
+    environment.effects = document.manifest.effects.clone();
     let anchor = site("notify", &[1]);
     let effect = EffectName::new("mail.send").unwrap();
     let transaction = Transaction {
@@ -280,7 +280,7 @@ fn an_effect_in_a_closure_body_is_listed_at_its_site() {
     let document = parse_document(
         r#"kernel 1
 numbers float
-effect display.show_message(input: Any) -> Any
+effect display.show_message(input: Any) -> Any contract "1"
 entry demo(seed: Any) -> Any
 fn demo(seed) {
   let task = fn() {
@@ -423,7 +423,7 @@ fn returns_and_assignments_keep_their_callable_and_write() {
     let document = parse_document(
         r#"kernel 1
 numbers float
-effect demo.read() -> Text
+effect demo.read() -> Text contract "1"
 entry demo() -> Text
 fn demo() {
   let state = "initial"
@@ -747,8 +747,8 @@ main { finish null }
 
 const NESTED: &str = r#"kernel 1
 numbers float
-effect mail.send(to: Text, message: Any) -> Bool
-effect log.write(line: Any) -> Any
+effect mail.send(to: Text, message: Any) -> Bool contract "1"
+effect log.write(line: Any) -> Any contract "1"
 entry notify(to: Text) -> Any
 
 fn notify(to) {
@@ -871,7 +871,7 @@ fn the_view_lists_nested_actions_in_issue_order_and_their_arguments_edit_in_plac
     let mut draft = Draft::open(document.clone()).expect("draft");
     let functions = FunctionRegistry::default();
     let mut environment = Environment::new(&functions);
-    environment.effects = document.manifest.signatures();
+    environment.effects = document.manifest.effects.clone();
     let subject = at(&[0, 0, 1, 0]);
     let replace = |draft: &Draft, with: &str| Transaction {
         base: draft.identity(),
@@ -918,7 +918,7 @@ fn do_computed_actions_round_trip_through_the_view() {
     let document = parse_document(
         r#"kernel 1
 numbers float
-effect show(value: Any) -> Any
+effect show(value: Any) -> Any contract "1"
 entry demo() -> Any
 fn demo() { do perform show({text: "x"}) as Any return null }
 main { finish null }
@@ -959,10 +959,10 @@ fn captions_join_the_view_by_node_arm_callable_parameter_and_field() {
     let document = parse_document(
         r#"kernel 1
 numbers float
-effect one() -> Any
-effect two() -> Any
-effect test() -> Bool
-effect send(x: Any) -> Any
+effect one() -> Any contract "1"
+effect two() -> Any contract "1"
+effect test() -> Bool contract "1"
+effect send(x: Any) -> Any contract "1"
 entry flow(event: Record{answer: Record{choice: Text}}, n: Int) -> Record{seen: Int}
 fn flow(event, n) {
   let a = 1
@@ -1182,7 +1182,7 @@ main { finish null }
 #[test]
 fn a_library_effects_origin_places_its_occurrence_on_the_authored_statement() {
     let document = parse_document(
-        "kernel 1\nnumbers float\neffect mail.send(value: Any) -> Any\nentry demo() -> Any\nfn demo() { let sent = perform mail.send(perform mail.send(null) as Any) as Any return sent }\nmain { finish null }",
+        "kernel 1\nnumbers float\neffect mail.send(value: Any) -> Any contract \"1\"\nentry demo() -> Any\nfn demo() { let sent = perform mail.send(perform mail.send(null) as Any) as Any return sent }\nmain { finish null }",
     )
     .expect("workflow");
     let view = view_of(&document, "demo");
@@ -1237,7 +1237,7 @@ fn a_library_effects_origin_places_its_occurrence_on_the_authored_statement() {
 #[test]
 fn an_actions_performs_include_the_effects_of_its_declared_callee() {
     let document = parse_document(
-        "kernel 1\nnumbers float\neffect dataframe.run() -> Any\neffect dataframe.read() -> Any\nentry demo() -> Any\nfn demo() { let collected = call collect() return collected }\nfn collect() { let rows = call load_rows() do perform dataframe.run() as Any return rows }\nfn load_rows() { return perform dataframe.read() as Any }\nmain { finish null }",
+        "kernel 1\nnumbers float\neffect dataframe.run() -> Any contract \"1\"\neffect dataframe.read() -> Any contract \"1\"\nentry demo() -> Any\nfn demo() { let collected = call collect() return collected }\nfn collect() { let rows = call load_rows() do perform dataframe.run() as Any return rows }\nfn load_rows() { return perform dataframe.read() as Any }\nmain { finish null }",
     ).expect("workflow");
     let view = view_of(&document, "demo");
     assert_eq!(view.dataflow.actions.len(), 1);
@@ -1302,7 +1302,7 @@ fn an_installed_collect_lists_its_performs_and_every_surface_member() {
 /// effects; an unrelated closure in the same unit contributes none.
 #[test]
 fn performs_follow_an_applied_closure_without_other_closures_in_its_unit() {
-    let document = parse_document("kernel 1\nnumbers float\neffect dataframe.run() -> Any\neffect dataframe.explain() -> Any\nentry demo() -> Any\nfn demo() { let callback = fn() { return perform dataframe.run() as Any } let unrelated = fn() { return perform dataframe.explain() as Any } let rows = apply callback() return rows }\nmain { finish null }").unwrap();
+    let document = parse_document("kernel 1\nnumbers float\neffect dataframe.run() -> Any contract \"1\"\neffect dataframe.explain() -> Any contract \"1\"\nentry demo() -> Any\nfn demo() { let callback = fn() { return perform dataframe.run() as Any } let unrelated = fn() { return perform dataframe.explain() as Any } let rows = apply callback() return rows }\nmain { finish null }").unwrap();
     let view = view_of(&document, "demo");
     let action = view
         .dataflow

@@ -17,6 +17,10 @@ pub struct ToolInvocation {
     /// Original native request correlation and replay data, when supplied.
     pub pending: Option<Box<crate::sansio::PendingToolCall>>,
     pub execution_grant: Option<Box<crate::ToolExecutionGrant>>,
+    /// The contract the performing code requires of the call's operation;
+    /// none for a model round's call, which is pinned to its recorded
+    /// definition.
+    pub contract: Option<lash_kernel_doc::ContractId>,
     pub child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
     pub issuing_language_node_id: Option<String>,
 }
@@ -29,6 +33,7 @@ impl ToolInvocation {
             args,
             pending: None,
             execution_grant: None,
+            contract: None,
             child_execution_trace_hook: None,
             issuing_language_node_id: None,
         }
@@ -69,6 +74,7 @@ impl std::fmt::Debug for ToolInvocation {
                 "execution_grant",
                 &self.execution_grant.as_ref().map(|_| "<grant>"),
             )
+            .field("contract", &self.contract)
             .field(
                 "child_execution_trace_hook",
                 &self.child_execution_trace_hook.as_ref().map(|_| "<hook>"),

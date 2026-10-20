@@ -180,8 +180,8 @@ pub(super) async fn run(
             let drafts: Vec<_> = view.members().iter().map(|member| member.draft()).collect();
             round::require_admitted(&opener, run, &drafts, &calls).map_err(exec)?;
             // A member that will run a body again runs it only on a node
-            // that serves its recorded entry undrifted; one with an outcome
-            // or a park replays without its provider.
+            // that serves its recorded entry's tool; one with an outcome or a
+            // park replays without its provider.
             let runnable = view
                 .members()
                 .iter()
@@ -197,8 +197,8 @@ pub(super) async fn run(
             RoundRunner::resumed(cx, owner.clone(), run, policies, bodies)
         }
         None => {
-            // A call whose recorded entry drifted on this node parks the
-            // turn before anything of the round is admitted (S5).
+            // A call whose recorded entry's tool is missing on this node
+            // parks the turn before anything of the round is admitted (S5).
             if let Some(drift) = tools.drift(&calls.iter().collect::<Vec<_>>()) {
                 return Err(TurnError::Runtime(drift));
             }

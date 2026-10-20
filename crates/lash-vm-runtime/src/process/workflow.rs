@@ -16,8 +16,7 @@ use std::sync::Arc;
 use lash_kernel_check::Environment;
 pub use lash_kernel_check::{WorkflowAdmissionRefusal, WorkflowDocument, WorkflowDocumentError};
 use lash_kernel_doc::{
-    FunctionRegistry, IdentifiedDocument, Name, Signature, WorkflowDocumentEntry,
-    WorkflowDocumentRef,
+    FunctionRegistry, IdentifiedDocument, Name, WorkflowDocumentEntry, WorkflowDocumentRef,
 };
 
 use super::{
@@ -68,24 +67,20 @@ impl WorkflowEnvironment {
     /// bindings.
     pub fn checker(&self) -> Environment<'_> {
         let mut environment = Environment::new(self.functions.as_ref());
-        environment.effects = signatures(&self.operations);
+        environment.effects = requirements(&self.operations);
         environment
     }
 }
 
 /// What the checker admits a document against: each operation's effect
-/// name with its signature.
-fn signatures(
+/// name with the requirement it is offered under.
+fn requirements(
     operations: &lash_kernel_dialect::Operations,
-) -> std::collections::BTreeMap<lash_kernel_doc::EffectName, Signature> {
+) -> std::collections::BTreeMap<lash_kernel_doc::EffectName, lash_kernel_doc::OperationRequirement>
+{
     operations
         .iter()
-        .map(|(operation, offered)| {
-            (
-                operation.effect_name(),
-                offered.requirement.signature.clone(),
-            )
-        })
+        .map(|(operation, offered)| (operation.effect_name(), offered.requirement.clone()))
         .collect()
 }
 
@@ -165,6 +160,13 @@ impl KernelDocumentProvider {
 
 #[async_trait::async_trait]
 impl lash_execution_contracts::process::ProcessDocumentProvider for KernelDocumentProvider {
+    fn owned_operations(
+        &self,
+        performed: &lash_execution_contracts::process::PerformedEffects,
+    ) -> lash_execution_contracts::process::OwnedOperations {
+        self.engine.owned_operations(performed)
+    }
+
     async fn document(
         &self,
         payload: &serde_json::Value,
@@ -359,7 +361,7 @@ impl lash_execution_contracts::process::ProcessDocumentProvider for KernelDocume
         let identified = request.document;
         let admission = {
             let mut environment = Environment::new(self.engine.functions.as_ref());
-            environment.effects = signatures(boundary.operations());
+            environment.effects = requirements(boundary.operations());
             WorkflowDocument::admit(
                 identified.document().clone(),
                 WorkflowDocumentEntry::Entry {

@@ -307,6 +307,7 @@ fn law_step(step: &str, tool: &str) -> EngineAction {
         steps: vec![StepRequest::Tool {
             step: StepName(step.to_owned()),
             effect: law_effect(tool),
+            contract: lash_kernel_doc::ContractId::new("law"),
             input: json!({}),
             site: None,
             matched: None,
@@ -444,6 +445,7 @@ impl ProcessEngine for LawEngine {
                     steps: vec![StepRequest::Tool {
                         step: StepName("stuck".to_owned()),
                         effect: law_effect("law_stuck"),
+                        contract: lash_kernel_doc::ContractId::new("law"),
                         input: json!({}),
                         site: None,
                         matched: None,
@@ -464,8 +466,9 @@ impl ProcessEngine for LawEngine {
                         .map(|step| StepRequest::Tool {
                             step: StepName((*step).to_owned()),
                             effect: law_effect(LAW_PARK),
+                            contract: lash_kernel_doc::ContractId::new("law"),
                             input: json!({}),
-                            site: Some(law_site(step)),
+                            site: Some(Box::new(law_site(step))),
                             matched: None,
                         })
                         .collect(),

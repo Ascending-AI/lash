@@ -215,8 +215,9 @@ fn observe(program: Program, relay: bool) -> Observed {
 
 /// Lowers a TypeScript cell against `kernel`'s library.
 fn lowered(kernel: &Kernel, source: &str) -> Program {
-    let environment_namespaces = lash_kernel_dialect::Namespaces::of_signatures(
+    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
         &super::machine::effects(),
+        &lash_kernel_doc::ContractId::new("1"),
         super::controls(),
     )
     .expect("the test's effects are operations");
@@ -450,8 +451,9 @@ fn a_callback_that_parks_inside_a_method_resumes_identically() {
         // An answer that ends no method's loop early.
         let answer = helper == "every";
         let program = |kernel: &Kernel| {
-            let mut header =
-                String::from("kernel 1\nnumbers by_spelling\neffect host.echo(x?: Any) -> Any\n");
+            let mut header = String::from(
+                "kernel 1\nnumbers by_spelling\neffect host.echo(x?: Any) -> Any contract \"1\"\n",
+            );
             for (id, used) in manifest(kernel, &[name.as_str(), "list.len", "same"]) {
                 header.push_str(&format!("use {used} = @{id}\n"));
             }

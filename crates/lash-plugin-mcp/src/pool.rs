@@ -21,8 +21,9 @@ pub(crate) mod guidance;
 mod lifecycle_actor;
 mod round_trip;
 pub(crate) mod tool_changes;
-pub(crate) use admission::admitted_binding;
-use admission::{McpCallTarget, RemoteCompletion};
+use admission::RemoteCompletion;
+#[cfg(test)]
+pub(crate) use admission::linked_server;
 
 use lash_protocol_types::{sync::LockResultExt, sync::MutexExt, sync::RwLockExt};
 use std::collections::BTreeMap;
@@ -238,7 +239,6 @@ struct ImportedTool {
     /// prefixing/normalisation).
     original_name: String,
     definition: ToolDefinition,
-    tool_digest: String,
     completion: RemoteCompletion,
 }
 
@@ -328,7 +328,7 @@ impl InstalledCatalog {
                 entry: installed.entry.upgrade()?,
                 advertised_name: tool.definition.manifest.tool(),
                 native_name: tool.original_name.clone(),
-                binding: admission::admitted_binding(&tool.definition.manifest).ok(),
+                completion: tool.completion.clone(),
             })
         })
     }
@@ -339,7 +339,7 @@ struct ResolvedToolTarget {
     entry: Arc<McpEntry>,
     advertised_name: String,
     native_name: String,
-    binding: Option<McpCallTarget>,
+    completion: RemoteCompletion,
 }
 
 impl McpConnectionPool {
@@ -1061,7 +1061,6 @@ fn import_tools_with_name_builder(
     let mut imported = BTreeMap::new();
     let server = naming::server_segment(server_name);
     for tool in tools {
-        let tool_digest = admission::tool_digest(&tool)?;
         // MCP tasks are an unsolicited extension result in 2026-07-28,
         // not a required completion mode declared by a tool.
         let completion = RemoteCompletion::Inline;
@@ -1077,6 +1076,7 @@ fn import_tools_with_name_builder(
         // tool's canonical name, both NAME-CANON by construction.
         let prefixed = format!("{server}.{}", build_name(server_name, &original_name));
         let tool_id = naming::durable_tool_id(server_name, &original_name);
+        let tag = admission::contract_tag(&tool_id, &tool)?;
 
         let definition = ToolDefinition::raw(
             tool_id,
@@ -1085,11 +1085,11 @@ fn import_tools_with_name_builder(
             input_schema,
             output_schema,
         )?
+        .host_tag(tag)
         .with_execution(execution);
         let imported_tool = ImportedTool {
             original_name,
             definition,
-            tool_digest,
             completion,
         };
         match imported.entry(prefixed.clone()) {

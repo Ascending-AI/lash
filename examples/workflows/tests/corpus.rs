@@ -3,11 +3,7 @@ fn corpus_tool_signatures() -> anyhow::Result<
 > {
     let mut boundary = lash::vm::HostBoundary::new();
     for tool in workflow_corpus::tools()? {
-        boundary.offer_tool(
-            &tool.manifest,
-            &tool.contract.input_schema.canonical,
-            &tool.contract.output_schema.canonical,
-        )?;
+        boundary.offer_tool(&tool.manifest, &tool.contract)?;
     }
     Ok(boundary
         .operations()
@@ -168,9 +164,12 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
         std::collections::BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
     )]);
     let embedding = lash_vm_worker::built_embedding(&Default::default()).unwrap();
-    let environment_namespaces =
-        lash_kernel_dialect::Namespaces::of_signatures(&effects, &controls)
-            .expect("the test's effects are operations");
+    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
+        &effects,
+        &lash_kernel_doc::ContractId::new("1"),
+        &controls,
+    )
+    .expect("the test's effects are operations");
     let environment =
         lash_kernel_dialect::Environment::new(embedding.library(), &environment_namespaces);
     let mut failures = Vec::new();
@@ -328,8 +327,12 @@ fn every_typescript_corpus_case_has_source_shaped_statements_and_one_body_per_lo
         lash_kernel_doc::EffectName::new("control.finish").unwrap(),
         std::collections::BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
     )]);
-    let env_namespaces = lash_kernel_dialect::Namespaces::of_signatures(&effects, &controls)
-        .expect("the test's effects are operations");
+    let env_namespaces = lash_kernel_dialect::Namespaces::of_effects(
+        &effects,
+        &lash_kernel_doc::ContractId::new("1"),
+        &controls,
+    )
+    .expect("the test's effects are operations");
     let env = lash_kernel_dialect::Environment::new(embedding.library(), &env_namespaces);
     let mut failures = Vec::new();
     let sources = [

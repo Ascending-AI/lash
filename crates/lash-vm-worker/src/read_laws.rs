@@ -188,8 +188,12 @@ fn lowered(dialect: &str, source: &str, effect: &EffectName) -> Program {
             source,
             &lash_kernel_dialect::Environment::new(
                 library,
-                &lash_kernel_dialect::Namespaces::of_signatures(&effects, &Default::default())
-                    .expect("the test's effects are operations"),
+                &lash_kernel_dialect::Namespaces::of_effects(
+                    &effects,
+                    &lash_kernel_doc::ContractId::new("1"),
+                    &Default::default(),
+                )
+                .expect("the test's effects are operations"),
             ),
             lash_kernel_dialect::Mode::Cell(lash_kernel_dialect::CellEnvironment::first()),
         )

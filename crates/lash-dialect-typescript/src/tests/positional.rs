@@ -184,7 +184,10 @@ fn a_saved_positional_function_runs_and_resumes_without_its_partner_in_scope() {
     let echo = lash_kernel_doc::EffectName::new("host.echo").unwrap();
     document.manifest.effects.insert(
         echo.clone(),
-        lash_kernel_doc::OperationRequirement::of_signature(machine::effects()[&echo].clone()),
+        lash_kernel_doc::OperationRequirement::new(
+            machine::effects()[&echo].clone(),
+            lash_kernel_doc::ContractId::new("1"),
+        ),
     );
     let mut bodies = 0;
     for stmt in &mut document.main {

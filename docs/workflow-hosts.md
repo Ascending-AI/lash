@@ -62,7 +62,7 @@ kernel notation:
 ```text
 kernel 1
 numbers float
-effect ledger.record(input: Any) -> Any contract 1
+effect ledger.record(input: Any) -> Any contract "1"
 entry audit(summary: Any) -> Any
 
 fn audit(summary) {
@@ -959,13 +959,51 @@ the separate component registry. It fills no session or deployment defaults.
 | Trigger delivery | The host publishes the trigger's stated environment under its pin and starts the definition with its explicit launch. |
 | Host or tool session-turn start | No process environment. The create request supplies the child session's configuration; its stated session id or the process-derived child id names it. |
 | Restart, crash resume, redrive or takeover | The recorded environment ref and engine settings are loaded. No policy or default runs again. |
-| Claim by another build | The build must serve the recorded components, config formats and each linked tool's retained surface. It builds only the named components; nothing is re-selected. A component the build declares retired is left out, unless the env links an effect to it or it holds recorded state; then the process parks with the typed refusal (see [Retiring a process component](plugins.md#retiring-a-process-component)). A kernel process stays pinned to the helper functions it was written against. |
+| Claim by another build | The build must serve the recorded components, config formats and each linked tool; a perform whose tool the build serves under another contract than the code pins raises `operation_contract_changed` (see [When a linked tool changes](#when-a-linked-tool-changes)). It builds only the named components; nothing is re-selected. A component the build declares retired is left out, unless the env links an effect to it or it holds recorded state; then the process parks with the typed refusal (see [Retiring a process component](plugins.md#retiring-a-process-component)). A kernel process stays pinned to the helper functions it was written against. |
 
 A committed model-start decision never re-runs its policy. An attempt abandoned
 before commit may choose again. A policy refusal becomes a tool error; a policy
 or publication fault retries the uncommitted attempt.
 [ADR 0141](adr/0141-a-model-started-process-environment-is-the-host-start-policys-sealed-choice.md)
 states these decisions.
+
+## When a linked tool changes
+
+Code pins each operation it performs to a contract: the `contract "<id>"` its
+manifest states for the effect. The tool that serves the operation declares
+that id (`ToolDraft::declared_contract`) or derives it from its input schema,
+output schema, output contract, declared intents and host tag
+(`ToolDraft::host_tag`), and from nothing else. A link records which tool and
+provider serve an effect, the execution policy and the provider's payload. It
+records no contract.
+
+At each perform one judge compares the live tool's contract id with the one
+the code pins, and nothing else:
+
+- Equal: the call runs under the execution policy its link recorded. A
+  reworded description, a new transport or server version, or changed retry
+  bounds change no contract.
+- Different: the perform raises `operation_contract_changed`, naming the
+  effect, the tool and both ids. No body ran, and the program may catch it.
+  This holds for a call not yet issued and for one admitted before the change,
+  in a round, a cell or a process.
+- Missing: the call parks, as a missing tool always has.
+
+A committed outcome is never run again. There is no rebind: a run that meets
+a changed contract raises at its next perform of that operation. A host whose
+tool changes behaviour under the same schemas changes its host tag or its
+declared contract.
+
+An imported MCP tool's host tag is its durable id and a digest of its name and
+schemas. Its transport, peer and server version are facts of the connection,
+not of the contract, so an admitted call, `Once` included, may be delivered
+to a redeployed server whose tool kept its name and schemas. A same-schema
+behaviour change on an MCP server is not detected.
+
+On an operation path a package owns, the serving tool must declare the
+package's contract id, declare exactly the package's intents and serve the
+package's signature. Otherwise the environment is refused when it is built,
+with `runner_not_packaged` naming the tool and the package.
 
 ## Reading and comparing process authority
 
@@ -985,17 +1023,17 @@ and `tools_excess`, filters `processes.list` results the same way, or cancels th
 process. The host also decides how to authorize a session-turn's child session.
 
 Compare against the session's resolved offered catalog. A process's effect
-links each name a tool; a link whose tool the catalog does not offer with the
-same id and dispatch surface is excess, including a same-name tool with a
-different id. The model-facing name, the binding path and the serving
-provider's key are not authority. Capability refs are within only when
+links each name a tool; a link whose tool the catalog does not offer under the
+same id is excess, including a same-name tool with a different id. The
+model-facing name, the serving provider's key and the tool's contract are not
+authority: a call runs only under the contract its code requires, which the
+one judge checks at each perform (`operation_contract_changed`). Capability refs are within only when
 equal; opaque refs have no ordering of authority. Components and named-session
 grants have separate helpers in `lash::process::authority`.
 
 This short host check is compiled in
 [processes_evidence.rs](../crates/lash/tests/processes_evidence.rs). It admits
-engine processes whose linked tool identities and dispatch surfaces are
-offered, and leaves child-session authorization for the host's separate policy:
+engine processes whose linked tool identities are offered, and leaves child-session authorization for the host's separate policy:
 
 ```rust
 async fn may_address_process(

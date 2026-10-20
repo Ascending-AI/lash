@@ -3,28 +3,28 @@
   "cases": [
     {
       "name": "disjoint argument main { do perform echo(\"wrong\") as Int }",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int\nmain { do perform echo(\"wrong\") as Int }\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int contract \"1\"\nmain { do perform echo(\"wrong\") as Int }\n",
       "expected": {
         "end": "refused"
       }
     },
     {
       "name": "disjoint argument main { let x = \"wrong\" do perform echo(x) as Int }",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int\nmain { let x = \"wrong\" do perform echo(x) as Int }\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int contract \"1\"\nmain { let x = \"wrong\" do perform echo(x) as Int }\n",
       "expected": {
         "end": "refused"
       }
     },
     {
       "name": "disjoint argument main { let x = [] do perform echo(x) as Int }",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int\nmain { let x = [] do perform echo(x) as Int }\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int contract \"1\"\nmain { let x = [] do perform echo(x) as Int }\n",
       "expected": {
         "end": "refused"
       }
     },
     {
       "name": "an argument that might fit is admitted",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int\nfn f(x) { let y = perform echo(x) as Int return y } main { let x = call f(1) finish x }\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int contract \"1\"\nfn f(x) { let y = perform echo(x) as Int return y } main { let x = call f(1) finish x }\n",
       "expected": {
         "end": {
           "finished": {

@@ -282,7 +282,7 @@ impl CellHost<'_> {
         &self,
         request: &EffectRequest,
         call: lash_core::ToolCallId,
-    ) -> Result<(ToolInvocation, FrozenRequest), ErrorDatum> {
+    ) -> Result<(ToolInvocation, CellCall, FrozenRequest), ErrorDatum> {
         if let Some(note) = self.envelope.unavailable_notes.get(request.effect.as_str()) {
             return Err(refused(
                 UNKNOWN_EFFECT,
@@ -300,11 +300,24 @@ impl CellHost<'_> {
         let args = CellArgs
             .args(&request.args)
             .map_err(|refusal| refusal.error(&request.effect))?;
-        let invocation = self.invocation(request, call, tool, args);
-        let frozen =
-            FrozenRequest::tool(CellCall::of(&invocation), request.args.clone(), &CellArgs)
-                .map_err(|refusal| refused(TOOL_ARGUMENTS, refusal.to_string()))?;
-        Ok((invocation, frozen))
+        // The call is pinned to the contract the cell's code requires of
+        // the operation, as the cell was lowered against it.
+        let contract = self
+            .boundary
+            .effect(&request.effect)
+            .map(|(_, offered)| offered.requirement.contract.clone())
+            .ok_or_else(|| {
+                refused(
+                    UNKNOWN_EFFECT,
+                    format!("this session offers no `{}`", request.effect),
+                )
+            })?;
+        let mut invocation = self.invocation(request, call, tool, args);
+        invocation.contract = Some(contract.clone());
+        let cell = CellCall::of(&invocation, contract);
+        let frozen = FrozenRequest::tool(cell.clone(), request.args.clone(), &CellArgs)
+            .map_err(|refusal| refused(TOOL_ARGUMENTS, refusal.to_string()))?;
+        Ok((invocation, cell, frozen))
     }
 
     /// The invocation of `tool` under `call`, with the grant a tool outside
@@ -410,7 +423,7 @@ impl KernelEffects for CellHost<'_> {
         outstanding: u64,
         live: u64,
     ) -> Result<Result<MemberDraft, ErrorDatum>, ParentFault> {
-        let (invocation, frozen) = match self.tool_call(request, call) {
+        let (invocation, cell, frozen) = match self.tool_call(request, call) {
             Ok(called) => called,
             Err(refusal) => return Ok(Err(refusal)),
         };
@@ -490,7 +503,7 @@ impl KernelEffects for CellHost<'_> {
                 .lock_recover()
                 .insert(invocation.id.clone(), request.identity.clone());
         }
-        let member = CellMember::Tool(CellCall::of(&invocation));
+        let member = CellMember::Tool(cell);
         // A node without the process engine the call's manifest names takes
         // up none of it: the cell stops unrecorded, and its turn waits for a
         // node that registers the engine.

@@ -669,10 +669,12 @@ impl Lowerer<'_> {
         } else {
             self.tool_arguments(effect, signature, call)?
         };
-        self.performed.insert(
-            effect.clone(),
-            lash_kernel_doc::OperationRequirement::of_signature(signature.clone()),
-        );
+        // The perform states the requirement the operation is offered
+        // under: its signature and its contract.
+        if let Some((_, offered)) = self.namespaces.operation(effect) {
+            self.performed
+                .insert(effect.clone(), offered.requirement.clone());
+        }
         Ok(ActExpr {
             kind: ActKind::Perform {
                 effect: effect.clone(),

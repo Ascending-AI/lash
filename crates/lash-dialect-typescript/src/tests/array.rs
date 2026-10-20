@@ -60,8 +60,9 @@ fn run(source: &str) -> End {
 
 fn drive(source: &str, expected: &[Vec<Datum>]) -> End {
     let kernel = kernel();
-    let environment_namespaces = lash_kernel_dialect::Namespaces::of_signatures(
+    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
         &super::machine::effects(),
+        &lash_kernel_doc::ContractId::new("1"),
         super::controls(),
     )
     .expect("the test's effects are operations");
@@ -842,8 +843,9 @@ impl Host for ArrayPathHost {
 }
 
 fn observe_array_path(method: &str, setup: &str, generic: bool) -> (String, Vec<String>, u64) {
-    let mut source =
-        String::from("kernel 1\nnumbers by_spelling\neffect host.echo(x: Any) -> Any\n");
+    let mut source = String::from(
+        "kernel 1\nnumbers by_spelling\neffect host.echo(x: Any) -> Any contract \"1\"\n",
+    );
     for (name, id) in kernel().library.iter() {
         source.push_str(&format!("use {name} = @{id}\n"));
     }

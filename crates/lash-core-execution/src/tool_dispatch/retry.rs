@@ -112,7 +112,7 @@ fn attempt_trace(
     };
     let (trace, body) = spec.bind();
     let provider = match authority {
-        AttemptAuthority::Granted(grant) => Some(grant.provider.callback_identity()),
+        AttemptAuthority::Granted(grant) => Some(grant.provider().callback_identity()),
         AttemptAuthority::Catalog { .. } => tool_context.executable.clone(),
     };
     if let Some(callback) = provider.as_ref().and_then(crate::trace::BoundCallback::of) {

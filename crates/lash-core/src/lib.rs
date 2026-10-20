@@ -434,7 +434,6 @@ pub use attachments::{
     AttachmentStoreFailureClass, AttachmentStorePersistence, EmptyRootSetPolicy, StoredAttachment,
     StoredBlobRef,
 };
-pub use lash_core_execution::CALL_DYNAMIC_EFFECT;
 pub use lash_core_execution::DeferredMatch;
 pub use lash_core_execution::DeferredOutcome;
 pub use lash_core_execution::DeferredResolutionPolicy;
@@ -442,21 +441,21 @@ pub use lash_core_execution::DeferredResolveContext;
 pub use lash_core_execution::DeferredToolProvider;
 pub use lash_core_execution::DeferredToolProviderRegistration;
 pub use lash_core_execution::DynamicCall;
-pub use lash_core_execution::EffectLink;
 pub use lash_core_execution::EffectName;
 pub use lash_core_execution::ExecutionBinding;
 pub use lash_core_execution::ExecutionBindingUnreadable;
-pub use lash_core_execution::LinkKind;
+pub use lash_core_execution::Judgement;
+pub use lash_core_execution::LinkSource;
 /// The run spec a frame switch's follow-on runs under (FIG-6021).
 pub use lash_core_execution::NextRun;
 pub use lash_core_execution::ObligationToken;
 pub use lash_core_execution::turn_stop_from_tool_control;
+pub use lash_core_execution::{CALL_DYNAMIC_CONTRACT, CALL_DYNAMIC_EFFECT};
 
-pub use lash_core_execution::ProcessSurface;
+pub use lash_core_execution::OperationLink;
 pub use lash_core_execution::ProviderKey;
 pub use lash_core_execution::RecordedSurface;
 pub use lash_core_execution::RegistryKind;
-pub use lash_core_execution::ResolvedLink;
 pub use lash_core_execution::SurfaceCollision;
 pub use lash_core_execution::SurfaceDuplicateTool;
 pub use lash_core_execution::SurfaceEntry;
@@ -465,17 +464,21 @@ pub use lash_core_execution::SurfaceTools;
 pub use lash_core_execution::ToolSurfaceDrift;
 pub use lash_core_execution::ToolSurfaceDriftKind;
 pub use lash_core_execution::call_dynamic_endpoint;
+pub use lash_core_execution::judge;
+pub use lash_core_execution::operation_contract_changed;
+/// What pins an operation's meaning: the id a tool serves and code requires.
+pub use lash_kernel_doc::ContractId;
 pub use lash_protocol_types::llm::attachment_delivery::ProviderFileScope;
 pub use lash_protocol_types::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, Backoff, BatchId,
     BindingChanges, BoundedRetry, CallResultSummary, CancelOrigin, CancelRequest, CellControl,
     CellDefect, CellFailure, CellFailureKind, CellFailureRepair, CellOutcome, CellPrint,
-    CellRecord, CheckpointKind, CompletionCandidate, CompletionDisposition, DecidedCompletion,
-    DeclarationRefusal, DegradedBinding, ExecCodeFailure, ExecCodeFailureReason, ExecResponse,
-    ExecutedCall, ExecutedCallOutcome, ExecutionBudgets, ExecutionBudgetsConfig,
+    CellRecord, CheckpointKind, CompletionCandidate, CompletionDisposition, ContractSource,
+    DecidedCompletion, DeclarationRefusal, DegradedBinding, ExecCodeFailure, ExecCodeFailureReason,
+    ExecResponse, ExecutedCall, ExecutedCallOutcome, ExecutionBudgets, ExecutionBudgetsConfig,
     ExecutionBudgetsError, ExecutionLimit, ExecutionPolicy, FinishDeclaration, FrameKey,
-    FrameKeyError, InputId, InternalPartKind, IntoOperation, JsonSchema, LimitCause, LlmCallError,
-    LlmUsage, MediaType, Message, MessageOrigin, MessageRole, NodeId, OutcomeShape,
+    FrameKeyError, HostTag, InputId, InternalPartKind, IntoOperation, JsonSchema, LimitCause,
+    LlmCallError, LlmUsage, MediaType, Message, MessageOrigin, MessageRole, NodeId, OutcomeShape,
     OutputRetentionPolicy, OutputValue, ParkBound, Part, PartKind, PluginMessage,
     PluginRuntimeEvent, ProjectionMode, ProviderAttemptLimits, QualifiedOperation,
     RegistrationRefused, RetainedOutput, RetainedValue, RunId, SchemaAdmissionError,
@@ -966,7 +969,7 @@ pub(crate) use session::RuntimeExecutionTracing;
 pub(crate) use session::Session;
 pub use session::{
     CellEndHandoff, EndedCell, ExecRequest, ExecutionEnvironmentSyncError, HeldResponse,
-    RuntimeExecutionContext, SessionError, ToolDispatchSurface, tool_dispatch_surface,
+    RuntimeExecutionContext, SessionError,
 };
 pub use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,

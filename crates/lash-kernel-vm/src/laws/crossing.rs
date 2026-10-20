@@ -16,7 +16,7 @@ const STARTABLE: &str = "let f = fn(a) start (a: Any) -> Any bare direct { retur
 /// raised instead, when it requested nothing.
 fn perform(ty: &str, arg: &str) -> Result<Vec<Datum>, (String, String)> {
     let mut embedder = Embedder::new(&format!(
-        "effect take(input: {ty}) -> Any\nmain {{ {STARTABLE} do perform take({arg}) as Any }}"
+        "effect take(input: {ty}) -> Any contract \"1\"\nmain {{ {STARTABLE} do perform take({arg}) as Any }}"
     ));
     loop {
         match embedder.run() {

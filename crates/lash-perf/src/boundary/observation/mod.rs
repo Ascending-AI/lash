@@ -359,21 +359,19 @@ pub(super) async fn publish(core: &lash::LashCore, document: &str) -> Result<Pub
         parse_document(document).map_err(|error| anyhow::anyhow!("workflow document: {error}"))?;
     let environment = environment(!document.manifest.effects.is_empty())?;
     let artifacts = core.host_artifacts();
-    // The document performs each effect under the signature this host
-    // offers it under.
+    // The document performs each effect under the requirement this host
+    // offers it under: its signature and contract.
     let offered = artifacts
         .workflow_environment(&environment)
         .await?
         .context("this core reads no workflow documents")?;
     for (effect, requirement) in &mut document.manifest.effects {
-        *requirement = lash::workflow::document::OperationRequirement::of_signature(
-            offered
-                .checker()
-                .effects
-                .get(effect)
-                .with_context(|| format!("this host offers no effect `{effect}`"))?
-                .clone(),
-        );
+        *requirement = offered
+            .checker()
+            .effects
+            .get(effect)
+            .with_context(|| format!("this host offers no effect `{effect}`"))?
+            .clone();
     }
     let pin = HostArtifactPin::mint();
     let publication = match within(
@@ -435,7 +433,7 @@ pub(super) fn loop_document(iterations: usize, steps: usize) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     let mut document = format!(
-        "kernel 1\nnumbers float\neffect tools.mark(input: Any) -> Any\nentry {ENTRY}() -> Any\n\n\
+        "kernel 1\nnumbers float\neffect tools.mark(input: Any) -> Any contract \"1\"\nentry {ENTRY}() -> Any\n\n\
          fn {ENTRY}() {{\n  let input = {{key: \"step\"}}\n  for item in [{items}] {{\n"
     );
     for _ in 0..steps {

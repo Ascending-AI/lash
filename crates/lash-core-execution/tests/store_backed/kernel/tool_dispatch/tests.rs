@@ -249,7 +249,7 @@ async fn explicit_execution_grant_runs_non_catalog_tool_with_binding() {
     };
     let tool_context = crate::testing::ToolCallFixture::from_dispatch(Arc::new(context.clone()))
         .prepared_call(&prepared)
-        .execution_binding(grant.binding.clone());
+        .execution_binding(grant.payload().cloned());
     let launch = crate::coordinate_prepared_tool_call_launch_with_execution_context(
         &context,
         prepared,
@@ -514,11 +514,11 @@ async fn a_deferred_only_granted_cell_call_executes_once_or_parks_for_missing_re
                 .map(|path| {
                     (
                         (*path).to_owned(),
-                        crate::DeferredOutcome::Resolved {
-                            provider: crate::testing::test_tools_provider(),
-                            definition: named_beta_tool("send_email"),
-                            binding: Some(granted_binding()),
-                        },
+                        crate::DeferredOutcome::resolved(
+                            crate::testing::test_tools_provider(),
+                            named_beta_tool("send_email"),
+                            Some(granted_binding()),
+                        ),
                     )
                 })
                 .collect()
@@ -592,14 +592,13 @@ async fn a_deferred_only_granted_cell_call_executes_once_or_parks_for_missing_re
         requested: "tools.send_email".to_owned(),
         outcome: resolved["tools.send_email"].clone(),
     };
-    let (provider_key, definition, binding) = matched.resolved().unwrap();
-    let grant =
-        crate::ToolExecutionGrant::from_definition(provider_key.clone(), definition.clone())
-            .with_execution_binding(binding.cloned());
+    let grant = crate::ToolExecutionGrant::of_link(matched.resolved().unwrap()).unwrap();
+    let definition = grant.definition().clone();
     let member = CellMember::Tool(CellCall {
         id: crate::ToolCallId::fixture("deferred-cell"),
         tool_id: definition.manifest.id.clone(),
         args: json!({ "value": "email" }),
+        contract: definition.contract_id(),
         execution_grant: Some(Box::new(grant)),
         issuing_language_node_id: None,
     });
@@ -651,13 +650,12 @@ async fn a_deferred_only_granted_cell_call_executes_once_or_parks_for_missing_re
     // retained cell member is restored, before its next admission.
     let mut unreadable = member.clone();
     let CellMember::Tool(call) = &mut unreadable;
-    call.execution_grant
-        .as_mut()
-        .unwrap()
-        .binding
-        .as_mut()
-        .unwrap()
-        .format = crate::FormatVersion::new(2).unwrap();
+    let grant = call.execution_grant.as_mut().unwrap();
+    let payload = crate::ExecutionBinding {
+        format: crate::FormatVersion::new(2).unwrap(),
+        ..grant.payload().unwrap().clone()
+    };
+    **grant = (**grant).clone().with_execution_binding(Some(payload));
     let error = members
         .require_capable(&unreadable)
         .expect_err("an unreadable binding parks");
@@ -695,11 +693,16 @@ async fn a_deferred_only_granted_cell_call_executes_once_or_parks_for_missing_re
     // execution provider absent from this node.
     let mut unserved = member.clone();
     let CellMember::Tool(call) = &mut unserved;
-    call.execution_grant.as_mut().unwrap().provider = crate::plugin::ToolProviderHandle::new(
-        crate::plugin::RegistryKind::Session,
-        "absent",
-        crate::tool_provider_key!("tools"),
-    );
+    let grant = call.execution_grant.as_mut().unwrap();
+    **grant = crate::ToolExecutionGrant::of_link(&crate::OperationLink {
+        provider: crate::plugin::ToolProviderHandle::new(
+            crate::plugin::RegistryKind::Session,
+            "absent",
+            crate::tool_provider_key!("tools"),
+        ),
+        ..grant.link().clone()
+    })
+    .unwrap();
     let error = members
         .require_capable(&unserved)
         .expect_err("a missing execution provider parks");

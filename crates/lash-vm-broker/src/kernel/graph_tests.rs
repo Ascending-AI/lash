@@ -87,6 +87,7 @@ fn call(id: &str, args: serde_json::Value) -> CellCall {
         id: ToolCallId::fixture(id),
         tool_id: ToolId::new("read"),
         args,
+        contract: lash_kernel_doc::ContractId::new("1"),
         execution_grant: None,
         issuing_language_node_id: Some("main/1.2".to_owned()),
     }

@@ -10,8 +10,9 @@
 //!
 //! The host answers a read the way the cell would see the same call
 //! recorded: its arguments are the guest's one input record under the
-//! call projection, validated against the tool's input schema; a failure
-//! is a `tool_failed` error carrying its data; and every read counts
+//! call projection, validated against the tool's input schema; a failure,
+//! `operation_contract_changed` included, is a `tool_failed` error carrying
+//! its data; and every read counts
 //! against `max_tool_calls` beside the cell's recorded calls, in the count
 //! the cell's saved state holds. A read is bounded by the sooner of its
 //! tool's execution bound and how long the worker waits on its parent, and
@@ -155,6 +156,11 @@ impl EffectReads for CellReads {
             Ok(ordinal) => ordinal,
             Err(refusal) => return Ok(Err(refusal)),
         };
+        // A tool served under another contract than the run pinned raises
+        // `operation_contract_changed` at the `perform`: nothing is read.
+        if let Some(failure) = route.contract_changed() {
+            return Ok(Err(tool_failed(failure)));
+        }
         let answer = match self.args(effect, route, args) {
             Ok(args) => {
                 let answer = self.answer(effect, route, &args).await;

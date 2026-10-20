@@ -236,11 +236,12 @@ fn lower() -> EncodedPayload {
         dialect: "typescript".into(),
         source: r#"await tools.mark({ key: "probe" }); await control.finish({ operation: "op" });"#
             .into(),
-        operations: lash_kernel_dialect::Namespaces::of_signatures(
+        operations: lash_kernel_dialect::Namespaces::of_effects(
             &["tools.mark", "control.finish"]
                 .into_iter()
                 .map(|name| (EffectName::new(name).expect("a tool's name"), tool()))
                 .collect(),
+            &lash_kernel_doc::ContractId::new("1"),
             &BTreeMap::from([(
                 EffectName::new("control.finish").expect("a tool's name"),
                 BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),

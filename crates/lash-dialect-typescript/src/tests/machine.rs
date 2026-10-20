@@ -253,9 +253,12 @@ fn start_with_bindings(source: &str, values: super::pages::Session) -> (KernelMa
     let library = super::library();
     let effects = effects();
     let bindings = values.names();
-    let environment_namespaces =
-        lash_kernel_dialect::Namespaces::of_signatures(&effects, super::controls())
-            .expect("the test's effects are operations");
+    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
+        &effects,
+        &lash_kernel_doc::ContractId::new("1"),
+        super::controls(),
+    )
+    .expect("the test's effects are operations");
     let environment = Environment::new(library, &environment_namespaces);
     let lowered = crate::lower(
         source,
@@ -693,9 +696,12 @@ fn a_function_crossing_to_a_tool_uses_its_source_entry_convention() {
             .split_once("function f")
             .expect("a source function");
         let effects = effects();
-        let environment_namespaces =
-            lash_kernel_dialect::Namespaces::of_signatures(&effects, super::controls())
-                .expect("the test's effects are operations");
+        let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
+            &effects,
+            &lash_kernel_doc::ContractId::new("1"),
+            super::controls(),
+        )
+        .expect("the test's effects are operations");
         let environment = Environment::new(super::library(), &environment_namespaces);
         let entry = crate::lower(
             &format!("export async function run{tail}"),

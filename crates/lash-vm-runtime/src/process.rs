@@ -93,7 +93,6 @@ pub enum KernelProcessFailureCode {
     ArgumentsInvalid,
     DocumentMissing,
     SettingsInvalid,
-    BoundaryInvalid,
     /// The machine refuses the run: its document or its saved state.
     RunRefused,
     /// The run reached no park after every attempt.
@@ -112,7 +111,6 @@ impl KernelProcessFailureCode {
             Self::ArgumentsInvalid => "process_arguments_invalid",
             Self::DocumentMissing => "process_document_missing",
             Self::SettingsInvalid => "process_settings_invalid",
-            Self::BoundaryInvalid => "process_boundary_invalid",
             Self::RunRefused => "process_run_refused",
             Self::RunUnsettled => "process_run_unsettled",
         }
@@ -420,6 +418,25 @@ fn process_random() -> u64 {
 }
 
 impl KernelProcessEngine {
+    /// The operations among `performed` whose paths a package owns in the
+    /// node's own package set, the view a run reads, with what each
+    /// package declares (PKG-RUNNER).
+    pub(crate) fn owned_operations(
+        &self,
+        performed: &lash_execution_contracts::process::PerformedEffects,
+    ) -> lash_execution_contracts::process::OwnedOperations {
+        let Some(held) = self.workers.config().packages.as_deref() else {
+            return Default::default();
+        };
+        let Ok(view) = held.view(&held.own()) else {
+            return Default::default();
+        };
+        performed
+            .keys()
+            .filter_map(|effect| Some((effect.clone(), crate::owned_operation(&view, effect)?)))
+            .collect()
+    }
+
     /// The engine that runs the documents in `documents`, written in
     /// `dialect`, on `workers`, holding each new process to `bounds`, for
     /// workers that hold the library of the dialects this build was built

@@ -133,14 +133,15 @@ impl RuntimeSessionServices {
 
 #[async_trait::async_trait]
 impl lash_core_execution::runtime::process::steps::ProcessStepContext for RuntimeSessionServices {
-    /// How this node serves the engine process's linked call of `effect`
-    /// (D3), judged now.
+    /// How this node serves the engine process's linked call of `effect`,
+    /// pinned to `contract` (D3), judged now.
     fn step_link(
         &self,
         effect: &lash_kernel_doc::EffectName,
+        contract: &lash_kernel_doc::ContractId,
     ) -> Result<crate::plugin::StepLink, lash_execution_contracts::plugin_error::PluginError> {
         let (_, engine) = self.current.engine_process()?;
-        Ok(engine.composition.step_link(&engine.env, effect))
+        Ok(engine.composition.step_link(&engine.env, effect, contract))
     }
 
     /// How this node serves the engine process's call of the tool

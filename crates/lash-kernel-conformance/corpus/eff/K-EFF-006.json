@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "float Number decodes 9007199254740993",
-      "document": "kernel 1\nnumbers float\neffect source() -> Any\nmain { let value = perform source() as Number finish value }\n",
+      "document": "kernel 1\nnumbers float\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Number finish value }\n",
       "expected": {
         "prints": [],
         "trace": [
@@ -39,7 +39,7 @@
     },
     {
       "name": "float Number decodes 1.0",
-      "document": "kernel 1\nnumbers float\neffect source() -> Any\nmain { let value = perform source() as Number finish value }\n",
+      "document": "kernel 1\nnumbers float\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Number finish value }\n",
       "expected": {
         "prints": [],
         "trace": [
@@ -75,7 +75,7 @@
     },
     {
       "name": "float Number decodes 1e3",
-      "document": "kernel 1\nnumbers float\neffect source() -> Any\nmain { let value = perform source() as Number finish value }\n",
+      "document": "kernel 1\nnumbers float\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Number finish value }\n",
       "expected": {
         "prints": [],
         "trace": [
@@ -111,7 +111,7 @@
     },
     {
       "name": "float Any decodes 9007199254740993",
-      "document": "kernel 1\nnumbers float\neffect source() -> Any\nmain { let value = perform source() as Any finish value }\n",
+      "document": "kernel 1\nnumbers float\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Any finish value }\n",
       "expected": {
         "prints": [],
         "trace": [
@@ -147,7 +147,7 @@
     },
     {
       "name": "float Any decodes 1.0",
-      "document": "kernel 1\nnumbers float\neffect source() -> Any\nmain { let value = perform source() as Any finish value }\n",
+      "document": "kernel 1\nnumbers float\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Any finish value }\n",
       "expected": {
         "prints": [],
         "trace": [
@@ -183,7 +183,7 @@
     },
     {
       "name": "float Any decodes 1e3",
-      "document": "kernel 1\nnumbers float\neffect source() -> Any\nmain { let value = perform source() as Any finish value }\n",
+      "document": "kernel 1\nnumbers float\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Any finish value }\n",
       "expected": {
         "prints": [],
         "trace": [
@@ -219,7 +219,7 @@
     },
     {
       "name": "by_spelling Number decodes 9007199254740993",
-      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any\nmain { let value = perform source() as Number finish value }\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Number finish value }\n",
       "expected": {
         "prints": [],
         "trace": [
@@ -255,7 +255,7 @@
     },
     {
       "name": "by_spelling Number decodes 1.0",
-      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any\nmain { let value = perform source() as Number finish value }\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Number finish value }\n",
       "expected": {
         "prints": [],
         "trace": [
@@ -291,7 +291,7 @@
     },
     {
       "name": "by_spelling Number decodes 1e3",
-      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any\nmain { let value = perform source() as Number finish value }\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Number finish value }\n",
       "expected": {
         "prints": [],
         "trace": [
@@ -327,7 +327,7 @@
     },
     {
       "name": "by_spelling Any decodes 9007199254740993",
-      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any\nmain { let value = perform source() as Any finish value }\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Any finish value }\n",
       "expected": {
         "prints": [],
         "trace": [
@@ -363,7 +363,7 @@
     },
     {
       "name": "by_spelling Any decodes 1.0",
-      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any\nmain { let value = perform source() as Any finish value }\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Any finish value }\n",
       "expected": {
         "prints": [],
         "trace": [
@@ -399,7 +399,7 @@
     },
     {
       "name": "by_spelling Any decodes 1e3",
-      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any\nmain { let value = perform source() as Any finish value }\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect source() -> Any contract \"1\"\nmain { let value = perform source() as Any finish value }\n",
       "expected": {
         "prints": [],
         "trace": [

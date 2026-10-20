@@ -406,6 +406,8 @@ fn launch_definitions() -> Vec<lash::tools::ToolDefinition> {
             serde_json::json!({"x-lash": {"kind": "process_unknown"}}),
         )
         .expect("tool schema")
+        // The contract the spawner's kernel text pins.
+        .declared_contract(lash_core::ContractId::new("1"))
         .with_execution(std::time::Duration::from_secs(120))
         .with_declaration(
             lash_core::ToolDeclaration::default()
@@ -799,7 +801,7 @@ fn spawner(launch: &str) -> lash::workflow::document::DocumentBytes {
     let mut document = parse_document(&format!(
         r#"kernel 1
 numbers float
-effect tools.{launch}(input: Any) -> Any
+effect tools.{launch}(input: Any) -> Any contract "1"
 entry spawner(base: Any, marker: Any, cut: Any) -> Any
 
 fn spawner(base, marker, cut) {{
@@ -820,11 +822,7 @@ main {{
     let mut boundary = lash::vm::HostBoundary::new();
     for tool in launch_definitions() {
         boundary
-            .offer_tool(
-                &tool.manifest,
-                &tool.contract.input_schema.canonical,
-                &tool.contract.output_schema.canonical,
-            )
+            .offer_tool(&tool.manifest, &tool.contract)
             .expect("the launch contract");
     }
     let effect = lash::workflow::document::EffectName::new(format!("tools.{launch}"))

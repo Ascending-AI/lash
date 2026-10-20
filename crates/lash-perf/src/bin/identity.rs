@@ -167,8 +167,12 @@ fn lower(
     )]);
     let bindings: BTreeSet<Name> = bindings.iter().map(|name| Name::new(*name)).collect();
     let functions = BTreeMap::new();
-    let environment_namespaces =
-        lash_kernel_dialect::Namespaces::of_signatures(&effects, &controls).ok()?;
+    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
+        &effects,
+        &lash_kernel_doc::ContractId::new("1"),
+        &controls,
+    )
+    .ok()?;
     let environment =
         lash_kernel_dialect::Environment::new(embedding.library(), &environment_namespaces);
     let cell = lash_kernel_dialect::CellEnvironment {

@@ -5,14 +5,18 @@
 //! that match:
 //!
 //! - a session run records the [`RecordedSurface`] its model calls are
-//!   admitted under, each tool with the provider it is matched to and its
-//!   whole definition;
-//! - a process env links each effect its document performs to a tool
-//!   ([`EffectLink`]), with the dispatch surface the link was checked
-//!   against ([`ProcessSurface`]);
+//!   admitted under, each tool with its [`OperationLink`] and its whole
+//!   definition as the model was shown it;
+//! - a process env links each effect its document performs to a tool by
+//!   one [`OperationLink`];
 //! - a call path no surface or link matches is resolved once by the
-//!   surface's deferred provider, and the [`DeferredMatch`] it records is
-//!   never resolved again.
+//!   surface's deferred provider, and the [`DeferredMatch`] it records, an
+//!   [`OperationLink`] retaining the matched definition, is never resolved
+//!   again.
+//!
+//! Every pinned call is judged by one [`judge`]: the live tool's contract id
+//! must equal the pinned one, and nothing else about the live tool is
+//! compared (OP-LINK-ONE).
 
 use std::collections::BTreeMap;
 
@@ -37,19 +41,37 @@ pub enum ReconfigureError {
     Validation(String),
 }
 
-/// One tool of a recorded surface: the tool, the provider it is matched to
-/// and its whole definition as the run was offered it.
+/// One tool of a recorded surface: its link, and its whole definition as
+/// the model was shown it, kept for prompt replay and as a round's pin.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SurfaceEntry {
-    pub provider: ProviderKey,
+    pub link: OperationLink,
     pub definition: ToolDefinition,
 }
 
 impl SurfaceEntry {
+    /// The entry of `definition`, advertised by `provider` with the codec
+    /// `payload` it states for the tool.
+    pub fn advertised(
+        provider: ProviderKey,
+        definition: ToolDefinition,
+        payload: Option<ExecutionBinding>,
+    ) -> Self {
+        Self {
+            link: OperationLink::advertised(provider, &definition, payload),
+            definition,
+        }
+    }
+
     /// The tool this entry offers.
     pub fn tool(&self) -> &ToolId {
-        &self.definition.manifest.id
+        &self.link.tool
+    }
+
+    /// The provider the entry's tool is matched to.
+    pub fn provider(&self) -> &ProviderKey {
+        &self.link.provider
     }
 }
 
@@ -137,7 +159,7 @@ impl RecordedSurface {
                 return Err(SurfaceRefusal::DuplicateTool(SurfaceDuplicateTool {
                     tool: entry.tool().clone(),
                     first_provider: first.clone(),
-                    second_provider: entry.provider.clone(),
+                    second_provider: entry.provider().clone(),
                 }));
             }
             let operation = entry.definition.manifest.operation.clone();
@@ -145,12 +167,12 @@ impl RecordedSurface {
                 return Err(SurfaceRefusal::Collision(SurfaceCollision {
                     operation: operation.effect_name().to_string(),
                     first_tool: first.tool().clone(),
-                    first_provider: first.provider.clone(),
+                    first_provider: first.provider().clone(),
                     second_tool: entry.tool().clone(),
-                    second_provider: entry.provider.clone(),
+                    second_provider: entry.provider().clone(),
                 }));
             }
-            ids.insert(entry.tool().clone(), entry.provider.clone());
+            ids.insert(entry.tool().clone(), entry.provider().clone());
             tools.insert(operation, entry);
         }
         Ok(Self { tools, deferred })
@@ -195,48 +217,13 @@ impl RecordedSurface {
     }
 }
 
-/// The part of a tool's dispatch surface a process link retains: what
-/// decides how a call is admitted and executed, without the session-only
-/// model-facing name, binding path or presentation. A linked call runs only
-/// on a node whose live tool projects to exactly this.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ProcessSurface {
-    pub id: ToolId,
-    pub input_schema: lash_protocol_types::SchemaContract,
-    pub output_schema: lash_protocol_types::SchemaContract,
-    pub output_contract: lash_protocol_types::ToolOutputContract,
-    pub declaration: lash_protocol_types::ToolDeclaration,
-    pub execution_policy: lash_protocol_types::ExecutionPolicy,
-    pub argument_projection: lash_protocol_types::ToolArgumentProjectionPolicy,
-}
-
-impl ProcessSurface {
-    /// The process projection of `definition`.
-    pub fn of(definition: &ToolDefinition) -> Self {
-        Self::of_parts(&definition.manifest, &definition.contract)
-    }
-
-    /// The process projection of the tool `manifest` and `contract` describe.
-    pub fn of_parts(
-        manifest: &crate::ToolManifest,
-        contract: &lash_protocol_types::ToolContract,
-    ) -> Self {
-        Self {
-            id: manifest.id.clone(),
-            input_schema: contract.input_schema.clone(),
-            output_schema: contract.output_schema.clone(),
-            output_contract: contract.output_contract.clone(),
-            declaration: manifest.declaration().clone(),
-            execution_policy: manifest.execution_policy,
-            argument_projection: manifest.argument_projection.clone(),
-        }
-    }
-}
-
 /// The effect path a process performs the `call_dynamic` endpoint
 /// under (P6, R9).
 pub const CALL_DYNAMIC_EFFECT: &str = "lash.call_dynamic";
+
+/// The contract id the `call_dynamic` endpoint declares: lash owns the
+/// operation, so its id is stated, never derived.
+pub const CALL_DYNAMIC_CONTRACT: &str = "lash.call_dynamic/1";
 
 /// The host's execution and retry contract for dynamic discovery, recorded
 /// in the process environment before its first resolution. Resolution and
@@ -268,7 +255,7 @@ impl Default for DeferredResolutionPolicy {
 /// takes the call path to resolve and the target's arguments
 /// ([`DynamicCall`]) and answers whatever the target answers. No provider
 /// advertises it; an env links it to its deferred provider
-/// ([`LinkKind::Dynamic`]). A call of it is two committed steps: its
+/// ([`LinkSource::Dynamic`]). A call of it is two committed steps: its
 /// resolution, whose committed outcome is the [`DeferredMatch`], then the
 /// call of the matched tool. Discovery is effect-free; its admitted policy
 /// controls retries and recovery.
@@ -293,6 +280,7 @@ pub fn call_dynamic_endpoint(policy: DeferredResolutionPolicy) -> ToolDefinition
         serde_json::json!({}),
     )
     .expect("the call_dynamic endpoint's schemas admit")
+    .declared_contract(lash_kernel_doc::ContractId::new(CALL_DYNAMIC_CONTRACT))
     .with_execution(policy.execution)
     .with_execution_policy(policy.execution_policy)
 }
@@ -307,95 +295,188 @@ pub struct DynamicCall {
     pub args: serde_json::Value,
 }
 
-/// What a linked effect is linked to.
+/// Where a linked operation's tool comes from.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum LinkKind {
-    /// An ordinary tool: one the link's provider advertises.
-    Tool,
-    /// The `call_dynamic` endpoint and its recorded resolution policy: a
-    /// call it makes is resolved once, then runs on the recorded match.
-    Dynamic(DeferredResolutionPolicy),
-    /// A tool the declaring cell's deferred provider resolved, as its
-    /// committed match recorded it: served from this retained definition
-    /// and binding by the link's provider, which need not advertise it, and
-    /// never resolved again.
-    Resolved(Box<ResolvedLink>),
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum LinkSource {
+    /// The link's provider advertises the tool.
+    Advertised,
+    /// A committed deferred match: the tool is served from this retained
+    /// definition by the link's provider, which need not advertise it, and
+    /// is never resolved again.
+    Resolved { definition: Box<ToolDefinition> },
+    /// The `call_dynamic` endpoint, bounded by `execution`, under the link's
+    /// policy: a call it makes is resolved once, then runs on the recorded
+    /// match.
+    Dynamic { execution: std::time::Duration },
 }
 
-/// The committed resolution a [`LinkKind::Resolved`] link retains: the
-/// matched tool's definition, whose process surface is the link's, and its
-/// execution binding, routed to the codec's process twin with its format
-/// and payload as recorded.
+/// The one pinned record of how a run's operation is served: in session
+/// surfaces, deferred matches and grants, and process envs alike.
+///
+/// It holds no contract id: the pin is the performing code's requirement,
+/// or for a model round its recorded definition's ([`judge`]).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ResolvedLink {
-    pub definition: ToolDefinition,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub binding: Option<ExecutionBinding>,
-}
-
-/// How one effect a process performs is implemented: the tool it is linked
-/// to, the provider (an env component's) that serves it, and the dispatch
-/// surface the link was checked against.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct EffectLink {
+pub struct OperationLink {
+    pub tool: ToolId,
     pub provider: ProviderKey,
-    pub surface: ProcessSurface,
-    pub kind: LinkKind,
+    /// The execution policy captured from the runner's manifest at link
+    /// time: the only policy a call through this link is admitted under.
+    pub policy: lash_protocol_types::ExecutionPolicy,
+    #[serde(default, skip_serializing_if = "is_default_projection")]
+    pub projection: lash_protocol_types::ToolArgumentProjectionPolicy,
+    /// The runner's codec payload, read back from the call's context and
+    /// never compared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload: Option<ExecutionBinding>,
+    pub source: LinkSource,
 }
 
-impl EffectLink {
-    /// The tool this effect is linked to.
-    pub fn tool(&self) -> &ToolId {
-        &self.surface.id
-    }
-
-    /// The link of the `call_dynamic` endpoint to the deferred provider an
-    /// env component declares as `deferred`.
-    pub fn dynamic(deferred: ProviderKey, policy: DeferredResolutionPolicy) -> Self {
+impl OperationLink {
+    /// The link of `definition`, which `provider` advertises, with the codec
+    /// `payload` the provider states for it.
+    pub fn advertised(
+        provider: ProviderKey,
+        definition: &ToolDefinition,
+        payload: Option<ExecutionBinding>,
+    ) -> Self {
         Self {
-            provider: deferred,
-            surface: ProcessSurface::of(&call_dynamic_endpoint(policy)),
-            kind: LinkKind::Dynamic(policy),
+            tool: definition.manifest.id.clone(),
+            provider,
+            policy: definition.manifest.execution_policy,
+            projection: definition.manifest.argument_projection.clone(),
+            payload,
+            source: LinkSource::Advertised,
         }
-    }
-
-    /// The resolution endpoint under the policy this link recorded. Only
-    /// a dynamic link retaining the endpoint's dispatch surface serves it;
-    /// no current provider policy participates in this check.
-    pub fn dynamic_endpoint(&self) -> Option<ToolDefinition> {
-        let LinkKind::Dynamic(policy) = self.kind else {
-            return None;
-        };
-        let endpoint = call_dynamic_endpoint(policy);
-        (self.surface == ProcessSurface::of(&endpoint)).then_some(endpoint)
     }
 
     /// The link of the tool a committed deferred match resolved to
-    /// `definition` under `binding`, served by the env component provider
-    /// declared as `provider`.
+    /// `definition` with the codec `payload`, served by `provider`.
     pub fn resolved(
         provider: ProviderKey,
         definition: ToolDefinition,
-        binding: Option<ExecutionBinding>,
+        payload: Option<ExecutionBinding>,
     ) -> Self {
         Self {
+            tool: definition.manifest.id.clone(),
             provider,
-            surface: ProcessSurface::of(&definition),
-            kind: LinkKind::Resolved(Box::new(ResolvedLink {
-                definition,
-                binding,
-            })),
+            policy: definition.manifest.execution_policy,
+            projection: definition.manifest.argument_projection.clone(),
+            payload,
+            source: LinkSource::Resolved {
+                definition: Box::new(definition),
+            },
         }
     }
 
-    /// The retained resolution of a [`LinkKind::Resolved`] link.
-    pub fn resolution(&self) -> Option<&ResolvedLink> {
-        match &self.kind {
-            LinkKind::Resolved(resolved) => Some(resolved),
-            LinkKind::Tool | LinkKind::Dynamic(_) => None,
+    /// The link of the `call_dynamic` endpoint to the deferred provider an
+    /// env component declares as `deferred`, under `policy`.
+    pub fn dynamic(deferred: ProviderKey, policy: DeferredResolutionPolicy) -> Self {
+        let endpoint = call_dynamic_endpoint(policy);
+        Self {
+            tool: endpoint.manifest.id.clone(),
+            provider: deferred,
+            policy: policy.execution_policy,
+            projection: endpoint.manifest.argument_projection,
+            payload: None,
+            source: LinkSource::Dynamic {
+                execution: policy.execution,
+            },
+        }
+    }
+
+    /// The definition a committed deferred match retains, for a
+    /// [`LinkSource::Resolved`] link.
+    pub fn resolution(&self) -> Option<&ToolDefinition> {
+        match &self.source {
+            LinkSource::Resolved { definition } => Some(definition),
+            LinkSource::Advertised | LinkSource::Dynamic { .. } => None,
+        }
+    }
+
+    /// The resolution endpoint under the policy and bound this link
+    /// recorded, for a [`LinkSource::Dynamic`] link.
+    pub fn dynamic_endpoint(&self) -> Option<ToolDefinition> {
+        let LinkSource::Dynamic { execution } = self.source else {
+            return None;
+        };
+        Some(call_dynamic_endpoint(DeferredResolutionPolicy {
+            execution,
+            execution_policy: self.policy,
+        }))
+    }
+
+    /// The definition a call through this link runs as: `served`, what the
+    /// runner serves now, or the retained or endpoint definition the link
+    /// itself serves, admitted under the link's policy and argument
+    /// projection rather than the served manifest's (C1).
+    pub fn admitted(&self, served: Option<&ToolDefinition>) -> Option<ToolDefinition> {
+        let mut definition = match &self.source {
+            LinkSource::Resolved { definition } => (**definition).clone(),
+            LinkSource::Dynamic { .. } => self.dynamic_endpoint()?,
+            LinkSource::Advertised => served?.clone(),
+        };
+        definition.manifest.execution_policy = self.policy;
+        definition.manifest.argument_projection = self.projection.clone();
+        Some(definition)
+    }
+
+    /// The callbacks a call through this link runs on: its provider, then
+    /// its payload's codec when it carries one.
+    pub fn callbacks(
+        &self,
+    ) -> impl Iterator<Item = crate::store::plugin_writers::PluginCallbackIdentity> + '_ {
+        std::iter::once(self.provider.callback_identity()).chain(
+            self.payload
+                .iter()
+                .map(|payload| payload.codec.callback_identity()),
+        )
+    }
+}
+
+fn is_default_projection(projection: &lash_protocol_types::ToolArgumentProjectionPolicy) -> bool {
+    projection.is_materialize_projected_values()
+}
+
+/// How the live runner serves a pinned call ([`judge`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Judgement {
+    /// The runner serves the linked tool under the pinned contract.
+    Served,
+    /// The linked tool is not served here.
+    Missing,
+    /// The runner serves the linked tool under another contract.
+    ContractChanged {
+        pinned: lash_kernel_doc::ContractId,
+        live: lash_kernel_doc::ContractId,
+    },
+}
+
+/// The one dispatch check (OP-CONTRACT-PIN, OP-LINK-ONE): whether the call
+/// `link` serves, pinned to `pinned`, may run against `live`, what its
+/// provider serves the linked tool as now. A resolved or dynamic link
+/// serves its own definition, so `live` is read only for an advertised one.
+/// The live contract id must equal the pinned one; nothing else about the
+/// live tool is compared.
+pub fn judge(
+    pinned: &lash_kernel_doc::ContractId,
+    link: &OperationLink,
+    live: Option<&ToolDefinition>,
+) -> Judgement {
+    let Some(served) = link
+        .admitted(live)
+        .filter(|served| served.manifest.id == link.tool)
+    else {
+        return Judgement::Missing;
+    };
+    let live = served.contract_id();
+    if live == *pinned {
+        Judgement::Served
+    } else {
+        Judgement::ContractChanged {
+            pinned: pinned.clone(),
+            live,
         }
     }
 }
@@ -467,13 +548,9 @@ pub struct DeferredMatch {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DeferredOutcome {
-    /// The path resolved to a tool its provider executes.
-    Resolved {
-        provider: ProviderKey,
-        definition: ToolDefinition,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        binding: Option<ExecutionBinding>,
-    },
+    /// The path resolved to a tool its provider executes: a
+    /// [`LinkSource::Resolved`] link.
+    Resolved { link: OperationLink },
     /// The resolver refused the path.
     Refused { reason: String },
     /// No tool is available for the path, with an optional host note.
@@ -483,16 +560,31 @@ pub enum DeferredOutcome {
     },
 }
 
+impl DeferredOutcome {
+    /// The path resolved to `definition`, executed by `provider` with the
+    /// codec `payload`.
+    pub fn resolved(
+        provider: ProviderKey,
+        definition: ToolDefinition,
+        payload: Option<ExecutionBinding>,
+    ) -> Self {
+        Self::Resolved {
+            link: OperationLink::resolved(provider, definition, payload),
+        }
+    }
+}
+
 impl DeferredMatch {
-    /// The resolved tool's definition, when the path resolved.
-    pub fn resolved(&self) -> Option<(&ProviderKey, &ToolDefinition, Option<&ExecutionBinding>)> {
+    /// The resolved tool's link, when the path resolved.
+    pub fn resolved(&self) -> Option<&OperationLink> {
         match &self.outcome {
-            DeferredOutcome::Resolved {
-                provider,
-                definition,
-                binding,
-            } => Some((provider, definition, binding.as_ref())),
+            DeferredOutcome::Resolved { link } => Some(link),
             DeferredOutcome::Refused { .. } | DeferredOutcome::Unavailable { .. } => None,
         }
+    }
+
+    /// The resolved tool's retained definition, when the path resolved.
+    pub fn definition(&self) -> Option<&ToolDefinition> {
+        self.resolved().and_then(OperationLink::resolution)
     }
 }

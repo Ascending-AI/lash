@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "delivery order appends tasks to ready queue",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\nfn child(value) { print value let answer = perform echo(value) as Int print answer return answer }\n\nmain {\nlet a = spawn call child(1)\nlet b = spawn call child(2)\nlet tasks = [a, b]\nlet answer = join all tasks\nfinish answer\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int contract \"1\"\nfn child(value) { print value let answer = perform echo(value) as Int print answer return answer }\n\nmain {\nlet a = spawn call child(1)\nlet b = spawn call child(2)\nlet tasks = [a, b]\nlet answer = join all tasks\nfinish answer\n}\n",
       "expected": {
         "prints": [
           {
@@ -83,7 +83,7 @@
     },
     {
       "name": "a then yield wait continues in arrival order with a joined task's, delivered first",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\nfn inplace() { let a = perform echo(1) as Int then yield print a return a }\nfn wait() { let b = perform echo(2) as Int return b }\nfn promised() { let t = spawn call wait() let b = join t print b return b }\n\nmain {\nlet x = spawn call inplace()\nlet y = spawn call promised()\nlet tasks = [x, y]\nlet answer = join all tasks\nfinish answer\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int contract \"1\"\nfn inplace() { let a = perform echo(1) as Int then yield print a return a }\nfn wait() { let b = perform echo(2) as Int return b }\nfn promised() { let t = spawn call wait() let b = join t print b return b }\n\nmain {\nlet x = spawn call inplace()\nlet y = spawn call promised()\nlet tasks = [x, y]\nlet answer = join all tasks\nfinish answer\n}\n",
       "expected": {
         "prints": [
           {
@@ -157,7 +157,7 @@
     },
     {
       "name": "a then yield wait continues in arrival order with a joined task's, delivered second",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\nfn inplace() { let a = perform echo(1) as Int then yield print a return a }\nfn wait() { let b = perform echo(2) as Int return b }\nfn promised() { let t = spawn call wait() let b = join t print b return b }\n\nmain {\nlet x = spawn call inplace()\nlet y = spawn call promised()\nlet tasks = [x, y]\nlet answer = join all tasks\nfinish answer\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int contract \"1\"\nfn inplace() { let a = perform echo(1) as Int then yield print a return a }\nfn wait() { let b = perform echo(2) as Int return b }\nfn promised() { let t = spawn call wait() let b = join t print b return b }\n\nmain {\nlet x = spawn call inplace()\nlet y = spawn call promised()\nlet tasks = [x, y]\nlet answer = join all tasks\nfinish answer\n}\n",
       "expected": {
         "prints": [
           {
@@ -231,7 +231,7 @@
     },
     {
       "name": "a failure delivered to a then yield wait reaches catch only after its turn",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\neffect fails(value: Int) -> Int\nfn guarded() { try { let a = perform fails(1) as Int then yield print a } catch e { print \"caught\" } return null }\nfn other() { let b = perform echo(2) as Int print b return b }\n\nmain {\nlet x = spawn call guarded()\nlet y = spawn call other()\nlet tasks = [x, y]\ndo join all tasks\nfinish null\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int contract \"1\"\neffect fails(value: Int) -> Int contract \"1\"\nfn guarded() { try { let a = perform fails(1) as Int then yield print a } catch e { print \"caught\" } return null }\nfn other() { let b = perform echo(2) as Int print b return b }\n\nmain {\nlet x = spawn call guarded()\nlet y = spawn call other()\nlet tasks = [x, y]\ndo join all tasks\nfinish null\n}\n",
       "expected": {
         "prints": [
           {

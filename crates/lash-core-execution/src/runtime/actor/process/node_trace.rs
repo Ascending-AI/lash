@@ -44,7 +44,7 @@ pub(super) fn step_trace_scope(
     };
     tracing.filter(|tracing| tracing.is_observed())?;
     let process = record.trace.as_ref()?.as_parent()?;
-    let parent = match node_site(record, request, site.as_ref()) {
+    let parent = match node_site(record, request, site.as_deref()) {
         Some(at) => process.container(&SpanKey::Node { at }),
         None => process,
     };
@@ -167,7 +167,7 @@ fn node_of(
     let StepRequest::Tool { site, .. } = &step.request else {
         return None;
     };
-    let at = node_site(record, &step.request, site.as_ref())?;
+    let at = node_site(record, &step.request, site.as_deref())?;
     let member = fold
         .round(RunSeq(step.run))?
         .members()

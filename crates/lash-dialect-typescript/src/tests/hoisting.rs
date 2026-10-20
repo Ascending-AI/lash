@@ -109,9 +109,12 @@ fn restored_session_bindings_cannot_mask_builtins() {
         );
         let bindings = [lash_kernel_doc::Name::new(name)].into_iter().collect();
         let effects = std::collections::BTreeMap::new();
-        let environment_namespaces =
-            lash_kernel_dialect::Namespaces::of_signatures(&effects, &Default::default())
-                .expect("the test's effects are operations");
+        let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
+            &effects,
+            &lash_kernel_doc::ContractId::new("1"),
+            &Default::default(),
+        )
+        .expect("the test's effects are operations");
         let environment =
             lash_kernel_dialect::Environment::new(super::library(), &environment_namespaces);
         let error = crate::Parser::default()

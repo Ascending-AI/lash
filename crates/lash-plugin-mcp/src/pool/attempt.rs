@@ -14,7 +14,7 @@ impl McpConnectionPool {
             entry,
             advertised_name,
             native_name,
-            binding,
+            completion: _,
         } = target;
 
         let call_timeout = entry.config.call_timeout();
@@ -69,24 +69,6 @@ impl McpConnectionPool {
             .into();
         }
 
-        if let Some(binding) = &binding {
-            if binding.completion != RemoteCompletion::Inline {
-                return McpCallFailure::UnsupportedRemoteCompletion {
-                    server: binding.server.clone(),
-                    tool_id: naming::durable_tool_id(&binding.server, &binding.native_tool)
-                        .to_string(),
-                }
-                .into();
-            }
-            if admission::peer_digest(&peer).ok().as_ref() != Some(&binding.peer_digest) {
-                return McpCallFailure::ExecutionBindingChanged {
-                    server: server_name,
-                    tool_id: naming::durable_tool_id(&binding.server, &binding.native_tool)
-                        .to_string(),
-                }
-                .into();
-            }
-        }
         if context
             .cancellation_token()
             .is_some_and(|token| token.is_cancelled())

@@ -191,11 +191,11 @@ impl WorkbenchDeferredProvider {
             return DeferredOutcome::Unavailable { note: None };
         };
         match self.store.granted(path) {
-            Ok(true) => DeferredOutcome::Resolved {
-                provider: deferred_provider(),
-                definition: definition.clone(),
-                binding: Some(binding_for(path)),
-            },
+            Ok(true) => DeferredOutcome::resolved(
+                deferred_provider(),
+                definition.clone(),
+                Some(binding_for(path)),
+            ),
             Ok(false) => DeferredOutcome::Unavailable { note: None },
             Err(err) => {
                 // A resolution has no error channel; surface the store
@@ -779,17 +779,12 @@ mod tests {
 
         let reopened = WorkbenchDeferredTools::open(&path).expect("reopen SQLite grant store");
         let after_restart = resolve(&reopened.provider, &["text.sha256"]).await;
-        let Some(DeferredOutcome::Resolved {
-            provider,
-            definition,
-            binding,
-        }) = after_restart.get("text.sha256")
-        else {
+        let Some(DeferredOutcome::Resolved { link }) = after_restart.get("text.sha256") else {
             panic!("expected the restored grant, got {after_restart:?}");
         };
-        assert_eq!(definition.id().as_str(), "workbench:deferred:text_sha256");
-        assert_eq!(provider, &deferred_provider());
-        assert_eq!(binding.as_ref(), Some(&binding_for("text.sha256")));
+        assert_eq!(link.tool.as_str(), "workbench:deferred:text_sha256");
+        assert_eq!(link.provider, deferred_provider());
+        assert_eq!(link.payload.as_ref(), Some(&binding_for("text.sha256")));
     }
 
     #[tokio::test]

@@ -3,7 +3,7 @@
   "cases": [
     {
       "name": "a read is answered inside its statement and charged as a recorded perform",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int\nmain { let x = perform echo(1) as Int finish x }\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int contract \"1\"\nmain { let x = perform echo(1) as Int finish x }\n",
       "environment": {
         "reads": [
           "echo"
@@ -40,7 +40,7 @@
     },
     {
       "name": "a read's error is raised at the perform",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\n\nmain {\ntry { do perform echo(1) as Int } catch e { finish (e.kind, e.data) }\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int contract \"1\"\n\nmain {\ntry { do perform echo(1) as Int } catch e { finish (e.kind, e.data) }\n}\n",
       "environment": {
         "reads": [
           "echo"
@@ -101,7 +101,7 @@
     },
     {
       "name": "a read's answer is decoded as the perform states",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\n\nmain {\ntry { do perform echo(1) as Int } catch e { finish e.kind }\n}\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int contract \"1\"\n\nmain {\ntry { do perform echo(1) as Int } catch e { finish e.kind }\n}\n",
       "environment": {
         "reads": [
           "echo"
@@ -137,7 +137,7 @@
     },
     {
       "name": "a recorded effect beside a read still waits",
-      "document": "kernel 1\nnumbers by_spelling\neffect look(key: Int) -> Int\neffect echo(value: Int) -> Int\nmain { let a = perform look(1) as Int let b = perform echo(a) as Int finish b }\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect look(key: Int) -> Int contract \"1\"\neffect echo(value: Int) -> Int contract \"1\"\nmain { let a = perform look(1) as Int let b = perform echo(a) as Int finish b }\n",
       "environment": {
         "reads": [
           "look"
@@ -197,7 +197,7 @@
     },
     {
       "name": "a read binding of an effect the manifest does not list is refused",
-      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int\nmain { let x = perform echo(1) as Int finish x }\n",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(x: Int) -> Int contract \"1\"\nmain { let x = perform echo(1) as Int finish x }\n",
       "environment": {
         "reads": [
           "other"

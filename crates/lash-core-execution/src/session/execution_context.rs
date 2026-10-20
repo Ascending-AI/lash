@@ -1208,12 +1208,17 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// # Errors
     ///
     /// [`crate::RuntimeErrorCode::LashVmCellBindingDrift`]: the tool is not
-    /// on the surface, drifted, or its provider registers no reader here.
+    /// on the surface, missing, or its provider registers no reader here.
+    /// A read pinned to `pinned` that its tool now serves under another
+    /// contract is routed, and raises `operation_contract_changed`.
     pub fn read_route(
         &self,
         tool: &crate::ToolId,
+        pinned: &lash_kernel_doc::ContractId,
     ) -> Result<crate::ReadRoute, crate::RuntimeEffectControllerError> {
-        self.dispatch.routes.read_route(tool, &self.dispatch.config)
+        self.dispatch
+            .routes
+            .read_route(tool, pinned, &self.dispatch.config)
     }
 
     /// The hooks through which the session's plugins see tool calls'

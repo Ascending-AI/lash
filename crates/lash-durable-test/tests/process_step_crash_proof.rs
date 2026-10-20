@@ -231,6 +231,7 @@ impl ProcessEngine for WriteEngine {
                     steps: vec![lash_execution_contracts::process::StepRequest::Tool {
                         step,
                         effect: lash_core_execution::testing::effect_of(&ext_write_definition()),
+                        contract: ext_write_definition().contract_id(),
                         input: payload,
                         site: None,
                         matched: None,

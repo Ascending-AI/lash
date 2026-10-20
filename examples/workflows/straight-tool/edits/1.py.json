@@ -1,105 +1,132 @@
 {
   "context": {
     "control.finish": {
-      "params": [
-        {
-          "name": "input",
-          "ty": "any"
-        }
-      ],
-      "result": "any"
+      "signature": {
+        "params": [
+          {
+            "name": "input",
+            "ty": "any"
+          }
+        ],
+        "result": "any"
+      },
+      "contract": "1"
     },
     "corpus.capture": {
-      "params": [
-        {
-          "name": "input",
-          "ty": {
-            "record": {
-              "fields": [
-                {
-                  "name": "list",
-                  "ty": {
-                    "list": "any"
+      "signature": {
+        "params": [
+          {
+            "name": "input",
+            "ty": {
+              "record": {
+                "fields": [
+                  {
+                    "name": "list",
+                    "ty": {
+                      "list": "any"
+                    }
                   }
-                }
-              ]
+                ]
+              }
             }
           }
-        }
-      ],
-      "result": "json"
+        ],
+        "result": "json"
+      },
+      "contract": "8be2f3c2bb16abe57355aa08cb729511defddba2c4adeb4b1744edd4e7d329e1"
     },
     "corpus.echo": {
-      "params": [
-        {
-          "name": "input",
-          "ty": "json",
-          "optional": true
-        }
-      ],
-      "result": "json"
+      "signature": {
+        "params": [
+          {
+            "name": "input",
+            "ty": "json",
+            "optional": true
+          }
+        ],
+        "result": "json"
+      },
+      "contract": "52910906e3f939a5ce2e34bd105cd37184ead8ac272080fcbff759b3b6db6560"
     },
     "display.add_item": {
-      "params": [
-        {
-          "name": "input",
-          "ty": "any"
-        }
-      ],
-      "result": "any"
+      "signature": {
+        "params": [
+          {
+            "name": "input",
+            "ty": "any"
+          }
+        ],
+        "result": "any"
+      },
+      "contract": "1"
     },
     "display.set_status": {
-      "params": [
-        {
-          "name": "input",
-          "ty": "any"
-        }
-      ],
-      "result": "any"
+      "signature": {
+        "params": [
+          {
+            "name": "input",
+            "ty": "any"
+          }
+        ],
+        "result": "any"
+      },
+      "contract": "1"
     },
     "display.show_message": {
-      "params": [
-        {
-          "name": "input",
-          "ty": "any"
-        }
-      ],
-      "result": "any"
+      "signature": {
+        "params": [
+          {
+            "name": "input",
+            "ty": "any"
+          }
+        ],
+        "result": "any"
+      },
+      "contract": "1"
     },
     "gmail.list_recent": {
-      "params": [
-        {
-          "name": "input",
-          "ty": "any"
-        }
-      ],
-      "result": "any"
+      "signature": {
+        "params": [
+          {
+            "name": "input",
+            "ty": "any"
+          }
+        ],
+        "result": "any"
+      },
+      "contract": "1"
     },
     "llm.query": {
-      "params": [
-        {
-          "name": "input",
-          "ty": "any"
-        }
-      ],
-      "result": "any"
+      "signature": {
+        "params": [
+          {
+            "name": "input",
+            "ty": "any"
+          }
+        ],
+        "result": "any"
+      },
+      "contract": "1"
     },
     "web.search": {
-      "params": [
-        {
-          "name": "input",
-          "ty": "any"
-        }
-      ],
-      "result": "any"
+      "signature": {
+        "params": [
+          {
+            "name": "input",
+            "ty": "any"
+          }
+        ],
+        "result": "any"
+      },
+      "contract": "1"
     }
   },
   "transaction": {
-    "base": "3b77ec99e3285ade47c2c62aa1c766fffd451eee85b2086442828eb4756f60c1",
+    "base": "c2dc2261174815326673d067b946a1ef798102a220d3bfc3afd5f2676fa8675a",
     "edits": [
       {
         "set_value": {
-          "base": "3b77ec99e3285ade47c2c62aa1c766fffd451eee85b2086442828eb4756f60c1",
+          "base": "c2dc2261174815326673d067b946a1ef798102a220d3bfc3afd5f2676fa8675a",
           "target": {
             "tool_argument": {
               "action": {

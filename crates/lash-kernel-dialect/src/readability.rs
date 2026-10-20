@@ -381,7 +381,7 @@ pub fn corpus() -> Result<Vec<Case>, Diagnostic> {
     let programs = [
         (
             "nested_actions",
-            r#"effect echo(input: Any) -> Any
+            r#"effect echo(input: Any) -> Any contract "1"
 fn worker(input) { return input }
 main {
  let f = fn(input) { return input }
@@ -395,9 +395,9 @@ main {
         ),
         (
             "three_effect_workflow",
-            r#"effect research.search(input: Any) -> Any
-effect research.synthesize(input: Any) -> Any
-effect display.show_message(input: Any) -> Any
+            r#"effect research.search(input: Any) -> Any contract "1"
+effect research.synthesize(input: Any) -> Any contract "1"
+effect display.show_message(input: Any) -> Any contract "1"
 entry deep_research() -> Any
 fn deep_research() {
  let search_input = {topic: "Reducing customer onboarding drop-off", max_sources: 3}
@@ -460,7 +460,7 @@ main { finish null }"#,
         ),
         (
             "rlm_tool_cell",
-            r#"effect tools.lookup(query: Any) -> Any
+            r#"effect tools.lookup(query: Any) -> Any contract "1"
 main {
  let query = "find source"
  let answer = perform tools.lookup(query) as Any

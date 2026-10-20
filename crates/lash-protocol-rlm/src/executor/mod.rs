@@ -362,13 +362,27 @@ async fn link_cell(
     // The catalog tools that declare a read, by effect: what the cell's
     // read plan is drawn from.
     let mut read_tools = BTreeMap::new();
+    // On a path a package of the cell's view owns, the package's declared
+    // contract is authoritative: a tool that does not serve it is refused
+    // (PKG-RUNNER).
+    let held = services.workers.config().packages.clone();
+    let view = held.as_deref().and_then(|held| held.view(&held.own()).ok());
     for tool in ctx.tool_catalog().entries() {
-        boundary
-            .offer_tool(
+        let effect = tool.manifest.operation.effect_name();
+        if let Some(owner) = view
+            .as_ref()
+            .and_then(|view| lash_vm_runtime::owned_operation(view, &effect))
+        {
+            lash_execution_contracts::process::check_runner(
+                &effect,
+                &owner,
                 &tool.manifest,
-                &tool.contract.input_schema.canonical,
-                &tool.contract.output_schema.canonical,
+                &tool.contract,
             )
+            .map_err(|refusal| host_failure(format!("invalid host tool surface: {refusal}")))?;
+        }
+        boundary
+            .offer_tool(&tool.manifest, &tool.contract)
             .map_err(|error| host_failure(format!("invalid host tool surface: {error}")))?;
         if tool.manifest.execution_policy == lash_core::ExecutionPolicy::Read {
             read_tools.insert(
@@ -655,7 +669,11 @@ fn read_candidates(
                     .tool(effect)
                     .is_some_and(|offered| &offered == tool)
         })
-        .filter_map(|(effect, tool)| Some((effect, ctx.read_route(&tool).ok()?.provider)))
+        .filter_map(|(effect, tool)| {
+            let (_, offered) = boundary.effect(&effect)?;
+            let route = ctx.read_route(&tool, &offered.requirement.contract).ok()?;
+            Some((effect, route.provider))
+        })
         .collect()
 }
 
@@ -895,7 +913,7 @@ async fn run_linked_cell(
                 ),
             );
         };
-        match ctx.read_route(&recorded.tool) {
+        match ctx.read_route(&recorded.tool, &recorded.requirement.contract) {
             Ok(route) if &route.provider == provider => {
                 routes.insert(effect.clone(), route);
             }

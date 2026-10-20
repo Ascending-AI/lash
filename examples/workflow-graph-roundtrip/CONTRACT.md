@@ -52,7 +52,7 @@ is HTTP 404 `unknown_workflow`; a stale `version` is HTTP 409
 `effects` maps each effect name to the signature the host offers it under.
 `functions` maps each library function's name to its identity. `POST
 /workflow` fills both into the manifest of the document it is given, so a
-client writes `effect display.show_message(input: Any) -> Any` and the host
+client writes `effect display.show_message(input: Any) -> Any` and the host contract "1"
 replaces the signature; a library function is called by the identity read
 here.
 

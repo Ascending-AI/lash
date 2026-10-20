@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::provider::AttachmentCapabilitySnapshot;
 use crate::run_spec::{CapabilityRef, SlotId};
-use crate::tool_surface::EffectLink;
+use crate::tool_surface::OperationLink;
 use crate::{ChargeSafetyPolicy, LlmProfileConfig, MaxToolCalls, SessionId};
 use lash_kernel_doc::EffectName;
 
@@ -46,7 +46,7 @@ pub struct ProcessEnv {
     /// The link of each effect the process performs, exactly: a start is
     /// refused unless these are the effects its entry calls or spawns.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    effects: BTreeMap<EffectName, EffectLink>,
+    effects: BTreeMap<EffectName, OperationLink>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     components: Vec<ProcessComponentEntry>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -412,12 +412,27 @@ pub enum ProcessEnvRefusal {
         tool: String,
         provider: String,
     },
-    /// The serving component projects a linked tool differently from the
-    /// surface the link retains.
+    /// A tool linked at a path a package owns does not serve the package's
+    /// operation (PKG-RUNNER).
+    #[error("tool `{tool}` cannot run `{effect}`, an operation package `{package}` owns: {reason}")]
+    RunnerNotPackaged {
+        effect: String,
+        tool: String,
+        package: String,
+        reason: String,
+    },
+    /// The serving component serves a linked tool under another contract
+    /// than the process's code requires (`operation_contract_changed`).
     #[error(
-        "effect `{effect}` is linked to tool `{tool}`, whose served surface differs from the linked one"
+        "effect `{effect}` is linked to tool `{tool}`, which serves contract `{live}`, not the \
+         contract `{pinned}` the process's code requires"
     )]
-    LinkedSurfaceChanged { effect: String, tool: String },
+    ContractChanged {
+        effect: String,
+        tool: String,
+        pinned: lash_kernel_doc::ContractId,
+        live: lash_kernel_doc::ContractId,
+    },
     /// Two linked effect paths collide: one is a namespace of the other.
     #[error("linked effects `{first}` and `{second}` collide")]
     LinkPathCollision { first: String, second: String },
@@ -486,7 +501,7 @@ impl ProcessEnv {
     /// The component list is refused.
     pub fn from_run(
         run: &crate::run_spec::ResolvedRun,
-        effects: BTreeMap<EffectName, EffectLink>,
+        effects: BTreeMap<EffectName, OperationLink>,
         components: Vec<ProcessComponentEntry>,
     ) -> Result<ProcessEnv, ProcessEnvRefusal> {
         let config = run.config();
@@ -552,7 +567,7 @@ impl ProcessEnv {
     }
 
     /// The link of each effect the process performs.
-    pub fn effects(&self) -> &BTreeMap<EffectName, EffectLink> {
+    pub fn effects(&self) -> &BTreeMap<EffectName, OperationLink> {
         &self.effects
     }
 
@@ -672,26 +687,22 @@ impl ProcessEnvBuilder {
 
     /// Link `effect` to `link`, replacing an earlier link of it.
     #[must_use]
-    pub fn link(mut self, effect: EffectName, link: EffectLink) -> Self {
+    pub fn link(mut self, effect: EffectName, link: OperationLink) -> Self {
         self.env.effects.insert(effect, link);
         self
     }
 
     /// Link the effect `definition`'s binding names (`module.operation`) to
-    /// that tool, served by the env component provider declared as
-    /// `provider`, against its process surface. A tool with no binding
-    /// names no effect: [`Self::build`] refuses it.
+    /// that tool, advertised by the env component provider declared as
+    /// `provider`. A tool with no binding names no effect: [`Self::build`]
+    /// refuses it.
     #[must_use]
     pub fn link_tool(
         mut self,
         provider: crate::tool_surface::ProviderKey,
         definition: &crate::ToolDefinition,
     ) -> Self {
-        let link = crate::tool_surface::EffectLink {
-            provider,
-            surface: crate::tool_surface::ProcessSurface::of(definition),
-            kind: crate::tool_surface::LinkKind::Tool,
-        };
+        let link = OperationLink::advertised(provider, definition, None);
         self.env
             .effects
             .insert(definition.manifest.operation.effect_name(), link);
@@ -700,7 +711,7 @@ impl ProcessEnvBuilder {
 
     /// Link exactly `effects`, replacing every earlier link.
     #[must_use]
-    pub fn effects(mut self, effects: BTreeMap<EffectName, EffectLink>) -> Self {
+    pub fn effects(mut self, effects: BTreeMap<EffectName, OperationLink>) -> Self {
         self.env.effects = effects;
         self
     }

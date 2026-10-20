@@ -1706,6 +1706,7 @@ fn tool_step(
     lash_execution_contracts::process::StepRequest::Tool {
         step: lash_execution_contracts::process::StepName(step.to_owned()),
         effect: lash_core_execution::testing::effect(&format!("tools.{tool}")),
+        contract: state_definition(tool).contract_id(),
         input: serde_json::json!({ "label": label }),
         site: None,
         matched: None,
