@@ -1,6 +1,6 @@
 kernel 1
 numbers float
-effect corpus.echo(input?: Any) -> Any
+effect corpus.echo(input?: Json) -> Json
 use bool.not = @740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d
 use brand.of = @bd9a21264286394a5cd731fecaa03951fb50517689667675c0788623eb529dc1
 use collection.holds_none = @a58e0ba0d11b84096fd0264a5a281ef308aa5fe9a7bf26dd7b662b283fa491fe
@@ -52,9 +52,9 @@ use text.utf16_len = @7be9b48ecb000bf8c0c6267fce3ef23096b08740ce0279b456bd06e9c5
 use text.utf16_slice = @e63080421899ba41a3d2d26b5a0e27ab7e48207de832479e1e6614032c6fe409
 use ts.array.integer = @73cf5440457f0488161c4946183b6f8aa140666ef9bdf1ef14765753b2a811dd
 use ts.array.is = @5519731ddb6c9d2183742b87ee54c7244f9e08d2f4557c9f7a3513595ed71db7
-use ts.array.iterator = @2b95b7ceed2f1cb9b0d01809dd0bbabbf226bbf9c767152d5991fb24cb020df6
+use ts.array.iterator = @c77ca5f7395849f262e43496373fdd107bc41adbe3f2a94ea6b373f3679c4c4b
 use ts.array.length = @6d765a1c4ff10aa2652f0b0adadb0a1c5b1872bb3f079301141ae536b2ad28d3
-use ts.array.values = @951f1ba6e5a5710913054610d8ad4bfdd88145b217e95d75e25271bd8934604b
+use ts.array.values = @2ef216aca9d0a748a28e4276abab065f7ddcd17feda65dd919ac0bff7f6a0a5f
 use ts.await = @18a30299db399e09c5772b4431f1c4baf6e139a164f476b6fe173b1447d54a6f
 use ts.boundary = @ac89e50257ae69e06fe10e8faa4c6567d50315aca6fcecee2a967bdc8b4af23b
 use ts.callable = @7fb5154d44a31046fccc5c7dc57c6e347c7722d7774389baf931942e74602e22
@@ -64,7 +64,7 @@ use ts.exotic.iterate = @690182cf08e5924b669d1ea7c32d0fc1f17dc7fb8384ead9df28de5
 use ts.exotic.to_primitive = @5f26f14804bc9ee15bbf1e6ada733414c3a2fb387ba4acc671c10e8f75aa50e8
 use ts.for_of.item = @9ca984cf92050630538b9cce7f1d1e121c03a9f071916630311c72ba43304ed4
 use ts.for_of.next = @b01e9bc78562470d442df6a60d4cdbf11011107ae94c38fa3a3aefcc5d4e7667
-use ts.for_of.open = @c8e49452863511cd2deba4de2d4ce2ec0cedbd092dbd554b747012f4acd8d96f
+use ts.for_of.open = @91906232a0961ff221d41e80cf6bc583504fffbe087cfa9ef88bd5c8de24fbee
 use ts.get = @6d85a5db708b9eacee39796ab1556021e5310f316a9f5736e5f4c785f6a54324
 use ts.hole_value = @a5e96b5c94e54ba44f74acb077f7c16258ab243ea1df7931ae5f3edb69731eda
 use ts.is_nullish = @d03fe5e4e3e3d05cb1759701a45670d5304f2a0b3cd9b10ac54a3a75b7c1f329
@@ -95,13 +95,13 @@ use ts.to_primitive = @04a7708dc45d479ed37f6240f5db8e0e93ded5280313782b87fc7dab4
 use ts.to_property_key = @802dfd92c69326cab249403280675a5fb1ce4e299a0bf653659123953c8a924a
 use ts.to_string = @df85fc159a8cabd4b521557da045e4fa9c64115e31a21d9d1f7b0dbf0f180d5d
 use tuple.len = @2eced051afe955ac8dbeed3762acd4b8ce74b7a4ed15763ea47dfd01e5cc5f71
-use typescript.__built = @cb82634ceb593af1c2512945c8abea41c32f60f3485d15f0e0e6502e38a7bd33
+use typescript.__built = @0f3ddbe8e41f84f0bc4180d2c05fddf818b7cb22abc84af09ce7a73d2b7f7abc
 entry demo(items: Any) -> Any ts_direct(ts.await)
 
 fn demo(items) {
   let out = []
   for item in items via (open ts.for_of.open, next ts.for_of.next, item ts.for_of.item) {
-    set out[list.len(out)] = perform corpus.echo(invoke ts.boundary(item)) as Any then yield
+    set out[list.len(out)] = perform corpus.echo(invoke ts.boundary(item)) as Json then yield
   }
   return out via ts.promise.adopt
 }

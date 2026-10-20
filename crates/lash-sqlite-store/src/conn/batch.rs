@@ -76,10 +76,42 @@ pub(super) struct Writer {
     pub(super) operational: crate::SqliteOperationalSettings,
     pub(super) write_gate: Arc<Mutex<()>>,
     pub(super) read_gate: Arc<RwLock<()>>,
+    pub(super) serializes_readers: bool,
     pub(super) fence: Arc<WriterFence>,
     pub(super) node_wakes: Mutex<Option<crate::durable::NodeWakeWriter>>,
     #[cfg(feature = "testing")]
     pub(super) pauses: Option<crate::testing::SqlitePauses>,
+}
+
+/// A WAL writer shares snapshots; a memory writer must wait for every
+/// reader before BEGIN because its rollback journal cannot commit over one.
+pub(super) enum ReaderAccess<'a> {
+    Wal {
+        _guard: std::sync::RwLockReadGuard<'a, ()>,
+    },
+    Memory {
+        _guard: std::sync::RwLockWriteGuard<'a, ()>,
+    },
+}
+
+impl Writer {
+    pub(super) fn access(&self) -> ReaderAccess<'_> {
+        if self.serializes_readers {
+            ReaderAccess::Memory {
+                _guard: self
+                    .read_gate
+                    .write()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+            }
+        } else {
+            ReaderAccess::Wal {
+                _guard: self
+                    .read_gate
+                    .read()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+            }
+        }
+    }
 }
 
 /// One queued write transaction: a batch member.
@@ -305,10 +337,7 @@ pub(super) fn run(c: &mut Connection, mut members: Vec<Member>) -> Vec<Member> {
     }
     let settled = Window::on_worker(window, || {
         crate::observed_sql::physical_scope(origin, || {
-            let _read_gate = gate(&writer.read_gate, "sqlite.read_gate", |gate| {
-                gate.read()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-            });
+            let _read_gate = gate(writer.as_ref(), "sqlite.read_gate", Writer::access);
             let _write_gate = gate(&writer.write_gate, "sqlite.write_gate", |gate| {
                 gate.lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)

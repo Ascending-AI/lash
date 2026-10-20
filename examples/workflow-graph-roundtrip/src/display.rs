@@ -235,7 +235,7 @@ impl lash::tools::StaticToolExecute for HostTools {
     async fn execute(&self, call: lash::tools::ToolCall<'_>) -> lash::tools::ToolAttemptOutcome {
         use lash::sync::MutexExt;
         use lash::tools::{PendingCompletion, ToolAttemptOutcome, ToolOutcome};
-        if call.name() == "corpus_echo" {
+        if matches!(call.name(), "corpus_echo" | "corpus_capture") {
             let Some(process) = call.context.enclosing_process() else {
                 return ToolOutcome::err_fmt("echo requires a workflow process").into();
             };

@@ -801,8 +801,7 @@ fn uri_decode_completion_price_bounds_delegated_work_on_return_and_raise() {
 
 /// FIG-6732: compiled helper plans retain results and errors under Off, in
 /// both dialects, using the differential corpus rather than a second set of cases.
-#[test]
-fn charge_off_preserves_the_helper_corpus() {
+fn charge_off_corpus_partition(shard: usize, shards: usize) {
     let cases: Vec<runner::Case> = serde_json::from_str(include_str!(
         "../../lash-dialect-typescript/tests/helper_differential/cases.json"
     ))
@@ -811,7 +810,12 @@ fn charge_off_preserves_the_helper_corpus() {
     for dialect in ["typescript", "python"] {
         let exact = runner::Runner::new(dialect).unwrap();
         let off = runner::Runner::new_with_charge(dialect, lash_kernel_vm::Charge::Off).unwrap();
-        for case in cases.iter().filter(|case| case.dialect == dialect) {
+        for case in cases
+            .iter()
+            .enumerate()
+            .filter(|(index, case)| case.dialect == dialect && index % shards == shard)
+            .map(|(_, case)| case)
+        {
             let expected = exact.run(case).unwrap();
             let actual = off.run(case).unwrap();
             assert_eq!(actual.result, expected.result, "{}", case.id);
@@ -820,8 +824,43 @@ fn charge_off_preserves_the_helper_corpus() {
             executed += 1;
         }
     }
-    println!("charge-off helper corpus: executed={executed}");
+    println!("charge-off helper corpus: shard={shard}/{shards} executed={executed}");
     assert!(executed > 0);
+}
+
+// Each case keeps the same Exact/Off comparison. The membership list owns
+// both the partition count and the laws, as in the other helper corpus sweeps.
+macro_rules! charge_off_shards {
+    (@parts $parts:expr, $part:expr;) => {};
+    (@parts $parts:expr, $part:expr; $name:ident $(, $rest:ident)*) => {
+        #[test]
+        fn $name() {
+            charge_off_corpus_partition($part, $parts);
+        }
+        charge_off_shards!(@parts $parts, $part + 1; $($rest),*);
+    };
+    ($($name:ident),+ $(,)?) => {
+        charge_off_shards!(@parts [$(stringify!($name)),+].len(), 0; $($name),+);
+    };
+}
+
+charge_off_shards! {
+    charge_off_preserves_the_helper_corpus,
+    charge_off_01_preserves_the_helper_corpus,
+    charge_off_02_preserves_the_helper_corpus,
+    charge_off_03_preserves_the_helper_corpus,
+    charge_off_04_preserves_the_helper_corpus,
+    charge_off_05_preserves_the_helper_corpus,
+    charge_off_06_preserves_the_helper_corpus,
+    charge_off_07_preserves_the_helper_corpus,
+    charge_off_08_preserves_the_helper_corpus,
+    charge_off_09_preserves_the_helper_corpus,
+    charge_off_10_preserves_the_helper_corpus,
+    charge_off_11_preserves_the_helper_corpus,
+    charge_off_12_preserves_the_helper_corpus,
+    charge_off_13_preserves_the_helper_corpus,
+    charge_off_14_preserves_the_helper_corpus,
+    charge_off_15_preserves_the_helper_corpus,
 }
 
 /// PLAN-INDEP / K-CHG-003: generated typed helper paths agree with their

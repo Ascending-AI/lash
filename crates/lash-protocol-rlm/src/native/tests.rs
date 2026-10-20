@@ -550,9 +550,8 @@ fn assert_simultaneous_turn_and_no_progress_exhaustion_prefers_silent_turn_stop(
         })
     )));
     assert_eq!(
-        machine
-            .events()
-            .iter()
+        delivered_events(&initial)
+            .chain(delivered_events(&effects))
             .filter(|event| matches!(event, lash_core::SessionHistoryRecord::Conversation(_)))
             .count(),
         0,
@@ -1557,6 +1556,10 @@ fn native_user_stop_is_terminal_live_and_after_restore() {
             &initial,
             vec![call("stop-call", "execute_code", r#"{"code":"print(1)"}"#)],
         );
+        let mut history = delivered_events(&initial)
+            .chain(delivered_events(&effects))
+            .cloned()
+            .collect::<Vec<_>>();
         if restore {
             let checkpoint =
                 serde_json::from_slice(&serde_json::to_vec(&machine.checkpoint()).unwrap())
@@ -1568,6 +1571,7 @@ fn native_user_stop_is_terminal_live_and_after_restore() {
             )
             .unwrap();
             effects = drain(&mut machine);
+            history.extend(delivered_events(&effects).cloned());
         }
         let id = effects
             .iter()
@@ -1613,7 +1617,8 @@ fn native_user_stop_is_terminal_live_and_after_restore() {
                 .iter()
                 .any(|effect| matches!(effect, Effect::LlmCall { .. } | Effect::ExecCode { .. }))
         );
-        assert!(!machine.events().iter().any(|event| matches!(event, lash_core::SessionHistoryRecord::Protocol(event) if matches!(crate::projection::decode_rlm_protocol_event(event).expect("valid history fixture").as_deref(), Some(RlmProtocolEvent::RlmTrajectoryEntry(_))))));
+        history.extend(delivered_events(&terminal).cloned());
+        assert!(!history.iter().any(|event| matches!(event, lash_core::SessionHistoryRecord::Protocol(event) if matches!(crate::projection::decode_rlm_protocol_event(event).expect("valid history fixture").as_deref(), Some(RlmProtocolEvent::RlmTrajectoryEntry(_))))));
     }
 }
 

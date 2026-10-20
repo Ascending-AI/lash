@@ -1,11 +1,11 @@
 kernel 1
 numbers float
-effect corpus.echo(input?: Any) -> Any
+effect corpus.echo(input?: Json) -> Json
 effect finish(input: Any) -> Any
 
 main {
   finish let(t1 = perform finish("done") as Any then yield, null)
-  do perform corpus.echo("unreachable") as Any then yield
+  do perform corpus.echo("unreachable") as Json then yield
 }
 
 unit Main: statements=2 scopes=1 sites=4

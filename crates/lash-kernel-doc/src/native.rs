@@ -120,6 +120,8 @@ struct ReleasedSet {
 struct Facts {
     definition: OnceLock<Arc<FunctionDefinition>>,
     callees: OnceLock<BTreeSet<FunctionId>>,
+    /// The empty requirement set for a definition with no body.
+    no_effects: BTreeMap<EffectName, OperationRequirement>,
     /// The definition's token body, encoded once for every holder that
     /// stores it.
     image: OnceLock<Arc<[u8]>>,
@@ -286,8 +288,9 @@ impl RegisteredFunction {
     /// body. A document reaching this function requires them through it
     /// (`K-DOC-002`); what its callees perform is theirs.
     pub fn performs(&self) -> &BTreeMap<EffectName, OperationRequirement> {
-        static NONE: BTreeMap<EffectName, OperationRequirement> = BTreeMap::new();
-        self.definition().body().map_or(&NONE, |body| &body.effects)
+        self.definition()
+            .body()
+            .map_or(&self.facts().no_effects, |body| &body.effects)
     }
 }
 

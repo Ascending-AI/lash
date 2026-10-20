@@ -1,9 +1,7 @@
 cell entries: []
-crossing corpus.echo
-Map {
-key Text("nested")
-Map {
-key Text("list")
+crossing corpus.capture
+Record {
+field list
 List [
 Int(Integer(1))
 FunctionValue entry=run signature=Some(Signature { params: [Param { name: Name("x"), ty: Int, optional: false }], result: Any })
@@ -69,5 +67,4 @@ fn run(x) {
 main {}
 started with x=2: Int(Integer(6))
 ]
-}
 }

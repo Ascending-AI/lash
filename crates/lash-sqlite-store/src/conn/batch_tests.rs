@@ -705,3 +705,116 @@ async fn a_panicking_member_fails_alone_and_its_siblings_commit() {
         vec!["before".to_owned(), "after".to_owned(), "served".to_owned()]
     );
 }
+/// FIG-6950: a memory database has no WAL. A live reader must queue its
+/// writer before BEGIN, rather than make publication fail at COMMIT.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_memory_publication_queues_behind_its_reader_snapshot() {
+    let target = DatabaseTarget::Memory(format!("/reader-law-{}/db", uuid::Uuid::new_v4()));
+    let mut policy = SqliteConnectionPolicy::standard(SqliteSynchronous::Normal);
+    policy.busy_timeout = std::time::Duration::ZERO;
+    let writer = installed(&target, policy).await;
+    writer
+        .write(|tx| tx.execute_batch("CREATE TABLE observed (value INTEGER)"))
+        .await
+        .expect("table");
+    let reader = SqliteConnection::open_readonly_configured(&target, policy.operational)
+        .await
+        .expect("reader");
+    let (entered, held) = tokio::sync::oneshot::channel();
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    let reading = tokio::spawn(async move {
+        reader
+            .read(move |tx| {
+                let count: u64 =
+                    tx.query_row("SELECT count(*) FROM observed", [], |row| row.get(0))?;
+                entered.send(count).expect("reader entered");
+                let _ = released.recv();
+                Ok(())
+            })
+            .await
+    });
+    assert_eq!(held.await.expect("snapshot held"), 0);
+    let committing = writer.clone();
+    let mut writing = tokio::spawn(async move {
+        committing
+            .write(|tx| tx.execute_batch("INSERT INTO observed VALUES (1)"))
+            .await
+    });
+    let early = tokio::time::timeout(std::time::Duration::from_millis(100), &mut writing).await;
+    drop(release);
+    reading
+        .await
+        .expect("reader task")
+        .expect("reader snapshot");
+    match early {
+        Ok(result) => panic!("publication ran while its reader held the snapshot: {result:?}"),
+        Err(_) => writing
+            .await
+            .expect("writer task")
+            .expect("publication after reader"),
+    }
+    let count: u64 = writer
+        .read(|tx| tx.query_row("SELECT count(*) FROM observed", [], |row| row.get(0)))
+        .await
+        .expect("published row");
+    assert_eq!(
+        count, 1,
+        "the publication commits once after its reader leaves"
+    );
+}
+
+/// FIG-6950: a memdb reader queues before SQL while another connection
+/// owns the writer transaction, and sees that publication after it commits.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_memory_reader_queues_behind_its_writer_transaction() {
+    let target = DatabaseTarget::Memory(format!("/writer-law-{}/db", uuid::Uuid::new_v4()));
+    let writer = installed(
+        &target,
+        SqliteConnectionPolicy::standard(SqliteSynchronous::Normal),
+    )
+    .await;
+    writer
+        .write(|tx| tx.execute_batch("CREATE TABLE observed (value INTEGER)"))
+        .await
+        .expect("table");
+    let reader = SqliteConnection::open_readonly_configured(&target, writer.operational)
+        .await
+        .expect("reader");
+    reader
+        .call(|conn| conn.busy_timeout(std::time::Duration::ZERO))
+        .await
+        .expect("no busy wait");
+    let (entered, held) = tokio::sync::oneshot::channel();
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    let writing = tokio::spawn(async move {
+        writer
+            .write(move |tx| {
+                tx.execute_batch("INSERT INTO observed VALUES (1)")?;
+                entered.send(()).expect("writer entered");
+                let _ = released.recv();
+                Ok(())
+            })
+            .await
+    });
+    held.await.expect("writer transaction held");
+    let mut reading = tokio::spawn(async move {
+        reader
+            .read(|tx| {
+                tx.query_row::<u64, _, _>("SELECT count(*) FROM observed", [], |row| row.get(0))
+            })
+            .await
+    });
+    let early = tokio::time::timeout(std::time::Duration::from_millis(100), &mut reading).await;
+    drop(release);
+    writing.await.expect("writer task").expect("publication");
+    match early {
+        Ok(result) => panic!("reader ran while the writer owned its transaction: {result:?}"),
+        Err(_) => assert_eq!(
+            reading
+                .await
+                .expect("reader task")
+                .expect("published snapshot"),
+            1
+        ),
+    }
+}

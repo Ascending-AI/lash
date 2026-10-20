@@ -1,7 +1,7 @@
 unit Function(Name("demo"))
 statement fn demo/0 ordinal=3 depth=0 block=fn demo If { condition: Call { function: FunctionId(a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0), args: [Variable(Name("value")), Literal(Int(Integer(0)))] }, then_block: [Return { value: Literal(Text("negative")) }], else_block: [] }
 statement fn demo/0/1/0 ordinal=5 depth=1 block=fn demo/0/1 Return { value: Literal(Text("negative")) }
-statement fn demo/1 ordinal=7 depth=0 block=fn demo Do { value: Act(ActExpr { kind: Call(Library(FunctionId(80c16e15d72610c71deb233d25b5cf09e04451185028fa4a95843aabd600b448))), args: [Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Any, then_yield: false }, args: [Variable(Name("value"))] })] }) }
+statement fn demo/1 ordinal=7 depth=0 block=fn demo Do { value: Act(ActExpr { kind: Call(Library(FunctionId(80c16e15d72610c71deb233d25b5cf09e04451185028fa4a95843aabd600b448))), args: [Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Json, then_yield: false }, args: [Variable(Name("value"))] })] }) }
 statement fn demo/2 ordinal=8 depth=0 block=fn demo Return { value: Literal(Text("done")) }
 scope fn demo ordinal=2 depth=0 Entry
 scope fn demo/0/1 ordinal=4 depth=1 Then

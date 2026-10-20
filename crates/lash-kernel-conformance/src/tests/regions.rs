@@ -1853,7 +1853,7 @@ macro_rules! program_shards {
 }
 
 // Each group's membership defines both its exhaustive partition count and
-// its tests. The two slow laws split their expensive projection sweeps;
+// its tests. The slow laws split their expensive projection sweeps;
 // all other program shards retain their complete sweep in one law.
 program_shards! {
     0 => [regions_on_and_off_agree_programs_0],
@@ -1866,7 +1866,12 @@ program_shards! {
     ],
     3 => [regions_on_and_off_agree_programs_3],
     4 => [regions_on_and_off_agree_programs_4],
-    5 => [regions_on_and_off_agree_programs_5],
+    5 => [
+        regions_on_and_off_agree_programs_5,
+        regions_on_and_off_agree_programs_5_sweep_1,
+        regions_on_and_off_agree_programs_5_sweep_2,
+        regions_on_and_off_agree_programs_5_sweep_3
+    ],
     6 => [
         regions_on_and_off_agree_programs_6,
         regions_on_and_off_agree_programs_6_sweep_1,
@@ -1880,6 +1885,11 @@ program_shards! {
     11 => [regions_on_and_off_agree_programs_11],
     12 => [regions_on_and_off_agree_programs_12],
     13 => [regions_on_and_off_agree_programs_13],
-    14 => [regions_on_and_off_agree_programs_14],
+    14 => [
+        regions_on_and_off_agree_programs_14,
+        regions_on_and_off_agree_programs_14_sweep_1,
+        regions_on_and_off_agree_programs_14_sweep_2,
+        regions_on_and_off_agree_programs_14_sweep_3
+    ],
     15 => [regions_on_and_off_agree_programs_15],
 }

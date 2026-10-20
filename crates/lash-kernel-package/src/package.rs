@@ -15,6 +15,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::PackageRefusal;
 
+/// The content identity of a package artifact.
+/// version_surface = "coexist"
+/// version_guard(items(PACKAGE_ARTIFACT_DOMAIN, Package))
+const PACKAGE_ARTIFACT_DOMAIN: &str = "lash package artifact 2026-10 v1";
+
 /// An artifact's key: its line and its digest. Two artifacts of one line
 /// (an own release and a retained one) are two keys.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -423,7 +428,7 @@ pub(crate) fn digest_of(
     exports: &BTreeMap<Segment, Export>,
     code: &[FunctionId],
 ) -> ArtifactDigest {
-    let mut hasher = blake3::Hasher::new_derive_key("lash package artifact 2026-10 v1");
+    let mut hasher = blake3::Hasher::new_derive_key(PACKAGE_ARTIFACT_DOMAIN);
     let mut field = |bytes: &[u8]| {
         hasher.update(&(bytes.len() as u64).to_le_bytes());
         hasher.update(bytes);

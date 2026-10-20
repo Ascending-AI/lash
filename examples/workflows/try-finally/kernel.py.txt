@@ -1,6 +1,6 @@
 kernel 1
 numbers by_spelling
-effect corpus.echo(input?: Any) -> Any
+effect corpus.echo(input?: Json) -> Json
 use bool.not = @740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d
 use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
@@ -16,7 +16,7 @@ entry demo() -> Any
 fn demo() {
   let `result` = "start"
   try {
-    set `result` = invoke py.reply(perform corpus.echo("try") as Any)
+    set `result` = invoke py.reply(perform corpus.echo("try") as Json)
   } catch t1 {
     if invoke py.exc.is_exception(t1, ()) {
       set `result` = "caught"
@@ -24,7 +24,7 @@ fn demo() {
       throw t1
     }
   } finally {
-    do invoke py.reply(perform corpus.echo("finally") as Any)
+    do invoke py.reply(perform corpus.echo("finally") as Json)
   }
   return `result`
 }

@@ -5,7 +5,7 @@ async def demo(items):
     #: Go through each item
     for item in items:
         #: Echo the item and keep the reply
-        out.append((await helper_py_reply((await tools.corpus.echo(item)))))
+        out.append((await helper_py_reply((await tools.corpus.echo(item, result="json")))))
     #: Give back the replies
     return out
 def main():

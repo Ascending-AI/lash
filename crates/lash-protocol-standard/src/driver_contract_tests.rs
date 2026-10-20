@@ -436,6 +436,16 @@ fn answer(
     drain(machine)
 }
 
+// Completion transfers the records to the consumer and releases the machine's copy.
+fn delivered_events(effects: &[Effect]) -> impl Iterator<Item = &lash_core::SessionHistoryRecord> {
+    effects.iter().flat_map(|effect| match effect {
+        Effect::Progress { event_delta, .. } | Effect::Done { event_delta, .. } => {
+            event_delta.as_slice()
+        }
+        _ => &[],
+    })
+}
+
 fn reported_causes(machine: &TurnMachine) -> String {
     serde_json::to_string(&machine.events().iter().cloned().collect::<Vec<_>>())
         .expect("events encode")
@@ -678,6 +688,7 @@ fn a_malformed_first_control_spends_the_slot() {
 #[test]
 fn a_control_member_inside_a_batch_finishes_with_its_identity() {
     let mut machine = controlling_machine();
+    let mut history = Vec::new();
     let effects = drain(&mut machine);
     let effects = respond(
         &mut machine,
@@ -690,6 +701,7 @@ fn a_control_member_inside_a_batch_finishes_with_its_identity() {
             ]),
         )],
     );
+    history.extend(delivered_events(&effects).cloned());
     let (id, calls, plan) = tool_work(&effects);
     let names: Vec<_> = calls.iter().map(|call| call.tool_name.as_str()).collect();
     assert_eq!(names, ["probe"], "the control member waits for its sibling");
@@ -697,6 +709,7 @@ fn a_control_member_inside_a_batch_finishes_with_its_identity() {
     let effects = answer(&mut machine, id, &calls, |_| {
         ToolCallOutput::success(serde_json::json!("ok"))
     });
+    history.extend(delivered_events(&effects).cloned());
     let (id, calls) = tool_calls(&effects).expect("the control member's round");
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].tool_name, "finish");
@@ -708,6 +721,7 @@ fn a_control_member_inside_a_batch_finishes_with_its_identity() {
     let effects = answer(&mut machine, id, &calls, |_| {
         ToolCallOutput::finish(serde_json::json!({ "value": 1 }))
     });
+    history.extend(delivered_events(&effects).cloned());
     let (id, kind) = checkpoint(&effects).expect("a completion checkpoint");
     assert_eq!(kind, CheckpointKind::BeforeCompletion);
     machine.handle_response(Response::Checkpoint {
@@ -715,6 +729,7 @@ fn a_control_member_inside_a_batch_finishes_with_its_identity() {
         delivery: sansio::CheckpointDelivery::default(),
     });
     let effects = drain(&mut machine);
+    history.extend(delivered_events(&effects).cloned());
     assert_eq!(
         turn_outcomes(&effects),
         vec![TurnOutcome::Finished(TurnFinish::Finished {
@@ -726,7 +741,7 @@ fn a_control_member_inside_a_batch_finishes_with_its_identity() {
     let decided = machine.decided_completions();
     assert_eq!(decided.len(), 1);
     assert_eq!(decided[0].candidate.call_id, wrapper.child(1));
-    let reported = reported_causes(&machine);
+    let reported = serde_json::to_string(&history).expect("delivered events encode");
     assert_eq!(
         reported.matches("\"kind\":\"ToolResult\"").count(),
         1,

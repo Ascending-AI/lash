@@ -9,5 +9,10 @@ async def main():
                     (await helper_py_arg_missing("add"))
                     None
                 (await helper_py_add((await helper_py_add(x, limit)), (await helper_py_getitem(shared, 0))))
-    await helper_py_reply((await tools.corpus.echo({"nested": {"list": [1, add]}})))
+    with k.do():
+        with k.bind("t2"):
+            [1, add]
+            with k.bind("t3"):
+                record({"list": t2})
+                (await helper_py_reply((await tools.corpus.capture(t3, result="json"))))
     await helper_py_setitem(shared, 0, 9)

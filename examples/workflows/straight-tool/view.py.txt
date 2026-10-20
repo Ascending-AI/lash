@@ -1,5 +1,5 @@
 unit Function(Name("demo"))
-statement fn demo/0 ordinal=3 depth=0 block=fn demo Return { value: Act(ActExpr { kind: Call(Library(FunctionId(80c16e15d72610c71deb233d25b5cf09e04451185028fa4a95843aabd600b448))), args: [Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Any, then_yield: false }, args: [Literal(Text("hello"))] })] }) }
+statement fn demo/0 ordinal=3 depth=0 block=fn demo Return { value: Act(ActExpr { kind: Call(Library(FunctionId(80c16e15d72610c71deb233d25b5cf09e04451185028fa4a95843aabd600b448))), args: [Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Json, then_yield: false }, args: [Literal(Text("hello"))] })] }) }
 scope fn demo ordinal=2 depth=0 Entry
 action fn demo/0/0 library id=80c16e15d72610c71deb233d25b5cf09e04451185028fa4a95843aabd600b448 name=py.reply label="Python reply"
 action fn demo/0/0/0 Some(Effect(QualifiedName("corpus.echo")))

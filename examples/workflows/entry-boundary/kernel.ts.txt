@@ -6,10 +6,10 @@ use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
 use ts.await = @18a30299db399e09c5772b4431f1c4baf6e139a164f476b6fe173b1447d54a6f
 use ts.promise.adopt = @ec07dd4e314068cde58b9c1223c9fc11094029f4f5fe6f8d325a12e10b32a475
 use ts.promise.is = @0f99cae1fc6ad1ff6812fb50d4070182ec247c6fe07f1a7b049a4fa7aa9c82a5
-use ts.promise.pending = @5de9143015d11b1e0014baf18e81dac46067c0fbf06545c08f7a08ce51fd62c2
+use ts.promise.pending = @6eb33d3d109ee6172eb05ba3658d7e3969ca8d7080e20243997d61205014bb41
 use ts.promise.run = @16fe1f1d98e1f2072247aeee93643c627d12d9fb390ee5c3c99baf2cd2455330
-use ts.promise.start = @1971e6688e08ab06c1019d049df1ee4348d130e117c0703d2a82f1c137ec7a3d
-use typescript.__built = @cb82634ceb593af1c2512945c8abea41c32f60f3485d15f0e0e6502e38a7bd33
+use ts.promise.start = @3e6dcf3c69893288a68de2be9528996fd8abe3f682397189190251a8e26c472d
+use typescript.__built = @0f3ddbe8e41f84f0bc4180d2c05fddf818b7cb22abc84af09ce7a73d2b7f7abc
 entry arrow(value: Number) -> Any ts_direct(ts.await)
 entry declared() -> Any ts_direct(ts.await)
 

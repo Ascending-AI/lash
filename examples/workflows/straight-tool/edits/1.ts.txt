@@ -1,7 +1,7 @@
 --- before
 -kernel 1
 -numbers float
--effect corpus.echo(input?: Any) -> Any
+-effect corpus.echo(input?: Json) -> Json
 -use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 -use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
 -use ts.await = @18a30299db399e09c5772b4431f1c4baf6e139a164f476b6fe173b1447d54a6f
@@ -10,7 +10,7 @@
 -entry demo() -> Any ts_direct(ts.await)
 -
 -fn demo() {
--  return perform corpus.echo("hello") as Any then yield via ts.promise.adopt
+-  return perform corpus.echo("hello") as Json then yield via ts.promise.adopt
 -}
 -
 -main {
@@ -19,7 +19,7 @@
 +++ after
 +kernel 1
 +numbers float
-+effect corpus.echo(input?: Any) -> Any
++effect corpus.echo(input?: Json) -> Json
 +use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 +use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
 +use ts.await = @18a30299db399e09c5772b4431f1c4baf6e139a164f476b6fe173b1447d54a6f
@@ -28,7 +28,7 @@
 +entry demo() -> Any ts_direct(ts.await)
 +
 +fn demo() {
-+  return perform corpus.echo("edited λ") as Any then yield via ts.promise.adopt
++  return perform corpus.echo("edited λ") as Json then yield via ts.promise.adopt
 +}
 +
 +main {
@@ -37,8 +37,8 @@
 
 Correspondence:
 {
-  "base": "96d4e1dbce6c21f93f0df5c55fd0c0887e4166faf3b1c84ca85bbf833567da4f",
-  "result": "f7d18458cd1edfb70769767ffaf113f42a64464856c818b28abab54298050fe8",
+  "base": "6da3145cff05797d022c20fe1ba051f78165ed5d5bb997e75bc7b584f4eee01e",
+  "result": "4b2701bb49527fb72d5322d0a58060b7e5a03ded2c3f864ad71c161a838c8c80",
   "entries": [
     {
       "from": {
@@ -140,7 +140,7 @@ Reprinted source:
 /** Say hello */
 export async function demo() {
   /** Send a greeting and give back the reply */
-  return k.returnVia((await await tools.corpus.echo("edited λ")), helper_ts_promise_adopt);
+  return k.returnVia((await await tools.corpus.echo("edited λ") as KernelType<"json">), helper_ts_promise_adopt);
 }
 async function main() {
   let demo = declared.demo;

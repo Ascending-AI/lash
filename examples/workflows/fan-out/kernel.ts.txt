@@ -1,6 +1,6 @@
 kernel 1
 numbers float
-effect corpus.echo(input?: Any) -> Any
+effect corpus.echo(input?: Json) -> Json
 use brand.of = @bd9a21264286394a5cd731fecaa03951fb50517689667675c0788623eb529dc1
 use collection.holds_none = @a58e0ba0d11b84096fd0264a5a281ef308aa5fe9a7bf26dd7b662b283fa491fe
 use date.ecma.format = @c6a7adc42030625a48d7f0b4786f2d0c81c0bd606025ddc6aa3db070f1af59a5
@@ -66,14 +66,14 @@ use ts.pad = @4397141e867d8cc6f131074cdb679fea54b22344aadac9df5e1aee34395a21b1
 use ts.primitive_to_number = @e3f5ecc4293cdbcf0996708034c6c8db4dcc7cc8c8ff730e6fe472078484bc39
 use ts.primitive_to_string = @183bb1ba4d4e942766ce640b2bb78ac02e9dbda5c2f98aee87db7ac92a650d66
 use ts.promise.adopt = @ec07dd4e314068cde58b9c1223c9fc11094029f4f5fe6f8d325a12e10b32a475
-use ts.promise.all = @982688fdffd20fc98a91ad211fe2208951077caaa5a902ea652f8320455199fd
+use ts.promise.all = @199979d071f955a8b29a3876a40e3a80ba756078440a0a613ca0609f61d1c79a
 use ts.promise.decided = @0ac2376081f53b9524b0d3df74d59d37b6a3f6946504bd421a26f5c308733264
 use ts.promise.is = @0f99cae1fc6ad1ff6812fb50d4070182ec247c6fe07f1a7b049a4fa7aa9c82a5
-use ts.promise.members = @b30e9bde6370214ca185dd522e4f21c70f184bc7c136b33e5d0f19391e46f9a4
-use ts.promise.pending = @5de9143015d11b1e0014baf18e81dac46067c0fbf06545c08f7a08ce51fd62c2
+use ts.promise.members = @cf7ed158cb22dc4f3cfa6e24eab675617d577ac838b7fc44d4f3303312e5c4a3
+use ts.promise.pending = @6eb33d3d109ee6172eb05ba3658d7e3969ca8d7080e20243997d61205014bb41
 use ts.promise.run = @16fe1f1d98e1f2072247aeee93643c627d12d9fb390ee5c3c99baf2cd2455330
-use ts.promise.settled = @1dc49af5dbc020ff9b56f26f7aefccf1cf0af64acc0414b8ca49a7e5f9a92b69
-use ts.promise.start = @1971e6688e08ab06c1019d049df1ee4348d130e117c0703d2a82f1c137ec7a3d
+use ts.promise.settled = @79f644b420a636c2ec89270722b1bc867ea0c141e3aab5edda5d7d4dee81a6a9
+use ts.promise.start = @3e6dcf3c69893288a68de2be9528996fd8abe3f682397189190251a8e26c472d
 use ts.receiver = @9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42
 use ts.regexp.escaped_source = @ec4fee5a46bb2d63665dd02de716b63bf630c4877fc96abc3b23525960656a0f
 use ts.regexp.spell = @17105be7ba3a8330dee6f0c09c5d302249850963f4312c7c272341d89c731bb9
@@ -81,13 +81,13 @@ use ts.string.trim_value = @2845fabd1d62dd6ae12b69a56f9d794fb12ffe649201c3673b74
 use ts.to_number = @a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f
 use ts.to_primitive = @04a7708dc45d479ed37f6240f5db8e0e93ded5280313782b87fc7dab40f125da
 use tuple.len = @2eced051afe955ac8dbeed3762acd4b8ce74b7a4ed15763ea47dfd01e5cc5f71
-use typescript.__built = @cb82634ceb593af1c2512945c8abea41c32f60f3485d15f0e0e6502e38a7bd33
+use typescript.__built = @0f3ddbe8e41f84f0bc4180d2c05fddf818b7cb22abc84af09ce7a73d2b7f7abc
 entry demo() -> Any ts_direct(ts.await)
 
 fn demo() {
   let work = ("ts.function", "", "work", 1.0, fn(this3, args3) start(value: Text) -> Any token("ts.function", 4) ts_direct(ts.await) {
     return invoke ts.promise.start(fn(this2, args2) {
-      return let(t1 = if(num.lt(list.len(args2), 1.0), invoke ts.pad(args2, 1.0), args2), let(value = t1[0.0], perform corpus.echo(invoke ts.boundary(value)) as Any then yield)) via ts.promise.adopt
+      return let(t1 = if(num.lt(list.len(args2), 1.0), invoke ts.pad(args2, 1.0), args2), let(value = t1[0.0], perform corpus.echo(invoke ts.boundary(value)) as Json then yield)) via ts.promise.adopt
     }, this3, list.copy(args3))
   }, {})
   return await(invoke ts.promise.all(absent, [[let(t6 = work, let(t7 = ["a"], let(t8 = ts.callable(t6), apply t8(absent, t7)))), let(t9 = work, let(t10 = ["b"], let(t11 = ts.callable(t9), apply t11(absent, t10))))]])) via ts.await via ts.promise.adopt

@@ -134,6 +134,18 @@ pub(crate) fn drain_effects(machine: &mut TurnMachine) -> Vec<Effect> {
     effects
 }
 
+// Completion transfers the records to the consumer and releases the machine's copy.
+pub(crate) fn delivered_events(
+    effects: &[Effect],
+) -> impl Iterator<Item = &lash_core::SessionHistoryRecord> {
+    effects.iter().flat_map(|effect| match effect {
+        Effect::Progress { event_delta, .. } | Effect::Done { event_delta, .. } => {
+            event_delta.as_slice()
+        }
+        _ => &[],
+    })
+}
+
 pub(crate) fn find_llm_call(effects: &[Effect]) -> Option<&sansio::EffectId> {
     effects.iter().find_map(|e| match e {
         Effect::LlmCall { id, .. } => Some(id),

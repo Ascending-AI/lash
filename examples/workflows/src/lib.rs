@@ -189,6 +189,25 @@ pub fn tools() -> Result<Vec<lash::tools::ToolDefinition>> {
         )?
         .with_execution(std::time::Duration::from_secs(120))
         .with_tool_binding(ToolBinding::new(["corpus"], "echo")),
+        ToolDefinition::raw(
+            "tool:corpus_capture",
+            "corpus_capture",
+            "Capture a function nested in a corpus value and display it.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "list": {
+                        "type": "array",
+                        "items": { "x-lash": { "kind": "function" } }
+                    }
+                },
+                "required": ["list"],
+                "additionalProperties": false
+            }),
+            serde_json::json!({}),
+        )?
+        .with_execution(std::time::Duration::from_secs(120))
+        .with_tool_binding(ToolBinding::new(["corpus"], "capture")),
     ])
 }
 

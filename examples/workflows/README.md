@@ -31,7 +31,9 @@ diff, Correspondence and reprinted source. Refused cases pin stable codes.
 Cell inputs are `source.<lang>`; `cell-1.<lang>.txt` shows the crossing datum
 structure and the FunctionValue's normalized code and frozen captures. Helper
 references use names here, so incidental content ids do not obscure the pin.
-The capturing cell changes a shared list after shipping the function, then
+The capturing cell ships its function through `corpus.capture`, whose nested list
+items explicitly admit functions with `x-lash`; `corpus.echo` accepts data. It
+changes a shared list after shipping the function, then
 starts the frozen document with `x=2`. Each dialect pins its own result.
 FN-ID independently proves content identity stability.
 

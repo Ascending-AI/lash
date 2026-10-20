@@ -18,6 +18,6 @@ async function main() {
       return k.returnVia(t4 + t3, helper_ts_promise_adopt);
     }, this2, helper_list_copy(args2)));
   }, {}] as const;
-  await await tools.corpus.echo((await helper_ts_boundary({nested: {list: [1.0, add]}})));
+  await await tools.corpus.capture((await helper_ts_boundary({list: [1.0, add]}))) as KernelType<"json">;
   await helper_ts_set(shared, 0.0, 9.0);
 }

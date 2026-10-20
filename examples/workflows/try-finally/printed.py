@@ -5,7 +5,7 @@ async def demo():
     #: Try the echo
     try:
         #: Echo a test message and keep the reply
-        result = (await helper_py_reply((await tools.corpus.echo("try"))))
+        result = (await helper_py_reply((await tools.corpus.echo("try", result="json"))))
     #: If the echo fails
     except BaseException as t1:
         if (await helper_py_exc_is_exception(t1, ())):
@@ -16,7 +16,7 @@ async def demo():
     #: Whatever happened
     finally:
         #: Send a closing echo
-        await helper_py_reply((await tools.corpus.echo("finally")))
+        await helper_py_reply((await tools.corpus.echo("finally", result="json")))
     #: Give back the result
     return result
 def main():

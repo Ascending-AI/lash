@@ -577,6 +577,7 @@ impl SqliteConnection {
                 operational: policy.operational,
                 write_gate: Arc::clone(&gate),
                 read_gate: Arc::clone(&reads),
+                serializes_readers: matches!(target, DatabaseTarget::Memory(_)),
                 fence: Arc::clone(&fence),
                 node_wakes: Mutex::new(None),
                 #[cfg(feature = "testing")]
@@ -651,6 +652,7 @@ impl SqliteConnection {
                 operational,
                 write_gate: Arc::clone(&gate),
                 read_gate: Arc::clone(&reads),
+                serializes_readers: matches!(target, DatabaseTarget::Memory(_)),
                 fence: Arc::clone(&fence),
                 node_wakes: Mutex::new(None),
                 #[cfg(feature = "testing")]
@@ -913,17 +915,13 @@ impl SqliteConnection {
         F: FnOnce(&Transaction<'_>) -> rusqlite::Result<FleetFormat> + Send + 'static,
     {
         let write_gate = Arc::clone(&self.write_gate);
-        let read_gate = Arc::clone(&self.read_gate);
+        let writer = Arc::clone(&self.writer);
         let fleet = flatten(
             self.run(move |c| {
                 #[cfg(feature = "perf-witness")]
                 let mut read_timing =
                     lash_core_ids::perf_witness::queues::Timer::enqueue("sqlite.read_gate");
-                let _read_gate = timed_gate(|| {
-                    read_gate
-                        .read()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                });
+                let _read_gate = timed_gate(|| writer.access());
                 #[cfg(feature = "perf-witness")]
                 if let Some(timing) = &mut read_timing {
                     timing.start_service();

@@ -7,6 +7,11 @@ use lash_kernel_doc::{ArtifactDigest, PackageSetDigest};
 
 use crate::{ArtifactKey, Package, PackageRefusal, SetHolds};
 
+/// The content identity of a dependency-closed package set.
+/// version_surface = "coexist"
+/// version_guard(items(PACKAGE_SET_DOMAIN, PackageSet))
+const PACKAGE_SET_DOMAIN: &str = "lash package set 2026-10 v1";
+
 /// One artifact per package line. Its constructor admits only a
 /// dependency-closed set: every artifact's requirement of a line names the
 /// set's artifact of that line.
@@ -74,7 +79,7 @@ impl PackageSet {
 
     /// The blake3 digest of the members: the set's one name, computed.
     pub fn digest(&self) -> PackageSetDigest {
-        let mut hasher = blake3::Hasher::new_derive_key("lash package set 2026-10 v1");
+        let mut hasher = blake3::Hasher::new_derive_key(PACKAGE_SET_DOMAIN);
         hasher.update(&(self.members.len() as u64).to_le_bytes());
         for (path, digest) in &self.members {
             let path = path.to_string();

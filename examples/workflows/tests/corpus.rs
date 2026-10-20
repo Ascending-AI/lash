@@ -1,3 +1,17 @@
+fn corpus_tool_signatures() -> anyhow::Result<
+    std::collections::BTreeMap<lash_kernel_doc::EffectName, lash_kernel_doc::Signature>,
+> {
+    let mut boundary = lash::vm::HostBoundary::new();
+    for tool in workflow_corpus::tools()? {
+        boundary.offer_bound_tool(
+            &tool.manifest,
+            &tool.contract.input_schema.canonical,
+            &tool.contract.output_schema.canonical,
+        )?;
+    }
+    Ok(boundary.signatures())
+}
+
 #[test]
 #[expect(
     clippy::disallowed_methods,
@@ -126,10 +140,10 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
         admitted,
         "every admitted Python corpus case is measured"
     );
-    let mut effects = std::collections::BTreeMap::new();
-    for name in ["corpus.echo", "finish"] {
+    let mut effects = corpus_tool_signatures().expect("the shared corpus tool signatures");
+    {
         effects.insert(
-            lash_kernel_doc::EffectName::new(name).unwrap(),
+            lash_kernel_doc::EffectName::new("finish").unwrap(),
             lash_kernel_doc::Signature {
                 params: vec![lash_kernel_doc::Param {
                     name: lash_kernel_doc::Name::new("input"),
@@ -279,7 +293,6 @@ fn every_typescript_corpus_case_has_source_shaped_statements_and_one_body_per_lo
     use lash_kernel_doc::{Node, Stmt};
     let embedding = lash_vm_worker::built_embedding(&Default::default()).unwrap();
     let effects = [
-        "corpus.echo",
         "finish",
         "display.show_message",
         "display.set_status",
@@ -302,6 +315,7 @@ fn every_typescript_corpus_case_has_source_shaped_statements_and_one_body_per_lo
             },
         )
     })
+    .chain(corpus_tool_signatures().expect("the shared corpus tool signatures"))
     .collect();
     let controls = std::collections::BTreeMap::from([(
         lash_kernel_doc::EffectName::new("finish").unwrap(),

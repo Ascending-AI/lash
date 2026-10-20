@@ -8,7 +8,7 @@ async def demo():
                     value is k.absent
                     (await helper_py_arg_missing("work"))
                     None
-                (await helper_py_reply((await tools.corpus.echo(value))))
+                (await helper_py_reply((await tools.corpus.echo(value, result="json"))))
     #: Echo "a" and "b" side by side and wait for both
     with k.return_():
         with k.bind("t2"):

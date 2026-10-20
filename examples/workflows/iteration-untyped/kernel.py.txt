@@ -1,6 +1,6 @@
 kernel 1
 numbers by_spelling
-effect corpus.echo(input?: Any) -> Any
+effect corpus.echo(input?: Json) -> Json
 use bool.not = @740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d
 use eq = @b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954
 use error.new = @94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064
@@ -26,7 +26,7 @@ entry demo(items: Any) -> Any
 fn demo(items) {
   let out = []
   for item in items via (open py.for_in.open, check py.for_in.check) {
-    do invoke py.method.append(out, invoke py.reply(perform corpus.echo(item) as Any))
+    do invoke py.method.append(out, invoke py.reply(perform corpus.echo(item) as Json))
   }
   return out
 }

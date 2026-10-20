@@ -5,7 +5,7 @@ export async function demo(items) {
   /** Go through each item */
   for (const item of items) {
     /** Echo the item and keep the reply */
-    out[helper_list_len(out)] = (await await tools.corpus.echo((await helper_ts_boundary(item))));
+    out[helper_list_len(out)] = (await await tools.corpus.echo((await helper_ts_boundary(item))) as KernelType<"json">);
   }
   /** Give back the replies */
   return k.returnVia(out, helper_ts_promise_adopt);

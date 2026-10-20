@@ -1,7 +1,5 @@
 cell entries: []
-crossing corpus.echo
-Record {
-field nested
+crossing corpus.capture
 Record {
 field list
 List [
@@ -139,6 +137,8 @@ use ts.array.argument = @ts.array.argument
 use ts.array.at = @ts.array.at
 use ts.array.bound = @ts.array.bound
 use ts.array.callback = @ts.array.callback
+use ts.array.callback_slots2 = @ts.array.callback_slots2
+use ts.array.callback_slots3 = @ts.array.callback_slots3
 use ts.array.concat = @ts.array.concat
 use ts.array.construct = @ts.array.construct
 use ts.array.copyWithin = @ts.array.copyWithin
@@ -147,6 +147,7 @@ use ts.array.entries = @ts.array.entries
 use ts.array.every = @ts.array.every
 use ts.array.fill = @ts.array.fill
 use ts.array.filter = @ts.array.filter
+use ts.array.filter_slots = @ts.array.filter_slots
 use ts.array.find = @ts.array.find
 use ts.array.findIndex = @ts.array.findIndex
 use ts.array.findLast = @ts.array.findLast
@@ -172,6 +173,7 @@ use ts.array.lastIndexOf = @ts.array.lastIndexOf
 use ts.array.length = @ts.array.length
 use ts.array.length_property = @ts.array.length_property
 use ts.array.map = @ts.array.map
+use ts.array.map_slots = @ts.array.map_slots
 use ts.array.match_length = @ts.array.match_length
 use ts.array.of = @ts.array.of
 use ts.array.pop = @ts.array.pop
@@ -190,6 +192,7 @@ use ts.array.slice = @ts.array.slice
 use ts.array.slice_generic = @ts.array.slice_generic
 use ts.array.some = @ts.array.some
 use ts.array.sort = @ts.array.sort
+use ts.array.sort_slots = @ts.array.sort_slots
 use ts.array.splice = @ts.array.splice
 use ts.array.toLocaleString = @ts.array.toLocaleString
 use ts.array.toReversed = @ts.array.toReversed
@@ -848,5 +851,4 @@ fn run(x) {
 main {}
 started with x=2: Float(Float(6.0))
 ]
-}
 }

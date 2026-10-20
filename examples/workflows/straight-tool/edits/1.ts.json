@@ -1,14 +1,34 @@
 {
   "context": {
+    "corpus.capture": {
+      "params": [
+        {
+          "name": "input",
+          "ty": {
+            "record": {
+              "fields": [
+                {
+                  "name": "list",
+                  "ty": {
+                    "list": "any"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "result": "json"
+    },
     "corpus.echo": {
       "params": [
         {
           "name": "input",
-          "ty": "any",
+          "ty": "json",
           "optional": true
         }
       ],
-      "result": "any"
+      "result": "json"
     },
     "display.add_item": {
       "params": [
@@ -75,11 +95,11 @@
     }
   },
   "transaction": {
-    "base": "96d4e1dbce6c21f93f0df5c55fd0c0887e4166faf3b1c84ca85bbf833567da4f",
+    "base": "6da3145cff05797d022c20fe1ba051f78165ed5d5bb997e75bc7b584f4eee01e",
     "edits": [
       {
         "set_value": {
-          "base": "96d4e1dbce6c21f93f0df5c55fd0c0887e4166faf3b1c84ca85bbf833567da4f",
+          "base": "6da3145cff05797d022c20fe1ba051f78165ed5d5bb997e75bc7b584f4eee01e",
           "target": {
             "tool_argument": {
               "action": {

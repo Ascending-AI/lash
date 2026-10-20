@@ -6,7 +6,7 @@ export async function demo(value) {
     return k.returnVia("negative", helper_ts_promise_adopt);
   }
   /** Echo the value */
-  await await tools.corpus.echo((await helper_ts_boundary(value)));
+  await await tools.corpus.echo((await helper_ts_boundary(value))) as KernelType<"json">;
   /** Report that it is done */
   return k.returnVia("done", helper_ts_promise_adopt);
 }

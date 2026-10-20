@@ -1182,13 +1182,16 @@ fn drive_stalling_turn(
 ) -> StalledTurn {
     let mut llm_calls = 0;
     let mut outcome = None;
+    let mut events = Vec::new();
     let mut effects = drain_effects(machine);
     loop {
+        events.extend(delivered_events(&effects).cloned());
         outcome = outcome.or_else(|| find_turn_outcome(&effects));
         if let Some((messages, _)) = find_done(&effects) {
             return StalledTurn {
                 llm_calls,
                 outcome,
+                events,
                 messages: messages.iter().cloned().collect(),
             };
         }
@@ -1227,6 +1230,7 @@ fn drive_stalling_turn(
 }
 
 struct StalledTurn {
+    events: Vec<lash_core::SessionHistoryRecord>,
     llm_calls: usize,
     outcome: Option<lash_protocol_types::TurnOutcome>,
     messages: Vec<Message>,
@@ -1446,7 +1450,7 @@ fn a_no_progress_stop_does_not_spend_the_next_turns_budget() {
     );
     let stalled = drive_stalling_turn(&mut first, "<typescript>\nfinish \"ok\"", None, 32);
     assert_eq!(stalled.llm_calls, 3, "the first turn spends its own budget");
-    let carried = first.events().to_vec();
+    let carried = stalled.events;
     assert!(
         !carried.is_empty(),
         "the stopped turn leaves its diagnostics on the session path"
@@ -1495,13 +1499,14 @@ fn prose_only_turns_do_not_accumulate_into_the_next_turns_count() {
             )])),
         });
         effects = drain_effects(&mut machine);
+        carried.extend(delivered_events(&effects).cloned());
         let (checkpoint_id, _) = find_checkpoint(&effects).expect("completion checkpoint");
         machine.handle_response(Response::Checkpoint {
             id: checkpoint_id,
             delivery: sansio::CheckpointDelivery::default(),
         });
-        drain_effects(&mut machine);
-        carried = machine.events().to_vec();
+        let effects = drain_effects(&mut machine);
+        carried.extend(delivered_events(&effects).cloned());
     }
     let prose_diagnostics = carried
         .iter()
@@ -1764,8 +1769,8 @@ fn identical_replies_are_fingerprinted_and_run_to_the_hosts_budget() {
         "and stops for the budget's reason: {:#?}",
         stalled.messages
     );
-    let fingerprints: Vec<String> = machine
-        .events()
+    let fingerprints: Vec<String> = stalled
+        .events
         .iter()
         .filter_map(|record| match record {
             lash_core::SessionHistoryRecord::Protocol(event) => match recorded_rlm_event(event) {

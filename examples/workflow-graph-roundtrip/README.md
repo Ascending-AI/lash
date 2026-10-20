@@ -124,7 +124,7 @@ workflow modules, cell crossings and module refusals. Both dialects import
 unchanged through `HostArtifacts::import_workflow`. Module counts come from
 `view::derive`; entry names follow the shared module contract. Cell and refusal
 cases open their source and recorded witness without replacing the saved workflow.
-The shared `workflow_corpus::tools` declaration binds `corpus.echo`; the mock
+The shared `workflow_corpus::tools` declaration binds `corpus.echo` for data and `corpus.capture` for a nested function; the mock
 returns its argument and displays it. No external service is called.
 
 The read-only pane offers three lenses:

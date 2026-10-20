@@ -443,6 +443,7 @@ pub(super) enum RlmContractStep {
 
 #[derive(Default)]
 struct RlmContractObserved {
+    history: Vec<lash_core::SessionHistoryRecord>,
     initial_request_tools_empty: Option<bool>,
     exec_codes: Vec<String>,
     checkpoints: Vec<&'static str>,
@@ -459,6 +460,11 @@ struct RlmContractObserved {
 impl RlmContractObserved {
     fn record(&mut self, effects: &[lash_core::Effect]) {
         for effect in effects {
+            if let lash_core::Effect::Progress { event_delta, .. }
+            | lash_core::Effect::Done { event_delta, .. } = effect
+            {
+                self.history.extend(event_delta.iter().cloned());
+            }
             match effect {
                 lash_core::Effect::LlmCall { request, .. } => {
                     if self.initial_request_tools_empty.is_none() {
@@ -617,7 +623,7 @@ pub(super) fn run_rlm_protocol_contract(
         effects = drain_rlm_contract_effects(&mut machine);
         observed.record(&effects);
     }
-    let events = rlm_contract_events(&machine)?;
+    let events = rlm_contract_events(&observed.history)?;
     Ok(json!({
         "execution_api": "lash_core::sansio::TurnMachine",
         "driver": "lash_protocol_rlm::RlmDriver",
@@ -862,13 +868,13 @@ pub(super) fn checkpoint_kind_name(checkpoint: lash_core::CheckpointKind) -> &'s
     }
 }
 
-/// The RLM events the machine recorded, read through the protocol's decoder:
+/// The RLM events delivered to the consumer, read through the protocol's decoder:
 /// an event the protocol cannot read is a failed contract, never an absence.
 fn rlm_contract_events(
-    machine: &lash_core::TurnMachine,
+    history: &[lash_core::SessionHistoryRecord],
 ) -> Result<Vec<RlmProtocolEvent>, FixedScriptRunnerError> {
     let mut events = Vec::new();
-    for event in machine.events().iter() {
+    for event in history {
         let lash_core::SessionHistoryRecord::Protocol(event) = event else {
             continue;
         };

@@ -1,6 +1,6 @@
 kernel 1
 numbers float
-effect corpus.echo(input?: Any) -> Any
+effect corpus.echo(input?: Json) -> Json
 use collection.holds_none = @a58e0ba0d11b84096fd0264a5a281ef308aa5fe9a7bf26dd7b662b283fa491fe
 use error.new = @94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064
 use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
@@ -26,7 +26,7 @@ fn demo(value) {
   if num.lt(num.to_float(value), 0.0) {
     return "negative" via ts.promise.adopt
   }
-  do perform corpus.echo(invoke ts.boundary(value)) as Any then yield
+  do perform corpus.echo(invoke ts.boundary(value)) as Json then yield
   return "done" via ts.promise.adopt
 }
 

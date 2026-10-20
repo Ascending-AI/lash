@@ -1,7 +1,7 @@
 --- before
 -kernel 1
 -numbers by_spelling
--effect corpus.echo(input?: Any) -> Any
+-effect corpus.echo(input?: Json) -> Json
 -use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 -use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
 -use py.reply = @80c16e15d72610c71deb233d25b5cf09e04451185028fa4a95843aabd600b448
@@ -10,7 +10,7 @@
 -entry demo() -> Any
 -
 -fn demo() {
--  return invoke py.reply(perform corpus.echo("hello") as Any)
+-  return invoke py.reply(perform corpus.echo("hello") as Json)
 -}
 -
 -main {
@@ -19,7 +19,7 @@
 +++ after
 +kernel 1
 +numbers by_spelling
-+effect corpus.echo(input?: Any) -> Any
++effect corpus.echo(input?: Json) -> Json
 +use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 +use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
 +use py.reply = @80c16e15d72610c71deb233d25b5cf09e04451185028fa4a95843aabd600b448
@@ -28,7 +28,7 @@
 +entry demo() -> Any
 +
 +fn demo() {
-+  return invoke py.reply(perform corpus.echo("edited λ") as Any)
++  return invoke py.reply(perform corpus.echo("edited λ") as Json)
 +}
 +
 +main {
@@ -37,8 +37,8 @@
 
 Correspondence:
 {
-  "base": "a5d79dc3e8bb6001a7d0743c7f17ca518cb7f48841c04c1f369cf5efcd399bb4",
-  "result": "86c0e570b9651abbb0563992d556c0f8255b410ee5489737ff3fe8ffafccc306",
+  "base": "5338ce2c42630d0dd2cccdca7c63abaf611df0bee8b0a23772c7af029c578e02",
+  "result": "a0f9665601d8d2a7192b1e66e9424ea48934bd38a9d3e24d24ec34c863c7fff7",
   "entries": [
     {
       "from": {
@@ -162,6 +162,6 @@ Reprinted source:
 #: Say hello
 async def demo():
     #: Send a greeting and give back the reply
-    return (await helper_py_reply((await tools.corpus.echo("edited λ"))))
+    return (await helper_py_reply((await tools.corpus.echo("edited λ", result="json"))))
 def main():
     demo = declared.demo

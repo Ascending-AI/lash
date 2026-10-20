@@ -257,7 +257,7 @@ async fn payload(backend: &lash::Backend, text: &str) -> serde_json::Value {
                 lash_core::HostArtifactPin::mint(),
             ))
             .expect("a host pin is unguarded"),
-            &document,
+            &lash::workflow::document::IdentifiedDocument::new(document.clone()),
             &declarations,
         )
         .await
@@ -980,7 +980,7 @@ async fn payload_under(
                 lash_core::HostArtifactPin::mint(),
             ))
             .expect("a host pin is unguarded"),
-            &document,
+            &lash::workflow::document::IdentifiedDocument::new(document.clone()),
             &lash::workflow::document::CheckedDeclarations::required(
                 &document,
                 environment.functions(),

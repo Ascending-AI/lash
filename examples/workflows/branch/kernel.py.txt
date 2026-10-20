@@ -1,6 +1,6 @@
 kernel 1
 numbers by_spelling
-effect corpus.echo(input?: Any) -> Any
+effect corpus.echo(input?: Json) -> Json
 use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
 use py.reply = @80c16e15d72610c71deb233d25b5cf09e04451185028fa4a95843aabd600b448
@@ -10,7 +10,7 @@ entry demo(flag: Bool) -> Any
 
 fn demo(flag) {
   if flag {
-    return invoke py.reply(perform corpus.echo("yes") as Any)
+    return invoke py.reply(perform corpus.echo("yes") as Json)
   }
   return "no"
 }
