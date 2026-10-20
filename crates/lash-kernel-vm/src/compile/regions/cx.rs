@@ -60,6 +60,8 @@ pub(crate) struct Cx<'a> {
     /// The session bindings the plan names, by [`super::LoopPlan::sessions`]
     /// index.
     pub(crate) sessions: &'a mut [SessionSlot],
+    /// Session slots with an unpublished write, counted once per binding.
+    pub(crate) written: usize,
     pub(crate) limits: KernelDataLimits,
     /// Whether memory is metered (`MemoryMeter` not off).
     pub(crate) memory: bool,
@@ -140,6 +142,17 @@ pub(crate) struct Made {
 }
 
 impl Cx<'_> {
+    /// Commits a session write, keeping its last-write order and the number
+    /// of bindings a guest call must publish before it reads the session.
+    pub(crate) fn write_session(&mut self, at: usize, value: Value, order: u64) {
+        let slot = &mut self.sessions[at];
+        self.written += usize::from(slot.written == 0);
+        *slot = SessionSlot {
+            value: Some(value),
+            written: order,
+        };
+    }
+
     /// Runs guest call `call` of `callee` on `args` through its callee's
     /// island ([`Guests::call`]).
     pub(super) fn guest(

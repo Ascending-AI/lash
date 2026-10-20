@@ -2456,3 +2456,31 @@ fn list_appends_stop_where_the_reference_stops() {
 }
 
 include!("regions/groups.rs");
+
+/// FIG-7004 / PLAN-INDEP: a batch publishes each binding's last write
+/// before an island reads it, including repeated writes to one binding,
+/// alternating bindings and consecutive calls with no intervening write.
+/// Bounds, slices and cross-resumes retain the reference's tape and images.
+#[test]
+fn region_guest_entries_publish_pending_bindings_before_each_call() {
+    let registry = Arc::new(super::corpus_registry());
+    let on = prepare_with_layout(Arc::clone(&registry), Layout(ON));
+    let off = prepare_with_layout(registry, Layout(OFF));
+    let case = program_case(
+        "guest entries publish pending bindings",
+        "main { let a = 0 let b = 0 let i = 0 let s = 0 \
+         let peek = fn() { return num.add(a, b) } \
+         while num.lt(i, 3) { \
+         set a = i set b = num.add(i, 10) set a = num.add(i, 1) \
+         do apply peek() set s = num.add(s, apply peek()) \
+         set b = num.add(i, 20) set a = num.add(i, 2) \
+         set s = num.add(s, apply peek()) set i = num.add(i, 1) } finish (s, a, b) }",
+        16,
+    );
+    let (mut counts, mut failures) = (Counts::default(), Vec::new());
+    assert!(formed_alike(&on, &off, &case).1 > 0);
+    let work = check(&on, &off, &case, &mut counts, &mut failures);
+    assert!(work.calls > 0 && work.iterations > 0, "{work:?}");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    println!("guest entries: paired runs={}", counts.runs);
+}

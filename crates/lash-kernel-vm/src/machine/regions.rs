@@ -305,21 +305,24 @@ impl KernelMachine {
         };
         let slice_end = self.slice_end;
         let mut guests = RegionGuests {
-            exe,
+            ground: super::islands::Ground {
+                exe,
+                tape,
+                recorder,
+                charging,
+                slice_end,
+                observed: self.observer.is_some(),
+                limits: self.limits,
+                base: depth,
+                call_depth: u64::from(self.bounds.call_depth),
+                memory,
+            },
             session: &mut self.session,
             names: &plan.sessions,
             scratch: &mut self.islands,
-            tape,
-            recorder,
-            charging,
             bound,
-            slice_end,
-            observed: self.observer.is_some(),
-            limits: self.limits,
             memory: memory.then_some(self.bounds.memory),
             floor: self.capacity_floor,
-            base: depth,
-            call_depth: u64::from(self.bounds.call_depth),
             levels: Vec::new(),
             halt: None,
             scope: None,
@@ -385,6 +388,7 @@ impl KernelMachine {
                 arena: &mut arena,
                 sites: &mut self.sites,
                 sessions: &mut *sessions,
+                written: 0,
                 limits: self.limits,
                 memory,
                 ceiling,
@@ -1118,10 +1122,7 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
             return Ok(false);
         }
         self.writes += 1;
-        self.cx.sessions[at as usize] = SessionSlot {
-            value: Some(value),
-            written: self.writes,
-        };
+        self.cx.write_session(at as usize, value, self.writes);
         self.commit(commit)?;
         Ok(true)
     }

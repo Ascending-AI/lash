@@ -104,6 +104,7 @@ fn first_statement(embedder: &mut Embedder, room: u64) -> (Option<Value>, u64) {
         arena: &mut arena,
         sites: &mut machine.sites,
         sessions: &mut [],
+        written: 0,
         limits: machine.limits,
         memory: true,
         ceiling,

@@ -226,6 +226,7 @@ fn region_kind_memo_records_both_general_formulas_for_every_kind() {
         arena: &mut arena,
         sites: &mut sites,
         sessions: &mut sessions,
+        written: 0,
         limits: Default::default(),
         memory: false,
         ceiling: u64::MAX,

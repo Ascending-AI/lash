@@ -302,17 +302,9 @@ impl KernelMachine {
             .ok_or_else(|| fault("no task"))?;
         let ground = Ground {
             exe,
-            arena: &mut arena,
-            sites: &mut self.sites,
-            session: &self.session,
             tape: recorder.filter(|_| gate.charging),
             recorder,
             charging: gate.charging,
-            bound: if gate.charging {
-                self.bounds.charge_limit
-            } else {
-                u64::MAX
-            },
             slice_end: gate.slice_end,
             observed: gate.observed,
             limits: gate.limits,
@@ -320,11 +312,22 @@ impl KernelMachine {
             base: gate.base,
             call_depth: gate.call_depth,
         };
+        let entry = Entry {
+            ground: &ground,
+            arena: &mut arena,
+            sites: &mut self.sites,
+            session: &self.session,
+            bound: if gate.charging {
+                self.bounds.charge_limit
+            } else {
+                u64::MAX
+            },
+        };
         let scratch = &mut self.islands;
         scratch.open();
         let charged = self.charged;
         let mut entry = open(
-            ground,
+            entry,
             scratch,
             &mut running.counters,
             (charged, island.frames),
@@ -491,19 +494,9 @@ impl KernelMachine {
             .ok_or_else(|| fault("no task"))?;
         let ground = Ground {
             exe,
-            arena: &mut arena,
-            sites: &mut self.sites,
-            session: &self.session,
             tape: recorder.filter(|_| gate.charging),
             recorder,
             charging: gate.charging,
-            // Read at each entry: a limiter grows it where a charge
-            // crosses it.
-            bound: if gate.charging {
-                self.bounds.charge_limit
-            } else {
-                u64::MAX
-            },
             slice_end: gate.slice_end,
             observed: gate.observed,
             limits: gate.limits,
@@ -511,9 +504,20 @@ impl KernelMachine {
             base: gate.base,
             call_depth: gate.call_depth,
         };
+        let entry = Entry {
+            ground: &ground,
+            arena: &mut arena,
+            sites: &mut self.sites,
+            session: &self.session,
+            bound: if gate.charging {
+                self.bounds.charge_limit
+            } else {
+                u64::MAX
+            },
+        };
         self.islands.open();
         let ran = enter(
-            ground,
+            entry,
             &mut self.islands,
             &mut running.counters,
             &mut self.charged,
@@ -699,23 +703,28 @@ impl KernelMachine {
     }
 }
 
-/// What an island entry runs under, borrowed from the machine or from the
-/// loop region whose statement makes the call.
-struct Ground<'a> {
-    exe: &'a Executable,
+/// Fields no call changes while a region batch or a callback walk runs.
+/// The bound stays at the entry: a callback's limiter can grow it.
+pub(in crate::machine) struct Ground<'a> {
+    pub(in crate::machine) exe: &'a Executable,
+    pub(in crate::machine) tape: Option<&'a ChargeTape>,
+    pub(in crate::machine) recorder: Option<&'a ChargeTape>,
+    pub(in crate::machine) charging: bool,
+    pub(in crate::machine) slice_end: u64,
+    pub(in crate::machine) observed: bool,
+    pub(in crate::machine) limits: KernelDataLimits,
+    pub(in crate::machine) memory: bool,
+    pub(in crate::machine) base: u64,
+    pub(in crate::machine) call_depth: u64,
+}
+
+/// The borrows and current bound of one entry under a held ground.
+struct Entry<'a> {
+    ground: &'a Ground<'a>,
     arena: &'a mut Arena,
     sites: &'a mut SiteCaches,
     session: &'a Session,
-    tape: Option<&'a ChargeTape>,
-    recorder: Option<&'a ChargeTape>,
-    charging: bool,
     bound: u64,
-    slice_end: u64,
-    observed: bool,
-    limits: KernelDataLimits,
-    memory: bool,
-    base: u64,
-    call_depth: u64,
 }
 
 /// Runs the call of `target` on `values` as an island in `scratch`, in
@@ -727,7 +736,7 @@ struct Ground<'a> {
 /// not run, and nothing changed.
 #[inline(always)]
 fn enter(
-    ground: Ground<'_>,
+    entry: Entry<'_>,
     scratch: &mut Scratch,
     counters: &mut Occurrences,
     charged: &mut u64,
@@ -735,9 +744,9 @@ fn enter(
     occurrence: Option<usize>,
     before: &[Weight],
 ) -> Result<Option<Ran>, Halt> {
-    let (base, call_depth) = (ground.base, ground.call_depth);
+    let (base, call_depth) = (entry.ground.base, entry.ground.call_depth);
     let mut island = open(
-        ground,
+        entry,
         scratch,
         counters,
         (*charged, frames(base, call_depth)),
@@ -773,24 +782,24 @@ fn enter(
 /// callee resolved yet, and no frame.
 #[inline(always)]
 fn open<'a>(
-    ground: Ground<'a>,
+    entry: Entry<'a>,
     scratch: &'a mut Scratch,
     counters: &'a mut Occurrences,
     (charged, frames): (u64, u32),
 ) -> Island<'a> {
-    let exe = ground.exe;
     scratch.sessions.clear();
+    let ground = entry.ground;
     Island {
-        exe,
-        stream: exe.document_stream(),
-        arena: ground.arena,
-        sites: ground.sites,
-        session: ground.session,
+        exe: ground.exe,
+        stream: ground.exe.document_stream(),
+        arena: entry.arena,
+        sites: entry.sites,
+        session: entry.session,
         tape: ground.tape,
         recorder: ground.recorder,
         charging: ground.charging,
         charged,
-        bound: ground.bound,
+        bound: entry.bound,
         slice_end: ground.slice_end,
         counters,
         observed: ground.observed,
@@ -842,29 +851,18 @@ fn ended(scratch: &mut Scratch, ran: Result<Value, Stop>) -> Result<Option<Ran>,
 /// guards, lent to the region for its run. An island that stops leaves its
 /// virtual frames here, for the region's exit to convert.
 pub(in crate::machine) struct RegionGuests<'a> {
-    pub(in crate::machine) exe: &'a Executable,
+    pub(in crate::machine) ground: Ground<'a>,
     pub(in crate::machine) session: &'a mut Session,
     /// The plan's session bindings, which the region holds as slots.
     pub(in crate::machine) names: &'a [BindingName],
     pub(in crate::machine) scratch: &'a mut Scratch,
-    /// The tape a charged run records on, and the one its calls are
-    /// counted on, charged or paced.
-    pub(in crate::machine) tape: Option<&'a ChargeTape>,
-    pub(in crate::machine) recorder: Option<&'a ChargeTape>,
-    /// Whether the run is charged, or paced with charge Off.
-    pub(in crate::machine) charging: bool,
     /// The run's bound, `u64::MAX` when it is paced.
     pub(in crate::machine) bound: u64,
-    pub(in crate::machine) slice_end: u64,
-    pub(in crate::machine) observed: bool,
-    pub(in crate::machine) limits: KernelDataLimits,
     /// The memory bound, when memory is accounted.
     pub(in crate::machine) memory: Option<u64>,
     /// The capacity the run's heap was sealed holding, until its first
     /// sweep: the least the capacity meter counts (FIG-6791).
     pub(in crate::machine) floor: u64,
-    pub(in crate::machine) base: u64,
-    pub(in crate::machine) call_depth: u64,
     /// The frames an island that stopped left, innermost first.
     pub(in crate::machine) levels: Vec<Level>,
     pub(in crate::machine) halt: Option<Halt>,
@@ -900,8 +898,8 @@ impl Guests for RegionGuests<'_> {
         let charged = cx.charged;
         if self.scratch.held
             || charged.checked_add(call.least)? > self.bound
-            || charged.checked_add(call.units)? >= self.slice_end
-            || self.base > self.call_depth
+            || charged.checked_add(call.units)? >= self.ground.slice_end
+            || self.ground.base > self.ground.call_depth
             || args.len() > MAX_ARGS
             || !args.iter().all(held)
         {
@@ -923,28 +921,31 @@ impl Guests for RegionGuests<'_> {
         }
         // The island reads the bindings the region wrote as the region
         // left them: its writes so far are published first, in order.
-        let written = &mut self.scratch.written;
-        written.clear();
-        written.extend(
-            cx.sessions
-                .iter()
-                .enumerate()
-                .filter(|(_, slot)| slot.written != 0)
-                .map(|(at, slot)| (slot.written, at)),
-        );
-        written.sort_unstable();
-        for &(_, at) in &*written {
-            let slot = &mut cx.sessions[at];
-            if !slot
-                .value
-                .is_some_and(|value| self.session.publish(&self.names[at].key, value))
-            {
-                self.halt = Some(fault(
-                    "a region wrote a session binding the cell does not hold",
-                ));
-                return None;
+        if cx.written != 0 {
+            let written = &mut self.scratch.written;
+            written.clear();
+            written.extend(
+                cx.sessions
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, slot)| slot.written != 0)
+                    .map(|(at, slot)| (slot.written, at)),
+            );
+            written.sort_unstable();
+            for &(_, at) in &*written {
+                let slot = &mut cx.sessions[at];
+                if !slot
+                    .value
+                    .is_some_and(|value| self.session.publish(&self.names[at].key, value))
+                {
+                    self.halt = Some(fault(
+                        "a region wrote a session binding the cell does not hold",
+                    ));
+                    return None;
+                }
+                slot.written = 0;
+                cx.written -= 1;
             }
-            slot.written = 0;
         }
         // The batch's guest calls share one resolution scope, as nothing
         // frees a closure or writes a cell while a region runs: a
@@ -957,7 +958,6 @@ impl Guests for RegionGuests<'_> {
                 epoch: self.scratch.epoch,
                 freed,
             })
-            || self.scratch.captured.len() > SCOPE_CAPTURED
         {
             #[cfg(test)]
             super::SCOPES.with(|scopes| scopes.set(scopes.get() + 1));
@@ -966,24 +966,15 @@ impl Guests for RegionGuests<'_> {
                 freed,
             });
         }
-        let ground = Ground {
-            exe: self.exe,
+        let entry = Entry {
+            ground: &self.ground,
             arena: &mut *cx.arena,
             sites: &mut *cx.sites,
             session: self.session,
-            tape: self.tape,
-            recorder: self.recorder,
-            charging: self.charging,
             bound: self.bound,
-            slice_end: self.slice_end,
-            observed: self.observed,
-            limits: self.limits,
-            memory: self.memory.is_some(),
-            base: self.base,
-            call_depth: self.call_depth,
         };
         let ran = enter(
-            ground,
+            entry,
             self.scratch,
             counters,
             &mut cx.charged,
@@ -991,6 +982,10 @@ impl Guests for RegionGuests<'_> {
             Some(call.occurrence),
             &call.before,
         );
+        // Reopen before the next call once this scope keeps too much.
+        if self.scratch.captured.len() > SCOPE_CAPTURED {
+            self.scope = None;
+        }
         let value = match ran {
             Ok(None) => return None,
             Ok(Some(Ran::Returned(value))) => Some(value),

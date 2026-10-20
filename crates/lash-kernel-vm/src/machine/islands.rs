@@ -167,7 +167,7 @@ struct Cached {
 /// the registers it holds there.
 type RunsOn = (StmtId, u32, Vec<(u32, Value)>);
 
-pub(super) use entry::{Gate, Ran, RegionGuests, SteadyIsland};
+pub(super) use entry::{Gate, Ground, Ran, RegionGuests, SteadyIsland};
 
 /// The machine's island state: buffers reused across entries, never saved.
 #[derive(Default)]
