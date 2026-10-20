@@ -376,6 +376,10 @@ mod tool_call_reads {
                 .await
         }
 
+        async fn readiness(&self) -> Result<lash_durable::Readiness, DurableError> {
+            self.inner.readiness().await
+        }
+
         async fn claim(
             &self,
             node: &NodeLease,

@@ -256,6 +256,18 @@ pub struct ActorCommit {
     pub turn_cancel: Option<crate::domain::TurnCancelRequest>,
 }
 
+/// What a claim could find, as [`DurableStore::readiness`] read it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Readiness {
+    /// The store's time the answer holds at.
+    pub now: DurableInstant,
+    /// Whether some actor is ready, or waiting with its due time at or
+    /// before `now`: a claim may find work.
+    pub due: bool,
+    /// The earliest due time after `now` that some waiting actor holds.
+    pub next_due: Option<DurableInstant>,
+}
+
 /// One actor a mailbox commit woke, for the post-commit hint.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Woken {
@@ -391,6 +403,14 @@ pub trait DurableStore: DurableReads {
     /// bumps the actor's epoch. A draining node claims nothing. Refused with
     /// [`DurableError::NodeLeaseLost`] when the node holds no live lease.
     async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError>;
+
+    /// What a claim could find now, read without a writer or a lock in one
+    /// statement (FIG-7044): the store's time, whether any actor is ready or
+    /// waiting with a passed due time, and the earliest due time still
+    /// ahead. A superset of every node's claimable actors, so a claim after
+    /// a negative answer finds nothing it would have found; a positive
+    /// answer only permits a claim, which decides under its own fence.
+    async fn readiness(&self) -> Result<Readiness, DurableError>;
 
     /// Acquire only `actor` for a test writer after execution is quiescent.
     /// The compare-and-set requires its observed `epoch` and an unowned,

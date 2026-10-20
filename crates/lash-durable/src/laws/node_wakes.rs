@@ -17,11 +17,16 @@ use crate::{
 };
 
 mod harness;
+mod scheduling;
 
 pub use harness::{Claims, CountingStore, LawNode, serve_node, serve_node_on};
 use harness::{
     Evidence, WakeEvidence, actor, create, eventually, holding, listening, liveness, mail, node,
     observing, owner_of, quiet, under,
+};
+pub use scheduling::{
+    a_quiet_node_claims_nothing_and_still_finds_unhinted_work,
+    timer_chains_are_claimed_when_due_without_empty_claims,
 };
 
 /// One dialect's database, as the node-wake laws reach it.
@@ -380,10 +385,11 @@ pub async fn a_readied_actor_is_claimed_by_one_attempt_on_one_node(
         nodes.push(peer);
         listening(node_wakes.as_ref(), &name).await?;
     }
-    claims.wait_for(NODES - 1).await;
+    claims.wait_for_probing(NODES - 1).await;
     ensure!(
-        claims.len() == NODES - 1,
-        "the peers claimed more than once"
+        claims.len() == 0,
+        "a peer claimed with nothing ready: {:?}",
+        claims.take()
     );
     let held_actor = actor("held")?;
     create(store.as_ref(), &held_actor).await?;
@@ -448,7 +454,7 @@ pub async fn a_hint_to_a_dead_node_is_backed_by_the_claim_poll(
     let claims = Claims::default();
     let (doomed, _) = start_counted(tier, "doomed", holding(quiet(), 256), &claims).await;
     listening(node_wakes.as_ref(), "doomed").await?;
-    claims.wait_for(1).await;
+    claims.wait_until_probed("doomed").await;
     let held_actor = actor("held")?;
     create(store.as_ref(), &held_actor).await?;
     let (mut producer, mut evidence) =
@@ -460,10 +466,9 @@ pub async fn a_hint_to_a_dead_node_is_backed_by_the_claim_poll(
         claim_backoff: poll,
         ..LeaseSettings::default()
     };
-    let before_survivor = claims.len();
     let (mut survivor, _) = start_counted(tier, "survivor", holding(polling, 256), &claims).await;
     listening(node_wakes.as_ref(), "survivor").await?;
-    claims.wait_for(before_survivor + 1).await;
+    claims.wait_until_probed("survivor").await;
     doomed.kill().await;
     eventually(|| async {
         Ok(liveness(node_wakes.as_ref())

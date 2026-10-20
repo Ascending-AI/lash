@@ -17,6 +17,7 @@ use lash_core_ids::clock::Clock;
 use lash_durable::{ActorKey, ActorState, BootId, NodeId, Owner, WakeBatch, Woken};
 use rusqlite::Connection;
 
+use super::doorbell::{Doorbell, Rung};
 use super::{INSERT, PRUNE, SqliteDurableStore, rows};
 use crate::conn::cached_execute;
 
@@ -25,6 +26,10 @@ pub(crate) struct NodeWakeWriter {
     sink: lash_durable::runner::WakeSink,
     retention: std::time::Duration,
     captured: CaptureMark,
+    /// Rings the listeners the batch's rows name once it commits.
+    doorbell: Doorbell,
+    /// The listeners the batch in flight wrote rows for.
+    rung: std::sync::Mutex<Rung>,
 }
 
 /// Set by a capture trigger on the writer's connection, cleared once a
@@ -38,13 +43,32 @@ enum Captured {
 }
 
 impl NodeWakeWriter {
-    pub(crate) fn new(store: &SqliteDurableStore) -> Self {
+    pub(crate) fn new(store: &SqliteDurableStore, doorbell: Doorbell) -> Self {
         Self {
             clock: Arc::clone(&store.clock),
             sink: store.conn.wakes().clone(),
             retention: store.conn.operational.wake_retention,
             captured: CaptureMark::default(),
+            doorbell,
+            rung: std::sync::Mutex::default(),
         }
+    }
+
+    /// The batch committed: ring the listeners its rows name, once each.
+    pub(crate) fn committed(&self) {
+        let rung = std::mem::take(&mut *self.rung());
+        self.doorbell.ring(&rung);
+    }
+
+    /// The batch did not commit: its rows ring nobody.
+    pub(crate) fn discard(&self) {
+        *self.rung() = Rung::default();
+    }
+
+    fn rung(&self) -> std::sync::MutexGuard<'_, Rung> {
+        self.rung
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// The mark this writer's capture triggers set.
@@ -115,6 +139,7 @@ impl NodeWakeWriter {
         }
         for (node, payload) in rows(&batch) {
             cached_execute(tx, INSERT, rusqlite::params![node, payload, now])?;
+            self.rung().add(node.as_deref());
         }
         let oldest =
             now.saturating_sub(i64::try_from(self.retention.as_millis()).unwrap_or(i64::MAX));

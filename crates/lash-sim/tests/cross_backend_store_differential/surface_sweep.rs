@@ -46,6 +46,9 @@ pub(super) enum SurfaceMethod {
     ModelCalls,
     ModelCallPins,
     ClaimFacts,
+    /// [`DurableStore::readiness`](lash_core::durable_port::DurableStore::readiness):
+    /// whether a claim could find work, and whether a due time is ahead.
+    Readiness,
     /// Test authority refuses an absent actor without changing durable state.
     AcquireIdleForTesting,
     ListPendingTurnInputs,
@@ -200,6 +203,7 @@ impl SurfaceMethod {
             Self::ModelCalls => "surface:model_calls",
             Self::ModelCallPins => "surface:model_call_pins",
             Self::ClaimFacts => "surface:claim_facts",
+            Self::Readiness => "surface:readiness",
             Self::AcquireIdleForTesting => "surface:acquire_idle_for_testing",
             Self::ListPendingTurnInputs => "surface:list_pending_turn_inputs",
             Self::PendingTurnInput { known: true } => "surface:pending_turn_input",
@@ -449,6 +453,7 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             surface(SurfaceMethod::ModelCalls),
             surface(SurfaceMethod::ModelCallPins),
             surface(SurfaceMethod::ClaimFacts),
+            surface(SurfaceMethod::Readiness),
             surface(SurfaceMethod::AcquireIdleForTesting),
             surface(SurfaceMethod::ReadSessionStateVersion),
             surface(SurfaceMethod::AdmitSessionState),
@@ -731,6 +736,21 @@ impl BackendRunner {
                     facts.node.is_some(),
                     facts.actor.is_some(),
                     roots.len()
+                )
+            }
+            SurfaceMethod::Readiness => {
+                let readiness = self
+                    .lifecycle_backend
+                    .durable()
+                    .readiness()
+                    .await
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                // Store time differs between backends; what a claim could
+                // find must not.
+                format!(
+                    "due={} next_due={}",
+                    readiness.due,
+                    readiness.next_due.is_some()
                 )
             }
             SurfaceMethod::DurableRead(method) => {

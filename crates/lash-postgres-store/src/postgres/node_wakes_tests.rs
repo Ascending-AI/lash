@@ -109,6 +109,9 @@ node_wake_laws!(
         crate::testing::fixture_config(),
     a_readied_actor_is_claimed_by_one_attempt_on_one_node => sixteen_nodes(),
     a_hint_to_a_dead_node_is_backed_by_the_claim_poll => crate::testing::fixture_config(),
+    timer_chains_are_claimed_when_due_without_empty_claims => crate::testing::fixture_config(),
+    a_quiet_node_claims_nothing_and_still_finds_unhinted_work =>
+        crate::testing::fixture_config(),
 );
 
 /// A node's lease renews on a task of its own over its renewal connection:
@@ -318,4 +321,117 @@ fn wake_payloads_split_encoded_batches_and_poll_for_oversized_keys() {
         carried, actors,
         "every fitting key rides a complete envelope"
     );
+}
+
+/// Reports each actor its node claims, and what woke the claim, holding it
+/// until the node stops.
+struct ReportClaims(tokio::sync::mpsc::UnboundedSender<(ActorKey, lash_durable::runner::Wake)>);
+
+#[async_trait::async_trait]
+impl lash_durable::runner::Activation for ReportClaims {
+    async fn activate(&self, owned: lash_durable::runner::Owned) -> lash_durable::runner::Exit {
+        let _ = self.0.send((owned.actor().clone(), owned.claimed_on()));
+        std::future::pending().await
+    }
+}
+
+/// FIG-7044: a process the registrar creates directly, outside any owner
+/// transaction, reaches the node serving the storage through its
+/// after-commit hint. The node's claim poll is out of reach once its first
+/// claim took the sentinel, so only the hint can claim the process.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_created_registration_reaches_the_serving_node_through_its_hint() {
+    use lash_execution_contracts::backend::StoreSet as _;
+    use lash_execution_contracts::process::{
+        EngineLaunch, Lifetime, ProcessInput, ProcessProvenance, ProcessRegistrar as _,
+        ProcessRegistration,
+    };
+    const WATCHDOG: Duration = Duration::from_secs(60);
+    let Some(tier) = PostgresTier::open(
+        "a_created_registration_reaches_the_serving_node_through_its_hint",
+        crate::testing::fixture_config(),
+    )
+    .await
+    else {
+        return;
+    };
+    let stores = crate::PostgresStoreSet::new(
+        &tier.storage,
+        Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
+    );
+    let store = stores.durable_store();
+    let sentinel = ActorKey::session("sentinel").expect("a session actor key");
+    let mut tx = lash_durable::MailTx::new();
+    tx.create_actor(sentinel.clone(), formats());
+    store
+        .commit_mail(tx, lash_durable::CommitLabel::new("law.create"))
+        .await
+        .expect("create the sentinel");
+    let input = ProcessInput::Engine {
+        kind: "hinted".into(),
+        payload: serde_json::json!({}),
+        launch: EngineLaunch::new(
+            lash_execution_contracts::testing::process_execution_env_fixture_ref(),
+            None,
+        ),
+    };
+    let never = Duration::from_secs(100 * 365 * 24 * 60 * 60);
+    let config = DurableSettings {
+        lease: LeaseSettings {
+            claim_poll: never,
+            claim_backoff: never,
+            startup: WATCHDOG,
+            ..LeaseSettings::default()
+        },
+        ..DurableSettings::default()
+    }
+    .validate()
+    .expect("the law's settings validate");
+    let (send, mut claimed) = tokio::sync::mpsc::unbounded_channel();
+    let runner = lash_durable::runner::Runner::new(
+        store,
+        Arc::new(lash_core_ids::clock::SystemClock),
+        lash_durable::runner::RunnerConfig::new(
+            lash_durable::NodeId::new("serving"),
+            vec![formats(), input.unstarted_formats()],
+            &config,
+        ),
+        Arc::new(ReportClaims(send)),
+    )
+    .with_node_wakes(stores.node_wakes().expect("PostgreSQL node wakes"));
+    let _attached = stores.wake_sink().attach(&runner.hints());
+    let serving = tokio::spawn(runner.run(std::future::pending()));
+    let first = tokio::time::timeout(WATCHDOG, claimed.recv())
+        .await
+        .expect("hang guard: the node never claimed the sentinel")
+        .expect("the node stopped");
+    assert_eq!(first.0, sentinel, "the first claim takes the sentinel");
+
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
+    let registry = stores.process_registry();
+    let prepared = registry
+        .prepare_process_registration(
+            ProcessRegistration::new(input, ProcessProvenance::host(), Lifetime::Detached),
+            &[],
+        )
+        .await
+        .expect("prepare the registration");
+    let receipt = registry
+        .commit_process_registration(prepared)
+        .await
+        .expect("register the process");
+    let process = ActorKey::process(receipt.record.id.as_str()).expect("a process actor key");
+    let delivered = tokio::time::timeout(WATCHDOG, claimed.recv())
+        .await
+        .expect("hang guard: no hint delivered the created process")
+        .expect("the node stopped");
+    assert_eq!(
+        delivered,
+        (process, lash_durable::runner::Wake::Hint),
+        "the created process is claimed on its after-commit hint"
+    );
+    serving.abort();
 }

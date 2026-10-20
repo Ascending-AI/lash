@@ -53,6 +53,7 @@ mod access;
 mod claim_facts;
 mod graph;
 mod model_calls;
+mod node_wake_sql;
 mod packages;
 mod pages;
 mod park;
@@ -110,39 +111,11 @@ mod waits;
 #[path = "../node_wakes.rs"]
 mod node_wakes;
 
+#[cfg(test)]
+pub(super) use node_wake_sql::NODE_WAKE_ROLLBACK_MAIL;
+pub(super) use node_wake_sql::{NODE_WAKE_CAPTURE, NODE_WAKE_PEERS, NODE_WAKE_ROWS};
 pub(crate) use node_wakes::TABLES as NODE_WAKES_TABLES;
 pub(crate) use node_wakes::{NodeWakeWriter, SqliteNodeWakes};
-
-// Connection-local buffers capture producers without a second dispatch list;
-// each capture sets the writer's capture mark (`CaptureMark::register`).
-pub(super) const NODE_WAKE_CAPTURE: &str = "
-CREATE TEMP TABLE lash_woken (actor TEXT PRIMARY KEY);
-CREATE TEMP TABLE lash_appended (actor TEXT PRIMARY KEY);
-CREATE TEMP TRIGGER lash_capture_created AFTER INSERT ON main.actors
-    WHEN NEW.state = 'ready' BEGIN
-    INSERT OR IGNORE INTO lash_woken VALUES (NEW.actor_key);
-    SELECT lash_wake_captured();
-END;
-CREATE TEMP TRIGGER lash_capture_woken AFTER UPDATE OF mail_seq ON main.actors
-    WHEN NEW.mail_seq > OLD.mail_seq BEGIN
-    INSERT OR IGNORE INTO lash_woken VALUES (NEW.actor_key);
-    SELECT lash_wake_captured();
-END;
-CREATE TEMP TRIGGER lash_capture_appended AFTER INSERT ON main.process_events BEGIN
-    INSERT OR IGNORE INTO lash_appended VALUES ('p/' || NEW.process_id);
-    SELECT lash_wake_captured();
-END;
-";
-
-pub(super) const NODE_WAKE_ROWS: &str = "
-SELECT a.actor_key, a.state, a.owner_node, a.owner_boot
-FROM temp.lash_woken w JOIN main.actors a ON a.actor_key = w.actor
-UNION ALL SELECT actor, NULL, NULL, NULL FROM temp.lash_appended";
-pub(super) const NODE_WAKE_PEERS: &str =
-    "SELECT node_id FROM nodes WHERE draining = 0 AND heartbeat_expires_at_ms > ?1";
-#[cfg(test)]
-pub(super) const NODE_WAKE_ROLLBACK_MAIL: &str =
-    "UPDATE actors SET mail_seq = mail_seq + 1 WHERE actor_key = ?1";
 
 // The domain tables I0 creates in the durable core database (FIG-5194);
 // each domain's own lane adds its tables beside them.
@@ -1316,6 +1289,10 @@ impl DurableStore for SqliteDurableStore {
             }
         })
         .await
+    }
+
+    async fn readiness(&self) -> Result<lash_durable::Readiness, DurableError> {
+        self.readiness_now().await
     }
 
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {

@@ -1153,6 +1153,24 @@ impl DurableStore for PostgresDurableStore {
         .await
     }
 
+    async fn readiness(&self) -> Result<lash_durable::Readiness, DurableError> {
+        self.within(CommitCapacity::Scheduler, async {
+            let injected = self.injected_instant().transpose()?.map(|now| now.0);
+            let (now, due, next_due): (i64, bool, Option<i64>) =
+                crate::observed_sql::query_as(SQL.postgres.readiness.sql())
+                    .bind(injected)
+                    .fetch_one(crate::observed_sql::executor(&self.pools.scheduler))
+                    .await
+                    .map_err(sqlx_failure)?;
+            Ok(lash_durable::Readiness {
+                now: DurableInstant(now),
+                due,
+                next_due: next_due.map(DurableInstant),
+            })
+        })
+        .await
+    }
+
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {
         self.within(CommitCapacity::Scheduler, async {
             let rows: Vec<(String, i64, String, Option<String>, bool)> =

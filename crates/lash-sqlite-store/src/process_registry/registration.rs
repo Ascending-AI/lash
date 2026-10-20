@@ -40,7 +40,8 @@ impl lash_execution_contracts::process::ProcessRegistrar for SqliteProcessRegist
         lash_execution_contracts::plugin_error::PluginError,
     > {
         let (registration, observers, process_id, retained, now) = prepared.into_commit();
-        self.conn
+        let receipt = self
+            .conn
             .write_flow(move |tx| {
                 let fleet_format = tx.fleet();
                 Ok(tx_outcome(Self::apply_registration_conn(
@@ -54,7 +55,22 @@ impl lash_execution_contracts::process::ProcessRegistrar for SqliteProcessRegist
                 )))
             })
             .await
-            .map_err(process_sqlite_error)?
+            .map_err(process_sqlite_error)??;
+        // The process's actor committed ready: a node attached to the store
+        // set hears of it now, not at its claim poll (FIG-7044). The commit
+        // already wrote the hint rows of any other node it picked.
+        if matches!(
+            receipt.outcome,
+            lash_execution_contracts::process::ProcessRegistrationOutcome::Created
+        ) && let Ok(actor) = lash_durable::ActorKey::process(receipt.record.id.as_str())
+        {
+            self.conn.woke(Some(&lash_durable::Woken {
+                actor,
+                state: lash_durable::ActorState::Ready,
+                owner: None,
+            }));
+        }
+        Ok(receipt)
     }
 
     async fn set_external_ref(

@@ -77,6 +77,11 @@ impl LivenessLocks {
         }
     }
 
+    /// The directory the locks live in.
+    pub(crate) fn dir(&self) -> &Path {
+        &self.dir
+    }
+
     fn path(&self, name: &str) -> PathBuf {
         self.dir.join(format!("{name}.{EXTENSION}"))
     }

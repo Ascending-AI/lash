@@ -419,6 +419,10 @@ impl DurableStore for RecordingStore {
             .await
     }
 
+    async fn readiness(&self) -> Result<lash_durable::Readiness, DurableError> {
+        self.inner.readiness().await
+    }
+
     async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError> {
         let started = Instant::now();
         let answer = self.inner.claim(node, limit).await;

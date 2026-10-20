@@ -43,6 +43,25 @@ impl SqliteDurableStore {
             .map_err(store_failure)?
     }
 
+    /// What a claim could find now ([`DurableStore::readiness`]): one
+    /// statement on a reader, so no claim write opens to learn it.
+    pub(super) async fn readiness_now(&self) -> Result<lash_durable::Readiness, DurableError> {
+        let now = self.instant()?;
+        self.query(move |connection| {
+            let (due, next_due) = connection
+                .prepare_cached(SQL.sqlite.readiness.sql())?
+                .query_row([now.0], |row| {
+                    Ok((row.get::<_, bool>(0)?, row.get::<_, Option<i64>>(1)?))
+                })?;
+            Ok(Ok(lash_durable::Readiness {
+                now,
+                due,
+                next_due: next_due.map(DurableInstant),
+            }))
+        })
+        .await
+    }
+
     /// A single statement owns its SQLite snapshot. Compound reads keep
     /// using `read` so their rows and graph bodies share one transaction.
     pub(super) async fn query<T, F>(&self, body: F) -> Result<T, DurableError>
@@ -121,6 +140,17 @@ lash_store_sql::statements! {
                                AND (s.done_step IS NULL OR s.done_step <> 'tombstone')))))
              ORDER BY COALESCE(a.ready_at_ms, a.next_due_ms), a.actor_key
              LIMIT ?3";
+
+        /// What a claim at `?1` could find (FIG-7044): whether some actor is
+        /// ready or waiting with a passed due time, and the earliest due time
+        /// still ahead. Every claimable actor is one of these, whatever node
+        /// claims; both partial indexes answer it.
+        readiness = "SELECT EXISTS (SELECT 1 FROM actors
+                        WHERE state = 'ready' AND ready_at_ms <= ?1)
+                    OR EXISTS (SELECT 1 FROM actors
+                        WHERE state = 'waiting' AND next_due_ms <= ?1),
+                    (SELECT MIN(next_due_ms) FROM actors
+                        WHERE state = 'waiting' AND next_due_ms > ?1)";
 
         /// Session `?1`'s unfinished turn with its phase row, in the turn
         /// read's column order, and the cancel request the turn accepted, in

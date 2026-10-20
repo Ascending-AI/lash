@@ -84,6 +84,21 @@ lash_store_sql::statements! {
              WHERE a.actor_key = c.actor_key
              RETURNING a.actor_key, a.epoch, c.state, c.formats, c.requires, c.holds";
 
+        /// What a claim could find now (FIG-7044), at injected store time
+        /// `?1` or else the server's: that time, whether some actor is ready
+        /// or waiting with a passed due time, and the earliest due time
+        /// still ahead. Every claimable actor is one of these, whatever node
+        /// claims. One statement, holding no lock.
+        readiness = "SELECT t.now,
+                    EXISTS (SELECT 1 FROM actors
+                        WHERE state = 'ready' AND ready_at_ms <= t.now)
+                    OR EXISTS (SELECT 1 FROM actors
+                        WHERE state = 'waiting' AND next_due_ms <= t.now),
+                    (SELECT MIN(next_due_ms) FROM actors
+                        WHERE state = 'waiting' AND next_due_ms > t.now)
+             FROM (SELECT COALESCE(?1::BIGINT,
+                 (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT) AS now) AS t";
+
         /// Session `?2`'s write authority when its actor `?1` exists: the
         /// actor row, then the history lock (seed `1`), in that order, and
         /// one row. The aggregate reads the whole locking subquery before

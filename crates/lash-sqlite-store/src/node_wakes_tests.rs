@@ -87,6 +87,8 @@ node_wake_laws!(
     mail_from_another_node_reaches_a_hot_owner_through_its_hint,
     mail_for_an_oversized_key_reaches_a_hot_owner_through_a_store_scan_hint,
     a_dead_node_is_reaped_through_its_lock_long_before_its_lease_lapses,
+    timer_chains_are_claimed_when_due_without_empty_claims,
+    a_quiet_node_claims_nothing_and_still_finds_unhinted_work,
 );
 
 #[path = "node_wakes_commit_tests.rs"]
@@ -428,6 +430,16 @@ async fn run_child(role: &str, database: &Path) {
             Arc::new(lash_core::testing::TestClock::new(STORE_TIME)),
         )
         .await
+    } else if role == "rung" {
+        // Only the doorbell can wake this listener: its poll is out of reach.
+        let mut options = crate::SqliteStoreSetOptions::standard(crate::SqliteSynchronous::Normal);
+        options.store.connection_policy.operational.wake_poll = Duration::from_secs(60 * 60);
+        SqliteStoreSet::open_with_options_and_clock(
+            database,
+            options,
+            Arc::new(lash_core_ids::clock::SystemClock),
+        )
+        .await
     } else {
         SqliteStoreSet::open(database, crate::SqliteSynchronous::Normal).await
     }
@@ -445,7 +457,7 @@ async fn run_child(role: &str, database: &Path) {
         report("condemned");
         std::future::pending::<()>().await;
     }
-    let node_wakes = if role == "hot" {
+    let node_wakes = if role == "hot" || role == "rung" {
         let (send, mut evidence) = mpsc::unbounded_channel();
         tokio::spawn(async move {
             while let Some(event) = evidence.recv().await {
@@ -467,7 +479,7 @@ async fn run_child(role: &str, database: &Path) {
     };
     let (activation, settings): (Arc<dyn Activation>, DurableSettings) = match role {
         // Wake delivery is observed explicitly, independently of the mail poll.
-        "hot" => (
+        "hot" | "rung" => (
             Arc::new(Report),
             DurableSettings {
                 lease: LeaseSettings {
@@ -1115,4 +1127,162 @@ async fn an_owned_mail_hint_is_already_committed_with_its_mail() {
         after, before,
         "neither post-commit signalling nor rolled-back mail writes a hint"
     );
+}
+
+/// Reports each actor its node claims, and what woke the claim, holding it
+/// until the node stops.
+struct ReportClaims(mpsc::UnboundedSender<(ActorKey, lash_durable::runner::Wake)>);
+
+#[async_trait::async_trait]
+impl Activation for ReportClaims {
+    async fn activate(&self, owned: Owned) -> Exit {
+        let _ = self.0.send((owned.actor().clone(), owned.claimed_on()));
+        std::future::pending().await
+    }
+}
+
+/// FIG-7044: a process the registrar creates directly, outside any owner
+/// transaction, reaches the node serving the store set through its
+/// after-commit hint. The node's claim poll is out of reach once its first
+/// claim took the sentinel, so only the hint can claim the process.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_created_registration_reaches_the_serving_node_through_its_hint() {
+    use lash_execution_contracts::process::{
+        EngineLaunch, Lifetime, ProcessInput, ProcessProvenance, ProcessRegistrar as _,
+        ProcessRegistration,
+    };
+    let dir = tempfile::tempdir().expect("a database directory");
+    let stores = SqliteStoreSet::open(dir.path().join("lash.db"), crate::SqliteSynchronous::Normal)
+        .await
+        .expect("open the database file");
+    let store = stores.durable_store();
+    let sentinel = actor("sentinel");
+    let mut tx = MailTx::new();
+    tx.create_actor(sentinel.clone(), formats());
+    store
+        .commit_mail(tx, CommitLabel::new("law.create"))
+        .await
+        .expect("create the sentinel");
+    let input = ProcessInput::Engine {
+        kind: "hinted".into(),
+        payload: serde_json::json!({}),
+        launch: EngineLaunch::new(
+            lash_execution_contracts::testing::process_execution_env_fixture_ref(),
+            None,
+        ),
+    };
+    let never = Duration::from_secs(100 * 365 * 24 * 60 * 60);
+    let config = DurableSettings {
+        lease: LeaseSettings {
+            claim_poll: never,
+            claim_backoff: never,
+            startup: WATCHDOG,
+            ..LeaseSettings::default()
+        },
+        ..DurableSettings::default()
+    }
+    .validate()
+    .expect("the law's settings validate");
+    let (send, mut claimed) = mpsc::unbounded_channel();
+    let runner = Runner::new(
+        Arc::new(store.clone()),
+        Arc::new(lash_core_ids::clock::SystemClock),
+        RunnerConfig::new(
+            NodeId::new("serving"),
+            vec![formats(), input.unstarted_formats()],
+            &config,
+        ),
+        Arc::new(ReportClaims(send)),
+    )
+    .with_node_wakes(stores.node_wakes().expect("file node wakes"));
+    let _attached = stores.wake_sink().attach(&runner.hints());
+    let serving = tokio::spawn(runner.run(std::future::pending()));
+    let first = tokio::time::timeout(WATCHDOG, claimed.recv())
+        .await
+        .expect("hang guard: the node never claimed the sentinel")
+        .expect("the node stopped");
+    assert_eq!(first.0, sentinel, "the first claim takes the sentinel");
+
+    lash_execution_contracts::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
+    let registry = stores.process_registry();
+    let prepared = registry
+        .prepare_process_registration(
+            ProcessRegistration::new(input, ProcessProvenance::host(), Lifetime::Detached),
+            &[],
+        )
+        .await
+        .expect("prepare the registration");
+    let receipt = registry
+        .commit_process_registration(prepared)
+        .await
+        .expect("register the process");
+    let process = ActorKey::process(receipt.record.id.as_str()).expect("a process actor key");
+    let delivered = tokio::time::timeout(WATCHDOG, claimed.recv())
+        .await
+        .expect("hang guard: no hint delivered the created process")
+        .expect("the node stopped");
+    assert_eq!(
+        delivered,
+        (process, lash_durable::runner::Wake::Hint),
+        "the created process is claimed on its after-commit hint"
+    );
+    serving.abort();
+}
+
+const DOORBELL: &str =
+    "durable::node_wakes::tests::a_commit_rings_a_listener_in_another_process_past_its_poll";
+
+/// FIG-7044: a commit in one process that writes a wake row for a node
+/// served by another process rings that node's listener once it commits.
+/// The child's data-version poll is an hour and its mail poll ten seconds,
+/// so each of twenty mails reaches its hot owner as a wake event only
+/// through the doorbell: no discovery by the listener's poll. Before, the
+/// listener found another process's rows only at its poll.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_commit_rings_a_listener_in_another_process_past_its_poll() {
+    if let Some((role, database)) = child_role() {
+        return run_child(&role, &database).await;
+    }
+    const WAKES: usize = 20;
+    let dir = tempfile::tempdir().expect("a database directory");
+    let database = dir.path().join("lash.db");
+    let stores = SqliteStoreSet::open(&database, crate::SqliteSynchronous::Normal)
+        .await
+        .expect("open the database file");
+    let store = stores.durable_store();
+    let hot = actor("hot");
+    let mut tx = MailTx::new();
+    tx.create_actor(hot.clone(), formats());
+    store
+        .commit_mail(tx, CommitLabel::new("law.create"))
+        .await
+        .expect("create the actor");
+    let mut child = Child::start(DOORBELL, "rung", &database);
+    assert_eq!(child.next(WATCHDOG).await, "serving");
+    assert_eq!(child.next(WATCHDOG).await, format!("owns {hot}"));
+    for _ in 0..WAKES {
+        let mut tx = MailTx::new();
+        tx.append(hot.clone(), MailKind::new("law.note"), "note");
+        let commit = store
+            .commit_mail(tx, CommitLabel::MAIL_SESSION)
+            .await
+            .expect("mail the hot actor");
+        let (_, seq) = &commit.appended[0];
+        let (mut woke, mut acked) = (false, false);
+        while !woke || !acked {
+            let line = child.next(WATCHDOG).await;
+            if line == format!("woke {hot}") {
+                assert!(!woke, "one ring per mail");
+                woke = true;
+            } else {
+                assert_eq!(line, format!("acked {hot} {}", seq.0));
+                assert!(woke, "the doorbell woke the owner before its mail poll");
+                acked = true;
+            }
+        }
+    }
+    child.kill().await;
 }

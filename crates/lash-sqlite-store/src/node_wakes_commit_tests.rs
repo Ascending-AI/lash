@@ -130,6 +130,12 @@ async fn claimed(claims: &Claims, count: usize) {
         .expect("the expected claim attempts completed");
 }
 
+async fn probed(claims: &Claims, node: &str) {
+    tokio::time::timeout(WATCHDOG, claims.wait_until_probed(node))
+        .await
+        .expect("the node made its first readiness read");
+}
+
 async fn listened(evidence: &mut mpsc::UnboundedReceiver<WakeEvidence>) -> NodeLease {
     let WakeEvidence::Listening(lease) = evidence_until(evidence, |event| {
         matches!(event, WakeEvidence::Listening(_))
@@ -171,10 +177,14 @@ pub(super) async fn one_claim_per_readied_actor() {
             &claims,
         );
         leases.push(listened(&mut evidence).await);
+        probed(&claims, &format!("peer-{index:02}")).await;
         peers.push((peer, attachment, peer_stores));
     }
-    claimed(&claims, PEERS).await;
-    assert!(claims.take().iter().all(|(_, taken)| *taken == 0));
+    assert_eq!(
+        claims.take(),
+        Vec::new(),
+        "no peer claims with nothing ready"
+    );
     evidence_until(&mut evidence, |event| {
         matches!(event, WakeEvidence::Watched(boots) if boots.iter().filter(|boot| boot.held).count() == PEERS + 1)
     })
@@ -253,8 +263,12 @@ pub(super) async fn lost_hint_reaches_the_claim_poll() {
         &claims,
     );
     listened(&mut survivor_evidence).await;
-    claimed(&claims, 1).await;
-    assert!(claims.take().iter().all(|(_, taken)| *taken == 0));
+    probed(&claims, "survivor").await;
+    assert_eq!(
+        claims.take(),
+        Vec::new(),
+        "the survivor claims with nothing ready"
+    );
     drop(doomed_feed); // releases its liveness lock; the producer's peer view is unchanged
     let readied = actor("readied");
     let commit = create(&store, &readied).await;

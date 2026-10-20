@@ -725,6 +725,10 @@ impl DurableStore for Retiring {
             .await
     }
 
+    async fn readiness(&self) -> Result<crate::Readiness, DurableError> {
+        self.inner.readiness().await
+    }
+
     async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError> {
         // A committed claim can become visible before this await returns.
         // Cancellation must not erase the attempt that acquired its owner.

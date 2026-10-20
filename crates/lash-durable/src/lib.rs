@@ -79,7 +79,7 @@ pub use packages::{
 pub use port::{
     ActorCommit, ActorSnapshot, ActorState, ClaimActorFacts, ClaimCause, ClaimFacts,
     ClaimNodeFacts, ClaimPurpose, Claimed, DurableStore, HeartbeatOutcome, MailCommit, NodeLease,
-    NodeSpec, Owner, Reaped, Woken, encode_requires, parse_requires,
+    NodeSpec, Owner, Readiness, Reaped, Woken, encode_requires, parse_requires,
 };
 pub use probe::{DurableProbe, NoProbe};
 pub use tx::{ActorTx, Mail, MailTx, MailWrite, OpenedActor, Release};

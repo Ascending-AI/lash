@@ -57,6 +57,17 @@
 //! correctness: the claim poll, each owner's mail poll and the lease reap
 //! find every piece of work.
 //!
+//! The claim loop claims on evidence of work (FIG-7044): a readiness hint,
+//! a committed due time this node's own release handed it
+//! ([`Hints::owner_committed`]), or a claim that filled its batch. Without
+//! one it reconciles every claim poll with one read-only
+//! [`DurableStore::readiness`] read, and claims only when that read finds
+//! work due, so a quiet node opens no claim write and a lost hint still
+//! costs at most one claim poll. The read's earliest due time also wakes the
+//! node when a timer another node committed comes due, one claim backoff
+//! after it, so the releasing node, which claims at the due time itself,
+//! takes it first while it lives.
+//!
 //! An owner with nothing to do keeps its actor hot ([`Owned::wait_idle`]),
 //! but its slot is room: a claim may take actors in its place and asks it
 //! to yield, and its mail poll backs off with its idle time (FIG-6890).
@@ -64,7 +75,7 @@
 mod hints;
 mod lease;
 
-pub use hints::{Hints, LogFollowers, WakeAttachment, WakeSink};
+pub use hints::{CommitEffects, Hints, KeyWatch, LogFollowers, WakeAttachment, WakeSink};
 use hints::{IdleWait, Running};
 pub use lease::NodeRegistration;
 use lease::Renewal;
@@ -73,9 +84,11 @@ use crate::config::{LeaseConfig, LeaseSettings};
 use crate::durable_config::{DurableConfig, RetirementSettings};
 use crate::error::{DurableError, StoreFailure, StoreFailureKind};
 use crate::formats::FormatSet;
-use crate::ids::{ActorKey, CommitLabel, Epoch, NodeId};
+use crate::ids::{ActorKey, CommitLabel, DurableInstant, Epoch, NodeId};
 use crate::node_wakes::{NodeWakeEvent, NodeWakeFeed, NodeWakes};
-use crate::port::{ActorCommit, ClaimCause, Claimed, DurableStore, NodeLease, NodeSpec, Owner};
+use crate::port::{
+    ActorCommit, ClaimCause, Claimed, DurableStore, NodeLease, NodeSpec, Owner, Readiness,
+};
 use crate::tx::{ActorTx, Release};
 use lash_core_ids::clock::Clock;
 use std::collections::{HashMap, HashSet};
@@ -439,7 +452,10 @@ impl Owned {
     /// The store's refusal; [`DurableError::OwnershipLost`] once the actor
     /// is someone else's.
     pub async fn drain_release(&self, tx: ActorTx) -> Result<ActorCommit, DurableError> {
-        self.drain.release(self.store.as_ref(), tx).await
+        let effects = CommitEffects::of(&tx);
+        let commit = Box::pin(self.drain.release(self.store.as_ref(), tx)).await?;
+        self.hints.owner_committed(&effects, &commit);
+        Ok(commit)
     }
 
     /// The node's lease as its own clock sees it.
@@ -465,12 +481,28 @@ impl Owned {
     ///
     /// The store's refusal; [`DurableError::OwnershipLost`] once the actor
     /// is someone else's.
-    pub async fn commit(
+    pub fn commit(
         &self,
         tx: ActorTx,
         label: CommitLabel,
-    ) -> Result<ActorCommit, DurableError> {
-        self.store.commit(tx, label).await
+    ) -> impl Future<Output = Result<ActorCommit, DurableError>> + Send + '_ {
+        // The store's commit takes `tx` now, so the answer carries only the
+        // commit's boxed future and its effects.
+        let effects = CommitEffects::of(&tx);
+        let committing = self.store.commit(tx, label);
+        async move {
+            let commit = committing.await?;
+            self.hints.owner_committed(&effects, &commit);
+            Ok(commit)
+        }
+    }
+
+    /// The node's hints: an owner commit made through another path than
+    /// [`Owned::commit`] hands its [`CommitEffects`] to
+    /// [`Hints::owner_committed`] once acknowledged.
+    #[must_use]
+    pub fn hints(&self) -> &Hints {
+        &self.hints
     }
 
     /// Wait until mail may have arrived for the actor: a wake hint, or one
@@ -589,8 +621,12 @@ pub enum Wake {
     /// The node's drain started.
     Drain,
     /// One poll interval passed with no hint: the backstop for a hint that
-    /// never came.
+    /// never came. A claim on it follows a reconciliation that found work
+    /// due.
     Poll,
+    /// A due time a release on this node committed passed: the claim takes
+    /// the actors whose timers are due (FIG-7044).
+    Deadline,
     /// A claim took the idle owner's slot ([`Owned::wait_idle`]): the
     /// owner releases its actor if it still has nothing to do.
     Yield,
@@ -811,8 +847,14 @@ impl Runner {
         let mut abandoned: Vec<(ActorKey, Epoch)> = Vec::new();
         let start = self.clock.now();
         let mut next_reap = start + settings.reap_every;
-        let mut next_claim = start;
-        let mut claim_delay = settings.claim_backoff;
+        // A claim evidence asked for: a hint, a filled batch, a hand-back.
+        let mut next_claim: Option<Instant> = None;
+        // The next reconciliation: a readiness read, then a claim only when
+        // it finds work due. The first runs at once.
+        let mut next_reconcile = start;
+        // The store's time less this node's wall clock, as the last
+        // readiness read saw it: how committed due times map onto the clock.
+        let mut skew = 0_i64;
         // The first probe runs at once, so the node knows its live peers
         // before its first readied actor.
         let mut next_watch = start;
@@ -831,10 +873,7 @@ impl Runner {
                     .bounded(&mut stop, &ended, self.hand_back(&actor, epoch))
                     .await
                 {
-                    Ok(Ok(())) => {
-                        next_claim = self.clock.now();
-                        claim_delay = settings.claim_backoff;
-                    }
+                    Ok(Ok(())) => next_claim = Some(self.clock.now()),
                     Ok(Err(DurableError::OwnershipLost(_))) => {}
                     Ok(Err(_)) => abandoned.push((actor, epoch)),
                     Err(stopped) => break 'serve stopped,
@@ -866,7 +905,26 @@ impl Runner {
             } else {
                 self.hints.room(self.config.max_active)
             });
-            let mut next = next_reap.min(next_claim);
+            // A draining node claims nothing, so nothing it would claim
+            // wakes it.
+            let claiming = !self.drain.started();
+            let deadline = self
+                .hints
+                .next_deadline()
+                .filter(|_| claiming)
+                .map(|due| self.on_clock(due, skew));
+            let mut next = next_reap;
+            if claiming {
+                next = next.min(next_reconcile);
+            }
+            if let Some(at) = next_claim
+                .filter(|_| claiming)
+                .into_iter()
+                .chain(deadline)
+                .min()
+            {
+                next = next.min(at);
+            }
             // What woke this turn of the loop: a claim it makes is on a hint,
             // or on the claim poll.
             let woke;
@@ -894,48 +952,47 @@ impl Runner {
                 event = next_node_wake(&mut feed) => {
                     woke = Wake::Hint;
                     match event {
-                    NodeWakeEvent::Ready => {
-                        next_claim = self.clock.now();
-                        claim_delay = settings.claim_backoff;
-                    }
+                    NodeWakeEvent::Ready => next_claim = Some(self.clock.now()),
                     NodeWakeEvent::Owned(actors) => {
+                        self.hints.changed_all_of(&actors);
                         for actor in &actors {
                             if !self.hints.hint_running(actor) {
-                                next_claim = self.clock.now();
+                                next_claim = Some(self.clock.now());
                             }
                         }
                     }
                     NodeWakeEvent::Appended(actors) => {
+                        self.hints.changed_all_of(&actors);
                         if let Some(followers) = self.hints.followers() {
                             followers.appended(&actors);
                         }
                         continue;
                     }
                     NodeWakeEvent::PollStore => {
+                        self.hints.everything_changed();
                         self.hints.hint_all_running();
-                        next_claim = self.clock.now();
-                        claim_delay = settings.claim_backoff;
+                        next_claim = Some(self.clock.now());
                     }
                     NodeWakeEvent::Resubscribed => {
                         seen_held.clear();
+                        self.hints.everything_changed();
                         self.hints.hint_all_running();
                         if let Some(followers) = self.hints.followers() {
                             followers.resubscribed();
                         }
-                        next_claim = self.clock.now();
-                        claim_delay = settings.claim_backoff;
+                        next_claim = Some(self.clock.now());
                     }
                     }
                 }
                 () = self.hints.inner.claim.notified() => {
                     woke = Wake::Hint;
-                    next_claim = self.clock.now();
-                    claim_delay = settings.claim_backoff;
+                    next_claim = Some(self.clock.now());
                 }
+                // A new earliest due time: the next turn sleeps until it.
+                () = self.hints.inner.deadline.notified() => continue,
                 Ok(()) = caught_up.changed(), if deferred => {
                     woke = Wake::Poll;
-                    next_claim = self.clock.now();
-                    claim_delay = settings.claim_backoff;
+                    next_claim = Some(self.clock.now());
                 }
                 () = self.clock.sleep_until(next) => woke = Wake::Poll,
             }
@@ -972,7 +1029,7 @@ impl Runner {
                 for boot in released {
                     let reap = node_wakes.reap_released(&lease, &boot);
                     match self.bounded(&mut stop, &ended, reap).await {
-                        Ok(Ok(reaped)) if !reaped.is_empty() => next_claim = now,
+                        Ok(Ok(reaped)) if !reaped.is_empty() => next_claim = Some(now),
                         Ok(Err(DurableError::NodeLeaseLost { .. })) => {
                             break 'serve Stopped::LeaseLost;
                         }
@@ -981,76 +1038,111 @@ impl Runner {
                     }
                 }
             }
-            if now >= next_claim && !self.drain.started() {
-                // Behind as of now, not as of the turn's start: no new
-                // actors until retirement catches up.
-                deferred = *caught_up.borrow_and_update();
-                if deferred {
-                    next_claim = now + settings.claim_poll;
+            if self.drain.started() {
+                continue;
+            }
+            // Why this turn claims, if it does: evidence first, then a due
+            // time, then a reconciliation that found work.
+            let cause = if next_claim.is_some_and(|at| now >= at) {
+                Some(woke)
+            } else if deadline.is_some_and(|at| now >= at) {
+                Some(Wake::Deadline)
+            } else if now >= next_reconcile {
+                next_reconcile = now + settings.claim_poll;
+                if adopt {
+                    Some(Wake::Poll)
+                } else {
+                    match self
+                        .bounded(&mut stop, &ended, self.store.readiness())
+                        .await
+                    {
+                        Ok(Ok(readiness)) => {
+                            skew = readiness_skew(&readiness, self.clock.timestamp_ms());
+                            // A timer another node committed: look again
+                            // one backoff after it is due, once its releasing
+                            // node had its turn.
+                            if let Some(due) = readiness.next_due {
+                                let at = self.on_clock(due, skew) + settings.claim_backoff;
+                                next_reconcile = next_reconcile.min(at);
+                            }
+                            readiness.due.then_some(Wake::Poll)
+                        }
+                        // An unanswered read claims, as the poll did.
+                        Ok(Err(_)) => Some(Wake::Poll),
+                        Err(stopped) => break stopped,
+                    }
+                }
+            } else {
+                None
+            };
+            let Some(woke) = cause else {
+                continue;
+            };
+            next_claim = None;
+            // Whatever is due by now, this claim, the claim it owes or the
+            // claim retirement's catching up rings takes.
+            self.hints.claimed_through(self.store_time(skew));
+            // Behind as of now, not as of the turn's start: no new actors
+            // until retirement catches up.
+            deferred = *caught_up.borrow_and_update();
+            if deferred {
+                continue;
+            }
+            // The room this claim may fill; an adoption takes what this boot
+            // already owns, whatever the room.
+            let mut room = 0;
+            let claimed = if adopt {
+                match self
+                    .bounded(&mut stop, &ended, self.store.owned(&lease))
+                    .await
+                {
+                    Ok(owned) => owned.map(|owned| {
+                        owned
+                            .into_iter()
+                            .filter(|claimed| !self.hints.running(&claimed.actor))
+                            .collect()
+                    }),
+                    Err(stopped) => break stopped,
+                }
+            } else {
+                // Idle owners' slots are room: the claim asks them to
+                // yield below. With no room the claim is owed, and the
+                // next room that opens rings it.
+                room = self
+                    .hints
+                    .claim_room(self.config.max_active)
+                    .min(self.config.claim_batch);
+                if room == 0 {
                     continue;
                 }
-                next_claim = now + settings.claim_poll;
-                // The room this claim may fill; an adoption takes what this
-                // boot already owns, whatever the room.
-                let mut room = 0;
-                let claimed = if adopt {
-                    match self
-                        .bounded(&mut stop, &ended, self.store.owned(&lease))
-                        .await
-                    {
-                        Ok(owned) => owned.map(|owned| {
-                            owned
-                                .into_iter()
-                                .filter(|claimed| !self.hints.running(&claimed.actor))
-                                .collect()
-                        }),
-                        Err(stopped) => break stopped,
-                    }
-                } else {
-                    // Idle owners' slots are room: the claim asks them to
-                    // yield below. With no room the claim is owed, and the
-                    // next room that opens rings it.
-                    room = self
-                        .hints
-                        .claim_room(self.config.max_active)
-                        .min(self.config.claim_batch);
-                    if room == 0 {
-                        continue;
-                    }
-                    match self
-                        .bounded(&mut stop, &ended, self.store.claim(&lease, room))
-                        .await
-                    {
-                        Ok(claimed) => claimed,
-                        Err(stopped) => break stopped,
-                    }
-                };
-                match claimed {
-                    Ok(claimed) => {
-                        // Claim again soon after work, and back off while
-                        // claims come back empty.
-                        claim_delay = if claimed.is_empty() {
-                            claim_delay.saturating_mul(2).min(settings.claim_poll)
-                        } else {
-                            settings.claim_backoff
-                        };
-                        next_claim = now + claim_delay;
-                        adopt = false;
-                        // A claim that filled its room may have left readied
-                        // actors behind.
-                        if room > 0 && claimed.len() >= room {
-                            self.hints.owe_claim();
-                        }
-                        for claimed in claimed {
-                            self.activate(&mut active, &mut claims, claimed, woke);
-                        }
-                        self.hints.make_room(self.config.max_active);
-                    }
-                    Err(DurableError::NodeLeaseLost { .. }) => break Stopped::LeaseLost,
-                    // A claim whose reply is lost may have taken actors:
-                    // adopt whatever this boot owns before claiming more.
-                    Err(_) => adopt = true,
+                match self
+                    .bounded(&mut stop, &ended, self.store.claim(&lease, room))
+                    .await
+                {
+                    Ok(claimed) => claimed,
+                    Err(stopped) => break stopped,
                 }
+            };
+            match claimed {
+                Ok(claimed) => {
+                    adopt = false;
+                    // A claim that filled its room may have left readied
+                    // actors behind: it claims again after a backoff, or
+                    // owes the claim to the next room that opens. One that
+                    // took less found all there was.
+                    if room > 0 && claimed.len() >= room {
+                        self.hints.owe_claim();
+                        next_claim = Some(now + settings.claim_backoff);
+                    }
+                    for claimed in claimed {
+                        self.activate(&mut active, &mut claims, claimed, woke);
+                    }
+                    self.hints.make_room(self.config.max_active);
+                }
+                Err(DurableError::NodeLeaseLost { .. }) => break Stopped::LeaseLost,
+                // A claim whose reply is lost may have taken actors: adopt
+                // whatever this boot owns before claiming more.
+                Err(_) => adopt = true,
             }
         };
         if stopped == Stopped::LeaseLost {
@@ -1073,6 +1165,26 @@ impl Runner {
         // liveness lock; nothing waits on it.
         drop(feed);
         released.map(|()| stopped)
+    }
+
+    /// When this node's clock reaches store time `due`, given the store's
+    /// `skew` from its wall clock: a millisecond late rather than early, so
+    /// a claim at that moment finds the due time passed.
+    fn on_clock(&self, due: DurableInstant, skew: i64) -> Instant {
+        let ahead = due
+            .0
+            .saturating_sub(self.store_time(skew).0)
+            .saturating_add(1);
+        self.clock.now() + std::time::Duration::from_millis(u64::try_from(ahead).unwrap_or(0))
+    }
+
+    /// The store's time now, as this node's wall clock and `skew` put it.
+    fn store_time(&self, skew: i64) -> DurableInstant {
+        DurableInstant(
+            i64::try_from(self.clock.timestamp_ms())
+                .unwrap_or(i64::MAX)
+                .saturating_add(skew),
+        )
     }
 
     /// Release the node's lease within `shutdown`. A release that does not
@@ -1130,12 +1242,19 @@ impl Runner {
     /// the drain's releases.
     async fn hand_back(&self, actor: &ActorKey, epoch: Epoch) -> Result<(), DurableError> {
         let mut tx = self.store.begin(actor, epoch).await?;
-        if self.drain.started() {
-            self.drain.release(self.store.as_ref(), tx).await?;
+        let commit = if self.drain.started() {
+            let effects = CommitEffects::of(&tx);
+            (effects, self.drain.release(self.store.as_ref(), tx).await?)
         } else {
             tx.give_up(Release::Ready);
-            self.store.commit(tx, CommitLabel::DRAIN_RELEASE).await?;
-        }
+            let effects = CommitEffects::of(&tx);
+            (
+                effects,
+                self.store.commit(tx, CommitLabel::DRAIN_RELEASE).await?,
+            )
+        };
+        // A draining node's hand-back reaches a peer through its hint.
+        self.hints.owner_committed(&commit.0, &commit.1);
         Ok(())
     }
 
@@ -1170,6 +1289,15 @@ impl Runner {
         });
         claims.insert(task.id(), claim);
     }
+}
+
+/// The store's time less the wall clock's `local` milliseconds, as
+/// `readiness` read it.
+fn readiness_skew(readiness: &Readiness, local: u64) -> i64 {
+    readiness
+        .now
+        .0
+        .saturating_sub(i64::try_from(local).unwrap_or(i64::MAX))
 }
 
 /// Why the node's renewal ended, once it has. A renewal task that ended

@@ -8,16 +8,26 @@
 //! the node has no room at all is owed: the next owner to wait idle, or the
 //! next activation to end, rings the claim loop, so no readied actor's wake
 //! is lost to a full node.
+//!
+//! It is also where the committed-change delivery ends (FIG-7044): an owner
+//! commit's effects ([`CommitEffects`]) hand the node the due time its
+//! release committed, ready actors it released and processes it started, so
+//! the claim loop claims when work is due instead of finding it by a claim;
+//! and read-only subscribers watch actors' committed changes by key
+//! ([`WakeSink::watch`], [`KeyWatch`]). Every one of them is a hint: it asks
+//! for a fresh authoritative read and answers nothing itself.
 
 use super::Wake;
-use crate::ids::{ActorKey, NodeId};
+use crate::domain::{DomainWrite, ProcessWrite};
+use crate::ids::{ActorKey, DurableInstant, NodeId};
 use crate::node_wakes::WakeBatch;
-use crate::port::{ActorState, MailCommit, Owner, Woken};
-use std::collections::HashMap;
+use crate::port::{ActorCommit, ActorState, MailCommit, Owner, Woken};
+use crate::tx::{ActorTx, Release};
+use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::Instant;
-use tokio::sync::Notify;
+use tokio::sync::{Notify, watch};
 
 /// Where a store set's producer commits hand what they woke, after the
 /// commit: the session work a host writes beside the session's wake (ADR
@@ -37,6 +47,8 @@ struct WakeSinkInner {
     /// The attached nodes' hints, by attachment.
     nodes: Mutex<Vec<(u64, Hints)>>,
     next: AtomicU64,
+    /// The keys read-only subscribers watch.
+    watches: Arc<Watches>,
 }
 
 impl WakeSink {
@@ -44,6 +56,11 @@ impl WakeSink {
     #[must_use = "the node hears the sink's wakes only while the attachment lives"]
     pub fn attach(&self, hints: &Hints) -> WakeAttachment {
         let id = self.inner.next.fetch_add(1, Ordering::Relaxed);
+        *hints
+            .inner
+            .watches
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(Arc::clone(&self.inner.watches));
         self.nodes().push((id, hints.clone()));
         WakeAttachment {
             sink: Arc::clone(&self.inner),
@@ -51,8 +68,18 @@ impl WakeSink {
         }
     }
 
+    /// Watch `actor`'s committed changes: what this process's commits
+    /// change and what its serving nodes' listeners hear. Subscribe before
+    /// the authoritative read the watch is to refresh, so no change after
+    /// that read is missed.
+    #[must_use]
+    pub fn watch(&self, actor: ActorKey) -> KeyWatch {
+        self.inner.watches.subscribe(actor)
+    }
+
     /// Deliver one actor a committed producer transaction woke.
     pub fn wake(&self, woken: &Woken) {
+        self.inner.watches.changed(&woken.actor);
         let hints = {
             let nodes = self.nodes();
             let owner = woken
@@ -167,7 +194,20 @@ pub(super) struct HintsInner {
     followers: Mutex<Option<Arc<dyn LogFollowers>>>,
     /// Rings the publisher.
     pub(super) flush: Notify,
+    /// The earliest due times this node's own releases committed, at most
+    /// [`DEADLINES`] of them: the claim loop claims at each.
+    deadlines: Mutex<BTreeSet<DurableInstant>>,
+    /// Rings the claim loop with a new earliest due time.
+    pub(super) deadline: Notify,
+    /// The read-only subscribers of the store set this node serves, once
+    /// it is attached to its sink.
+    watches: Mutex<Option<Arc<Watches>>>,
 }
+
+/// How many committed due times a node keeps: the earliest ones. A due time
+/// past the bound is left to the reconciliation, which reads the earliest
+/// due time from the store.
+const DEADLINES: usize = 64;
 
 /// A node's followers of actor event logs: what its listener heard of logs
 /// that grew on any node. A latency aid only: a follower still re-reads its
@@ -203,6 +243,7 @@ impl Hints {
 
     /// Deliver one woken actor.
     pub fn wake(&self, woken: &Woken) {
+        self.changed(&woken.actor);
         match &woken.owner {
             Some(owner) if self.is_mine(owner) => {
                 if !self.hint_running(&woken.actor) {
@@ -237,9 +278,106 @@ impl Hints {
     /// Tell every listening node that a commit grew `actor`'s event log.
     /// Called after the commit; nothing is published without node wakes.
     pub fn appended(&self, actor: ActorKey) {
+        self.changed(&actor);
         self.queue(|batch| {
             batch.appended.insert(actor);
         });
+    }
+
+    /// Deliver what an owner commit of this node committed, once the store
+    /// acknowledged it with `receipt`: an actor it left ready is woken as a
+    /// readied unowned actor; the due time a `waiting` release committed is
+    /// handed to the claim loop, which claims when it passes; and each
+    /// process it started is woken ready (FIG-7044).
+    pub fn owner_committed(&self, effects: &CommitEffects, receipt: &ActorCommit) {
+        let effects = &effects.0;
+        self.changed(&effects.actor);
+        match (receipt.state, effects.release) {
+            (ActorState::Ready, _) => self.wake(&Woken {
+                actor: effects.actor.clone(),
+                state: ActorState::Ready,
+                owner: None,
+            }),
+            (
+                ActorState::Waiting,
+                Some(Release::Waiting {
+                    next_due: Some(due),
+                }),
+            ) => self.due(due),
+            _ => {}
+        }
+        for started in &effects.started {
+            self.wake(&Woken {
+                actor: started.clone(),
+                state: ActorState::Ready,
+                owner: None,
+            });
+        }
+    }
+
+    /// A release on this node committed `due` as its actor's due time: the
+    /// claim loop claims once the store's time passes it.
+    pub fn due(&self, due: DurableInstant) {
+        let earliest = {
+            let mut deadlines = self.deadlines();
+            deadlines.insert(due);
+            while deadlines.len() > DEADLINES {
+                deadlines.pop_last();
+            }
+            deadlines.first() == Some(&due)
+        };
+        if earliest {
+            self.inner.deadline.notify_one();
+        }
+    }
+
+    /// The earliest committed due time this node holds.
+    pub(super) fn next_deadline(&self) -> Option<DurableInstant> {
+        self.deadlines().first().copied()
+    }
+
+    /// A claim at store time `now` took what was due by then: forget the due
+    /// times it covered.
+    pub(super) fn claimed_through(&self, now: DurableInstant) {
+        let mut deadlines = self.deadlines();
+        *deadlines = deadlines.split_off(&now.after_millis(1));
+    }
+
+    fn deadlines(&self) -> std::sync::MutexGuard<'_, BTreeSet<DurableInstant>> {
+        self.inner
+            .deadlines
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// `actors` may have changed: their watchers read again.
+    pub(super) fn changed_all_of(&self, actors: &[ActorKey]) {
+        if let Some(watches) = self.watches() {
+            for actor in actors {
+                watches.changed(actor);
+            }
+        }
+    }
+
+    /// Any watched actor may have changed: hints were lost.
+    pub(super) fn everything_changed(&self) {
+        if let Some(watches) = self.watches() {
+            watches.all_changed();
+        }
+    }
+
+    fn changed(&self, actor: &ActorKey) {
+        if let Some(watches) = self.watches() {
+            watches.changed(actor);
+        }
+    }
+
+    fn watches(&self) -> Option<Arc<Watches>> {
+        self.inner
+            .watches
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     /// Hand what this node's listener hears of appended logs to
@@ -566,5 +704,127 @@ pub(super) struct Running {
 impl Drop for Running {
     fn drop(&mut self) {
         self.hints.end(&self.actor);
+    }
+}
+
+/// What an owner commit hands its node's scheduler once acknowledged
+/// ([`Hints::owner_committed`]), read from its transaction before it
+/// commits: the actor, how the transaction gives it up, and the processes
+/// it starts.
+#[derive(Clone, Debug)]
+pub struct CommitEffects(Box<Effects>);
+
+/// [`CommitEffects`]' content, boxed so the commit futures that carry it
+/// across their await stay small.
+#[derive(Clone, Debug)]
+struct Effects {
+    actor: ActorKey,
+    release: Option<Release>,
+    started: Vec<ActorKey>,
+}
+
+impl CommitEffects {
+    /// The effects `tx` commits, if the store acknowledges it.
+    #[must_use]
+    pub fn of(tx: &ActorTx) -> Self {
+        let started = tx
+            .domain()
+            .iter()
+            .filter_map(|write| match write {
+                DomainWrite::Process(ProcessWrite::Register(rows)) => {
+                    ActorKey::process(rows.process.as_str()).ok()
+                }
+                _ => None,
+            })
+            .collect();
+        Self(Box::new(Effects {
+            actor: tx.actor().clone(),
+            release: tx.release(),
+            started,
+        }))
+    }
+}
+
+/// The keys read-only subscribers watch, each with its change generation.
+/// Entries are weak: a key nobody watches is forgotten.
+#[derive(Default)]
+struct Watches {
+    keys: Mutex<HashMap<ActorKey, Weak<watch::Sender<u64>>>>,
+}
+
+impl Watches {
+    fn subscribe(&self, actor: ActorKey) -> KeyWatch {
+        let mut keys = self.keys.lock().unwrap_or_else(PoisonError::into_inner);
+        let sender = match keys.get(&actor).and_then(Weak::upgrade) {
+            Some(sender) => sender,
+            None => {
+                let sender = Arc::new(watch::channel(0).0);
+                keys.retain(|_, sender| sender.strong_count() > 0);
+                keys.insert(actor, Arc::downgrade(&sender));
+                sender
+            }
+        };
+        KeyWatch {
+            changes: sender.subscribe(),
+            _sender: sender,
+        }
+    }
+
+    fn changed(&self, actor: &ActorKey) {
+        let sender = self
+            .keys
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(actor)
+            .and_then(Weak::upgrade);
+        if let Some(sender) = sender {
+            sender.send_modify(|generation| *generation += 1);
+        }
+    }
+
+    fn all_changed(&self) {
+        let senders: Vec<_> = self
+            .keys
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .values()
+            .filter_map(Weak::upgrade)
+            .collect();
+        for sender in senders {
+            sender.send_modify(|generation| *generation += 1);
+        }
+    }
+}
+
+/// One subscriber's watch on an actor's committed changes
+/// ([`WakeSink::watch`]). A change is a hint to read the actor's state
+/// again, never the state: a lost or late change costs the subscriber its
+/// own fallback read, and many changes coalesce into one.
+pub struct KeyWatch {
+    changes: watch::Receiver<u64>,
+    _sender: Arc<watch::Sender<u64>>,
+}
+
+impl KeyWatch {
+    /// Wait until the actor may have changed since the subscription, or
+    /// since the last wait returned. Cancel-safe.
+    pub async fn changed(&mut self) {
+        // The watch holds its sender, so the channel never closes.
+        let _ = self.changes.changed().await;
+    }
+
+    /// How many changes the watch has heard of: two reads that see one
+    /// generation saw no change between them.
+    #[must_use]
+    pub fn generation(&self) -> u64 {
+        *self.changes.borrow()
+    }
+}
+
+impl std::fmt::Debug for KeyWatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KeyWatch")
+            .field("generation", &self.generation())
+            .finish()
     }
 }

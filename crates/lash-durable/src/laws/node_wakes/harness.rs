@@ -277,10 +277,13 @@ pub(super) fn quiet() -> LeaseSettings {
     }
 }
 
-/// Every claim call the counted nodes made, as (node, actors taken).
+/// Every claim call the counted nodes made, as (node, actors taken), and
+/// how many readiness reads they made.
 #[derive(Clone, Default)]
 pub struct Claims {
     attempts: Arc<std::sync::Mutex<Vec<(String, usize)>>>,
+    /// The readiness reads completed, by node.
+    probes: Arc<std::sync::Mutex<std::collections::BTreeMap<String, usize>>>,
     changed: Arc<Notify>,
 }
 
@@ -294,6 +297,48 @@ impl Claims {
             }
             changed.await;
         }
+    }
+
+    /// Await `count` nodes' first completed readiness reads: a node that
+    /// made one is serving, its listener in place before it.
+    pub async fn wait_for_probing(&self, count: usize) {
+        loop {
+            let changed = self.changed.notified();
+            if self.probing().len() >= count {
+                return;
+            }
+            changed.await;
+        }
+    }
+
+    /// Await `node`'s first completed readiness read.
+    pub async fn wait_until_probed(&self, node: &str) {
+        loop {
+            let changed = self.changed.notified();
+            if self.probing().contains_key(node) {
+                return;
+            }
+            changed.await;
+        }
+    }
+
+    /// The readiness reads completed so far, by node.
+    #[must_use]
+    pub fn probing(&self) -> std::collections::BTreeMap<String, usize> {
+        self.probes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    fn probed(&self, node: &str) {
+        *self
+            .probes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(node.to_owned())
+            .or_default() += 1;
+        self.changed.notify_waiters();
     }
 
     pub(super) fn len(&self) -> usize {
@@ -362,6 +407,14 @@ impl DurableStore for CountingStore {
             .await
     }
 
+    async fn readiness(&self) -> Result<crate::Readiness, DurableError> {
+        let readiness = self.inner.readiness().await;
+        if readiness.is_ok() {
+            self.claims.probed(&self.node);
+        }
+        readiness
+    }
+
     async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError> {
         let claimed = self.inner.claim(node, limit).await;
         if let Ok(claimed) = &claimed {
@@ -370,7 +423,7 @@ impl DurableStore for CountingStore {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .push((self.node.clone(), claimed.len()));
-            self.claims.changed.notify_one();
+            self.claims.changed.notify_waiters();
         }
         claimed
     }

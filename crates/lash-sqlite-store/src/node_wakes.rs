@@ -18,9 +18,12 @@
 //!   every the configured wake poll. The version moves exactly when another connection
 //!   commits, so a quiet database costs one pragma and one file check per
 //!   poll. When it moves, the listener reads the wake rows past its cursor
-//!   and forwards its own node's and every node's. A publish in this process also rings this
-//!   process's listeners of the database at once, so a wake between two
-//!   nodes of one process waits for no poll.
+//!   and forwards its own node's and every node's. Once a commit that wrote
+//!   rows is durable, it rings the listeners they name
+//!   ([`doorbell`]): this process's at once, every other process's through
+//!   the datagram endpoint its listener bound for the database, so
+//!   a wake between nodes on one machine waits for no poll (FIG-7044). The
+//!   poll stays the fallback for a ring that never came.
 //! - **Liveness.** The listener holds its boot's liveness lock, a file lock
 //!   beside the database ([`crate::liveness_locks`]), for as long as it
 //!   lives. The kernel drops it when the listener's process dies, however it
@@ -155,6 +158,7 @@ pub(crate) struct SqliteNodeWakes {
     target: DatabaseTarget,
     locks: LivenessLocks,
     ring: Arc<Ring>,
+    doorbell: doorbell::Doorbell,
 }
 
 impl std::fmt::Debug for SqliteNodeWakes {
@@ -172,14 +176,22 @@ impl SqliteNodeWakes {
         store: SqliteDurableStore,
         path: &std::path::Path,
     ) -> rusqlite::Result<Self> {
+        let target = DatabaseTarget::File(path.to_path_buf());
+        let locks = LivenessLocks::beside(path, store.conn.operational.liveness_lock_attempts);
+        let ring = ring(&target);
+        let doorbell = doorbell::Doorbell::new(
+            locks.dir().to_path_buf(),
+            &target.canonical_name(),
+            Arc::clone(&ring),
+        );
         store
             .conn
-            .install_node_wakes(NodeWakeWriter::new(&store))
+            .install_node_wakes(NodeWakeWriter::new(&store, doorbell.clone()))
             .await?;
-        let target = DatabaseTarget::File(path.to_path_buf());
         Ok(Self {
-            locks: LivenessLocks::beside(path, store.conn.operational.liveness_lock_attempts),
-            ring: ring(&target),
+            locks,
+            ring,
+            doorbell,
             store,
             target,
         })
@@ -304,10 +316,11 @@ impl Session {
     }
 }
 
-/// This process's publishes on one database, counted: a listener waits on
-/// the count as well as on its poll, so a publish here wakes it at once.
+/// The rings of one database's listeners in this process, counted: a
+/// listener waits on the count as well as on its poll, so a ring wakes it at
+/// once.
 #[derive(Default)]
-struct Ring {
+pub(crate) struct Ring {
     rung: Mutex<u64>,
     bell: Condvar,
 }
@@ -427,6 +440,8 @@ struct SqliteFeed {
     lost: Arc<AtomicU64>,
     stop: Arc<AtomicBool>,
     ring: Arc<Ring>,
+    /// The node's doorbell endpoint, while the listener lives.
+    _answering: Option<doorbell::Answering>,
 }
 
 #[async_trait::async_trait]
@@ -458,6 +473,10 @@ impl NodeWakes for SqliteNodeWakes {
         if rows.is_empty() {
             return Ok(());
         }
+        let mut rung = doorbell::Rung::default();
+        for (node, _) in &rows {
+            rung.add(node.as_deref());
+        }
         let now = self.store.instant()?;
         let oldest = now.0.saturating_sub(
             i64::try_from(self.store.conn.operational.wake_retention.as_millis())
@@ -474,12 +493,13 @@ impl NodeWakes for SqliteNodeWakes {
             })
             .await
             .map_err(store_failure)?;
-        self.ring.ring();
+        self.doorbell.ring(&rung);
         Ok(())
     }
 
+    /// Every hint the runner hands here was captured as rows by the commit
+    /// that woke its actors, which rang their listeners once it committed.
     async fn committed(&self, _batch: &WakeBatch) -> Result<(), DurableError> {
-        self.ring.ring();
         Ok(())
     }
 
@@ -500,6 +520,7 @@ impl NodeWakes for SqliteNodeWakes {
             lost: Arc::clone(&lost),
             stop: Arc::clone(&stop),
             ring: Arc::clone(&self.ring),
+            _answering: self.doorbell.answer(lease.owner.node.as_str()),
         };
         let ring = Arc::clone(&self.ring);
         std::thread::Builder::new()
@@ -548,4 +569,6 @@ mod tests;
 
 #[path = "node_wakes_commit.rs"]
 mod commit;
+#[path = "node_wakes_doorbell.rs"]
+mod doorbell;
 pub(crate) use commit::NodeWakeWriter;

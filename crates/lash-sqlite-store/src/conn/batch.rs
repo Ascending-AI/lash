@@ -384,6 +384,8 @@ fn transact(
     writes: &mut Writes,
 ) -> Settled {
     let mut members = members.into_iter();
+    // Wake rows an earlier batch staged but never committed ring nobody.
+    with_node_wakes(writer, crate::durable::NodeWakeWriter::discard);
     #[cfg(feature = "perf-witness")]
     let witness = lash_core_ids::perf_witness::latency::Transaction::begin();
     let solo = members.len() == 1;
@@ -527,6 +529,11 @@ fn transact(
             .as_ref()
             .map(|_| lash_core_ids::perf_witness::latency::Stamp::now());
         let committed = tx.commit();
+        // Once its rows are durable, the batch rings the listeners they
+        // name (FIG-7044).
+        if committed.is_ok() {
+            with_node_wakes(writer, crate::durable::NodeWakeWriter::committed);
+        }
         #[cfg(feature = "perf-witness")]
         if committed.is_ok()
             && let Some((witness, before)) = witness.zip(before)
@@ -541,6 +548,18 @@ fn transact(
             unrun,
         },
         Err(error) => Settled::failed(ran, &error, unrun),
+    }
+}
+
+/// Apply `f` to the writer's wake capture, when its file has one.
+fn with_node_wakes(writer: &Writer, f: impl FnOnce(&crate::durable::NodeWakeWriter)) {
+    if let Some(wakes) = writer
+        .node_wakes
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+    {
+        f(wakes);
     }
 }
 

@@ -226,6 +226,9 @@ pub struct PostgresProcessRegistry {
     /// the registration transaction itself.
     /// Where registration mints process ids (ADR 0107).
     process_id_mint: lash_core_store::process_identity::ProcessIdMint,
+    /// The storage's wake sink, which a created process's actor is handed
+    /// to after its registration commits (FIG-7044).
+    wakes: lash_durable::runner::WakeSink,
     /// The storage's writer fence: every mutation fences on `F`, and every
     /// process-event payload the registry stamps goes
     /// through the fenced `F`'s `writer_version`, never a bare build constant
@@ -787,6 +790,7 @@ impl PostgresStorage {
             pools: Arc::clone(&self.pools),
             clock: Arc::new(lash_core_ids::clock::SystemClock),
             process_id_mint: lash_core_store::process_identity::ProcessIdMint::default(),
+            wakes: self.wakes.clone(),
             #[cfg(test)]
             decoded_roster_records: Arc::default(),
             fence: self.fence.clone(),

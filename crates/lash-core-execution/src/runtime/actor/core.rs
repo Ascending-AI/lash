@@ -95,6 +95,9 @@ pub(super) struct Inner {
     /// The claiming node's lease as its own clock sees it; a context that
     /// owns no claim holds no node lease.
     liveness: Option<lash_durable::runner::Liveness>,
+    /// The claiming node's hints, which each acknowledged commit hands its
+    /// effects (FIG-7044); a context that owns no claim has none.
+    hints: Option<lash_durable::runner::Hints>,
     clock: Arc<dyn Clock>,
     cancel: CancellationToken,
     probe: Arc<dyn DurableProbe>,
@@ -148,6 +151,7 @@ impl ActorContext {
                 mail: None,
                 drain: None,
                 liveness: None,
+                hints: None,
                 clock,
                 cancel,
                 probe,
@@ -184,6 +188,7 @@ impl ActorContext {
                 mail: Some(owned.mail_waker()),
                 drain: Some(owned.drain().clone()),
                 liveness: Some(owned.liveness().clone()),
+                hints: Some(owned.hints().clone()),
                 clock: Arc::clone(owned.clock()),
                 cancel,
                 probe,
@@ -226,6 +231,7 @@ impl ActorContext {
                 mail: None,
                 drain: None,
                 liveness: None,
+                hints: None,
                 clock: Arc::new(crate::SystemClock),
                 cancel: CancellationToken::new(),
                 probe: Arc::new(lash_durable::NoProbe),
@@ -472,7 +478,11 @@ impl ActorContext {
                 _ => None,
             })
             .sum::<u64>();
+        let effects = lash_durable::runner::CommitEffects::of(&tx);
         let committed = self.commit_with_obligations(tx, owing, commit).await?;
+        if let Some(hints) = &self.inner.hints {
+            hints.owner_committed(&effects, &committed);
+        }
         self.ack_model_calls(model_debts);
         self.inner
             .tool_call_admissions

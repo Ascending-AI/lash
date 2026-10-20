@@ -705,6 +705,10 @@ impl DurableStore for FaultStore {
             .await
     }
 
+    async fn readiness(&self) -> Result<lash_durable::Readiness, DurableError> {
+        self.read(self.inner.readiness()).await
+    }
+
     async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError> {
         self.activity
             .turn(&self.node, &self.life, &self.clock)

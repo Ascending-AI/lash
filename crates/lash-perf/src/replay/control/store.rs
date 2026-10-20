@@ -49,6 +49,10 @@ impl DurableStore for ObservedStore {
             .await
     }
 
+    async fn readiness(&self) -> Result<lash_durable::Readiness, DurableError> {
+        self.observe("readiness", self.inner.readiness()).await
+    }
+
     async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError> {
         self.observe("claim", self.inner.claim(node, limit)).await
     }

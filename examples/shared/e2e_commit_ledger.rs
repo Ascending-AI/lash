@@ -515,6 +515,10 @@ impl DurableStore for LedgerStore {
             .await
     }
 
+    async fn readiness(&self) -> Result<Readiness, DurableError> {
+        self.inner.readiness().await
+    }
+
     async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError> {
         let answer = self.inner.claim(node, limit).await;
         if let Ok(claimed) = &answer {

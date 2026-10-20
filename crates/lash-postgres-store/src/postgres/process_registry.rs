@@ -243,6 +243,15 @@ impl lash_execution_contracts::process::ProcessRegistrar for PostgresProcessRegi
         {
             AppliedRegistration::Created(record) => {
                 tx.commit().await.map_err(plugin_sqlx_error)?;
+                // The process's actor committed ready: its node hears of it
+                // now, not at its claim poll (FIG-7044).
+                if let Ok(actor) = lash_durable::ActorKey::process(record.id.as_str()) {
+                    self.wakes.wake(&lash_durable::Woken {
+                        actor,
+                        state: lash_durable::ActorState::Ready,
+                        owner: None,
+                    });
+                }
                 Ok(lash_execution_contracts::process::ProcessRegistrationReceipt::created(record))
             }
             AppliedRegistration::Retained { record } => {

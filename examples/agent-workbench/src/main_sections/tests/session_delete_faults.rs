@@ -319,6 +319,10 @@ impl DurableStore for DeleteDurableStore {
             .await
     }
 
+    async fn readiness(&self) -> Result<Readiness, DurableError> {
+        self.inner.readiness().await
+    }
+
     async fn claim(&self, node: &NodeLease, limit: usize) -> Result<Vec<Claimed>, DurableError> {
         self.inner.claim(node, limit).await
     }
