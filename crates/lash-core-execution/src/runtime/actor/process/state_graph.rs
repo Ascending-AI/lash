@@ -76,6 +76,7 @@ pub fn stage_engine_state(
             host: None,
             envelope: None,
             owed: Vec::new(),
+            requirements: state.requirements.clone(),
         },
     )?;
     let write = DomainWrite::ExecRoot(ExecRootWrite::Put {
@@ -184,6 +185,7 @@ pub fn load_engine_state(
             },
             bytes,
             pages,
+            requirements: exec.requirements,
         },
     ))
 }

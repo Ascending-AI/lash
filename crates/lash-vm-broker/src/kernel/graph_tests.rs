@@ -384,6 +384,7 @@ fn a_parks_membership_follows_its_ledger_by_admission() {
             host: None,
             envelope: None,
             owed: Vec::new(),
+            requirements: Default::default(),
         },
         (None, None),
         CommitId([3; 32]),

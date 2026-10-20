@@ -45,7 +45,7 @@ pub enum KernelRestoreRefusal {
         "the state was parked under kernel version {parked}; the document is written for {supported}"
     )]
     KernelVersion { parked: u32, supported: u32 },
-    #[error("the registry has no function {function}, which the parked run pins")]
+    #[error("function {function}, which the run pins, is neither held here nor stored")]
     MissingFunction { function: String },
     #[error("a parked wait names effect {effect}, which no admission under this execution holds")]
     AdmissionUnresolved { effect: String },
@@ -55,6 +55,11 @@ pub enum KernelRestoreRefusal {
     /// and this worker has no native for it.
     #[error("function {function} needs a native implementation this worker lacks")]
     MissingNative { function: String },
+    /// The run's stored definition of a function is refused at admission:
+    /// it does not decode, is another function's, is written for another
+    /// kernel version, or the checker refuses it.
+    #[error("the stored definition of function {function} is refused: {problem}")]
+    DefinitionRefused { function: String, problem: String },
     /// The admission under this execution holds a request of another kind
     /// than the wait's.
     #[error("the admission of effect {effect} is not the kind of the parked wait")]

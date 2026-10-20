@@ -468,6 +468,11 @@
         "tests/support/served.rs",
         "tests/support/sim.rs"
       ],
+      "pinned_code_laws": [
+        "tests/pinned_code_laws.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs"
+      ],
       "plugin_state_storage_laws": [
         "tests/plugin_state_storage_laws.rs",
         "tests/support/dialect.rs",

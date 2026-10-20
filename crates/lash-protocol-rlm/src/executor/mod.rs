@@ -656,18 +656,13 @@ async fn run_linked_cell(
     };
     // The cell's roots pin its document's execution closure, and a saved
     // function's record names it: a capture stages it with them.
-    let closure = match services
-        .kernel
-        .library()
-        .map_err(|refusal| refusal.to_string())
-        .and_then(|functions| {
-            lash_vm_broker::kernel::closure::derive(
-                document.manifest.functions.keys().copied(),
-                &functions,
-                lash_vm_broker::kernel::closure::Natives::Declared,
-            )
-            .map_err(|refusal| refusal.to_string())
-        }) {
+    // A resumed cell runs the definitions it was written against, the
+    // store's where this node lacks them (FIG-6985).
+    let closure = match services.kernel.library() {
+        Ok(functions) => processes::pinned_closure(&ctx, &document, &functions).await,
+        Err(refusal) => Err(refusal.to_string()),
+    };
+    let closure = match closure {
         Ok(closure) => closure,
         Err(message) => {
             return exec_setup_failure_or_stop(

@@ -103,9 +103,34 @@ impl lash_execution_contracts::process::EngineSuccession for KernelSuccession {
         };
         let base = read(input.document).await?;
         let next = read(successor.document).await?;
-        let relink =
-            relink(&base, &next, &engine.functions).map_err(|refusal| refused(&refusal))?;
-        let carried = plan_carry(&base, state.parked.is_some(), &engine.functions, &relink)
+        // Both documents' code, as the store keeps what this node does not
+        // hold, declared through the loader (FIG-6985): adoption reads it
+        // as rebasing does, under its own policy.
+        let unread = |message: String| refused(&HelperAdoptionRefusal::Unread { message });
+        let mut stored = BTreeMap::new();
+        for document in [&base, &next] {
+            match documents
+                .stored_definitions(document, &engine.functions)
+                .await
+                .map_err(|error| SuccessionError::Unavailable(error.to_string()))?
+            {
+                Ok(found) => stored.extend(found),
+                Err(unretained) => return Err(unread(format!("{unretained:?}"))),
+            }
+        }
+        let functions = lash_vm_broker::kernel::loader::declare(
+            base.manifest
+                .functions
+                .keys()
+                .chain(next.manifest.functions.keys())
+                .copied(),
+            base.manifest.kernel,
+            &engine.functions,
+            &stored,
+        )
+        .map_err(|refusal| unread(refusal.to_string()))?;
+        let relink = relink(&base, &next, &functions).map_err(|refusal| refused(&refusal))?;
+        let carried = plan_carry(&base, state.parked.is_some(), &functions, &relink)
             .map_err(|refusal| refused(&refusal))?;
         if carried.rewritten.identity() != successor.document {
             return Err(refused(&HelperAdoptionRefusal::NoCorrespondence {

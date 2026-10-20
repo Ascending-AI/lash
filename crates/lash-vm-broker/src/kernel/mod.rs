@@ -25,6 +25,7 @@
 pub mod closure;
 pub mod graph;
 pub mod ledger;
+pub mod loader;
 pub mod pages;
 pub mod run;
 pub mod state;

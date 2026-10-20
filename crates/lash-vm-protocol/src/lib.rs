@@ -44,7 +44,7 @@ pub use message::{
     EncodedPayload, ExecutionLease, FrameEpoch, HeaderRefusal, HostReadId, HostReadKind,
     LimitDecision, LimitedBound, MemoryMeter, MessageFence, MessageHeader, OwnerEpoch, ParentFrame,
     ParentMessage, PoolStart, PoolStartParts, PoolStarted, RunBounds, RunMeters, Start, StartFrom,
-    TransportSequence, WorkerFrame, WorkerMessage, WorkerPhase, WorkerWork,
+    StoredDefinition, TransportSequence, WorkerFrame, WorkerMessage, WorkerPhase, WorkerWork,
 };
 pub use outcome::{
     BootstrapFault, CgroupController, CgroupRefusal, Detail, DetailLimit, Exchange,

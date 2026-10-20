@@ -50,6 +50,10 @@ pub enum HelperAdoptionRefusal {
     },
     #[error("the process's stored state does not decode: {message}")]
     State { message: String },
+    /// The code the adoption moves off or onto is not read from the
+    /// store, or not admitted there (FIG-6985).
+    #[error("the adopted code is not read: {message}")]
+    Unread { message: String },
     /// The successor's document is not the process's document relinked
     /// onto the successor's functions of the same names: no correspondence
     /// carries the run onto it.

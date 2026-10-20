@@ -174,7 +174,8 @@ pub struct RemoteMachines {
     start: RunStart,
     bounds: Bounds,
     /// The document's execution closure, as the parent derived it over the
-    /// functions it links documents against.
+    /// functions its node holds and the definitions of the others it read
+    /// from the store, which every checkout's `Start` carries.
     closure: Closure,
     /// The closures of the session's earlier cells no commit installed.
     carried: Vec<Closure>,
@@ -256,6 +257,15 @@ impl RemoteMachines {
             owner: self.owner.clone(),
             dialect: self.dialect.clone(),
             document: EncodedPayload(self.body.to_vec()),
+            definitions: self
+                .closure
+                .stored()
+                .iter()
+                .map(|(function, body)| lash_vm_protocol::StoredDefinition {
+                    function: *function.as_bytes(),
+                    body: EncodedPayload(body.to_vec()),
+                })
+                .collect(),
             from,
             bounds: RunBounds {
                 memory_meter: match self.bounds.memory_meter {
@@ -885,6 +895,7 @@ mod reservation_tests {
             owner: VmOwner::new("reservation-law"),
             dialect: "typescript".to_owned(),
             document: EncodedPayload(vec![0; 16]),
+            definitions: Vec::new(),
             from: StartFrom::Fresh(EncodedPayload(vec![0; 16])),
             bounds: RunBounds {
                 memory_meter: lash_vm_protocol::MemoryMeter::On,

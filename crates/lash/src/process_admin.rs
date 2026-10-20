@@ -846,6 +846,7 @@ impl Processes {
             .map_err(refused)?;
         engines
             .capture_env(kind, &payload, &performed, candidate)
+            .await
             .map_err(refused)
     }
 
@@ -881,7 +882,14 @@ impl Processes {
             .await
             .map_err(refused)?;
         engines
-            .check_links(kind, &std::sync::Arc::new(env.clone()), &performed, fits)
+            .check_links(
+                kind,
+                payload,
+                &std::sync::Arc::new(env.clone()),
+                &performed,
+                fits,
+            )
+            .await
             .map_err(refused)?;
         Ok(())
     }

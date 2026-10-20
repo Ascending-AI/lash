@@ -303,7 +303,7 @@ impl ProcessActivation {
             requires: owned.requires().to_vec(),
         };
         loop {
-            let passed = self.pass(owned, process, &mut live).await;
+            let passed = Box::pin(self.pass(owned, process, &mut live)).await;
             self.publish(process, &live).await;
             match passed {
                 Ok(Pass::Again) => {}

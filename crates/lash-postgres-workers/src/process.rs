@@ -222,6 +222,7 @@ impl ProcessEngine for WorkerEngine {
                 format: self.state_format(),
                 bytes,
                 pages: None,
+                requirements: Default::default(),
             },
             action,
         ))

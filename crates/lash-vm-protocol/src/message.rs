@@ -364,14 +364,21 @@ pub struct Start {
     pub owner: VmOwner,
     /// The dialect the run's document is written in, as its session or
     /// process recorded it at creation. A worker whose embedding lacks it
-    /// refuses the run before it reads the document
-    /// ([`crate::RunRefusal::DialectNotInstalled`]), and a new run pins
-    /// that dialect's helper release (FIG-5990).
+    /// refuses a run that saves functions, which it writes as the
+    /// dialect's values, before it reads the document
+    /// ([`crate::RunRefusal::DialectNotInstalled`], FIG-5990); it runs any
+    /// other, which needs no dialect (FIG-6985).
     pub dialect: String,
     /// The admitted document, as its canonical token body (`K-ID-003`),
     /// the body of its checkpoint graph node. The worker decodes, validates
     /// and compiles it: the parent never compiles model code.
     pub document: EncodedPayload,
+    /// The stored definition of each library function the document reaches
+    /// that the parent's node does not hold, read from the store
+    /// (FIG-6985): the worker admits each, checked, into the library this
+    /// run alone executes. Empty when the node holds every one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub definitions: Vec<StoredDefinition>,
     pub from: StartFrom,
     pub bounds: RunBounds,
     /// The OwnerBinding node of the execution every checkpoint root of the
@@ -409,6 +416,17 @@ pub struct Start {
     /// Whether the parent decides at the run's charge bound, as for memory.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub charge_limiter: bool,
+}
+
+/// A library function's definition as the store keeps it: the token body
+/// of its HelperDefinition node, under the identity the document names it
+/// by, which the worker checks the body against.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StoredDefinition {
+    #[serde(with = "serde_bytes")]
+    pub function: [u8; 32],
+    pub body: EncodedPayload,
 }
 
 /// One committed outcome, for the wait the machine named.

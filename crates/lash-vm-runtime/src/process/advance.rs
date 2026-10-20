@@ -68,6 +68,12 @@ pub(crate) fn encode(
         format: state_format(kernel),
         bytes: serde_json::to_vec(state).map_err(|error| infra(error.to_string()))?,
         pages: state.parked.map(|parked| parked.page.root),
+        // An ended process requires nothing, whatever its last park did.
+        requirements: if matches!(state.phase, Phase::Ended) {
+            lash_kernel_doc::ExecutionRequirements::default()
+        } else {
+            state.requirements.clone()
+        },
     })
 }
 
@@ -135,6 +141,7 @@ pub(crate) fn advance(
             waits: Default::default(),
             settled: Vec::new(),
             phase: Phase::Ended,
+            requirements: lash_kernel_doc::ExecutionRequirements::default(),
         };
         let action = run(&mut state, Vec::new())?;
         return Ok((encode(&state, writes)?, action));
@@ -334,8 +341,9 @@ fn run_settled(
     };
     match output {
         KernelRunOutput::Ended { outcome, .. } => {
-            // An ended run stands on no page.
+            // An ended run stands on no page, and requires nothing.
             state.parked = None;
+            state.requirements = lash_kernel_doc::ExecutionRequirements::default();
             state.phase = Phase::Ended;
             Ok(EngineAction::Terminal(*outcome))
         }
@@ -343,6 +351,7 @@ fn run_settled(
             state: parked,
             issued,
             withdrawn,
+            requirements,
             ..
         } => {
             // Runs are sequential: the one settling is the last asked for.
@@ -351,6 +360,7 @@ fn run_settled(
                 page: parked,
                 by: settling,
             });
+            state.requirements = requirements;
             state.phase = Phase::Parked;
             for wait in withdrawn {
                 state.waits.remove(&wait);

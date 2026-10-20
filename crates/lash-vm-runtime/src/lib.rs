@@ -16,6 +16,7 @@
 
 #![deny(clippy::future_not_send)]
 
+mod authority;
 mod boundary;
 mod formats;
 mod host;
@@ -23,6 +24,9 @@ mod process;
 mod process_plugin;
 mod projection;
 
+pub use authority::{
+    AuthorityUnread, InternalAuthority, NoInternalOperations, StoredAuthority, admit_internal,
+};
 pub use boundary::{
     BoundaryError, HostBoundary, MAX_PROJECTED_TYPE_NODES, MAX_RESOLVED_REFERENCES, SchemaConflict,
     SchemaProjectionRefusal, effect_controls, offered_tool, owned_operation, tool_input,
@@ -35,6 +39,7 @@ pub use formats::{
 pub use host::{EffectReads, ParentHost};
 /// Why a kernel migration does not carry a document or a parked run.
 pub use lash_kernel_migrate::{DocumentRefusal, ParkedRefusal};
+pub use lash_vm_broker::kernel::loader::LoadRefusal;
 /// lash's own packages, registered once in a process: what a kernel
 /// document is linked, admitted and migrated against when the host
 /// installs no package of its own. The parent decodes them from the

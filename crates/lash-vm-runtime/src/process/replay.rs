@@ -355,7 +355,8 @@ fn failed(host: &ReplayHost, failure: KernelFailure) -> Result<SegmentAnswer, Re
             RunRefusal::Restore {
                 refusal:
                     KernelRestoreRefusal::MissingNative { .. }
-                    | KernelRestoreRefusal::MissingFunction { .. },
+                    | KernelRestoreRefusal::MissingFunction { .. }
+                    | KernelRestoreRefusal::DefinitionRefused { .. },
             } => unreplayable(Unreplayable::FunctionMissing),
             RunRefusal::Restore {
                 refusal: KernelRestoreRefusal::KernelVersion { .. },
@@ -494,11 +495,12 @@ impl KernelProcessEngine {
         let Ok(args) = entry_args(&document, &input) else {
             return unreplayable(Unreplayable::NoTape);
         };
-        let Ok(closure) = lash_vm_broker::kernel::closure::derive(
-            document.manifest.functions.keys().copied(),
-            &self.functions,
-            lash_vm_broker::kernel::closure::Natives::Declared,
-        ) else {
+        // A replay runs the code the run ran: the definitions its document
+        // was written against, the store's where the node lacks them.
+        let Ok(closure) = super::run::pinned_closure(self, &document)
+            .await
+            .map_err(|fault| ReplayFault(fault.0))?
+        else {
             return unreplayable(Unreplayable::FunctionMissing);
         };
         let host = Arc::new(ReplayHost::of(reads));

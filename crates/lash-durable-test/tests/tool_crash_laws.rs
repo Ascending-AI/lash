@@ -1861,6 +1861,7 @@ impl lash_execution_contracts::process::ProcessEngine for StateEngine {
             format: self.state_format(),
             bytes: serde_json::to_vec(&settled).map_err(engine_failure)?,
             pages: None,
+            requirements: Default::default(),
         };
         Ok((state, action))
     }

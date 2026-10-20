@@ -170,11 +170,15 @@ impl KernelDocumentProvider {
 
 #[async_trait::async_trait]
 impl lash_execution_contracts::process::ProcessDocumentProvider for KernelDocumentProvider {
-    fn owned_operations(
+    async fn owned_operations(
         &self,
+        payload: &serde_json::Value,
         performed: &lash_execution_contracts::process::PerformedEffects,
-    ) -> lash_execution_contracts::process::OwnedOperations {
-        self.engine.owned_operations(performed)
+    ) -> Result<
+        lash_execution_contracts::process::OwnedOperations,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
+        self.engine.owned_operations(payload, performed).await
     }
 
     fn definition_packages(

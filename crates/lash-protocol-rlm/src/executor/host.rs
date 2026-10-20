@@ -706,10 +706,22 @@ impl KernelEffects for CellHost<'_> {
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect();
+        // What the cell's static links require of a node that resumes it:
+        // the reader of every provider its read plan reads through
+        // (FIG-6985). Its deferred matches are dynamic, recorded by their
+        // commits.
+        let mut links = lash_kernel_doc::ExecutionRequirements::default();
+        links.providers.extend(
+            self.envelope
+                .reads
+                .values()
+                .map(lash_core_store::tool_surface::provider_key),
+        );
         Ok(HostParts {
             host: Some(host),
             envelope: Some(envelope),
             owed,
+            links,
         })
     }
 

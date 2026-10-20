@@ -148,7 +148,7 @@ impl Parent {
             lash_vm_releases::lash_packages()
                 .expect("the parent's packages")
                 .functions(),
-            lash_vm_broker::kernel::closure::Natives::Declared,
+            &std::collections::BTreeMap::new(),
         )
         .expect("the parent holds the cell's functions");
         let pages = self.pages.take().expect("a lease's pages");
@@ -280,6 +280,7 @@ fn turn(parent: &mut Parent, bounds: RunBounds) {
         owner: VmOwner::new("codemode:session"),
         dialect: DIALECT.into(),
         document: EncodedPayload(document),
+        definitions: Vec::new(),
         from: StartFrom::Fresh(
             wire::encode(
                 PayloadKind::Start,

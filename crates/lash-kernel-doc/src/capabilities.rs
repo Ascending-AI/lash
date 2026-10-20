@@ -116,3 +116,67 @@ impl std::fmt::Display for ExecutionRequirements {
         }
     }
 }
+
+/// The record's canonical tokens, as an execution root holds it: four
+/// sequences, each ascending, so equal requirements spell equal bytes and
+/// a record whose sets are not sorted and distinct does not decode.
+impl crate::graph_tokens::TokenCodec for ExecutionRequirements {
+    fn encode(&self, out: &mut crate::graph_tokens::TokenWriter) {
+        out.seq(4);
+        self.natives.iter().copied().collect::<Vec<_>>().encode(out);
+        self.kernels.iter().copied().collect::<Vec<_>>().encode(out);
+        self.providers
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .encode(out);
+        self.codecs
+            .iter()
+            .map(|(provider, version)| Codec(provider.clone(), *version))
+            .collect::<Vec<_>>()
+            .encode(out);
+    }
+
+    fn decode(
+        input: &mut crate::graph_tokens::TokenReader<'_>,
+    ) -> Result<Self, crate::graph_tokens::TokenError> {
+        use crate::graph_tokens::check_ascending;
+        input.expect_struct(4)?;
+        let natives = Vec::<FunctionId>::decode(input)?;
+        check_ascending(&natives)?;
+        let kernels = Vec::<u32>::decode(input)?;
+        check_ascending(&kernels)?;
+        let providers = Vec::<String>::decode(input)?;
+        check_ascending(&providers)?;
+        let codecs: Vec<(String, u32)> = Vec::<Codec>::decode(input)?
+            .into_iter()
+            .map(|Codec(provider, version)| (provider, version))
+            .collect();
+        check_ascending(&codecs)?;
+        Ok(Self {
+            natives: natives.into_iter().collect(),
+            kernels: kernels.into_iter().collect(),
+            providers: providers.into_iter().collect(),
+            codecs: codecs.into_iter().collect(),
+        })
+    }
+}
+
+/// One codec requirement's tokens: its provider key and format version.
+struct Codec(String, u32);
+
+impl crate::graph_tokens::TokenCodec for Codec {
+    fn encode(&self, out: &mut crate::graph_tokens::TokenWriter) {
+        out.seq(2);
+        out.text(&self.0);
+        self.1.encode(out);
+    }
+
+    fn decode(
+        input: &mut crate::graph_tokens::TokenReader<'_>,
+    ) -> Result<Self, crate::graph_tokens::TokenError> {
+        input.expect_struct(2)?;
+        let provider = input.text()?.to_owned();
+        Ok(Self(provider, u32::decode(input)?))
+    }
+}

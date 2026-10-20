@@ -155,6 +155,7 @@ fn fresh(document: &EncodedPayload, target: Target, args: Vec<Datum>) -> Start {
         owner: owner(),
         dialect: DIALECT.into(),
         document: document.clone(),
+        definitions: Vec::new(),
         from: StartFrom::Fresh(
             wire::encode(
                 PayloadKind::Start,
@@ -192,6 +193,7 @@ fn resumed(
         owner: owner(),
         dialect: dialect.into(),
         document: document.clone(),
+        definitions: Vec::new(),
         from: StartFrom::Checkpoint(CheckpointStart { root, admissions }),
         bounds: bounds(),
         binding: BINDING,
@@ -218,7 +220,7 @@ fn closure(document: &EncodedPayload) -> NodeId {
         lash_vm_releases::lash_packages()
             .expect("the parent's packages")
             .functions(),
-        lash_vm_broker::kernel::closure::Natives::Declared,
+        &std::collections::BTreeMap::new(),
     )
     .expect("the parent holds the document's functions")
     .reference()
@@ -674,13 +676,14 @@ fn a_typescript_cell_lowered_in_the_worker_parks_and_resumes() {
     );
 }
 
-/// FIG-5990: a run names the dialect its session or process recorded at
-/// creation, and a worker whose host did not name that dialect refuses it
-/// with a typed refusal before it reads the document or runs anything: a
-/// new run before its first slice, and a parked one before its state. The
-/// worker of a host that named the dialect runs the same start.
+/// FIG-5990, FIG-6985: a run names the dialect its session or process
+/// recorded at creation. Running its document needs no dialect, so the
+/// worker of a host that did not name it runs a new run and resumes a
+/// parked one all the same; a run that saves its functions, which it
+/// writes as the dialect's values, is refused with a typed refusal before
+/// the worker reads the document or runs anything.
 #[test]
-fn a_worker_refuses_a_run_in_a_dialect_its_host_did_not_name() {
+fn a_worker_runs_code_in_a_dialect_its_host_did_not_name_and_refuses_to_save_it() {
     let (identity, document) = {
         HOST_DIALECTS.set("typescript,python");
         document(TOOL_LOOP)
@@ -705,26 +708,44 @@ fn a_worker_refuses_a_run_in_a_dialect_its_host_did_not_name() {
     worker.release().expect("release at the park");
     drop(pool);
 
-    // A host that names TypeScript alone refuses both starts.
+    // A host that names TypeScript alone runs both, and refuses a save.
     HOST_DIALECTS.set("typescript");
     let pool = WorkerPool::new(config("")).expect("pool");
     let parked = resumed("python", &document, root, vec![admission]);
     for (start, from) in [(new_run(), "a new run"), (parked, "a parked run")] {
         let mut worker = checkout(&pool);
-        let refused = worker
+        worker
             .start(start, &identity, ExecutionClass::Cell)
             .and_then(|()| parent.run(&mut worker, SLICE, false))
-            .expect_err("the worker installs no Python");
-        assert!(
-            matches!(
-                &refused,
-                PoolError::Infrastructure(InfrastructureOutcome::RunRefused {
-                    refusal: RunRefusal::DialectNotInstalled { dialect }
-                }) if dialect == "python"
-            ),
-            "{from}: {refused:?}"
-        );
+            .unwrap_or_else(|error| panic!("{from} runs without Python: {error:?}"));
     }
+    let saving = Start {
+        save: Some(
+            wire::encode(
+                PayloadKind::Start,
+                &wire::SaveWire {
+                    controls: std::collections::BTreeMap::new(),
+                    written: std::collections::BTreeMap::new(),
+                },
+            )
+            .expect("a save encodes"),
+        ),
+        ..new_run()
+    };
+    let mut worker = checkout(&pool);
+    let refused = worker
+        .start(saving, &identity, ExecutionClass::Cell)
+        .and_then(|()| parent.run(&mut worker, SLICE, false))
+        .expect_err("the worker installs no Python to save in");
+    assert!(
+        matches!(
+            &refused,
+            PoolError::Infrastructure(InfrastructureOutcome::RunRefused {
+                refusal: RunRefusal::DialectNotInstalled { dialect }
+            }) if dialect == "python"
+        ),
+        "{refused:?}"
+    );
 }
 
 /// FIG-5990: a Python cell is lowered and run by the worker of a host that
@@ -1894,7 +1915,7 @@ fn a_host_read_past_its_deadline_ends_the_run_with_its_typed_limit() {
             lash_vm_releases::lash_packages()
                 .expect("the parent's packages")
                 .functions(),
-            lash_vm_broker::kernel::closure::Natives::Declared,
+            &std::collections::BTreeMap::new(),
         )
         .expect("the parent holds the document's functions"),
     )

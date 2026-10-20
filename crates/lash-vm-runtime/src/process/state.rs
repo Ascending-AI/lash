@@ -301,6 +301,14 @@ pub(crate) struct KernelEngineState {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) settled: Vec<Delivery>,
     pub(crate) phase: Phase,
+    /// What running the process requires of a node while its run is
+    /// parked: what the run's last park recorded (FIG-6985). Empty before
+    /// the first park and once the run ended.
+    #[serde(
+        default,
+        skip_serializing_if = "lash_kernel_doc::ExecutionRequirements::is_empty"
+    )]
+    pub(crate) requirements: lash_kernel_doc::ExecutionRequirements,
 }
 
 /// The input of one `kernel_run`: everything the step recomputes from.
@@ -473,6 +481,13 @@ pub(crate) enum KernelRunOutput {
         /// Where the segment started, at `observe: counts`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         start: Option<Box<RecordedStart>>,
+        /// What running the process requires of a node while it stands on
+        /// this park (FIG-6985).
+        #[serde(
+            default,
+            skip_serializing_if = "lash_kernel_doc::ExecutionRequirements::is_empty"
+        )]
+        requirements: lash_kernel_doc::ExecutionRequirements,
     },
     /// The run ended.
     Ended {

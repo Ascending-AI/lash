@@ -190,6 +190,7 @@ impl EngineSuccession for ProofSuccession {
                 format: state.format.clone(),
                 bytes: serde_json::to_vec(&script).map_err(unreadable)?,
                 pages: None,
+                requirements: Default::default(),
             }),
             own_formats: false,
         })
@@ -359,6 +360,7 @@ impl ProcessEngine for ProofEngine {
                 format: self.state_format(),
                 bytes,
                 pages: None,
+                requirements: Default::default(),
             },
             action,
         ))

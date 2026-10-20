@@ -150,6 +150,10 @@ pub struct HostParts {
     /// The callbacks the host's state owes beyond its admitted calls (S7):
     /// a cell's committed deferred matches' providers and codecs.
     pub owed: Vec<lash_core_store::store::plugin_writers::PluginCallbackIdentity>,
+    /// What the host's static operation links require of a node: their
+    /// providers and codecs (FIG-6985). A parked root's requirements
+    /// record holds them beside what its code requires.
+    pub links: lash_kernel_doc::ExecutionRequirements,
 }
 
 /// A park's sealed checkpoint root: its page, staged in the activation's
@@ -837,8 +841,20 @@ impl DurableSnapshotStore {
             .map_err(refused)?;
         // The candidate the commit publishes: the park's checkpoint root, or
         // the session descriptor an end hands the turn.
+        let mut requirements = lash_kernel_doc::ExecutionRequirements::default();
         let (status, state, format, membership, candidate) = match phase {
             SavePhase::Parked { state, closure, .. } => {
+                // What running the parked execution requires: its code's
+                // natives and kernel version, and its links' providers and
+                // codecs (FIG-6985). An ended one requires nothing.
+                requirements =
+                    super::loader::requirements(closure, state.header.kernel, std::iter::empty());
+                requirements
+                    .providers
+                    .extend(parts.links.providers.iter().cloned());
+                requirements
+                    .codecs
+                    .extend(parts.links.codecs.iter().cloned());
                 let membership = book.membership(&ledger).map_err(refused)?;
                 for write in book.retire_unnamed(&self.exec, &membership) {
                     tx.write(write);
@@ -896,6 +912,7 @@ impl DurableSnapshotStore {
                 host: parts.host,
                 envelope: parts.envelope,
                 owed: owing.owed.clone(),
+                requirements,
             },
             (
                 expected.map(|held| held.rev),

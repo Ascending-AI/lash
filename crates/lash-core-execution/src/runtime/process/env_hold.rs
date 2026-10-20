@@ -273,7 +273,14 @@ pub(crate) async fn hold_launch_performing(
         (ProcessEnvSelection::New(linked.clone()), None)
     };
     engines
-        .check_links(kind, &std::sync::Arc::new(linked), performed, &choice.fits)
+        .check_links(
+            kind,
+            payload,
+            &std::sync::Arc::new(linked),
+            performed,
+            &choice.fits,
+        )
+        .await
         .map_err(HoldEnvError::Refused)?;
     let env_ref = match held {
         Some(env_ref) => env_ref,

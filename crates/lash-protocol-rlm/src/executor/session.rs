@@ -593,7 +593,7 @@ impl CodeModeExecutionState {
                     let closure = lash_vm_broker::kernel::closure::derive(
                         relinked.document.manifest.functions.keys().copied(),
                         view.catalog(),
-                        lash_vm_broker::kernel::closure::Natives::Declared,
+                        &std::collections::BTreeMap::new(),
                     )
                     .map_err(|refusal| RelinkError::Library(refusal.to_string()))?;
                     function.against = relinked.against;

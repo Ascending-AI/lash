@@ -214,6 +214,7 @@ impl ProcessEngine for DrainEngine {
                 format: self.state_format(),
                 bytes: serde_json::to_vec(&settled).map_err(infra)?,
                 pages: None,
+                requirements: Default::default(),
             },
             action,
         ))

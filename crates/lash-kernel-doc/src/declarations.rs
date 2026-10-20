@@ -217,6 +217,27 @@ impl CheckedDeclarations {
         })
     }
 
+    /// What running `document`, whose declarations these are, requires
+    /// of a node by its code alone (FIG-6985): the native of each function
+    /// it reaches that only a native implements, and its kernel version.
+    /// A document lists every function it reaches, so these are its
+    /// closure's.
+    #[must_use]
+    pub fn requirements(&self, document: &Document) -> crate::ExecutionRequirements {
+        crate::ExecutionRequirements {
+            natives: self
+                .held
+                .iter()
+                .filter(|(_, declaration)| {
+                    declaration.definition.has_native() && declaration.definition.body().is_none()
+                })
+                .map(|(function, _)| *function)
+                .collect(),
+            kernels: [document.manifest.kernel].into(),
+            ..Default::default()
+        }
+    }
+
     /// Each declaration's function and the token body it is stored as, in
     /// identity order.
     #[must_use]

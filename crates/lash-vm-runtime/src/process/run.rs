@@ -311,6 +311,33 @@ async fn kernel_run(
             trace.delivered(delivery);
         }
     }
+    // The run executes the definitions its document was written against:
+    // the node's own where it holds them, the store's otherwise (FIG-6985).
+    let closure = match pinned_closure(engine, &document).await? {
+        Ok(closure) => closure,
+        Err(Unpinned::Unretained(unretained)) => {
+            return ended(failure(
+                KernelProcessFailureCode::DefinitionUnretained,
+                format!("the process's code is not retained: {unretained:?}"),
+                None,
+            ));
+        }
+        Err(Unpinned::Refused(refusal)) => {
+            return ended(failure(
+                KernelProcessFailureCode::DefinitionRefused,
+                format!("the process's code is refused: {refusal}"),
+                None,
+            ));
+        }
+    };
+    // What running the process requires of a node while it parks on this
+    // run: its code's natives and kernel version, and its env's links'
+    // providers and codecs (FIG-6985).
+    let requirements = lash_vm_broker::kernel::loader::requirements(
+        &closure,
+        document.manifest.kernel,
+        run.effects.values(),
+    );
     let counts = settings.observe == lash_kernel_vm::ObservationMode::Counts;
     let start = counts.then(|| recorded_start(process_input.document, &input));
     // A recovered wait is reported by the occurrence it was delivered as.
@@ -349,12 +376,7 @@ async fn kernel_run(
             save: None,
         },
         settings.bounds(),
-        lash_vm_broker::kernel::closure::derive(
-            document.manifest.functions.keys().copied(),
-            &engine.functions,
-            lash_vm_broker::kernel::closure::Natives::Declared,
-        )
-        .map_err(|refusal| RunFault(refusal.to_string()))?,
+        closure,
     )
     .map_err(|error| RunFault(error.to_string()))?;
     let Some(step_pages) = run.pages.as_ref() else {
@@ -448,6 +470,7 @@ async fn kernel_run(
                     caught,
                     reads,
                     start,
+                    requirements,
                 },
                 Some(candidate),
             ))
@@ -618,6 +641,51 @@ pub(super) async fn run_machine(
             caught,
         });
     }
+}
+
+/// Why a run's pinned code is not admitted.
+pub(super) enum Unpinned {
+    /// The store does not keep a definition the run reaches.
+    Unretained(super::documents::Unretained),
+    /// A stored definition is refused (R5).
+    Refused(lash_vm_broker::kernel::loader::LoadRefusal),
+}
+
+/// The execution closure of `document` over the definitions it was
+/// written against (FIG-6985): each the engine holds as it holds it, and
+/// each other as the store keeps it, admitted under the engine's
+/// internal-operation authority.
+///
+/// # Errors
+///
+/// [`RunFault`] when the store does not answer or a closure node does not
+/// encode.
+pub(super) async fn pinned_closure(
+    engine: &KernelProcessEngine,
+    document: &lash_kernel_doc::Document,
+) -> Result<Result<lash_vm_broker::kernel::closure::Closure, Unpinned>, RunFault> {
+    let stored = match engine
+        .documents
+        .stored_definitions(document, &engine.functions)
+        .await
+        .map_err(|error| RunFault(error.to_string()))?
+    {
+        Ok(stored) => stored,
+        Err(unretained) => return Ok(Err(Unpinned::Unretained(unretained))),
+    };
+    if let Err(refusal) = crate::admit_internal(engine.authority.as_ref(), &stored)
+        .await
+        .map_err(|unread| RunFault(unread.to_string()))?
+    {
+        return Ok(Err(Unpinned::Refused(refusal)));
+    }
+    lash_vm_broker::kernel::closure::derive(
+        document.manifest.functions.keys().copied(),
+        &engine.functions,
+        &stored,
+    )
+    .map(Ok)
+    .map_err(|refusal| RunFault(refusal.to_string()))
 }
 
 /// What a failure to drive the machine is to the process: its terminal

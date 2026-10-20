@@ -14,7 +14,7 @@ use lash_kernel_state::paged::{Checkpoint, PageSource};
 use lash_kernel_vm::{
     Bounds, CellStart, Host, KernelMachine, Machine, Outcome, Program, Step, WaitId,
 };
-use lash_vm_broker::kernel::closure::{Closure, Natives};
+use lash_vm_broker::kernel::closure::Closure;
 use lash_vm_broker::kernel::pages::{PageExchange, SharedPages};
 use lash_vm_broker::kernel::state::GraphStateFailure;
 use lash_vm_broker::kernel::{
@@ -41,7 +41,8 @@ pub struct InProcess<H> {
     start: RunStart,
     document: DocumentId,
     host: Arc<std::sync::Mutex<H>>,
-    /// The document's execution closure over the program's registry.
+    /// The document's execution closure over the program's registry, which
+    /// the loader assembled ([`lash_vm_broker::kernel::loader::assemble`]).
     closure: OnceLock<Result<Closure, GraphStateFailure>>,
 }
 
@@ -330,11 +331,12 @@ where
     fn closure(&self) -> Result<&Closure, KernelFailure> {
         self.closure
             .get_or_init(|| {
-                lash_vm_broker::kernel::closure::derive(
-                    self.program.document.manifest.functions.keys().copied(),
+                lash_vm_broker::kernel::loader::assemble(
+                    &self.program.document,
                     self.program.library.registry(),
-                    Natives::Required,
+                    &std::collections::BTreeMap::new(),
                 )
+                .map(|assembled| assembled.closure)
                 .map_err(|refusal| GraphStateFailure::Restore(refusal.into()))
             })
             .as_ref()

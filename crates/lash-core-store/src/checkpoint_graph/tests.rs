@@ -105,6 +105,12 @@ fn exec_root(staging: &mut GraphStaging, identity: &str) -> (NodeId, ExecRoot) {
         host: None,
         envelope: None,
         owed: Vec::new(),
+        requirements: lash_kernel_doc::ExecutionRequirements {
+            natives: [lash_kernel_doc::FunctionId::from_bytes([1; 32])].into(),
+            kernels: [1].into(),
+            providers: ["host/tools".to_owned()].into(),
+            codecs: [("host/codec".to_owned(), 2)].into(),
+        },
     };
     (
         staging.encode_value(NodeKind::EXEC_ROOT, &root).unwrap(),

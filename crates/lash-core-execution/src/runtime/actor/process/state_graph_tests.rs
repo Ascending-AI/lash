@@ -51,6 +51,7 @@ fn state(version: u32, bytes: Vec<u8>) -> EngineState {
         },
         bytes,
         pages: None,
+        requirements: Default::default(),
     }
 }
 

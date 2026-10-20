@@ -1120,3 +1120,46 @@ async fn a_node_writes_cells_under_a_stored_surface_it_does_not_hold() {
     assert!(listed.contains(&b_function("dataframe.same")), "B's `same`");
     assert!(listed.is_subset(&b_set), "the cell reaches B's set alone");
 }
+
+/// NEVER-USED-MEMBER (FIG-6985): a node holding R1 alone runs B's new
+/// member `same`, which no document ever reached, in a cell written under
+/// B's stored surface, from the definitions B's install stored under its
+/// pin and nothing else: the cell's declarations are read from the store
+/// and checked, and its run executes B's body. Before the loader read
+/// them, the cell was refused for want of a declaration the node held.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_node_runs_a_member_no_document_reached_from_the_code_its_install_stored() {
+    let lash = lash();
+    let (a, a_sets) = hold(&lash, vec![vec![r1(&lash)]]);
+    let (b, b_sets) = hold(&lash, vec![vec![r2_grown(&lash)]]);
+    let stored = stored_cell(&a, &b, b_sets[0]);
+    let mut session = Session::open(&a, a_sets[0]).await;
+    // What B's install writes (FIG-6991): the code the node lacks, under
+    // the set's pin.
+    let images: Vec<(FunctionId, Arc<[u8]>)> = stored
+        .stored_definitions()
+        .iter()
+        .map(|(function, definition)| {
+            (
+                *function,
+                Arc::from(lash_kernel_doc::graph_tokens::encode_body(
+                    definition.as_ref(),
+                )),
+            )
+        })
+        .collect();
+    lash_vm_runtime::KernelDocuments::new(session.host.context().backend().module_artifacts())
+        .hold_definitions(
+            &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
+                lash_core::HostArtifactPin::mint(),
+            ))
+            .expect("a host pin is unguarded"),
+            &images,
+        )
+        .await
+        .expect("B's install stores its code");
+    let ran = session
+        .cell_with(stored, "await control.finish(dataframe.same(7));")
+        .await;
+    assert_eq!(finish_of(&ran), serde_json::json!(7));
+}

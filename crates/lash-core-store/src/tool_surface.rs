@@ -376,6 +376,19 @@ impl OperationLink {
         Some(definition)
     }
 
+    /// What the link requires of a node that runs a call through it
+    /// (FIG-6985): its provider, by key, in `requirements.providers`, and
+    /// the codec its payload is read by, with the payload's format
+    /// version, in `requirements.codecs`.
+    pub fn require(&self, requirements: &mut lash_kernel_doc::ExecutionRequirements) {
+        requirements.providers.insert(provider_key(&self.provider));
+        if let Some(payload) = &self.payload {
+            requirements
+                .codecs
+                .insert((provider_key(&payload.codec), payload.format.get()));
+        }
+    }
+
     /// The callbacks a call through this link runs on: its provider, then
     /// its payload's codec when it carries one.
     pub fn callbacks(
@@ -541,4 +554,11 @@ impl DeferredMatch {
     pub fn definition(&self) -> Option<&ToolDefinition> {
         self.resolved().and_then(OperationLink::resolution)
     }
+}
+
+/// A provider's key as requirements name it: the plugin that registers it
+/// and its key there, whichever registry serves it.
+#[must_use]
+pub fn provider_key(provider: &ProviderKey) -> String {
+    format!("{}/{}", provider.owner(), provider.key())
 }

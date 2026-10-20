@@ -92,6 +92,13 @@ pub enum KernelProcessFailureCode {
     PayloadInvalid,
     ArgumentsInvalid,
     DocumentMissing,
+    /// A definition the document reaches, which the node does not hold, is
+    /// not stored as it should be (FIG-6985).
+    DefinitionUnretained,
+    /// A stored definition the process reaches is refused at admission:
+    /// it performs an internal operation of a package it is not a member
+    /// of (R5, FIG-6985).
+    DefinitionRefused,
     SettingsInvalid,
     /// The machine refuses the run: its document or its saved state.
     RunRefused,
@@ -110,6 +117,8 @@ impl KernelProcessFailureCode {
             Self::PayloadInvalid => "process_payload_invalid",
             Self::ArgumentsInvalid => "process_arguments_invalid",
             Self::DocumentMissing => "process_document_missing",
+            Self::DefinitionUnretained => "process_definition_unretained",
+            Self::DefinitionRefused => "process_definition_refused",
             Self::SettingsInvalid => "process_settings_invalid",
             Self::RunRefused => "process_run_refused",
             Self::RunUnsettled => "process_run_unsettled",
@@ -352,6 +361,9 @@ pub struct KernelProcessEngine {
     /// The library functions the engine's workers hold, by identity: what a
     /// document is linked and admitted against in the parent.
     pub(crate) functions: Arc<lash_kernel_doc::FunctionRegistry>,
+    /// The packages the engine's workers hold: the surfaces of their sets
+    /// are read without the store.
+    pub(crate) packages: Arc<lash_kernel_package::HeldPackages>,
     pub(crate) workers: lash_vm_client::service::Service,
     /// The dialect the host's process documents are written in: a new
     /// process records it, and its runs name it to their worker.
@@ -363,6 +375,10 @@ pub struct KernelProcessEngine {
     pub(crate) policy: KernelRunPolicy,
     pub(crate) random: Arc<dyn Fn() -> u64 + Send + Sync>,
     pub(crate) trace_runtime: Option<lash_core::trace::TraceRuntime>,
+    /// Who may perform a package's internal operations, as the store's
+    /// snapshots answer it: what a run's stored code is admitted under
+    /// (R5, FIG-6985).
+    pub(crate) authority: Arc<dyn crate::InternalAuthority>,
 }
 
 /// Host-selected policy for one `kernel_run`, separate from a process's
@@ -423,22 +439,53 @@ fn process_random() -> u64 {
 
 impl KernelProcessEngine {
     /// The operations among `performed` whose paths a package owns in the
-    /// node's own package set, the view a run reads, with what each
-    /// package declares (PKG-RUNNER).
-    pub(crate) fn owned_operations(
+    /// package set a start of `payload` is linked under, with what each
+    /// package declares (PKG-RUNNER): that set's surface snapshot, as this
+    /// node holds it or, for a set it does not hold, as the store keeps it
+    /// (FIG-6985). A start that names no set is linked under this node's
+    /// own.
+    ///
+    /// # Errors
+    ///
+    /// A payload that is not this engine's, a set the store keeps no
+    /// surface of, and the store's failure to answer.
+    pub(crate) async fn owned_operations(
         &self,
+        payload: &serde_json::Value,
         performed: &lash_execution_contracts::process::PerformedEffects,
-    ) -> lash_execution_contracts::process::OwnedOperations {
-        let Ok(held) = self.workers.config().held_packages() else {
-            return Default::default();
+    ) -> Result<
+        lash_execution_contracts::process::OwnedOperations,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
+        let fault = |message: String| {
+            lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                "the package surface a start is linked under is not read: {message}"
+            ))
         };
-        let Ok(view) = held.view(&held.own()) else {
-            return Default::default();
+        let linked = KernelProcessInput::from_payload(payload)
+            .map_err(|error| fault(error.to_string()))?
+            .packages
+            .unwrap_or_else(|| self.packages.own());
+        let surface = match self.packages.surface(&linked) {
+            Some(surface) => Arc::clone(surface),
+            None => {
+                let bytes = self
+                    .authority
+                    .package_surface(&linked)
+                    .await
+                    .map_err(|unread| fault(unread.to_string()))?
+                    .ok_or_else(|| fault(format!("package set {linked} has no stored surface")))?;
+                Arc::new(
+                    lash_kernel_package::SurfaceSnapshot::decode(linked, &bytes)
+                        .map_err(|refusal| fault(refusal.to_string()))?,
+                )
+            }
         };
-        performed
+        let view = lash_kernel_package::PackageView::new(&surface, self.packages.functions());
+        Ok(performed
             .keys()
             .filter_map(|effect| Some((effect.clone(), crate::owned_operation(&view, effect)?)))
-            .collect()
+            .collect())
     }
 
     /// The engine that runs the documents in `documents`, written in
@@ -463,6 +510,7 @@ impl KernelProcessEngine {
                 documents::EffectPreparations::default(),
             )),
             functions: Arc::clone(packages.functions()),
+            packages,
             workers,
             dialect: dialect.to_owned(),
             bounds,
@@ -470,6 +518,7 @@ impl KernelProcessEngine {
             policy: KernelRunPolicy::standard(),
             random: Arc::new(process_random),
             trace_runtime: None,
+            authority: Arc::new(crate::NoInternalOperations),
         })
     }
 
@@ -487,6 +536,14 @@ impl KernelProcessEngine {
     #[must_use]
     pub fn with_run_policy(mut self, policy: KernelRunPolicy) -> Self {
         self.policy = policy;
+        self
+    }
+
+    /// Sets where a run's stored code is admitted under internal-operation
+    /// authority from (R5).
+    #[must_use]
+    pub fn with_internal_authority(mut self, authority: Arc<dyn crate::InternalAuthority>) -> Self {
+        self.authority = authority;
         self
     }
 

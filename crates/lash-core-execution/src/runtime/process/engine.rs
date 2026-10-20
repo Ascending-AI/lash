@@ -514,18 +514,22 @@ impl ProcessEngineRegistry {
         Ok(env.with_package_roots(roots))
     }
 
-    /// Check that `env` links exactly `performed`, what a run on the `kind`
-    /// engine performs, each to a tool its components serve under the
-    /// contract the code requires and, on a path a package owns in the
-    /// engine's package view, as the package declares it (P1, PKG-RUNNER),
-    /// fitting under `fits` ([`ProcessComponentRegistry::check_links`]).
+    /// Check that `env` links exactly `performed`, what a start of the
+    /// `kind` engine on `payload` performs, each to a tool its components
+    /// serve under the contract the code requires and, on a path a package
+    /// owns in the package set the start is linked under, as the package
+    /// declares it (P1, PKG-RUNNER), fitting under `fits`
+    /// ([`ProcessComponentRegistry::check_links`]).
     ///
     /// # Errors
     ///
-    /// The pair's typed [`crate::ProcessEnvRefusal`].
-    pub fn check_links(
+    /// The pair's typed [`crate::ProcessEnvRefusal`]; a linked set whose
+    /// declarations are not read certifies no link
+    /// ([`crate::ProcessEnvRefusal::Uncertified`]).
+    pub async fn check_links(
         &self,
         kind: &str,
+        payload: &serde_json::Value,
         env: &Arc<crate::ProcessEnv>,
         performed: &PerformedEffects,
         fits: &std::collections::BTreeMap<
@@ -533,10 +537,15 @@ impl ProcessEngineRegistry {
             lash_execution_contracts::process::FitPolicy,
         >,
     ) -> Result<(), crate::ProcessEnvRefusal> {
-        let owned = self
-            .document_provider(kind)
-            .map(|documents| documents.owned_operations(performed))
-            .unwrap_or_default();
+        let owned = match self.document_provider(kind) {
+            Some(documents) => documents
+                .owned_operations(payload, performed)
+                .await
+                .map_err(|error| crate::ProcessEnvRefusal::Uncertified {
+                    reason: error.to_string(),
+                })?,
+            None => Default::default(),
+        };
         self.components().check_links(env, performed, &owned, fits)
     }
 

@@ -327,10 +327,12 @@ async fn an_exact_fit_is_required_before_a_launch_is_held() {
     engines
         .check_links(
             &target.engine_kind,
+            &target.payload,
             &Arc::new(env.clone()),
             &performed,
             &Default::default(),
         )
+        .await
         .expect("the wider tool is compatible");
     let choice = ProcessStartChoice {
         fits: std::collections::BTreeMap::from([(

@@ -164,10 +164,12 @@ pub async fn request_process_successor(
     engines
         .check_links(
             kind,
+            &request.payload,
             &std::sync::Arc::new(new_env.clone()),
             &performed,
             &successor.fits,
         )
+        .await
         .map_err(link)?;
     // An admitted step keeps the match its admission recorded.
     let row =

@@ -251,6 +251,7 @@ impl ProcessEngine for SimProcessEngine {
                 format: self.state_format(),
                 bytes,
                 pages: None,
+                requirements: Default::default(),
             },
             action,
         ))

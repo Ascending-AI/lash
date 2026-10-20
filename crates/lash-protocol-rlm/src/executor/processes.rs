@@ -25,10 +25,29 @@ pub(super) async fn retain_document(
     functions: &lash_kernel_doc::FunctionRegistry,
 ) -> Result<(), String> {
     let claim = ctx.execution_claim().map_err(|error| error.to_string())?;
-    let declarations = lash_kernel_doc::CheckedDeclarations::required(document, functions)
-        .map_err(|error| error.to_string())?;
     let documents =
         lash_vm_runtime::KernelDocuments::new(ctx.actor_context().backend().module_artifacts());
+    // A cell written under a stored surface lists functions this node does
+    // not hold: their declarations are the definitions its install stored,
+    // read and checked like any pinned code (FIG-6985).
+    let stored = documents
+        .stored_definitions(document, functions)
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|unretained| format!("the cell's code is not stored: {unretained:?}"))?;
+    let declarations = if stored.is_empty() {
+        lash_kernel_doc::CheckedDeclarations::required(document, functions)
+    } else {
+        let declared = lash_vm_broker::kernel::loader::declare(
+            document.manifest.functions.keys().copied(),
+            document.manifest.kernel,
+            functions,
+            &stored,
+        )
+        .map_err(|refusal| refusal.to_string())?;
+        lash_kernel_doc::CheckedDeclarations::required(document, &declared)
+    }
+    .map_err(|error| error.to_string())?;
     let frame = match ctx.frame_claim() {
         Ok(frame) => Some(frame),
         Err(lash_execution_contracts::plugin_error::PluginError::NotASessionRuntime { .. }) => None,
@@ -57,4 +76,43 @@ pub(super) async fn retain_document(
         (published, _) => published,
     };
     published.map(|_| ()).map_err(|error| error.to_string())
+}
+
+/// The execution closure of the cell's `document` over the definitions it
+/// was written against (FIG-6985): each `functions`, the node's registry,
+/// holds as it holds it, and each other as the store keeps it, admitted
+/// under the store's internal-operation authority (R5). A fresh cell was
+/// lowered against `functions`, so it reads nothing from the store.
+///
+/// # Errors
+///
+/// The store's failure, a definition it does not keep or refuses, or a
+/// closure that does not encode, as text.
+pub(super) async fn pinned_closure(
+    ctx: &RuntimeExecutionContext<'_>,
+    document: &lash_kernel_doc::Document,
+    functions: &lash_kernel_doc::FunctionRegistry,
+) -> Result<lash_vm_broker::kernel::closure::Closure, String> {
+    let documents =
+        lash_vm_runtime::KernelDocuments::new(ctx.actor_context().backend().module_artifacts());
+    let stored = documents
+        .stored_definitions(document, functions)
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|unretained| format!("the cell's code is not retained: {unretained:?}"))?;
+    // Stored code performs a package's internal operation only as that
+    // package's member (R5).
+    lash_vm_runtime::admit_internal(
+        &lash_vm_runtime::StoredAuthority::new(ctx.actor_context().backend().stores()),
+        &stored,
+    )
+    .await
+    .map_err(|unread| unread.to_string())?
+    .map_err(|refusal| refusal.to_string())?;
+    lash_vm_broker::kernel::closure::derive(
+        document.manifest.functions.keys().copied(),
+        functions,
+        &stored,
+    )
+    .map_err(|refusal| refusal.to_string())
 }

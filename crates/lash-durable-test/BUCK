@@ -975,6 +975,33 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
+    name = "pinned_code_laws__test",
+    crate_features = [],
+    crate_name = "pinned_code_laws",
+    crate_root = "tests/pinned_code_laws.rs",
+    declared_features = [],
+    srcs_patterns = [
+        "tests/pinned_code_laws.rs",
+        "tests/support/served.rs",
+        "tests/support/sim.rs",
+    ],
+    data_patterns = [],
+    exec_properties = sized_exec_properties("lash-internal-durable-test", "pinned_code_laws", "//crates/lash-durable-test:pinned_code_laws__test"),
+    extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    library = ":lash-durable-test",
+    library_crate_name = "lash_durable_test",
+    manifest_dir = "crates/lash-durable-test",
+    package_name = "lash-internal-durable-test",
+    rustc_env = {},
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "plugin_state_storage_laws__test",
     crate_features = [],
     crate_name = "plugin_state_storage_laws",

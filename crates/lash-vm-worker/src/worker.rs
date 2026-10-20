@@ -478,9 +478,12 @@ impl<'embedding> Server<'embedding> {
     fn start(&mut self, start: Start) -> Result<Hosted, PoolError> {
         self.wire = None;
         // The run's dialect is what its session or process recorded at
-        // creation. A worker whose host did not name that dialect refuses
-        // before it reads the document or the checkpoint (FIG-5990).
-        if !self.embedding.installs(&start.dialect) {
+        // creation. Running a document needs no dialect: only a cell that
+        // saves its functions writes them as the dialect's values, so a
+        // worker whose host did not name the dialect refuses such a run
+        // before it reads the document or the checkpoint (FIG-5990), and
+        // runs any other (FIG-6985).
+        if start.save.is_some() && !self.embedding.installs(&start.dialect) {
             return Err(PoolError::refused(RunRefusal::DialectNotInstalled {
                 dialect: start.dialect,
             }));
@@ -492,7 +495,7 @@ impl<'embedding> Server<'embedding> {
             })
         };
         let fresh = matches!(start.from, StartFrom::Fresh(_));
-        let program = self.program(&start.document, fresh)?;
+        let program = self.program(&start.document, &start.definitions, fresh)?;
         let path = start.observe_path.then(|| program.document.site_ordinals());
         let bounds = Bounds {
             memory_meter: match start.bounds.memory_meter {
@@ -642,15 +645,23 @@ impl<'embedding> Server<'embedding> {
         })
     }
     /// The content key is the token body itself rather than a claimed
-    /// identity. Holding the same Arc also reuses PreparedLibrary's
-    /// admission and code; eviction lets its weak document entries be
-    /// reclaimed on admission. A miss decodes the body once, under the
-    /// worker's data limits, and derives its execution closure over the
-    /// worker's registry: a resume needs every function the closure lists,
-    /// and the native of each native-only one (`K-MACH-008`). A `fresh`
-    /// start that reaches a function the worker lacks is refused as a start
-    /// is, and a resume as a restore, naming the function.
-    fn program(&mut self, encoded: &EncodedPayload, fresh: bool) -> Result<Program, PoolError> {
+    /// identity: a document reaches one closure on this worker, whose
+    /// stored definitions the parent supplies alike each time. Holding the
+    /// same Arc also reuses PreparedLibrary's admission and code; eviction
+    /// lets its weak document entries be reclaimed on admission. A miss
+    /// decodes the body once, under the worker's data limits, and takes
+    /// the library the document runs on ([`Embedding::library_for`]): the
+    /// frame's when it holds every function the document reaches, and
+    /// otherwise one assembled with `definitions`, the stored definitions
+    /// of the others (FIG-6985). A `fresh` start whose library is refused
+    /// is refused as a start is, and a resume as a restore, naming the
+    /// function.
+    fn program(
+        &mut self,
+        encoded: &EncodedPayload,
+        definitions: &[StoredDefinition],
+        fresh: bool,
+    ) -> Result<Program, PoolError> {
         if let Some(index) = self
             .documents
             .iter()
@@ -668,24 +679,31 @@ impl<'embedding> Server<'embedding> {
                     detail: Detail::new(error),
                 })
             })?;
-        let library = self.embedding.prepared_library().map_err(|error| {
-            PoolError::breach(ProtocolBreach::Machine {
-                detail: Detail::new(error),
+        let supplied: Vec<(lash_kernel_doc::FunctionId, &[u8])> = definitions
+            .iter()
+            .map(|definition| {
+                (
+                    lash_kernel_doc::FunctionId::from_bytes(definition.function),
+                    definition.body.0.as_slice(),
+                )
             })
-        })?;
-        let closure = lash_vm_broker::kernel::closure::derive(
-            document.manifest.functions.keys().copied(),
-            library.registry(),
-            lash_vm_broker::kernel::closure::Natives::Required,
-        )
-        .map_err(|refusal| match fresh {
-            true => PoolError::refused(RunRefusal::Start {
-                detail: Detail::new(refusal),
-            }),
-            false => PoolError::refused(RunRefusal::Restore {
-                refusal: refusal.into(),
-            }),
-        })?;
+            .collect();
+        let (library, closure) = self
+            .embedding
+            .library_for(&document, &supplied, self.bootstrap.tuning.kernel_data)
+            .map_err(|error| {
+                PoolError::breach(ProtocolBreach::Machine {
+                    detail: Detail::new(error),
+                })
+            })?
+            .map_err(|refusal| match fresh {
+                true => PoolError::refused(RunRefusal::Start {
+                    detail: Detail::new(refusal),
+                }),
+                false => PoolError::refused(RunRefusal::Restore {
+                    refusal: refusal.into(),
+                }),
+            })?;
         // Admitted by identity: one validated before, in lowering or an
         // earlier decode, is not validated again (FIG-6931). A refusal is
         // the start's, which admits it again.
@@ -1075,6 +1093,7 @@ mod tests {
             owner: VmOwner::new("process:law"),
             dialect: lash_vm_releases::TYPESCRIPT.to_owned(),
             document: EncodedPayload(document.canonical_bytes()),
+            definitions: Vec::new(),
             from: StartFrom::Fresh(
                 wire::encode(
                     PayloadKind::Start,
@@ -1171,7 +1190,7 @@ mod tests {
             ))
             .expect("document");
             server
-                .program(&EncodedPayload(next.canonical_bytes()), true)
+                .program(&EncodedPayload(next.canonical_bytes()), &[], true)
                 .expect("preparation");
         }
         assert_eq!(server.documents.len(), 16);

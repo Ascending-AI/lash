@@ -245,6 +245,7 @@ impl ProcessEngine for LawEngine {
                 format: self.state_format(),
                 bytes,
                 pages: None,
+                requirements: Default::default(),
             },
             action,
         ))

@@ -88,16 +88,21 @@ impl Fixture {
     /// Every edge to a kernel document. A document is read with the
     /// declaration of each helper it lists, `function:<id>` (FIG-6379),
     /// held beside it under the same referrer or by the frame whose cells
-    /// listed it, which retains it across those cells (FIG-6481): those
-    /// edges are checked here, so a declaration held by any other referrer
-    /// that holds no document fails every law that reads edges, and are left
-    /// out of the answer.
+    /// listed it, which retains it across those cells (FIG-6481), and is
+    /// published with its requirements record, `requirements:<id>`, under
+    /// its own referrer (FIG-6985): those edges are checked here, so a
+    /// declaration or record held by any other referrer that holds no
+    /// document fails every law that reads edges, and are left out of the
+    /// answer.
     pub async fn edges(&self) -> Vec<Edge> {
         let (declarations, documents): (Vec<Edge>, Vec<Edge>) = self
             .kernel_document_edges()
             .await
             .into_iter()
-            .partition(|edge| edge.artifact_ref.starts_with("function:"));
+            .partition(|edge| {
+                edge.artifact_ref.starts_with("function:")
+                    || edge.artifact_ref.starts_with("requirements:")
+            });
         let holders: std::collections::BTreeSet<(&str, &str)> = documents
             .iter()
             .map(|edge| (edge.kind.as_str(), edge.id.as_str()))
@@ -105,7 +110,7 @@ impl Fixture {
         let stray: Vec<&Edge> = declarations
             .iter()
             .filter(|edge| {
-                edge.kind != "frame_environment"
+                (edge.kind != "frame_environment" || edge.artifact_ref.starts_with("requirements:"))
                     && !holders.contains(&(edge.kind.as_str(), edge.id.as_str()))
             })
             .collect();

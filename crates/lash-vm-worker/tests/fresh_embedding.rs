@@ -476,3 +476,161 @@ unsafe impl GlobalAlloc for Counting {
 
 #[global_allocator]
 static ALLOCATOR: Counting = Counting;
+
+/// FIG-6985: a run whose code a worker lacks runs from the definitions
+/// the store keeps under exactly the charges, their origins and the
+/// outcome of the build that wrote it: with closed helpers answered by
+/// their generated plans (layout 0) and with every body run (layout 3),
+/// on a library assembled cold and on the same library cached.
+#[test]
+fn a_run_from_stored_definitions_charges_exactly_as_the_writers_build() {
+    use std::sync::Arc;
+
+    use lash_kernel_doc::{FunctionName, parse_document};
+    use lash_kernel_package::{HeldPackages, Package, PackageSources};
+    use lash_kernel_vm::Machine as _;
+    use lash_kernel_vm::kernel_internals::{Layout, start_with_layout};
+
+    let lash = lash_vm_releases::built().expect("lash's packages");
+    let ts = lash
+        .iter()
+        .find(|package| package.function("ts.number.parse_int").is_some())
+        .expect("the package of a planned helper");
+    let parse_int = ts
+        .function("ts.number.parse_int")
+        .expect("a planned helper");
+    let w = |release: &str, step: i64| {
+        Package::build(
+            "w",
+            release,
+            &PackageSources {
+                kernel: &format!(
+                    "use ts.number.parse_int\n\nfunction w.go(s: Text) -> Any\nkernel 1\ncharge 2\nbody {{\n  let n = invoke ts.number.parse_int(s, 10, false)\n  let out = [n, {step}]\n  return out\n}}\n"
+                ),
+                surface: "function go(s: Text) -> Any = w.go\n",
+                labels: "go\tgo\n",
+            },
+            &lash.iter().collect::<Vec<_>>(),
+        )
+        .expect("w builds")
+    };
+    let (w1, w2) = (w("1.0.0", 1), w("2.0.0", 2));
+    let go = w1.function("w.go").expect("release 1's w.go");
+    let install = |w: &Package| {
+        HeldPackages::install(lash.iter().cloned().chain([w.clone()])).expect("one registration")
+    };
+    let (writer, reader) = (install(&w1), install(&w2));
+    let embed = |held: &HeldPackages| {
+        lash_vm_worker::Embedder::new()
+            .dialect(lash_vm_worker::typescript(&WorkerTuning::standard()).expect("typescript"))
+            .and_then(|embedder| embedder.finish(held))
+            .expect("the worker binds")
+    };
+    let (writes, reads) = (embed(&writer), embed(&reader));
+
+    let closure =
+        lash_vm_broker::kernel::closure::derive([go], writer.functions(), &BTreeMap::new())
+            .expect("the writer's closure");
+    let mut document = parse_document(&format!(
+        "kernel 1\nnumbers float\nuse w.go = @{go}\nmain {{\n  let a = invoke w.go(\"123456789\")\n  return a\n}}\n"
+    ))
+    .expect("a document");
+    for function in closure.body().identities() {
+        let name = writer
+            .functions()
+            .name_of(&function)
+            .expect("a held function");
+        document
+            .manifest
+            .functions
+            .insert(function, FunctionName::new(name).expect("a name"));
+    }
+    let document = Arc::new(document);
+    let stored: Vec<(lash_kernel_doc::FunctionId, Vec<u8>)> = closure
+        .body()
+        .identities()
+        .filter(|function| reader.functions().get(function).is_none())
+        .map(|function| {
+            let definition = writer.functions().get(&function).expect("held");
+            (
+                function,
+                lash_kernel_doc::graph_tokens::encode_body(definition.definition().as_ref()),
+            )
+        })
+        .collect();
+    assert_eq!(
+        stored
+            .iter()
+            .map(|(function, _)| *function)
+            .collect::<Vec<_>>(),
+        vec![go],
+        "the reader lacks release 1's w.go alone"
+    );
+    let definitions: Vec<(lash_kernel_doc::FunctionId, &[u8])> = stored
+        .iter()
+        .map(|(function, body)| (*function, body.as_slice()))
+        .collect();
+    let limits = lash_kernel_doc::KernelDataLimits::standard();
+    let library = |embedding: &lash_vm_worker::Embedding, definitions| {
+        embedding
+            .library_for(&document, definitions, limits)
+            .expect("a prepared frame")
+            .expect("the run's library assembles")
+    };
+
+    let run = |(library, closure): (
+        lash_kernel_vm::PreparedLibrary,
+        lash_vm_broker::kernel::closure::Closure,
+    ),
+               layout: Layout| {
+        let program = lash_kernel_vm::Program {
+            closure: lash_kernel_doc::heap::PageId(closure.reference().0),
+            document: Arc::clone(&document),
+            library,
+        };
+        let start = lash_kernel_vm::CellStart {
+            owner: lash_kernel_doc::heap::PageId([9; 32]),
+            target: lash_kernel_vm::Target::Main,
+            args: Vec::new(),
+            session: None,
+            modes: Default::default(),
+            host: Vec::new(),
+        };
+        let mut machine =
+            start_with_layout(program, BOUNDS, start, layout, Box::<Pages>::default())
+                .expect("the run starts");
+        let tape = lash_kernel_vm::ChargeTape::new();
+        machine.record_charges(tape.clone());
+        let end = loop {
+            match machine.run(&mut World, u64::MAX).expect("a slice") {
+                lash_kernel_vm::Step::Ended(end) => break end,
+                lash_kernel_vm::Step::Slice => {}
+                lash_kernel_vm::Step::Parked(park) => panic!("the run never waits: {park:?}"),
+            }
+        };
+        let lash_kernel_vm::End::Finished(done) = end else {
+            panic!("the run finishes: {end:?}");
+        };
+        (done.result, tape.steps())
+    };
+
+    // Assembled once, cold: nothing compiled, nothing cached.
+    let cold = library(&reads, &definitions);
+    assert!(
+        cold.0
+            .registry()
+            .get(&parse_int)
+            .and_then(|function| function.plan())
+            .is_some(),
+        "the assembled library keeps the planned helper's plan"
+    );
+    assert_eq!(cold.1.reference(), closure.reference());
+    for layout in [Layout(0), Layout(3)] {
+        let all_a = run(library(&writes, &[]), layout);
+        assert!(!all_a.1.is_empty(), "the run charges");
+        assert_eq!(run(cold.clone(), layout), all_a, "cold, layout {layout:?}");
+        // Answered from the worker's cache of assembled libraries.
+        let warm = run(library(&reads, &definitions), layout);
+        assert_eq!(warm, all_a, "warm, layout {layout:?}");
+    }
+}

@@ -996,3 +996,66 @@ async fn a_stored_set_outlives_its_installer_and_collection() {
     );
     assert!(view.catalog().get(&helper).is_some(), "the helper's code");
 }
+
+/// `s.get(name)`, as the source `name` writes it, performing `s.raw`.
+fn raw_reader(name: &str) -> String {
+    format!(
+        "function {name}(name: Text) -> Any\nkernel 1\ncharge 1\n\
+         effect s.raw(name: Text) -> Any contract \"raw/1\"\n\
+         body {{\n  let value = perform s.raw(name) as Any\n  return value\n}}\n"
+    )
+}
+
+/// R5 (FIG-6985) over the store an install writes: `s` declares `raw`
+/// internal, and its helper `s.get` performs it. A node that never built
+/// `s` admits `s.get`'s stored code, which the install indexed as `s`'s,
+/// and refuses at admission a stored definition named `s.get2` performing
+/// the same operation, which no install indexed, naming it and `s.raw`.
+#[tokio::test]
+async fn stored_code_performs_an_internal_operation_only_as_its_packages_own() {
+    let s = Package::build(
+        "s",
+        "1.0.0",
+        &PackageSources {
+            kernel: &raw_reader("s.get"),
+            surface: "internal operation raw(name: Text) -> Any contract \"raw/1\"\n\
+                      async function get(name: Text) -> Any = s.get\n",
+            labels: "",
+        },
+        &[],
+    )
+    .expect("s builds");
+    let get = s.function("s.get").expect("s's helper");
+    let stores = crate::tests::sqlite_memory_store_set().await;
+    let backend = lash_conformance::backend_over(stores.clone());
+    let installed = Arc::new(HeldPackages::install([s]).expect("s's set"));
+    lash_execution_contracts::backend::NodePackages::hold(
+        &NodeHold::new(Arc::clone(&installed)),
+        &backend,
+    )
+    .await
+    .expect("s installs");
+    let stored = |text: &str| {
+        let definition = lash_kernel_doc::parse_definition(text).expect("a definition");
+        (definition.identity(), Arc::new(definition))
+    };
+    let (genuine, forged) = (stored(&raw_reader("s.get")), stored(&raw_reader("s.get2")));
+    assert_eq!(genuine.0, get, "the stored helper is s's own code");
+    let authority = lash_vm_runtime::StoredAuthority::new(stores.clone());
+    assert_eq!(
+        lash_vm_runtime::admit_internal(&authority, &[genuine.clone()].into_iter().collect()).await,
+        Ok(Ok(())),
+        "s's own helper performs its internal operation"
+    );
+    assert_eq!(
+        lash_vm_runtime::admit_internal(
+            &authority,
+            &[genuine, forged.clone()].into_iter().collect()
+        )
+        .await,
+        Ok(Err(lash_vm_runtime::LoadRefusal::InternalOperation {
+            function: forged.0,
+            operation: lash_kernel_doc::EffectName::new("s.raw").expect("an operation"),
+        })),
+    );
+}

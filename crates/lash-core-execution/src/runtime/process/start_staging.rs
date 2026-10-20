@@ -1194,10 +1194,12 @@ async fn link_start(
         .engines
         .check_links(
             kind,
+            payload,
             &Arc::new(env.clone()),
             &performed,
             &std::collections::BTreeMap::new(),
         )
+        .await
         .map_err(refused)?;
     Ok(())
 }

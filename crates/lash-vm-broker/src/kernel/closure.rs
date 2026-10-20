@@ -5,8 +5,15 @@
 //! closure of its document: each function the document lists and every
 //! function their bodies reach, ascending by identity, each with its
 //! definition node (kind 14) and whether only a native implements it. The
-//! closure is derived from the document, so a worker and a parent derive one
-//! node from one document, and a root carries only its reference.
+//! closure is a function of the document and those definitions alone, so
+//! a worker and a parent derive one node from one document, and a root
+//! carries only its reference.
+//!
+//! A definition is the node's own when its registry holds that identity,
+//! and is read from the store otherwise (FIG-6985): pinned work runs from
+//! the definitions it was written against, whichever build runs it. A
+//! closure carries the images of the stored ones, for the worker that
+//! admits them ([`crate::kernel::loader`]).
 //!
 //! Whoever commits a run's first root stages the closure node and every
 //! definition node it names beside it. The store retains them while a root
@@ -23,7 +30,7 @@ use lash_core_store::checkpoint_graph::{
 use lash_kernel_doc::graph_tokens::{
     ChildRef, TokenCodec, TokenError, TokenReader, TokenWriter, check_ascending, encode_body,
 };
-use lash_kernel_doc::{FunctionId, FunctionRegistry, RegisteredFunction};
+use lash_kernel_doc::{FunctionDefinition, FunctionId, FunctionRegistry};
 use lash_vm_protocol::KernelRestoreRefusal;
 
 /// One function a closure holds.
@@ -98,12 +105,10 @@ impl ExecutionClosure {
 /// of a run that pins it refuses, naming the function.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ClosureRefusal {
-    /// The registry holds no function of this identity.
-    #[error("function {function} is not held here")]
+    /// Neither the registry nor the store holds a function of this
+    /// identity.
+    #[error("function {function} is neither held here nor stored")]
     Missing { function: FunctionId },
-    /// Only a native implements the function, and the registry has none.
-    #[error("function {function} needs a native implementation this worker lacks")]
-    NativeMissing { function: FunctionId },
     /// A definition did not encode as a graph node: a defect of the build.
     #[error(transparent)]
     Graph(#[from] GraphRefusal),
@@ -115,25 +120,11 @@ impl From<ClosureRefusal> for KernelRestoreRefusal {
             ClosureRefusal::Missing { function } => Self::MissingFunction {
                 function: function.to_string(),
             },
-            ClosureRefusal::NativeMissing { function } => Self::MissingNative {
-                function: function.to_string(),
-            },
             ClosureRefusal::Graph(refusal) => Self::Malformed {
                 problem: refusal.to_string(),
             },
         }
     }
-}
-
-/// Whether a closure is derived for a machine that runs it, which holds the
-/// native of every native-only function, or for a parent that only links.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Natives {
-    /// A worker's registry: a native-only function without its native is
-    /// refused.
-    Required,
-    /// A parent's declarations: natives are a worker's.
-    Declared,
 }
 
 /// A document's execution closure, with the nodes that store it.
@@ -143,6 +134,9 @@ pub struct Closure {
     body: Arc<ExecutionClosure>,
     /// The closure node and every node of every definition it names.
     nodes: Arc<BTreeMap<NodeId, EncodedNode>>,
+    /// The token body of each definition read from the store: those the
+    /// registry it was derived over does not hold.
+    stored: Arc<BTreeMap<FunctionId, Arc<[u8]>>>,
 }
 
 impl Closure {
@@ -162,6 +156,13 @@ impl Closure {
     #[must_use]
     pub fn nodes(&self) -> &BTreeMap<NodeId, EncodedNode> {
         &self.nodes
+    }
+
+    /// The token body of each of its definitions that was read from the
+    /// store, by identity: what a worker of this node lacks.
+    #[must_use]
+    pub fn stored(&self) -> &BTreeMap<FunctionId, Arc<[u8]>> {
+        &self.stored
     }
 
     /// Stages the closure in `tx`, whose root names it: every node on the
@@ -232,12 +233,15 @@ fn staging() -> GraphStaging {
     GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)))
 }
 
-/// `registered`'s definition as its graph nodes, encoded once per process:
-/// its identity names one definition, so its nodes never change.
-fn definition_nodes(registered: &RegisteredFunction) -> Result<Arc<DefinitionNodes>, GraphRefusal> {
+/// The definition `function`, whose token body `image` answers, as its
+/// graph nodes, encoded once per process: its identity names one
+/// definition, so its nodes never change.
+fn definition_nodes(
+    function: FunctionId,
+    image: impl FnOnce() -> Arc<[u8]>,
+) -> Result<Arc<DefinitionNodes>, GraphRefusal> {
     static NODES: OnceLock<Mutex<HashMap<FunctionId, Arc<DefinitionNodes>>>> = OnceLock::new();
     let cache = NODES.get_or_init(Mutex::default);
-    let function = registered.identity();
     if let Some(nodes) = cache
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -247,10 +251,7 @@ fn definition_nodes(registered: &RegisteredFunction) -> Result<Arc<DefinitionNod
     }
     let mut staging = staging();
     let id = staging
-        .encode(
-            NodeKind::HELPER_DEFINITION,
-            TypedBody::logical(&registered.image()),
-        )
+        .encode(NodeKind::HELPER_DEFINITION, TypedBody::logical(&image()))
         .map_err(GraphRefusal::from)?;
     let nodes = Arc::new(DefinitionNodes {
         id,
@@ -265,19 +266,57 @@ fn definition_nodes(registered: &RegisteredFunction) -> Result<Arc<DefinitionNod
     ))
 }
 
-/// The closure of `listed`, the library functions a document lists, over
-/// `functions`: each listed function and every function a body it holds
-/// reaches, transitively.
+/// One function of a closure, as the registry holds it or the store
+/// answered it.
+enum Member<'a> {
+    Held(&'a lash_kernel_doc::RegisteredFunction),
+    Stored(&'a Arc<FunctionDefinition>),
+}
+
+impl Member<'_> {
+    fn of<'a>(
+        function: FunctionId,
+        held: &'a FunctionRegistry,
+        stored: &'a BTreeMap<FunctionId, Arc<FunctionDefinition>>,
+    ) -> Result<Member<'a>, ClosureRefusal> {
+        match (held.get(&function), stored.get(&function)) {
+            (Some(registered), _) => Ok(Member::Held(registered)),
+            (None, Some(definition)) => Ok(Member::Stored(definition)),
+            (None, None) => Err(ClosureRefusal::Missing { function }),
+        }
+    }
+
+    fn callees(&self) -> Vec<FunctionId> {
+        match self {
+            Member::Held(registered) => registered.callees().iter().copied().collect(),
+            Member::Stored(definition) => definition
+                .body()
+                .map(|body| body.functions.keys().copied().collect())
+                .unwrap_or_default(),
+        }
+    }
+
+    fn native_only(&self) -> bool {
+        match self {
+            Member::Held(registered) => registered.states_native() && !registered.has_body(),
+            Member::Stored(definition) => definition.has_native() && definition.body().is_none(),
+        }
+    }
+}
+
+/// The closure of `listed`, the library functions a document lists: each
+/// listed function and every function a body it holds reaches,
+/// transitively, each from `held`, the node's registry, or, when it holds
+/// no such identity, from `stored`, the definitions read from the store.
 ///
 /// # Errors
 ///
-/// [`ClosureRefusal`], naming the first function, by identity, that
-/// `functions` does not hold, or whose native it lacks under
-/// [`Natives::Required`].
+/// [`ClosureRefusal::Missing`], naming the first function, by identity,
+/// that neither holds.
 pub fn derive(
     listed: impl IntoIterator<Item = FunctionId>,
-    functions: &FunctionRegistry,
-    natives: Natives,
+    held: &FunctionRegistry,
+    stored: &BTreeMap<FunctionId, Arc<FunctionDefinition>>,
 ) -> Result<Closure, ClosureRefusal> {
     let mut reached = BTreeSet::new();
     let mut pending: Vec<FunctionId> = listed.into_iter().collect();
@@ -285,28 +324,27 @@ pub fn derive(
         if reached.contains(&function) {
             continue;
         }
-        let registered = functions
-            .get(&function)
-            .ok_or(ClosureRefusal::Missing { function })?;
-        pending.extend(registered.callees().iter().copied());
+        pending.extend(Member::of(function, held, stored)?.callees());
         reached.insert(function);
     }
     let mut body = ExecutionClosure::default();
     let mut nodes = BTreeMap::new();
+    let mut images = BTreeMap::new();
     for function in reached {
-        let registered = functions
-            .get(&function)
-            .ok_or(ClosureRefusal::Missing { function })?;
-        let native_only = registered.states_native() && !registered.has_body();
-        if native_only && natives == Natives::Required && registered.native().is_none() {
-            return Err(ClosureRefusal::NativeMissing { function });
-        }
-        let definition = definition_nodes(registered)?;
+        let member = Member::of(function, held, stored)?;
+        let definition = match &member {
+            Member::Held(registered) => definition_nodes(function, || registered.image())?,
+            Member::Stored(definition) => {
+                let image: Arc<[u8]> = encode_body(definition.as_ref()).into();
+                images.insert(function, Arc::clone(&image));
+                definition_nodes(function, || image)?
+            }
+        };
         nodes.extend(definition.nodes.iter().map(|node| (node.id, node.clone())));
         body.functions.push(ClosureFunction {
             function,
             definition: definition.id.child_ref(),
-            native_only,
+            native_only: member.native_only(),
         });
     }
     let mut staging = staging();
@@ -321,9 +359,6 @@ pub fn derive(
         reference,
         body: Arc::new(body),
         nodes: Arc::new(nodes),
+        stored: Arc::new(images),
     })
 }
-
-#[cfg(test)]
-#[path = "closure_tests.rs"]
-mod tests;

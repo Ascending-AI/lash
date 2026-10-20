@@ -231,6 +231,7 @@ impl ProcessEngine for BenchEngine {
                 format: self.state_format(),
                 bytes,
                 pages: None,
+                requirements: Default::default(),
             },
             action,
         ))

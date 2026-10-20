@@ -47,8 +47,8 @@ pub use lash_vm_client::packages::refusal as package_refusal;
 /// `typescript` gives the host `lash::typescript`, the front end and
 /// printer, and `python` gives it `lash::python`.
 /// A session or process records its dialect at creation, and a worker whose
-/// embedding lacks it refuses the run
-/// ([`RunRefusal::DialectNotInstalled`]).
+/// embedding lacks it refuses a run that saves functions
+/// ([`RunRefusal::DialectNotInstalled`]); running code needs no dialect.
 /// `examples/worker_host.rs` proves this bootstrap.
 /// The child starts with an empty environment and closes inherited descriptors.
 /// The language bounds guest authority; the process contains native crashes.

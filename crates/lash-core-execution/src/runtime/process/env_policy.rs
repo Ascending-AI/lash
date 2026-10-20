@@ -234,12 +234,14 @@ impl<'a> ProcessEnvCx<'a> {
             effects.insert(effect.clone(), link);
         }
         let candidate = ProcessEnv::from_run(run, effects, components)?;
-        self.engines.capture_env(
-            &self.target.engine_kind,
-            &self.target.payload,
-            performed,
-            &candidate,
-        )
+        self.engines
+            .capture_env(
+                &self.target.engine_kind,
+                &self.target.payload,
+                performed,
+                &candidate,
+            )
+            .await
     }
 
     /// Restrict the enclosing process's environment to the effects the
@@ -273,7 +275,7 @@ impl ProcessEngineRegistry {
     /// # Errors
     ///
     /// A missing effect, an unfit link, or a component that cannot serve it.
-    pub fn capture_env(
+    pub async fn capture_env(
         &self,
         kind: &str,
         payload: &serde_json::Value,
@@ -294,13 +296,20 @@ impl ProcessEngineRegistry {
                 reason: error.to_string(),
             })?;
         self.components().admit(&env)?;
-        self.check_links(kind, &Arc::new(env.clone()), performed, &Default::default())
-            .map_err(|refusal| match refusal {
-                ProcessEnvRefusal::ToolNotServed { effect, tool, .. } => {
-                    ProcessEnvRefusal::CaptureMissing { effect, tool }
-                }
-                refusal => refusal,
-            })?;
+        self.check_links(
+            kind,
+            payload,
+            &Arc::new(env.clone()),
+            performed,
+            &Default::default(),
+        )
+        .await
+        .map_err(|refusal| match refusal {
+            ProcessEnvRefusal::ToolNotServed { effect, tool, .. } => {
+                ProcessEnvRefusal::CaptureMissing { effect, tool }
+            }
+            refusal => refusal,
+        })?;
         Ok(env)
     }
 }

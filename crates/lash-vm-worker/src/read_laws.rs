@@ -207,7 +207,7 @@ fn lowered(dialect: &str, source: &str, effect: &EffectName) -> Program {
     let closure = lash_vm_broker::kernel::closure::derive(
         document.manifest.functions.keys().copied(),
         library.registry(),
-        lash_vm_broker::kernel::closure::Natives::Required,
+        &std::collections::BTreeMap::new(),
     )
     .expect("the worker holds the cell's functions");
     Program {

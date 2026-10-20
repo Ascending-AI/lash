@@ -29,7 +29,6 @@ use lash_execution_contracts::module_artifacts::ModuleArtifactBody;
 use lash_execution_contracts::module_artifacts::ModuleArtifactHold;
 use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
 use lash_kernel_check::{WorkflowDocument, WorkflowDocumentError};
-use lash_kernel_doc::graph_tokens::decode_body;
 use lash_kernel_doc::{
     CheckedDeclarations, Correspondence, Document, DocumentId, FunctionDeclarations,
     FunctionDefinition, FunctionId, IdentifiedDocument, SourceMap, SourceMapId,
@@ -49,6 +48,15 @@ pub(crate) fn function_artifact(function: &FunctionId) -> ArtifactName {
     ArtifactName {
         store: lash_core::ArtifactStoreId::KernelDocument,
         artifact_ref: format!("function:{function}"),
+    }
+}
+
+/// The module artifact a published document's requirements record is
+/// stored under (FIG-6985).
+pub(crate) fn requirements_artifact(document: &DocumentId) -> ArtifactName {
+    ArtifactName {
+        store: lash_core::ArtifactStoreId::KernelDocument,
+        artifact_ref: format!("requirements:{document}"),
     }
 }
 
@@ -171,6 +179,9 @@ pub struct KernelDocuments {
     /// bytes, so residency neither retains an artifact nor hides corruption.
     /// Each entry is keyed by its token body.
     decoded: Arc<Mutex<VecDeque<IdentifiedDocument>>>,
+    /// Stored definitions, decoded and checked once by identity; a read
+    /// still fetches each one's current bytes.
+    definitions: Arc<lash_vm_broker::kernel::loader::Definitions>,
 }
 
 /// The hosting factory outlives its per-activation engine bindings. Only
@@ -178,6 +189,7 @@ pub struct KernelDocuments {
 #[derive(Default)]
 pub(crate) struct ProcessPreparations {
     decoded: Arc<Mutex<VecDeque<IdentifiedDocument>>>,
+    definitions: Arc<lash_vm_broker::kernel::loader::Definitions>,
     effects: Arc<Mutex<EffectPreparations>>,
 }
 
@@ -187,6 +199,7 @@ impl ProcessPreparations {
         mut engine: super::KernelProcessEngine,
     ) -> super::KernelProcessEngine {
         engine.documents.decoded = Arc::clone(&self.decoded);
+        engine.documents.definitions = Arc::clone(&self.definitions);
         engine.effect_preparations = Arc::clone(&self.effects);
         engine
     }
@@ -287,6 +300,7 @@ impl KernelDocuments {
         Self {
             store,
             decoded: Arc::new(Mutex::new(VecDeque::new())),
+            definitions: Arc::default(),
         }
     }
 
@@ -362,9 +376,22 @@ impl KernelDocuments {
             module_ref: &document_ref,
             body: ModuleArtifactBody::Document(document.body()),
         };
+        // What running the document requires by its code, written with it
+        // and held by its claim (FIG-6985). A retained document is a
+        // session cell's: its record is the cell's execution root, written
+        // at park and capture and empty between cells, so its publication
+        // costs only the document (DOC-COST).
+        let requirements = requirements_artifact(&identity);
+        let record =
+            lash_kernel_doc::graph_tokens::encode_body(&declarations.requirements(document));
+        let requirements_hold = ModuleArtifactHold::Acquire {
+            module_ref: &requirements.artifact_ref,
+            body: ModuleArtifactBody::Bytes(&record),
+        };
         match retainer {
             None => {
                 artifacts.push(document_hold);
+                artifacts.push(requirements_hold);
                 self.store.hold_module_artifacts(claim, &artifacts).await?;
             }
             Some(retainer) => {
@@ -431,8 +458,10 @@ impl KernelDocuments {
         Ok(())
     }
 
-    /// The definition of each of `functions`, read back under its identity
-    /// and checked to be it, whichever document or install stored it.
+    /// The definition stored under each of `functions`' identities, read
+    /// back by FunctionId and checked to be that function's (FIG-6985):
+    /// the one read of stored code, whichever document, install or bundle
+    /// rooted it.
     ///
     /// # Errors
     ///
@@ -444,81 +473,127 @@ impl KernelDocuments {
         Result<std::collections::BTreeMap<FunctionId, Arc<FunctionDefinition>>, Unretained>,
         DocumentStoreError,
     > {
-        let mut read = std::collections::BTreeMap::new();
+        let mut stored = std::collections::BTreeMap::new();
         for function in functions {
-            let artifact = function_artifact(&function);
-            let Some(bytes) = self
-                .store
-                .get_module_artifact(&artifact.artifact_ref)
-                .await?
-            else {
-                return Ok(Err(Unretained::Missing { artifact }));
+            match self.definition(&function).await? {
+                Ok(definition) => stored.insert(function, definition),
+                Err(unretained) => return Ok(Err(unretained)),
             };
-            let definition = match decode_body::<FunctionDefinition>(&bytes) {
-                Ok(definition) => definition,
-                Err(error) => {
-                    return Ok(Err(Unretained::Corrupt {
-                        artifact,
-                        message: error.to_string(),
-                    }));
-                }
-            };
-            let identity = definition.identity();
-            if identity != function {
-                return Ok(Err(Unretained::Corrupt {
-                    artifact,
-                    message: format!("the stored definition is {identity}"),
-                }));
-            }
-            read.insert(function, Arc::new(definition));
         }
-        Ok(Ok(read))
+        Ok(Ok(stored))
     }
 
-    /// The declarations `document` was stored with, each read back under
-    /// its identity and checked against it.
+    /// The requirements record `document` was published with, checked
+    /// against the record its stored code derives (FIG-6985): a record
+    /// that does not read, or reads as another, is corrupt.
     ///
     /// # Errors
     ///
     /// The store's failure to answer.
-    pub async fn declarations(
+    pub async fn published_requirements(
         &self,
         document: &Document,
-    ) -> Result<Result<FunctionDeclarations, Unretained>, DocumentStoreError> {
-        let mut held = FunctionDeclarations::new();
-        for function in document.manifest.functions.keys() {
-            let artifact = function_artifact(function);
-            let Some(bytes) = self
-                .store
-                .get_module_artifact(&artifact.artifact_ref)
-                .await?
-            else {
-                return Ok(Err(Unretained::Missing { artifact }));
-            };
-            let corrupt = |message: String| Unretained::Corrupt {
-                artifact: artifact.clone(),
-                message,
-            };
-            let definition = match decode_body::<FunctionDefinition>(&bytes) {
-                Ok(definition) => definition,
-                Err(error) => return Ok(Err(corrupt(error.to_string()))),
-            };
-            held.insert(*function, definition);
-        }
-        Ok(match lash_kernel_doc::check_declarations(document, &held) {
-            Ok(()) => Ok(held),
-            Err(refusal) => Err(Unretained::Corrupt {
-                artifact: match &refusal {
-                    lash_kernel_doc::DeclarationRefusal::Identity { function, .. }
-                    | lash_kernel_doc::DeclarationRefusal::Name { function, .. }
-                    | lash_kernel_doc::DeclarationRefusal::Dependency { function, .. } => {
-                        function_artifact(function)
-                    }
-                    _ => document_artifact(&document.identity()),
-                },
+    ) -> Result<Result<lash_kernel_doc::ExecutionRequirements, Unretained>, DocumentStoreError>
+    {
+        let artifact = requirements_artifact(&document.identity());
+        let Some(bytes) = self
+            .store
+            .get_module_artifact(&artifact.artifact_ref)
+            .await?
+        else {
+            return Ok(Err(Unretained::Missing { artifact }));
+        };
+        let stored = match self
+            .stored_functions(document.manifest.functions.keys().copied())
+            .await?
+        {
+            Ok(stored) => stored,
+            Err(unretained) => return Ok(Err(unretained)),
+        };
+        let declarations = stored
+            .into_iter()
+            .map(|(function, definition)| (function, definition.as_ref().clone()))
+            .collect::<FunctionDeclarations>();
+        let derived = match CheckedDeclarations::required(document, &declarations) {
+            Ok(checked) => checked.requirements(document),
+            Err(refusal) => {
+                return Ok(Err(Unretained::Corrupt {
+                    artifact,
+                    message: refusal.to_string(),
+                }));
+            }
+        };
+        Ok(
+            match lash_kernel_doc::graph_tokens::decode_body_with_limits::<
+                lash_kernel_doc::ExecutionRequirements,
+            >(&bytes, lash_kernel_doc::KernelDataLimits::standard())
+            {
+                Ok(record) if record == derived => Ok(record),
+                Ok(_) => Err(Unretained::Corrupt {
+                    artifact,
+                    message: "the record is not the one the document's code derives".to_owned(),
+                }),
+                Err(error) => Err(Unretained::Corrupt {
+                    artifact,
+                    message: error.to_string(),
+                }),
+            },
+        )
+    }
+
+    /// The stored definition of each library function `document` lists
+    /// that `held`, the node's registry, does not hold, read back under its
+    /// identity and checked to be that function's (FIG-6985): what a
+    /// pinned run of `document` executes beside the node's own functions,
+    /// which are the same definitions by identity. A node that holds every
+    /// one reads nothing.
+    ///
+    /// # Errors
+    ///
+    /// The store's failure to answer.
+    pub async fn stored_definitions(
+        &self,
+        document: &Document,
+        held: &lash_kernel_doc::FunctionRegistry,
+    ) -> Result<
+        Result<std::collections::BTreeMap<FunctionId, Arc<FunctionDefinition>>, Unretained>,
+        DocumentStoreError,
+    > {
+        let lacked: Vec<FunctionId> = document
+            .manifest
+            .functions
+            .keys()
+            .filter(|function| held.get(function).is_none())
+            .copied()
+            .collect();
+        self.stored_functions(lacked).await
+    }
+
+    /// The definition stored under `function`'s identity, decoded and
+    /// checked to be that function's.
+    async fn definition(
+        &self,
+        function: &FunctionId,
+    ) -> Result<Result<Arc<FunctionDefinition>, Unretained>, DocumentStoreError> {
+        let artifact = function_artifact(function);
+        let Some(bytes) = self
+            .store
+            .get_module_artifact(&artifact.artifact_ref)
+            .await?
+        else {
+            return Ok(Err(Unretained::Missing { artifact }));
+        };
+        Ok(self
+            .definitions
+            .decode(
+                *function,
+                &bytes,
+                lash_kernel_doc::KernelDataLimits::standard(),
+            )
+            .map_err(|refusal| Unretained::Corrupt {
+                artifact,
                 message: refusal.to_string(),
-            }),
-        })
+            }))
     }
 
     /// The document `reference` names, entered where it says, with the
@@ -548,10 +623,29 @@ impl KernelDocuments {
             }
             Err(error) => return Err(error),
         };
-        let declarations = match self.declarations(&document).await? {
-            Ok(declarations) => declarations,
+        let declarations = match self
+            .stored_functions(document.manifest.functions.keys().copied())
+            .await?
+        {
+            Ok(stored) => stored
+                .into_iter()
+                .map(|(function, definition)| (function, definition.as_ref().clone()))
+                .collect::<FunctionDeclarations>(),
             Err(unretained) => return Ok(StoredWorkflow::Unretained(unretained)),
         };
+        if let Err(refusal) = lash_kernel_doc::check_declarations(&document, &declarations) {
+            return Ok(StoredWorkflow::Unretained(Unretained::Corrupt {
+                artifact: match &refusal {
+                    lash_kernel_doc::DeclarationRefusal::Identity { function, .. }
+                    | lash_kernel_doc::DeclarationRefusal::Name { function, .. }
+                    | lash_kernel_doc::DeclarationRefusal::Dependency { function, .. } => {
+                        function_artifact(function)
+                    }
+                    _ => artifact,
+                },
+                message: refusal.to_string(),
+            }));
+        }
         let rewritten_from = match self.rewrite(&reference.document).await? {
             Ok(rewrite) => rewrite,
             Err(unretained) => return Ok(StoredWorkflow::Unretained(unretained)),
@@ -794,6 +888,7 @@ impl KernelDocuments {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash_kernel_doc::graph_tokens::decode_body;
 
     struct Stored(Mutex<Option<Vec<u8>>>);
 
@@ -972,7 +1067,13 @@ mod tests {
             let mut writes = std::mem::take(&mut *store.writes.lock().expect("writes"));
             assert_eq!(writes.len(), 1, "one fenced batch, not {writes:?}");
             let mut write = writes.remove(0);
-            assert_eq!(write.len(), 4);
+            assert_eq!(write.len(), 5);
+            // The document's requirements record rides in the same batch
+            // (FIG-6985).
+            assert_eq!(
+                write.pop().map(|(artifact, _)| artifact),
+                Some(requirements_artifact(&identity).artifact_ref)
+            );
             assert_eq!(
                 write.pop().map(|(artifact, _)| artifact),
                 Some(document_artifact(&identity).artifact_ref)
@@ -1231,5 +1332,64 @@ mod tests {
         );
         *store.0.lock().expect("store") = None;
         assert!(engine.performed_effects(&payload).await.is_err());
+    }
+
+    /// A document is published with the requirements record its code
+    /// derives, in the same write (FIG-6985): the native of a native-only
+    /// function it reaches and its kernel version. The record reads back
+    /// only as the one its stored code derives again; one that reads
+    /// otherwise is corrupt, never taken.
+    #[tokio::test]
+    async fn a_document_is_published_with_the_requirements_its_code_derives() {
+        let mut registry = lash_kernel_doc::FunctionRegistry::declarations();
+        let leaf = registry
+            .register(
+                lash_kernel_doc::parse_definition(
+                    "function leaf() -> Int\nkernel 1\ncharge 1\nnative\n",
+                )
+                .expect("leaf"),
+                None,
+            )
+            .expect("registered");
+        let document = IdentifiedDocument::new(
+            lash_kernel_doc::parse_document(&format!(
+                "kernel 1\nnumbers float\nuse leaf = @{leaf}\nentry one() -> Any\nfn one() {{ let n = invoke leaf() return n }}\nmain {{ }}",
+            ))
+            .expect("document"),
+        );
+        let declarations = CheckedDeclarations::required(&document, &registry).expect("listed");
+        let store = Arc::new(Counted::default());
+        let documents = KernelDocuments::new(store.clone());
+        let claim = ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
+            lash_core::HostArtifactPin::mint(),
+        ))
+        .expect("a host pin is unguarded");
+        documents
+            .publish(&claim, &document, &declarations)
+            .await
+            .expect("published");
+        let record = documents
+            .published_requirements(&document)
+            .await
+            .expect("read")
+            .expect("the record reads as its code derives it");
+        assert_eq!(record.natives, [leaf].into());
+        assert_eq!(record.kernels, [1].into());
+
+        let forged = lash_kernel_doc::graph_tokens::encode_body(
+            &lash_kernel_doc::ExecutionRequirements::default(),
+        );
+        store
+            .stored
+            .lock()
+            .expect("store")
+            .insert(requirements_artifact(&document.id()).artifact_ref, forged);
+        assert!(matches!(
+            documents
+                .published_requirements(&document)
+                .await
+                .expect("read"),
+            Err(Unretained::Corrupt { .. })
+        ));
     }
 }

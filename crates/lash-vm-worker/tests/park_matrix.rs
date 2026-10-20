@@ -1097,6 +1097,7 @@ impl KernelEffects for LawHost {
                 "park-law envelope",
             )?),
             owed: Vec::new(),
+            links: Default::default(),
         })
     }
 }

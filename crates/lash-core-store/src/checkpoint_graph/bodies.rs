@@ -259,11 +259,16 @@ pub struct ExecRoot {
     /// match a cell committed, which its later calls run on. Empty once it
     /// ended, and for a process.
     pub owed: Vec<PluginCallbackIdentity>,
+    /// What running the execution requires of a node (FIG-6985): the
+    /// natives and kernel versions its code reaches and the providers and
+    /// codecs of its static operation links, written with every root. An
+    /// ended root requires nothing.
+    pub requirements: lash_kernel_doc::ExecutionRequirements,
 }
 
 impl TokenCodec for ExecRoot {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(10);
+        out.seq(11);
         self.exec.encode(out);
         self.owner.encode(out);
         out.text(&self.executable_identity);
@@ -274,10 +279,11 @@ impl TokenCodec for ExecRoot {
         self.host.encode(out);
         self.envelope.encode(out);
         self.owed.encode(out);
+        self.requirements.encode(out);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(10)?;
+        input.expect_struct(11)?;
         Ok(Self {
             exec: ExecRootKind::decode(input)?,
             owner: NodeId::decode(input)?,
@@ -289,6 +295,7 @@ impl TokenCodec for ExecRoot {
             host: Option::decode(input)?,
             envelope: Option::decode(input)?,
             owed: Vec::decode(input)?,
+            requirements: lash_kernel_doc::ExecutionRequirements::decode(input)?,
         })
     }
 }

@@ -728,6 +728,7 @@ impl ProcessEngine for SleepEngine {
                 format: self.state_format(),
                 bytes: serde_json::to_vec(&script).map_err(infra)?,
                 pages: None,
+                requirements: Default::default(),
             },
             action,
         ))

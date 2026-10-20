@@ -138,6 +138,7 @@ fn parked(issued: Vec<Issued>, withdrawn: Vec<lash_protocol_types::WaitId>) -> S
             caught: Vec::new(),
             reads: None,
             start: None,
+            requirements: Default::default(),
         })
         .expect("a run output serializes"),
     )
@@ -987,5 +988,121 @@ fn a_parked_run_is_not_adopted_and_stays_on_the_release_it_pins() {
             .keys()
             .all(|function| over_r1.manifest.functions.contains_key(function)),
         "it still pins every R1 function"
+    );
+}
+
+/// One shared reader, two policies (FIG-6985): R2 of `p` changes the
+/// contract `p.fix` performs `p.send` under and keeps its signature. On a
+/// node that holds only R2, rebasing a saved function compares the
+/// signatures it was saved against and takes the changed contract;
+/// adopting a workflow reads R1's code from its stored definitions in
+/// declaration mode and refuses it, naming the operation.
+#[test]
+fn a_changed_contract_under_one_signature_is_rebased_and_never_adopted() {
+    use lash_kernel_doc::{FunctionDefinition, FunctionRegistry, parse_definition, parse_document};
+    use std::sync::Arc;
+
+    let release = |contract: &str| {
+        let fix = parse_definition(&format!(
+            "function p.fix(x: Any) -> Any\nkernel 1\ncharge 1\n\
+             effect p.send(value?: Any) -> Any contract \"{contract}\"\n\
+             body {{\n  let sent = perform p.send(x) as Any\n  return x\n}}\n"
+        ))
+        .unwrap();
+        let outer = parse_definition(&format!(
+            "function p.outer(x: Any) -> Any\nkernel 1\ncharge 1\nuse p.fix = @{}\n\
+             body {{\n  let y = invoke p.fix(x)\n  return y\n}}\n",
+            fix.identity()
+        ))
+        .unwrap();
+        [fix, outer]
+    };
+    let (r1, r2) = (release("1"), release("2"));
+    let mut node = FunctionRegistry::default();
+    for definition in &r2 {
+        node.register(definition.clone(), None).unwrap();
+    }
+    let stored: BTreeMap<_, Arc<FunctionDefinition>> = r1
+        .iter()
+        .map(|definition| (definition.identity(), Arc::new(definition.clone())))
+        .collect();
+    let [fix1, outer1] = [r1[0].identity(), r1[1].identity()];
+    let send = lash_kernel_doc::EffectName::new("p.send").unwrap();
+
+    // Rebasing a saved function written over R1 takes R2's contract.
+    let mut document = parse_document(&format!(
+        "kernel 1\nnumbers float\nuse p.outer = @{outer1}\n\
+         fn keep(n) {{ let e = invoke p.outer(n) return e }}\nmain {{}}"
+    ))
+    .unwrap();
+    document
+        .manifest
+        .functions
+        .insert(fix1, lash_kernel_doc::FunctionName::new("p.fix").unwrap());
+    let saved = lash_kernel_dialect::SavedFunction {
+        name: lash_kernel_doc::Name::new("keep"),
+        document,
+        captures: BTreeMap::new(),
+        closure: lash_kernel_doc::heap::PageRef {
+            id: lash_kernel_doc::heap::PageId([1; 32]),
+            grant: lash_kernel_doc::heap::PageGrant::NONE,
+        },
+        helper_owners: std::collections::BTreeSet::new(),
+        references: std::collections::BTreeSet::new(),
+        written: None,
+        token: None,
+        held: None,
+        against: r1
+            .iter()
+            .map(|definition| (definition.identity(), definition.signature.clone()))
+            .collect(),
+    };
+    let library = lash_kernel_dialect::NamedLibrary::resolving(&node, |_| true).unwrap();
+    let rebased =
+        lash_kernel_dialect::relink_saved(&saved, &library, &lash_kernel_dialect::NoPackages)
+            .expect("rebasing takes a changed contract under one signature");
+    assert!(
+        rebased
+            .document
+            .manifest
+            .functions
+            .contains_key(&r2[1].identity())
+    );
+    assert_eq!(
+        rebased.document.manifest.effects[&send].contract,
+        lash_kernel_doc::ContractId::new("2")
+    );
+
+    // Adopting a workflow written over R1 refuses it.
+    let over_r1 = parse_document(&format!(
+        "kernel 1\nnumbers float\neffect p.send(value?: Any) -> Any contract \"1\"\n\
+         use p.fix = @{fix1}\nuse p.outer = @{outer1}\n\
+         entry run(x: Any) -> Any\n\
+         fn run(x) {{\nlet got = invoke p.outer(x)\nreturn got\n}}\nmain {{}}\n"
+    ))
+    .unwrap();
+    let declared = lash_vm_broker::kernel::loader::declare(
+        over_r1
+            .manifest
+            .functions
+            .keys()
+            .copied()
+            .chain(r2.iter().map(FunctionDefinition::identity)),
+        1,
+        &node,
+        &stored,
+    )
+    .expect("both releases are declared");
+    let relink = lash_kernel_migrate::relink(&r1, &r2);
+    let refusal = super::plan_adoption(&over_r1, false, &declared, &relink)
+        .expect_err("adoption refuses a changed contract");
+    assert_eq!(
+        refusal,
+        super::HelperAdoptionRefusal::Document {
+            document: over_r1.identity(),
+            refusal: lash_kernel_migrate::DocumentRefusal::OperationContractChanged {
+                operation: send,
+            },
+        }
     );
 }

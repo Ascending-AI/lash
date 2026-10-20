@@ -865,6 +865,31 @@ impl FunctionRegistry {
     /// [`RegistryError::PlanWithoutBody`], [`RegistryError::AlreadyPlanned`]
     /// and [`RegistryError::PlanCalleeUnanswered`].
     pub fn install_plans(&mut self, plans: &[&'static HelperPlan]) -> Result<usize, RegistryError> {
+        self.install(plans, true)
+    }
+
+    /// [`FunctionRegistry::install_plans`], skipping each plan that calls a
+    /// callee nothing answers: a registry assembled from an execution's
+    /// stored closure holds a plan's function without every callee the
+    /// build generated it against, and runs that function's body instead.
+    /// It returns how many plans it installed.
+    ///
+    /// # Errors
+    ///
+    /// [`RegistryError::PlanWithoutBody`] and
+    /// [`RegistryError::AlreadyPlanned`].
+    pub fn install_answered_plans(
+        &mut self,
+        plans: &[&'static HelperPlan],
+    ) -> Result<usize, RegistryError> {
+        self.install(plans, false)
+    }
+
+    fn install(
+        &mut self,
+        plans: &[&'static HelperPlan],
+        strict: bool,
+    ) -> Result<usize, RegistryError> {
         self.materialize();
         let mut installing: Vec<(usize, &'static HelperPlan)> = Vec::with_capacity(plans.len());
         let mut seen = vec![false; self.functions.len()];
@@ -890,39 +915,40 @@ impl FunctionRegistry {
         // A native beside a body may decline: that body needs its own plan
         // too, before it can answer a closed caller; a segment may yield.
         let closed = |plan: &HelperPlan| plan.sites.is_empty();
-        let mut answers: Vec<bool> = self
-            .functions
-            .iter()
-            .map(|registered| registered.plan.is_some_and(closed) || !registered.has_body())
-            .collect();
-        for (at, plan) in &installing {
-            answers[*at] |= closed(plan);
-        }
-        for (at, plan) in &installing {
-            // Callback membership alone answers these callees. Project it
-            // once before looking up the remaining callees in the registry;
-            // wide dispatchers need no registry probe for every callback.
-            let mut callbacks = Vec::new();
-            if !plan.sites.is_empty() {
-                callbacks.resize(plan.callees.len(), false);
-                for site in plan.sites {
-                    if let crate::plan::SiteCall::Invoke(callee) = site.call
-                        && let Some(invoked) = callbacks.get_mut(callee as usize)
-                    {
-                        *invoked = true;
-                    }
-                }
+        loop {
+            let mut answers: Vec<bool> = self
+                .functions
+                .iter()
+                .map(|registered| registered.plan.is_some_and(closed) || !registered.has_body())
+                .collect();
+            for (at, plan) in &installing {
+                answers[*at] |= closed(plan);
             }
-            for (index, callee) in plan.callees.iter().enumerate() {
-                if callbacks.get(index).copied().unwrap_or(false)
-                    || self.find(callee).is_ok_and(|callee| answers[callee])
-                {
-                    continue;
-                }
-                return Err(RegistryError::PlanCalleeUnanswered {
-                    name: self.functions[*at].definition().name.clone(),
-                    callee: *callee,
-                });
+            let unanswered: Vec<usize> = installing
+                .iter()
+                .enumerate()
+                .filter_map(|(index, (at, plan))| {
+                    let callee = self.unanswered(plan, &answers)?;
+                    Some((index, *at, callee))
+                })
+                .map(|(index, at, callee)| {
+                    if strict {
+                        Err(RegistryError::PlanCalleeUnanswered {
+                            name: self.functions[at].definition().name.clone(),
+                            callee,
+                        })
+                    } else {
+                        Ok(index)
+                    }
+                })
+                .collect::<Result<_, _>>()?;
+            if unanswered.is_empty() {
+                break;
+            }
+            // A skipped closed plan no longer answers its callers: check
+            // the rest again without it.
+            for index in unanswered.into_iter().rev() {
+                installing.remove(index);
             }
         }
         let installed = installing.len();
@@ -931,6 +957,33 @@ impl FunctionRegistry {
             functions[at].plan = Some(plan);
         }
         Ok(installed)
+    }
+
+    /// The first callee `plan` calls outside its callback sites that
+    /// `answers`, by registry position, does not answer.
+    fn unanswered(&self, plan: &HelperPlan, answers: &[bool]) -> Option<FunctionId> {
+        // Callback membership alone answers these callees. Project it once
+        // before looking up the remaining callees in the registry; wide
+        // dispatchers need no registry probe for every callback.
+        let mut callbacks = Vec::new();
+        if !plan.sites.is_empty() {
+            callbacks.resize(plan.callees.len(), false);
+            for site in plan.sites {
+                if let crate::plan::SiteCall::Invoke(callee) = site.call
+                    && let Some(invoked) = callbacks.get_mut(callee as usize)
+                {
+                    *invoked = true;
+                }
+            }
+        }
+        plan.callees
+            .iter()
+            .enumerate()
+            .find(|(index, callee)| {
+                !(callbacks.get(*index).copied().unwrap_or(false)
+                    || self.find(callee).is_ok_and(|callee| answers[callee]))
+            })
+            .map(|(_, callee)| *callee)
     }
 
     pub fn get(&self, function: &FunctionId) -> Option<&RegisteredFunction> {

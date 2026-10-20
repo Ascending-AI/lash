@@ -353,9 +353,17 @@ pub enum ProcessDocumentRefRead {
 #[async_trait::async_trait]
 pub trait ProcessDocumentProvider: Send + Sync {
     /// The operations among `performed` whose paths a package owns, in the
-    /// package view the engine's documents run under, each with what its
+    /// package set a start of `payload` is linked under, each with what its
     /// package declares (PKG-RUNNER).
-    fn owned_operations(&self, performed: &PerformedEffects) -> OwnedOperations;
+    ///
+    /// # Errors
+    ///
+    /// The linked set's surface is not read.
+    async fn owned_operations(
+        &self,
+        payload: &serde_json::Value,
+        performed: &PerformedEffects,
+    ) -> Result<OwnedOperations, crate::PluginError>;
 
     /// The producer's package set for a host start with no parent cell.
     fn definition_packages(

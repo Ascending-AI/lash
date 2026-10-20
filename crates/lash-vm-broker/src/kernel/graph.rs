@@ -917,6 +917,9 @@ pub struct RootParts {
     /// What the parked execution owes beyond its admitted calls (S7): its
     /// committed deferred matches' providers and codecs. Empty once ended.
     pub owed: Vec<lash_core_store::store::plugin_writers::PluginCallbackIdentity>,
+    /// What running the execution requires of a node (FIG-6985). Empty
+    /// once ended.
+    pub requirements: lash_kernel_doc::ExecutionRequirements,
 }
 
 /// The owner binding of `exec`.
@@ -991,6 +994,7 @@ pub fn stage_exec_root(
             host: parts.host,
             envelope: parts.envelope,
             owed: parts.owed,
+            requirements: parts.requirements,
         },
     )?;
     let write = DomainWrite::ExecRoot(lash_durable::domain::graph::ExecRootWrite::Put {

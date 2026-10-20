@@ -52,6 +52,15 @@ pub struct EngineState {
     /// (FIG-6193). None for an engine that keeps no heap.
     #[serde(default, skip_serializing_if = "Option::is_none", with = "page_hex")]
     pub pages: Option<lash_core_store::checkpoint_graph::NodeId>,
+    /// What running the process requires of a node while it stands on
+    /// this state (FIG-6985): the natives and kernel versions its parked
+    /// run's code reaches and the providers and codecs of its env's
+    /// links. Its execution root records it; empty when no run is parked.
+    #[serde(
+        default,
+        skip_serializing_if = "lash_kernel_doc::ExecutionRequirements::is_empty"
+    )]
+    pub requirements: lash_kernel_doc::ExecutionRequirements,
 }
 
 impl EngineState {
@@ -68,6 +77,7 @@ impl EngineState {
             format,
             bytes,
             pages: None,
+            requirements: lash_kernel_doc::ExecutionRequirements::default(),
         }
     }
 }
