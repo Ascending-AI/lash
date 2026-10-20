@@ -101,7 +101,7 @@ impl Lowerer<'_> {
                     Body::Value(&lambda.body),
                     false,
                     &defaults,
-                    "<lambda>",
+                    Some("<lambda>"),
                     None,
                 )?;
                 let written = self.function_written(lambda.parameters.as_deref(), false, None);

@@ -1057,12 +1057,13 @@ impl Lowerer<'_> {
         // The body runs only once the name is bound.
         self.mark_bound(name);
         let active = self.takes_active(name).then(|| self.fresh("active"));
+        let checked = !self.scope().bindings.filled.contains(name);
         let (params, body) = self.function_body(
             Some(&def.parameters),
             Body::Suite(&def.body),
             def.is_async,
             &defaults,
-            name,
+            checked.then_some(name),
             active,
         )?;
         let written =
@@ -1126,23 +1127,26 @@ impl Lowerer<'_> {
         Ok(defaults)
     }
 
-    /// The kernel parameters and block of a function or a lambda. `active`
-    /// is the last parameter of a function that takes the exception its
-    /// caller handles.
+    /// The kernel parameters and block of a function or a lambda. `checked`
+    /// names the function a call that leaves a parameter without a default
+    /// unfilled raises for, and is None where no call can (`always_filled`).
+    /// `active` is the last parameter of a function that takes the
+    /// exception its caller handles.
     pub(super) fn function_body(
         &mut self,
         parameters: Option<&ast::Parameters>,
         body: Body<'_>,
         is_async: bool,
         defaults: &[Option<Operand>],
-        name: &str,
+        checked: Option<&str>,
         active: Option<Name>,
     ) -> Lowering<(Vec<Name>, Buf)> {
         let suite: &[PyStmt] = match body {
             Body::Suite(suite) => suite,
             Body::Value(_) => &[],
         };
-        let bindings = scope::bindings(suite, parameters, &self.rebound, &self.reraisers());
+        let mut bindings = scope::bindings(suite, parameters, &self.rebound, &self.reraisers());
+        bindings.filled = scope::always_filled(suite, &bindings.defs);
         let params: Vec<String> = parameters
             .map(|parameters| {
                 parameters
@@ -1198,7 +1202,7 @@ impl Lowerer<'_> {
                 .iter()
                 .zip(defaults)
                 .rfind(|(_, default)| default.is_none());
-            let argument_check = if let Some((param, _)) = required {
+            let argument_check = if let (Some((param, _)), Some(name)) = (required, checked) {
                 let missing = this.omitted(param)?;
                 let failure = this.invoke("py.arg_missing", &[Operand::text(name)], Ty::Unknown)?;
                 Some(Expr::If {

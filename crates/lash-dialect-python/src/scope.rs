@@ -87,6 +87,9 @@ pub(crate) struct Bindings {
     /// Those of `defs` that take the exception their caller handles, for a
     /// bare `raise` they reach (`reraisers`).
     pub(crate) reraisers: BTreeSet<String>,
+    /// Those of a function's `defs` no call can leave a parameter without
+    /// a default unfilled (`always_filled`). Empty for a module.
+    pub(crate) filled: BTreeSet<String>,
 }
 
 #[derive(Default)]
@@ -247,6 +250,7 @@ pub(crate) fn bindings(
         types,
         defs,
         reraisers,
+        filled: BTreeSet::new(),
     }
 }
 
@@ -407,6 +411,85 @@ pub(crate) fn rebound(body: &[Stmt]) -> (BTreeSet<String>, BTreeSet<String>) {
     }
     walk(body, &mut globals, &mut nonlocals);
     (globals, nonlocals)
+}
+
+/// The functions of `defs`, bound once by a `def` of a function's body,
+/// whose every call gives each parameter without a default.
+///
+/// A function's local is visible only to its body and the scopes nested in
+/// it, so `body` holds every read of the name. A read that is not the callee
+/// of a call gives the function to code the front end cannot see: stored,
+/// passed, returned, or deleted, the value may be called later with any
+/// arguments, so its check stays. Recursion and a capture before the `def`
+/// read the same binding inside `body`, and are judged as calls like any
+/// other. `defs` already leaves out a name bound twice or named by a
+/// `global` or `nonlocal` anywhere in the program, so nothing else can put
+/// another value in the binding. A nested scope that binds the name itself
+/// is still read here: that only keeps a check that was not needed.
+///
+/// Arguments are values of the program, and no value of a program is
+/// `absent`: a read of a slot that may be unbound goes through
+/// `py.name_check`. So a call that names every required parameter, by
+/// position or keyword, never reaches the missing-argument check.
+pub(crate) fn always_filled(body: &[Stmt], defs: &BTreeMap<String, CallShape>) -> BTreeSet<String> {
+    let mut reads = Reads {
+        defs,
+        escaped: BTreeSet::new(),
+    };
+    reads.visit_body(body);
+    defs.keys()
+        .filter(|name| !reads.escaped.contains(*name))
+        .cloned()
+        .collect()
+}
+
+struct Reads<'s> {
+    defs: &'s BTreeMap<String, CallShape>,
+    escaped: BTreeSet<String>,
+}
+
+impl<'a> Visitor<'a> for Reads<'_> {
+    fn visit_expr(&mut self, expr: &'a Expr) {
+        match expr {
+            Expr::Call(call) => match call.func.as_ref() {
+                Expr::Name(name) if self.defs.contains_key(name.id.as_str()) => {
+                    let shape = &self.defs[name.id.as_str()];
+                    if !fills(shape, &call.arguments) {
+                        self.escaped.insert(name.id.as_str().to_string());
+                    }
+                    self.visit_arguments(&call.arguments);
+                }
+                _ => visitor::walk_expr(self, expr),
+            },
+            Expr::Name(name) => {
+                if self.defs.contains_key(name.id.as_str()) {
+                    self.escaped.insert(name.id.as_str().to_string());
+                }
+            }
+            _ => visitor::walk_expr(self, expr),
+        }
+    }
+}
+
+/// Whether `arguments` give every parameter of `shape` without a default:
+/// no `*` or `**` argument, and each such parameter by position or by name.
+fn fills(shape: &CallShape, arguments: &ast::Arguments) -> bool {
+    let positional = arguments.args.len();
+    !arguments.args.iter().any(Expr::is_starred_expr)
+        && arguments
+            .keywords
+            .iter()
+            .all(|keyword| keyword.arg.is_some())
+        && shape.params.iter().enumerate().all(|(index, param)| {
+            param.has_default
+                || index < positional
+                || arguments.keywords.iter().any(|keyword| {
+                    keyword
+                        .arg
+                        .as_ref()
+                        .is_some_and(|arg| arg.id.as_str() == param.name.as_str())
+                })
+        })
 }
 
 /// A deliberately scope-wide proof: every definition of a candidate local

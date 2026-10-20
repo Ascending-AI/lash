@@ -109,6 +109,39 @@ Exceptions: `BaseException`, `Exception`, `ArithmeticError`,
 declares from them. A tool's failure is caught by `except Exception`; its
 class name is the error's kind.
 
+Missing arguments: a call fills parameters in order and leaves the rest
+`absent`, so a function checks its last parameter without a default and
+raises `TypeError("f() missing a required positional argument")` in its
+body. A `def` in a function's body skips that check when no call can leave
+such a parameter unfilled (`scope::always_filled`, FIG-6961): its name is
+bound once, by that `def`, and no `global` or `nonlocal` anywhere names it;
+and every read of the name, in the body and every scope nested in it, is
+the callee of a call that gives each parameter without a default, by
+position or by keyword, with no `*` or `**` argument. The argument is about
+where the value can go:
+
+- A function's local is visible only to its own body and the scopes nested
+  in it, so those reads are every way to reach the value.
+- Stored, passed, returned, or read by a closure that hands it on, the value
+  leaves the callee position: code the lowerer cannot see may call it with
+  any arguments, so it keeps its check.
+- Rebound by a second binding, or by a `nonlocal` write from a nested scope,
+  the name may hold some other function; every `def` of it keeps its check.
+- Recursion and a call from a function defined before the `def` read the
+  same binding inside the body, so they are judged like any other call. A
+  call made before the name is bound still meets the absent slot and
+  `py.name_check`, which this does not touch.
+- A nested scope that binds the same name is read as if it were this one;
+  that only keeps a check that was not needed.
+- No program value is `absent`: a read of a slot that may be unbound goes
+  through `py.name_check`. So a call that gives a parameter a value fills
+  it.
+
+The check costs a `same(param, absent)` and a branch on every call; a
+skipped check changes the program's charge to that of the shorter body.
+A module's `def` keeps its check: a later cell, a saved function or a host
+may call it with any arguments.
+
 asyncio: `asyncio.sleep`, `asyncio.gather` over coroutine calls, tasks or
 one `*tasks`, `asyncio.create_task`, and `asyncio.run` at the top level.
 A tool is a name of `environment.effects`, called as `await tool(x)`.

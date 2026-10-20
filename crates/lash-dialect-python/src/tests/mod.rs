@@ -1,5 +1,6 @@
 //! Laws of the Python dialect.
 
+mod arguments;
 mod captured;
 mod conformance;
 mod controls;

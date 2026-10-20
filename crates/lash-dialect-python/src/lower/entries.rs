@@ -55,7 +55,7 @@ impl Lowerer<'_> {
             Body::Suite(&def.body),
             true,
             &[],
-            name,
+            Some(name),
             None,
         );
         self.in_entry = false;

@@ -7,7 +7,6 @@ use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
 use map.contains = @5a66ffea6554dc3cceb26c77fe239e0ab2ecd7dbbb0654104ab865df84ec75d3
 use map.len = @eca67654cffa061303e34a549e20bb70b7668a3e655709d36fd1c2fdd6b2956d
-use py.arg_missing = @c9577269a338e9de71987d8f4aa60455693ac5af4eb2774138e6958d05790ce9
 use py.exc.name = @fc83b0ea9d71ee72309df257cff6e29f5f6183d497225973d0b49a30a2a63d8e
 use py.fail = @da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078
 use py.for_in.check = @9c19a00e95592dd7c0bb299ea5df5908af7176c5e66457c782dd81d954b58830
@@ -19,7 +18,6 @@ use record.len = @5866a6b77ba3e738a556e617baf8cc6570e9417d9df1f641ad49b4b0a77cd7
 use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
 use set.len = @3b70dd4bec191dc3c00a32a3aee61fa82e4e4b7256aac2668f25739b0b7a4d38
 use sub = @59b9d484a581bca4a1909189b23b1f4363670e1af545c6b28c6110f6ee95b01a
-use text.concat = @ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb
 use text.join = @79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f
 use text.len = @a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716
 use tuple.len = @2eced051afe955ac8dbeed3762acd4b8ce74b7a4ed15763ea47dfd01e5cc5f71
@@ -27,17 +25,17 @@ entry demo(items: List(Text)) -> Any
 
 fn demo(items) {
   let size = fn(item) start(item: Any) -> Any bare direct {
-    return let(t1 = if(same(item, absent), invoke py.arg_missing("size"), null), invoke py.length(item))
+    return invoke py.length(item)
   }
-  let t2 = []
+  let t1 = []
   for item_1 in items via (open py.for_in.open, check py.for_in.check) {
-    set t2[list.len(t2)] = apply size(item_1)
+    set t1[list.len(t1)] = apply size(item_1)
   }
-  return t2
+  return t1
 }
 
 main {
   let demo = &demo
 }
 
-unit Function(Name("demo")): statements=6 scopes=3 sites=10
+unit Function(Name("demo")): statements=6 scopes=3 sites=9
