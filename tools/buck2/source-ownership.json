@@ -449,6 +449,7 @@
       "model_answer_receipt_laws": [
         "tests/model_answer_receipt_laws.rs",
         "tests/model_answer_receipt_laws/fused_receipt.rs",
+        "tests/support/dialect.rs",
         "tests/support/sim.rs"
       ],
       "one_slot_process_await": [

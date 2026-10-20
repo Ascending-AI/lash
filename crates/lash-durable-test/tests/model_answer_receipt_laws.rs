@@ -67,6 +67,9 @@
 #[path = "support/sim.rs"]
 mod sim;
 
+#[path = "support/dialect.rs"]
+mod dialect;
+
 #[path = "model_answer_receipt_laws/fused_receipt.rs"]
 mod fused_receipt;
 
@@ -74,6 +77,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use dialect::Dialect;
 use lash::provider::{LlmTransportError, TransportRetryVerdict};
 use lash::tools::{StaticToolExecute, StaticToolProvider};
 use lash_core::facade_support::ProviderHandle;
@@ -90,7 +94,6 @@ use lash_durable_test::{
 };
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::backend::BackendParts;
-use lash_execution_contracts::backend::StoreSet;
 use lash_execution_contracts::projection::NoProjectionProviders;
 use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
@@ -694,7 +697,7 @@ impl Setup {
     }
 }
 
-/// One session served by sim nodes over SQLite in memory.
+/// One session served by sim nodes over SQLite in memory or PostgreSQL.
 struct Deployment {
     backend: Backend,
     clock: Arc<SimClock>,
@@ -705,34 +708,27 @@ struct Deployment {
     core: lash::LashCore,
     _b_core: Option<lash::LashCore>,
     durable: lash::DurableSession,
-    _database: Option<lash_postgres_store::testing::IsolatedDatabase>,
+    /// What must outlive the store set: an isolated PostgreSQL database.
+    _keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
 }
 
 impl Deployment {
     /// The deployment of `setup`, its fault rules armed by `arm`.
     async fn new(setup: Setup, arm: impl FnOnce(&Script)) -> Self {
         let clock = SimClock::new();
-        let (stores, isolated): (Arc<dyn StoreSet>, _) = if setup.postgres {
-            sim::wait_out_renders(&clock);
-            let url = lash_postgres_store::testing::required_database_url();
-            let isolated = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
-            let storage = lash_postgres_store::testing::connect(isolated.url())
-                .await
-                .expect("PostgreSQL store");
-            let stores = lash_postgres_store::PostgresStoreSet::with_clock_for_testing(
-                &storage,
-                Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
-                clock.clone(),
-            );
-            lash_execution_contracts::testing::process_execution_env_fixture(
-                stores.process_env_store().as_ref(),
-            )
-            .await;
-            (Arc::new(stores), Some(isolated))
+        // The PostgreSQL leg's pool is waited out by the clock: its round
+        // trips answer over the network, which the nodes' quiescence does
+        // not otherwise see, so time never moves and the scheduler never
+        // reports nothing to do while an admission or activation still
+        // waits on the database.
+        let keep = Mutex::default();
+        let (stores, database) = if setup.postgres {
+            let url = dialect::postgres_url()
+                .unwrap_or_else(lash_postgres_store::testing::required_database_url);
+            dialect::open(Dialect::Postgres, Some(&url), Arc::clone(&clock), &keep).await
         } else {
-            (Arc::new(sim::memory(Arc::clone(&clock)).await), None)
+            dialect::open(Dialect::SqliteMemory, None, Arc::clone(&clock), &keep).await
         };
-        let database = stores.durable_store();
         let backend = Backend::assemble(BackendParts {
             stores,
             settings: sim::settings(),
@@ -815,7 +811,7 @@ impl Deployment {
             live_replay,
             core,
             _b_core: b_core,
-            _database: isolated,
+            _keep: keep,
             durable,
         }
     }

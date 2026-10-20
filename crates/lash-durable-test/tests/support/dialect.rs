@@ -12,6 +12,10 @@ use lash_protocol_types::sync::MutexExt as _;
 
 /// Where a scenario's database lives.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(
+    dead_code,
+    reason = "a test that includes this module runs only the dialects its laws name"
+)]
 pub enum Dialect {
     SqliteMemory,
     SqliteFile,

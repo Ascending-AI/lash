@@ -867,6 +867,7 @@ lash_rust_integration_test(
     srcs_patterns = [
         "tests/model_answer_receipt_laws.rs",
         "tests/model_answer_receipt_laws/fused_receipt.rs",
+        "tests/support/dialect.rs",
         "tests/support/sim.rs",
     ],
     data_patterns = [],
