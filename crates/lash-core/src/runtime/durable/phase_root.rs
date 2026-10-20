@@ -17,7 +17,7 @@
 use lash_core_store::checkpoint_graph::bodies::PhaseRoot as PhaseRootBody;
 use lash_core_store::checkpoint_graph::{
     EncodeBudget, ExplicitLimit, GraphDecoder, GraphRefusal, GraphStaging, NodeId, NodeKind,
-    NodeSource, TokenCodec, TokenError, TokenReader, TokenWriter,
+    NodeSource, TokenCodec, TokenError, TokenReader, TokenWriter, TypedBody,
 };
 use lash_sansio::{
     CheckpointContentPin, CheckpointContentRef, SavedTurn, TurnCheckpoint, TurnCheckpointContent,
@@ -69,6 +69,18 @@ impl TokenCodec for ContentText {
     }
 }
 
+/// Encode a canonical text slice without making an owned decode value.
+fn stage_content(staging: &mut GraphStaging, text: &str) -> Result<NodeId, GraphRefusal> {
+    let mut out = TokenWriter::new();
+    out.text(text);
+    let body = out.into_bytes();
+    #[cfg(feature = "perf-witness")]
+    crate::perf_witness::record_graph_serialized_body(body.len());
+    staging
+        .encode(NodeKind::TURN_CONTENT, TypedBody::logical(&body))
+        .map_err(Into::into)
+}
+
 /// Kind 46: a request's changing scope over its immutable configuration.
 /// The config is a TurnContent whose text is shared across sends; neither
 /// the scope nor the checkpoint's content digest is part of that child.
@@ -101,9 +113,7 @@ fn stage_request(staging: &mut GraphStaging, text: &str) -> Result<NodeId, Strin
         .as_object_mut()
         .and_then(|config| config.remove("scope"))
         .ok_or_else(|| "the checkpoint's model request has no scope".to_owned())?;
-    let config = staging
-        .encode_value(NodeKind::TURN_CONTENT, &ContentText(config.to_string()))
-        .map_err(|e| e.to_string())?;
+    let config = stage_content(staging, &config.to_string()).map_err(|e| e.to_string())?;
     staging
         .encode_value(
             NodeKind::MODEL_REQUEST_FRAME,
@@ -288,9 +298,7 @@ impl StagedPhase {
             let node = if Some(digest) == request {
                 stage_request(&mut staging, text)?
             } else {
-                staging
-                    .encode_value(NodeKind::TURN_CONTENT, &ContentText(text.to_owned()))
-                    .map_err(|error| refused(error.into()))?
+                stage_content(&mut staging, text).map_err(refused)?
             };
             content.push((digest.as_str().to_owned(), node));
             stored.push((digest.clone(), CheckpointContentPin::new(node.0)));
@@ -536,6 +544,32 @@ async fn read_phase(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// BorrowedEncodingIsIdentical: borrowing canonical phase text keeps every
+    /// staged envelope and its digest, including placed and chunked UTF-8 text.
+    #[test]
+    fn borrowed_content_encoding_keeps_nodes_and_digests() {
+        let limits = lash_core_store::checkpoint_graph::DecodeLimits::within_total(1 << 22);
+        for text in [
+            String::new(),
+            r#"{"escaped":"\n\"\\","number":123456789012345678901234567890}"#.into(),
+            "é日🦀".repeat(8192),
+        ] {
+            let budget = || EncodeBudget::new(ExplicitLimit::new(u64::MAX));
+            let mut owned = GraphStaging::new(budget());
+            let expected = owned
+                .encode_value(NodeKind::TURN_CONTENT, &ContentText(text.clone()))
+                .unwrap();
+            let mut borrowed = GraphStaging::new(budget());
+            let actual = stage_content(&mut borrowed, &text).unwrap();
+            assert_eq!(actual, expected);
+            assert_eq!(borrowed.nodes(), owned.nodes());
+            let ContentText(decoded) = GraphDecoder::new(&borrowed, limits)
+                .decode(actual, NodeKind::TURN_CONTENT)
+                .unwrap();
+            assert_eq!(decoded, text);
+        }
+    }
 
     /// PHASE-PIN-STRUCTURE: the stored pin is fields, and a graph read
     /// returns exactly the host's original opaque spelling to the machine.

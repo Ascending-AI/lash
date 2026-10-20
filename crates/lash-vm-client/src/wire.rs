@@ -9,6 +9,7 @@
 //! A document is not one of these: it crosses as its canonical token body
 //! (`lash_kernel_doc::IdentifiedDocument::body`), never as JSON.
 
+use std::borrow::Cow;
 use std::time::Duration;
 
 use lash_kernel_doc::graph_tokens::{decode_body, encode_body};
@@ -42,14 +43,62 @@ pub fn wrap(kind: PayloadKind, json: &[u8]) -> Result<EncodedPayload, PoolError>
         .map_err(|error| PoolError::payload(kind, error))
 }
 
-/// The JSON text a payload of `kind` carries.
+/// The JSON text a payload of `kind` carries, borrowed from binary or string
+/// input. The accepted integer-array form owns its assembled bytes.
 ///
 /// # Errors
 ///
-/// A payload breach when the payload is not one binary.
-pub fn unwrap(kind: PayloadKind, payload: &EncodedPayload) -> Result<Vec<u8>, PoolError> {
-    rmp_serde::from_slice::<serde_bytes::ByteBuf>(&payload.0)
-        .map(serde_bytes::ByteBuf::into_vec)
+/// A payload breach when the payload cannot decode to bytes.
+pub fn unwrap(kind: PayloadKind, payload: &EncodedPayload) -> Result<Cow<'_, [u8]>, PoolError> {
+    // Match ByteBuf's visitor, including its alternate string/sequence forms
+    // and error expectation, while borrowing contiguous bytes from the frame.
+    struct PayloadBytes;
+    impl<'de> serde::de::Visitor<'de> for PayloadBytes {
+        type Value = Cow<'de, [u8]>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("byte array")
+        }
+
+        fn visit_borrowed_bytes<E: serde::de::Error>(
+            self,
+            bytes: &'de [u8],
+        ) -> Result<Self::Value, E> {
+            Ok(Cow::Borrowed(bytes))
+        }
+
+        fn visit_borrowed_str<E: serde::de::Error>(self, text: &'de str) -> Result<Self::Value, E> {
+            Ok(Cow::Borrowed(text.as_bytes()))
+        }
+
+        fn visit_bytes<E: serde::de::Error>(self, bytes: &[u8]) -> Result<Self::Value, E> {
+            Ok(Cow::Owned(bytes.to_vec()))
+        }
+
+        fn visit_str<E: serde::de::Error>(self, text: &str) -> Result<Self::Value, E> {
+            self.visit_bytes(text.as_bytes())
+        }
+
+        fn visit_byte_buf<E: serde::de::Error>(self, bytes: Vec<u8>) -> Result<Self::Value, E> {
+            Ok(Cow::Owned(bytes))
+        }
+
+        fn visit_string<E: serde::de::Error>(self, text: String) -> Result<Self::Value, E> {
+            Ok(Cow::Owned(text.into_bytes()))
+        }
+
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(
+            self,
+            sequence: A,
+        ) -> Result<Self::Value, A::Error> {
+            serde_bytes::ByteBuf::deserialize(serde::de::value::SeqAccessDeserializer::new(
+                sequence,
+            ))
+            .map(|bytes| Cow::Owned(bytes.into_vec()))
+        }
+    }
+    let mut decoder = rmp_serde::Deserializer::from_read_ref(&payload.0);
+    serde::Deserializer::deserialize_byte_buf(&mut decoder, PayloadBytes)
         .map_err(|error| PoolError::payload(kind, error))
 }
 
@@ -706,6 +755,76 @@ pub type ProjectionAnswer = Result<Datum, ErrorDatum>;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// BorrowedPayloadDecodePreservesAcceptance: the MessagePack adapter keeps
+    /// the owned decoder's accepted forms and failures, borrowing binary input.
+    #[test]
+    fn borrowed_payload_decode_preserves_acceptance() {
+        let kind = PayloadKind::Outcome;
+        let json = r#"{"number":123456789012345678901234567890,"text":"é"}"#.as_bytes();
+        let mut cases = vec![wrap(kind, json).unwrap().0];
+        for header in [
+            vec![0xc5, 0, json.len() as u8],
+            vec![0xc6, 0, 0, 0, json.len() as u8],
+        ] {
+            let mut bytes = header;
+            bytes.extend_from_slice(json);
+            cases.push(bytes);
+        }
+        let binaries = cases.len();
+        let number = Datum::Number(lash_kernel_doc::NumberToken::new("1.2300e+40").unwrap());
+        let mut nested = number;
+        for _ in 0..160 {
+            nested = Datum::List(vec![nested]);
+        }
+        let nested_payload = encode(kind, &nested).unwrap();
+        assert_eq!(decode::<Datum>(kind, &nested_payload).unwrap(), nested);
+        cases.extend([
+            rmp_serde::to_vec(&std::str::from_utf8(json).unwrap()).unwrap(),
+            rmp_serde::to_vec(&json.to_vec()).unwrap(),
+            vec![],
+            vec![0xc4],
+            vec![0xc4, 2, b'1'],
+            vec![0xc1],
+            vec![0xc0],
+            vec![0x81, 1, 2],
+            vec![0x91, 0xcd, 1, 0],
+            vec![0xa1, 0xff],
+            wrap(kind, b"1 2").unwrap().0,
+            wrap(kind, b"{").unwrap().0,
+        ]);
+        let mut trailing = wrap(kind, json).unwrap().0;
+        trailing.push(0xc0);
+        cases.push(trailing);
+        for (index, bytes) in cases.into_iter().enumerate() {
+            let payload = EncodedPayload(bytes);
+            let owned = rmp_serde::from_slice::<serde_bytes::ByteBuf>(&payload.0);
+            let borrowed = unwrap(kind, &payload);
+            assert_eq!(owned.is_ok(), borrowed.is_ok(), "case {index}");
+            if let Err(error) = &owned {
+                assert_eq!(
+                    borrowed.as_ref().unwrap_err(),
+                    &PoolError::payload(kind, error),
+                    "case {index}"
+                );
+            }
+            if let Ok(owned) = owned {
+                let borrowed = borrowed.unwrap();
+                let actual_bytes: &[u8] = borrowed.as_ref();
+                assert_eq!(actual_bytes, owned.as_ref(), "case {index}");
+                let expected = from_json::<serde_json::Value>(kind, &owned);
+                let actual = decode::<serde_json::Value>(kind, &payload);
+                if index < binaries {
+                    assert!(expected.is_ok());
+                }
+                assert_eq!(actual, expected, "case {index}");
+                if index < binaries {
+                    assert!(borrowed.as_ptr() >= payload.0.as_ptr());
+                    assert!(borrowed.as_ptr_range().end <= payload.0.as_ptr_range().end);
+                }
+            }
+        }
+    }
 
     /// FIG-6788: an outcome past the effect value bound is refused while it
     /// is encoded, naming its whole size, and its encoding never holds more
