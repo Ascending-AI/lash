@@ -31,7 +31,7 @@ pub fn saved_function(
         name: function.name.clone(),
         document: document.document,
         captures: function.captures.clone(),
-        release: function.release,
+        closure: function.closure,
         references: function.references.clone(),
         helper_owners: function.helper_owners.clone(),
         written: function.written.clone(),

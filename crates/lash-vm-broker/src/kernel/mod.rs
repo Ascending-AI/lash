@@ -4,14 +4,16 @@
 //! module is the durable half of that: the machine parks, the broker
 //! commits (kernel spec §9 rule 4).
 //!
+//! - [`closure`]: a run's execution closure: every library function its
+//!   document reaches, by identity, as one graph node a root names.
 //! - [`ledger`]: the set of waits a saved state stands on, keyed by the
 //!   machine's effect identity, and which records stay reachable for it.
 //! - [`graph`]: a run's admissions, membership, root and end as checkpoint
 //!   graph nodes.
 //! - [`pages`]: an activation's page service: its root lease, capability
 //!   key and spool, and the candidate a park publishes from it.
-//! - [`state`]: a checkpoint root's header, the build's releases and a
-//!   run's recorded end, as graph nodes.
+//! - [`state`]: a checkpoint root's header and a run's recorded end, as
+//!   graph nodes.
 //! - [`store`]: the park transaction (saved state and the admission of
 //!   every effect requested since the last park, together), delivery of
 //!   committed outcomes in any order, and settlement over tasks.
@@ -20,6 +22,7 @@
 //! - [`value`]: effect values as JSON text, every number carried as
 //!   written.
 
+pub mod closure;
 pub mod graph;
 pub mod ledger;
 pub mod pages;

@@ -118,12 +118,7 @@ pub(crate) async fn commit(
 ) -> Result<ActorCommit, DurableError> {
     let staged = match (executor, published(&tx, session)) {
         (Some(executor), Some(publishes)) => executor
-            .execution_candidate(
-                publishes.root(),
-                CommitId::mint(),
-                &mut tx,
-                cx.durable_reads()?,
-            )
+            .execution_candidate(publishes.root(), CommitId::mint(), &mut tx)
             .await
             .map_err(|error| {
                 DurableError::Store(lash_durable::StoreFailure {

@@ -53,6 +53,7 @@ mod access;
 mod claim_facts;
 mod graph;
 mod model_calls;
+mod packages;
 mod pages;
 mod park;
 pub(crate) mod processes;
@@ -244,6 +245,37 @@ CREATE TABLE IF NOT EXISTS nodes (
     draining INTEGER NOT NULL DEFAULT 0 CONSTRAINT ck_nodes_draining CHECK (draining IN (0, 1))
 );
 
+-- An installed package artifact (FIG-6918), keyed by its digest, with the
+-- ordinal the store assigned it on its package line and its header.
+CREATE TABLE IF NOT EXISTS package_artifacts (
+    artifact TEXT PRIMARY KEY,
+    path TEXT NOT NULL,
+    ordinal INTEGER NOT NULL,
+    header TEXT NOT NULL,
+    CONSTRAINT uq_package_artifacts_line UNIQUE (path, ordinal)
+);
+
+-- An installed package set, keyed by its digest, at the store's install
+-- sequence: the only key behind newest first.
+CREATE TABLE IF NOT EXISTS package_sets (
+    digest TEXT PRIMARY KEY,
+    sequence INTEGER NOT NULL CONSTRAINT uq_package_sets_sequence UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS package_set_members (
+    set_digest TEXT NOT NULL REFERENCES package_sets (digest),
+    artifact TEXT NOT NULL REFERENCES package_artifacts (artifact),
+    PRIMARY KEY (set_digest, artifact)
+);
+
+-- The artifacts a live node holds, gone with its row.
+CREATE TABLE IF NOT EXISTS node_artifacts (
+    node_id TEXT NOT NULL REFERENCES nodes (node_id) ON DELETE CASCADE,
+    artifact TEXT NOT NULL REFERENCES package_artifacts (artifact),
+    path TEXT NOT NULL,
+    PRIMARY KEY (node_id, artifact)
+);
+
 CREATE TABLE IF NOT EXISTS actors (
     actor_key TEXT PRIMARY KEY,
     kind TEXT NOT NULL CONSTRAINT ck_actors_kind CHECK (kind IN ('session', 'process')),
@@ -256,6 +288,7 @@ CREATE TABLE IF NOT EXISTS actors (
     next_due_ms INTEGER,
     formats TEXT NOT NULL,
     requires TEXT,
+    packages TEXT,
     state_revision INTEGER NOT NULL,
     mail_seq INTEGER NOT NULL,
     acked_seq INTEGER NOT NULL,
@@ -582,13 +615,6 @@ fn formats_json(spec: &[lash_durable::FormatSet]) -> String {
     serde_json::Value::from(formats).to_string()
 }
 
-/// The format sets a node's stored `formats_json` names.
-fn decoded_sets(stored: &str) -> Result<Vec<lash_durable::FormatSet>, DurableError> {
-    let sets: Vec<String> =
-        serde_json::from_str(stored).map_err(|_| corrupt("node format sets", stored))?;
-    Ok(sets.into_iter().map(lash_durable::FormatSet::new).collect())
-}
-
 fn owner(node: Option<String>, boot: Option<String>) -> Option<Owner> {
     Some(Owner {
         node: NodeId::new(node?),
@@ -733,6 +759,13 @@ fn apply_owner(
     }
     if let Some(requires) = write.requires() {
         processes::stamp_requires(tx, &actor, requires)?;
+    }
+    if let Some(packages) = write.packages() {
+        cached_execute(
+            tx,
+            SQL.actor.stamp_packages.sql(),
+            rusqlite::params![actor, packages.map(|digest| digest.to_string())],
+        )?;
     }
     if let Some(through) = write.ack() {
         cached_execute(tx, SQL.actor.ack.sql(), rusqlite::params![actor, through.0])?;
@@ -934,7 +967,6 @@ fn apply_domain(tx: &FencedTx<'_>, committing: &Committing<'_>, write: &DomainWr
         DomainWrite::RunFact(write) => run_records::apply(tx, committing, write),
         DomainWrite::ExecRoot(write) => snapshots::apply(tx, committing, write),
         DomainWrite::EffectAdmission(write) => graph::apply_admission(tx, committing, write),
-        DomainWrite::ReleasePin(write) => graph::apply_release_pin(tx, committing, write),
         DomainWrite::Wait(write) => waits::apply(tx, committing, write),
         DomainWrite::Process(write) => processes::apply(tx, committing, write),
         DomainWrite::SessionClose(write) => session_close::apply(tx, committing, write),
@@ -1117,10 +1149,12 @@ impl DurableStore for SqliteDurableStore {
                         expires_at.0
                     ],
                 )?;
+                packages::hold(tx, lease_owner.node.as_str(), &spec.held)?;
                 commit(NodeLease {
                     owner: lease_owner,
                     decodes: spec.decodes,
                     serves: spec.serves.clone(),
+                    held: spec.held.clone(),
                     ttl_millis: spec.ttl_millis,
                     expires_at,
                 })
@@ -1259,12 +1293,13 @@ impl DurableStore for SqliteDurableStore {
                         row.get::<_, i64>(1)?,
                         row.get::<_, String>(2)?,
                         row.get::<_, Option<String>>(3)?,
+                        row.get::<_, bool>(4)?,
                     ))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows
                 .into_iter()
-                .map(|(key, epoch, stored_formats, requires)| {
+                .map(|(key, epoch, stored_formats, requires, holds)| {
                     Ok(Claimed {
                         actor: actor_key(&key)?,
                         epoch: Epoch(epoch),
@@ -1273,6 +1308,7 @@ impl DurableStore for SqliteDurableStore {
                             &lease,
                             &stored_formats,
                             requires.as_deref(),
+                            holds,
                         )?,
                         // `of_stored` refused a corrupt spelling above.
                         requires: lash_durable::parse_requires(requires.as_deref())
@@ -1301,16 +1337,30 @@ impl DurableStore for SqliteDurableStore {
         .await
     }
 
-    async fn live_decodes(&self) -> Result<Vec<Vec<lash_durable::FormatSet>>, DurableError> {
+    async fn live_nodes(&self) -> Result<Vec<lash_durable::NodeCapability>, DurableError> {
         let now = self.instant()?;
-        self.read(move |tx| {
-            let rows = tx
-                .prepare_cached(SQL.node.live_decodes.sql())?
-                .query_map([now.0], |row| row.get::<_, String>(0))?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            Ok(rows.iter().map(|stored| decoded_sets(stored)).collect())
-        })
+        self.read(move |tx| packages::live_nodes(tx, now)).await
+    }
+
+    async fn install_packages(
+        &self,
+        artifacts: &[lash_durable::packages::ArtifactInstall],
+        sets: &[lash_durable::packages::SetInstall],
+    ) -> Result<(), DurableError> {
+        let artifacts = artifacts.to_vec();
+        let sets = sets.to_vec();
+        self.write(
+            CommitLabel::PACKAGES_INSTALL,
+            move |tx, _now| match packages::install(tx, &artifacts, &sets)? {
+                Ok(()) => commit(()),
+                Err(error) => refuse(error),
+            },
+        )
         .await
+    }
+
+    async fn package_catalog(&self) -> Result<lash_durable::PackageCatalog, DurableError> {
+        self.read(packages::catalog).await
     }
 
     async fn begin(&self, actor: &ActorKey, epoch: Epoch) -> Result<ActorTx, DurableError> {

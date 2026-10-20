@@ -1,5 +1,5 @@
 //! FIG-6041: fresh registration uses the build's function tokens, with the
-//! same identities and current manifests.
+//! same identities.
 #![cfg(target_os = "linux")]
 
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -11,7 +11,7 @@ use lash_kernel_doc::document_work;
 use lash_vm_client::WorkerTuning;
 
 #[test]
-fn a_fresh_embedding_parses_no_kernel_text_and_preserves_the_release() {
+fn a_fresh_embedding_parses_no_kernel_text_and_preserves_the_functions() {
     let _ = document_work::take_definition_parses();
     let instructions = Instructions::start();
     let before = allocations();
@@ -34,9 +34,7 @@ fn a_fresh_embedding_parses_no_kernel_text_and_preserves_the_release() {
     );
 
     let registry = embedding.registry().expect("the worker registry");
-    // The parent catalog holds retained releases plus changed helpers and
-    // every successor kernel declaration this feature resolution interprets.
-    let expected = lash_vm_library::lash_packages()
+    let expected = lash_vm_releases::lash_packages()
         .map(|packages| std::sync::Arc::clone(packages.functions()))
         .expect("the complete interpreted release declarations")
         .export_declarations();
@@ -45,37 +43,6 @@ fn a_fresh_embedding_parses_no_kernel_text_and_preserves_the_release() {
         expected,
         "exact FunctionIds and definitions"
     );
-    let parent = lash_vm_client::graph::release_manifests().expect("parent manifests");
-    for dialect in lash_vm_releases::DIALECTS {
-        let held = dialect.held_releases().expect("retained manifests");
-        for release in held.retained {
-            let (_, manifest) = parent
-                .manifests
-                .of_dialect(dialect.dialect)
-                .find(|(_, manifest)| manifest.ordinal == release.ordinal)
-                .expect("a retained manifest");
-            assert_eq!(manifest.release, release.release);
-            assert_eq!(manifest.writes, release.writes);
-            let manifest_functions: BTreeMap<_, _> = manifest
-                .functions
-                .iter()
-                .map(|f| (f.function, f.native))
-                .collect();
-            let released_functions: BTreeMap<_, _> = release
-                .functions
-                .iter()
-                .map(|f| (f.function, f.definition.has_native()))
-                .collect();
-            assert_eq!(manifest_functions, released_functions);
-            let index = release.index();
-            let worker = embedding
-                .helper_releases()
-                .find(|r| r.ordinal == index.ordinal)
-                .expect("the worker holds this release");
-            assert!(index.functions.is_subset(&worker.functions));
-            assert!(index.writes.is_subset(&worker.writes));
-        }
-    }
     assert_eq!(
         parses, 0,
         "a fresh worker must read no kernel text after the build"
@@ -95,7 +62,7 @@ fn a_host_package_installs_once_and_runs_in_a_single_binary_worker() {
     use lash_kernel_package::{HeldPackages, testing};
     use lash_kernel_vm::Machine as _;
 
-    let lash = lash_vm_library::built().expect("lash's packages");
+    let lash = lash_vm_releases::built().expect("lash's packages");
     let kernel = lash
         .iter()
         .find(|package| package.path().to_string() == "kernel")
@@ -164,7 +131,7 @@ fn a_host_package_installs_once_and_runs_in_a_single_binary_worker() {
         .expect("the parent admits it");
 
     let program = lash_kernel_vm::Program {
-        release: lash_kernel_doc::heap::PageId([8; 32]),
+        closure: lash_kernel_doc::heap::PageId([8; 32]),
         document,
         library: lash_kernel_vm::PreparedLibrary::new(worker),
     };
@@ -221,7 +188,7 @@ fn a_shipped_native_uses_its_declared_callee_identity_among_retained_versions() 
             Ok(Value::Float(Float::new(999.0)))
         }
     }
-    let shipped = lash_vm_library::lash_packages().expect("shipped packages");
+    let shipped = lash_vm_releases::lash_packages().expect("shipped packages");
     let current = shipped
         .functions()
         .named("num.add")
@@ -292,7 +259,7 @@ fn a_shipped_native_uses_its_declared_callee_identity_among_retained_versions() 
         "kernel 1\nnumbers by_spelling\nuse ts.add = @{add}\nmain {{ let sum = invoke ts.add(1.5, 2.0) return sum }}"
     )).expect("document");
     let program = lash_kernel_vm::Program {
-        release: lash_kernel_doc::heap::PageId([8; 32]),
+        closure: lash_kernel_doc::heap::PageId([8; 32]),
         document: Arc::new(document),
         library: lash_kernel_vm::PreparedLibrary::new(Arc::new(natives)),
     };

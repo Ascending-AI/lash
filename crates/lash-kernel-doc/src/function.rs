@@ -56,6 +56,67 @@ pub struct FunctionDefinition {
     pub native_version: u32,
 }
 
+/// What a first use of a library function reads of its definition: all of
+/// it but its body (FIG-6931). Lowering, validation and a machine's
+/// preparation read the header, so a body is decoded only to compile it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FunctionHeader {
+    pub kernel: u32,
+    pub name: FunctionName,
+    pub signature: Signature,
+    pub errors: BTreeSet<String>,
+    pub charge: Formula,
+    pub guard: Option<Guard>,
+    pub implementation: ImplementationKind,
+}
+
+/// Which implementations a definition states, without its body.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ImplementationKind {
+    Native,
+    Body,
+    Both,
+}
+
+impl FunctionHeader {
+    /// `definition`'s header.
+    #[must_use]
+    pub fn of(definition: &FunctionDefinition) -> Self {
+        Self {
+            kernel: definition.kernel,
+            name: definition.name.clone(),
+            signature: definition.signature.clone(),
+            errors: definition.errors.clone(),
+            charge: definition.charge.clone(),
+            guard: definition.guard.clone(),
+            implementation: match definition.implementation {
+                Implementation::Native => ImplementationKind::Native,
+                Implementation::Body(_) => ImplementationKind::Body,
+                Implementation::Both(_) => ImplementationKind::Both,
+            },
+        }
+    }
+
+    /// Whether the definition states a native implementation
+    /// ([`FunctionDefinition::has_native`]).
+    #[must_use]
+    pub fn has_native(&self) -> bool {
+        matches!(
+            self.implementation,
+            ImplementationKind::Native | ImplementationKind::Both
+        )
+    }
+
+    /// Whether the definition has a kernel body.
+    #[must_use]
+    pub fn has_body(&self) -> bool {
+        matches!(
+            self.implementation,
+            ImplementationKind::Body | ImplementationKind::Both
+        )
+    }
+}
+
 /// The version a native implementation states when it states none.
 pub const FIRST_NATIVE_VERSION: u32 = 1;
 

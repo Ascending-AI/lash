@@ -57,6 +57,7 @@ async fn damage(database: &dyn DurableStore, damage: Damage) {
             node: lash_durable::NodeId::new("a"),
             decodes: vec![snapshot.formats],
             serves: Vec::new(),
+            held: Default::default(),
             ttl_millis: 15_000,
         })
         .await

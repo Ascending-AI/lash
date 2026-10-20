@@ -124,7 +124,7 @@ impl ProcessActivation {
         let Some(older) = self.backend.formats().process_in(written).cloned() else {
             return Ok(false);
         };
-        let live = owned.store().live_decodes().await?;
+        let live = owned.store().live_nodes().await?;
         let candidates = [newer.clone(), older];
         Ok(lash_durable::fleet_writable(&candidates, &live) == Some(newer))
     }

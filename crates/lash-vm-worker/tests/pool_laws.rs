@@ -208,6 +208,21 @@ fn resumed(
 /// node, the worker names its digest in each root it seals.
 const BINDING: [u8; 32] = [5; 32];
 
+/// The execution closure `document`'s roots pin, as a parent derives it.
+fn closure(document: &EncodedPayload) -> NodeId {
+    let document = lash_kernel_doc::IdentifiedDocument::decode_standard(&document.0)
+        .expect("the document decodes");
+    lash_vm_broker::kernel::closure::derive(
+        document.manifest.functions.keys().copied(),
+        lash_vm_releases::lash_packages()
+            .expect("the parent's packages")
+            .functions(),
+        lash_vm_broker::kernel::closure::Natives::Declared,
+    )
+    .expect("the parent holds the document's functions")
+    .reference()
+}
+
 /// A store the laws' page service never reads: nothing here commits, so a
 /// run reads only what its activation staged.
 struct Unread;
@@ -242,16 +257,15 @@ struct Parent {
 }
 
 impl Parent {
-    /// The page service of runs pinning `dialect`'s helper release.
-    fn new(dialect: &str) -> Self {
+    /// The page service of runs of `documents`, each pinning its
+    /// execution closure.
+    fn new(documents: &[&EncodedPayload]) -> Self {
         let directory = tempfile::tempdir().expect("spool directory");
         let spools = SpoolRoot::open(directory.path(), 1 << 30).expect("spools");
         let spool = SharedSpool::new(spools.spool(StageLeaseId(1)).expect("spool"));
-        let releases = lash_vm_broker::kernel::state::release_manifests().expect("releases");
-        let release = releases
-            .manifests
-            .current(dialect)
-            .expect("the dialect's helper release");
+        let mut references: Vec<NodeId> =
+            documents.iter().map(|document| closure(document)).collect();
+        references.push(NodeId(BINDING));
         let pages = ActivationPages::new(
             Arc::new(Unread),
             None,
@@ -267,7 +281,7 @@ impl Parent {
                     .decode,
             ),
         )
-        .with_references([NodeId(release.0), NodeId(BINDING)]);
+        .with_references(references);
         Self {
             runtime: tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -523,8 +537,8 @@ fn killed_at_a_park_and_resumed(
 /// again.
 fn a_parked_run_carries_on_in_another_worker_without_asking_again() {
     let pool = WorkerPool::new(config("")).expect("pool");
-    let mut parent = Parent::new(DIALECT);
     let (identity, document) = document(TOOL_LOOP);
+    let mut parent = Parent::new(&[&document]);
     let (end, asked) =
         killed_at_a_park_and_resumed(&pool, &mut parent, DIALECT, &identity, &document);
     let EndWire::Finished { result, .. } = end else {
@@ -544,7 +558,6 @@ fn parts_that_outgrow_one_frame_cross_apart_and_the_run_goes_on_the_same() {
     let mut config = config("");
     config.protocol.decode.max_frame_bytes = FRAME;
     let pool = WorkerPool::new(config).expect("pool");
-    let mut parent = Parent::new(DIALECT);
     let sent = || pool.measurements().counters.ipc_sent_messages;
     // Never run: it makes the document, and so each start, large.
     let padding = "p".repeat(30 * 1024);
@@ -558,6 +571,7 @@ main {{
 }}"#
     ));
     let large = Datum::Text("y".repeat(40 * 1024));
+    let mut parent = Parent::new(&[&document]);
 
     let mut first = checkout(&pool);
     first
@@ -626,7 +640,9 @@ fn a_typescript_cell_lowered_in_the_worker_parks_and_resumes() {
         .clone(),
         bindings: Default::default(),
         functions: Default::default(),
-        helpers: lash_vm_library::HELPER_RELEASE,
+        packages: lash_vm_releases::lash_packages()
+            .expect("the parent's packages")
+            .own(),
     };
     let mut worker = checkout(&pool);
     let response = worker
@@ -645,7 +661,7 @@ fn a_typescript_cell_lowered_in_the_worker_parks_and_resumes() {
         .id()
         .to_string();
     let document = EncodedPayload(document);
-    let mut parent = Parent::new(DIALECT);
+    let mut parent = Parent::new(&[&document]);
     let (end, asked) =
         killed_at_a_park_and_resumed(&pool, &mut parent, DIALECT, &identity, &document);
     assert_eq!(asked.len(), 3, "each call is asked once: {asked:?}");
@@ -675,7 +691,7 @@ fn a_worker_refuses_a_run_in_a_dialect_its_host_did_not_name() {
 
     // A host that names Python runs it, to a park another worker resumes.
     let pool = WorkerPool::new(config("")).expect("pool");
-    let mut parent = Parent::new("python");
+    let mut parent = Parent::new(&[&document]);
     let mut worker = checkout(&pool);
     worker
         .start(new_run(), &identity, ExecutionClass::Cell)
@@ -743,7 +759,9 @@ fn a_python_cell_lowered_in_the_worker_runs_under_its_confinement() {
         .clone(),
         bindings: Default::default(),
         functions: Default::default(),
-        helpers: lash_vm_library::HELPER_RELEASE,
+        packages: lash_vm_releases::lash_packages()
+            .expect("the parent's packages")
+            .own(),
     };
     let mut worker = checkout(&pool);
     let response = worker
@@ -765,7 +783,7 @@ fn a_python_cell_lowered_in_the_worker_runs_under_its_confinement() {
     // Its first park seals its root and the worker is killed: another
     // resumes it only on the release it pinned, which holds Python's
     // helpers and no other dialect's.
-    let mut parent = Parent::new("python");
+    let mut parent = Parent::new(&[&document]);
     let (end, asked) =
         killed_at_a_park_and_resumed(&pool, &mut parent, "python", &identity, &document);
     assert_eq!(asked.len(), 3, "each call is asked once");
@@ -776,9 +794,9 @@ fn a_python_cell_lowered_in_the_worker_runs_under_its_confinement() {
 /// refuses the state before any machine is built.
 fn a_parked_run_is_refused_under_another_document() {
     let pool = WorkerPool::new(config("")).expect("pool");
-    let mut parent = Parent::new(DIALECT);
     let (identity, document_a) = document(TOOL_LOOP);
     let (other, document_b) = document("main { let got = perform host.echo(1) as Any return got }");
+    let mut parent = Parent::new(&[&document_a, &document_b]);
     let mut worker = checkout(&pool);
     worker
         .start(
@@ -836,7 +854,7 @@ main { }"#,
     worker
         .start(start, &identity, ExecutionClass::Process)
         .expect("start");
-    let mut parent = Parent::new(DIALECT);
+    let mut parent = Parent::new(&[&document]);
     let (wait, argument) = requested(parent.run(&mut worker, SLICE, false).expect("run"));
     let entered: Vec<Vec<EffectId>> = worker
         .take_sites()
@@ -913,7 +931,7 @@ main { }"#,
     let now = Timestamp {
         nanoseconds: Integer::from(1_700_000_000),
     };
-    let mut parent = Parent::new(DIALECT);
+    let mut parent = Parent::new(&[&document]);
     let mut kinds = Vec::new();
     let mut step = parent.run(&mut worker, SLICE, false).expect("run");
     let end = loop {
@@ -1113,7 +1131,6 @@ fn metered(step: &RunStep) -> RunMeters {
 /// once, naming the bound, what the run used and its limit.
 fn a_refusing_parent_limiter_ends_the_run_where_no_limiter_does() {
     let pool = WorkerPool::new(config("")).expect("pool");
-    let mut parent = Parent::new(DIALECT);
     let charge = document("main { while true { } }");
     let memory = document(
         r#"
@@ -1122,6 +1139,7 @@ main {
   return 0
 }"#,
     );
+    let mut parent = Parent::new(&[&charge.1, &memory.1]);
     for (bound, (identity, document)) in [(Bound::Charge, charge), (Bound::Memory, memory)] {
         let mut ends = Vec::new();
         for limiter in [true, false] {
@@ -1186,7 +1204,6 @@ fn a_limit_the_parent_grows_is_saved_and_a_resumed_run_keeps_it() {
     const LIMIT: u64 = 300;
     const GROW: u64 = 100_000;
     let pool = WorkerPool::new(config("")).expect("pool");
-    let mut parent = Parent::new(DIALECT);
     let (identity, document) = document(
         r#"
 main {
@@ -1202,6 +1219,7 @@ main {
   return num.add(got, j)
 }"#,
     );
+    let mut parent = Parent::new(&[&document]);
     let mut ran = Vec::new();
     for (limit, limiter) in [(LIMIT, true), (LIMIT + GROW, false)] {
         let mut answers = std::collections::VecDeque::from([LimitDecision::Grow(GROW)]);
@@ -1255,8 +1273,8 @@ main {
 /// execution's attempts (FIG-6786).
 fn worker_crash_mid_run_leaves_the_parent_running() {
     let pool = WorkerPool::new(config("abort")).expect("pool");
-    let mut parent = Parent::new(DIALECT);
     let (identity, document) = document(TOOL_LOOP);
+    let mut parent = Parent::new(&[&document]);
     let mut worker = checkout(&pool);
     let pid = worker.pid().expect("pid");
     worker
@@ -1865,15 +1883,18 @@ fn a_host_read_past_its_deadline_ends_the_run_with_its_typed_limit() {
             requests_per_park: run.requests_per_park,
             join_members: run.join_members,
         },
+        lash_vm_broker::kernel::closure::derive(
+            document.manifest.functions.keys().copied(),
+            lash_vm_releases::lash_packages()
+                .expect("the parent's packages")
+                .functions(),
+            lash_vm_broker::kernel::closure::Natives::Declared,
+        )
+        .expect("the parent holds the document's functions"),
     )
     .expect("the run's machines");
     let directory = tempfile::tempdir().expect("spool directory");
     let spools = SpoolRoot::open(directory.path(), 1 << 30).expect("spools");
-    let releases = lash_vm_broker::kernel::state::release_manifests().expect("releases");
-    let release = releases
-        .manifests
-        .current(DIALECT)
-        .expect("the dialect's helper release");
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -1895,7 +1916,10 @@ fn a_host_read_past_its_deadline_ends_the_run_with_its_typed_limit() {
                 Duration::from_secs(600),
                 PageLimits::within(service.config().protocol.decode),
             )
-            .with_references([NodeId(release.0), NodeId(BINDING)]);
+            .with_references([
+                machines.closure().expect("the closure").reference(),
+                NodeId(BINDING),
+            ]);
             let mut machine = machines
                 .start(NodeId(BINDING), Arc::new(tokio::sync::Mutex::new(pages)))
                 .await
@@ -1969,12 +1993,12 @@ fn authored_workflow_import_is_worker_owned_and_preserves_source_policy() {
     runtime.block_on(async {
         let source = "export async function digest(inbox: string) { return inbox; }";
         let (document, _, _) = workers
-            .import_workflow(typescript, source, &environment, limits(1024))
+            .import_workflow(typescript, source, &environment, None, limits(1024))
             .await
             .expect("workflow import");
         assert!(document.entries.contains_key(&Name::new("digest")));
         let refused = workers
-            .import_workflow(typescript, source, &environment, limits(1))
+            .import_workflow(typescript, source, &environment, None, limits(1))
             .await;
         assert!(matches!(
             refused,
@@ -1985,6 +2009,7 @@ fn authored_workflow_import_is_worker_owned_and_preserves_source_policy() {
                 typescript,
                 "export const broken = ;",
                 &environment,
+                None,
                 limits(1024),
             )
             .await;
@@ -2026,7 +2051,7 @@ fn pool_holdings(
     retained: Option<Arc<lash_kernel_package::Package>>,
 ) -> Arc<lash_kernel_package::HeldPackages> {
     use lash_kernel_package::{HeldPackages, PackageSet};
-    let shipped = lash_vm_library::lash_packages().expect("parent's shipped packages");
+    let shipped = lash_vm_releases::lash_packages().expect("parent's shipped packages");
     let mut artifacts: Vec<_> = shipped.artifacts().values().cloned().collect();
     let mut sets: Vec<_> = shipped.sets().values().cloned().collect();
     if let Some(retained) = retained {
@@ -2098,7 +2123,7 @@ fn a_shipped_both_function_without_its_native_answers_by_its_body_with_the_same_
 /// under a warm worker and a fresh process, including the charge.
 #[test]
 fn a_shipped_packages_native_is_pure_across_warm_and_cold_workers() {
-    let held = lash_vm_library::lash_packages().expect("shipped packages");
+    let held = lash_vm_releases::lash_packages().expect("shipped packages");
     let function = held
         .functions()
         .named("num.abs")

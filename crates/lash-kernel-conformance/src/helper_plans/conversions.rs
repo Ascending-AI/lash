@@ -198,7 +198,7 @@ main {{ return null }}
     ];
     for source in sources {
         let program = Program {
-            release: base.release,
+            closure: base.closure,
             document: Arc::new(
                 parse_document(&format!("kernel 1\nnumbers by_spelling\n{source}")).unwrap(),
             ),

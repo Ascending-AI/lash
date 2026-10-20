@@ -346,6 +346,20 @@ pub trait Activation: Send + Sync + 'static {
     ///
     /// The runner drops this future, mid-await, when the node stops serving.
     async fn activate(&self, owned: Owned) -> Exit;
+
+    /// The package code the node holds (FIG-6918): its activation installs
+    /// it in the store and answers the artifacts the node advertises before
+    /// it registers, so a node claims an actor only when it holds the set
+    /// the actor's code was linked under (CLAIM-HOLDS). An activation that
+    /// runs no package code holds none.
+    ///
+    /// # Errors
+    ///
+    /// The refusal that keeps the node from starting, such as
+    /// [`DurableError::RetiredDependents`], or the store's.
+    async fn hold(&self) -> Result<std::collections::BTreeSet<crate::HeldArtifact>, DurableError> {
+        Ok(std::collections::BTreeSet::new())
+    }
 }
 
 /// One claimed actor, as its activation holds it.
@@ -685,10 +699,16 @@ impl Runner {
     pub async fn run(self, stop: impl Future<Output = ()> + Send) -> Result<Stopped, DurableError> {
         let settings = self.config.lease.settings();
         tokio::pin!(stop);
+        let held = tokio::select! {
+            biased;
+            () = &mut stop => return Ok(Stopped::Requested),
+            held = self.activation.hold() => held?,
+        };
         let spec = NodeSpec {
             node: self.config.node.clone(),
             decodes: self.config.decodes.clone(),
             serves: self.config.serves.clone(),
+            held,
             ttl_millis: self.config.lease.ttl_millis(),
         };
         let mut register_delay = settings.claim_backoff;

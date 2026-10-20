@@ -48,9 +48,7 @@ use lash_core_store::checkpoint_graph::{
     NodeSource, StoredNode, check_envelope, node::is_semantic,
 };
 use lash_durable::domain::DomainRefusal;
-use lash_durable::domain::graph::{
-    EffectAdmissionWrite, HydratedGraph, HydratedNode, ReleasePinWrite, RootOwner,
-};
+use lash_durable::domain::graph::{EffectAdmissionWrite, HydratedGraph, HydratedNode, RootOwner};
 use lash_durable::domain::graph_commit::{
     CheckedGraph, CheckedNode, EDGE_ROW_LOGICAL_BYTES, blob_row_logical_bytes,
 };
@@ -347,21 +345,6 @@ lash_store_sql::statements! {
              FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
         /// Artifact `?3` of namespace `?2`'s graph node, as [`Self::hydrate_exec`] reads an execution's.
         hydrate_artifact = "WITH RECURSIVE root AS (SELECT graph_ref AS hash FROM lash_vm_artifacts WHERE namespace = ?2 AND artifact_ref = ?3 AND storage_kind = 1),
-             reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
-                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
-                 JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?1::bytea[])) AND NOT (edge.child_hash = ANY(?1::bytea[]))
-                   AND CASE
-                       WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
-                       WHEN get_byte(parent.content, 4) < 128
-                            OR get_byte(parent.content, 5) >= 128 THEN TRUE
-                       ELSE (get_byte(parent.content, 4) - 128) + get_byte(parent.content, 5) * 128
-                            NOT BETWEEN 1000 AND 1999
-                   END)
-             SELECT root.hash, blob.hash, blob.encoding, blob.content
-             FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
-        /// Release `?2`'s manifest, as [`Self::hydrate_exec`] reads an execution's.
-        hydrate_release = "WITH RECURSIVE root AS (SELECT root_ref AS hash FROM graph_release_pins WHERE release_key = ?2),
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
                  SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
                  JOIN blobs AS parent ON parent.hash = reach.hash
@@ -807,9 +790,6 @@ async fn hydrate_rows(connection: &mut PgConnection, owner: &RootOwner) -> Answe
         } => query(sql.hydrate_artifact.sql())
             .bind(namespace.as_str())
             .bind(artifact.as_str()),
-        RootOwner::ReleasePin { release } => {
-            query(sql.hydrate_release.sql()).bind(release.as_str())
-        }
     };
     bound
         .fetch_all(crate::observed_sql::executor(connection))
@@ -886,9 +866,6 @@ pub(super) async fn root_of(
         } => query(sql.postgres.artifact_root.sql())
             .bind(namespace.as_str())
             .bind(artifact.as_str()),
-        RootOwner::ReleasePin { release } => {
-            query(sql.graph.release_root.sql()).bind(release.as_str())
-        }
     };
     bound
         .fetch_optional(crate::observed_sql::executor(connection))
@@ -930,15 +907,6 @@ pub(super) async fn hydrate_in(
     let spent = Budget { count, total };
     let nodes = walk_found(None, &[root], found, spent, limits, None).await?;
     Ok(HydratedGraph { owner, root, nodes })
-}
-
-/// Whether `query`, a conditional write that returns its row, matched one.
-async fn matched(tx: &mut PgConnection, query: crate::observed_sql::Query<'_>) -> Answer<bool> {
-    Ok(query
-        .fetch_optional(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(db)?
-        .is_some())
 }
 
 fn graph_refused(refusal: GraphRefusal) -> DurableError {
@@ -1043,52 +1011,6 @@ pub(super) async fn apply_admission(
     match steps::run(tx, &program, &commit.steps()).await? {
         None => Ok(()),
         Some(_) => Err(graph_refused(GraphRefusal::RevisionConflict)),
-    }
-}
-
-/// Applies a release pin write.
-pub(super) async fn apply_release_pin(
-    tx: &mut PgConnection,
-    commit: &Committing<'_>,
-    write: &ReleasePinWrite,
-) -> Result<(), DurableError> {
-    match write {
-        ReleasePinWrite::Install { release, root } => {
-            let installed = crate::observed_sql::query(SQL.graph.release_install.sql())
-                .bind(release.as_str())
-                .bind(crate::keys::key(root.to_hex()))
-                .execute(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?
-                .rows_affected();
-            if installed == 0 {
-                let pinned: String = crate::keys::query_scalar(SQL.graph.release_root.sql())
-                    .bind(release.as_str())
-                    .fetch_one(crate::observed_sql::executor(&mut *tx))
-                    .await
-                    .map_err(sqlx_failure)?;
-                if pinned != root.to_hex() {
-                    return Err(graph_refused(GraphRefusal::RevisionConflict));
-                }
-            }
-            Ok(())
-        }
-        ReleasePinWrite::Retire { release, expected } => {
-            let retired = matched(
-                tx,
-                crate::observed_sql::query(SQL.graph.release_retire.sql())
-                    .bind(release.as_str())
-                    .bind(crate::keys::key(expected.to_hex())),
-            )
-            .await
-            .map_err(graph_refused)?;
-            if retired {
-                commit.retired.closure(expected);
-                Ok(())
-            } else {
-                Err(graph_refused(GraphRefusal::RevisionConflict))
-            }
-        }
     }
 }
 

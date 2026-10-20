@@ -1246,7 +1246,7 @@ fn canvas_atomic() {
         join_members: 4,
     };
     let program = Program {
-        release: PageId([8; 32]),
+        closure: PageId([8; 32]),
         document: Arc::new(original.clone()),
         library: lash_kernel_vm::PreparedLibrary::new(Arc::new(registry)),
     };

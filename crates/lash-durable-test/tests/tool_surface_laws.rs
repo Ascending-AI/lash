@@ -659,6 +659,7 @@ async fn claimed_requirements(
             node: NodeId::new("law-requirement-probe"),
             decodes: backend.formats().session_decodes(),
             serves,
+            held: Default::default(),
             ttl_millis: 15_000,
         })
         .await

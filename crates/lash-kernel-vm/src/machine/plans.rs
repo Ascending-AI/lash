@@ -713,7 +713,7 @@ impl KernelMachine {
                 // is that operation's, as when it passes in the body's
                 // frames (`K-LIB-006`).
                 if charging && let Halt::Bound(exceeded) = halt.as_mut() {
-                    exceeded.function = Some(exe.lib(lib).definition.name.clone());
+                    exceeded.function = Some(exe.lib(lib).header.name.clone());
                 }
                 Err(Interrupt::Halt(halt))
             }

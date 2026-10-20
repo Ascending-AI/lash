@@ -51,6 +51,7 @@ pub use labels::CommitCapacity;
 pub mod laws;
 pub mod node_wake_payload;
 mod node_wakes;
+pub mod packages;
 mod port;
 mod probe;
 mod retirement;
@@ -71,6 +72,9 @@ pub use ids::{
     MailSeq, NodeId, StateRevision,
 };
 pub use node_wakes::{BootLiveness, NodeWakeEvent, NodeWakeFeed, NodeWakes, WakeBatch};
+pub use packages::{
+    ArtifactDigest, HeldArtifact, NodeCapability, PackageCatalog, PackageSetDigest, StoredSet,
+};
 pub use port::{
     ActorCommit, ActorSnapshot, ActorState, ClaimActorFacts, ClaimCause, ClaimFacts,
     ClaimNodeFacts, ClaimPurpose, Claimed, DurableStore, HeartbeatOutcome, MailCommit, NodeLease,

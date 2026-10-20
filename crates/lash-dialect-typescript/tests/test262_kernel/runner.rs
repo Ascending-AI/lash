@@ -180,7 +180,7 @@ impl Host for TestHost {
 impl<M: Machine> Executor for OnMachine<M> {
     fn run(&self, lowered: &Lowered) -> Result<Execution, String> {
         let program = Program {
-            release: pages::RELEASE,
+            closure: pages::CLOSURE,
             document: Arc::clone(lowered.document.shared()),
             library: self.library.clone(),
         };
@@ -1005,6 +1005,7 @@ fn async_tests_are_judged_by_done_completion() {
             written: Default::default(),
             document: document.into(),
             captions,
+            validated: false,
         };
         let end = executor().run(&lowered).unwrap();
         assert_eq!(judge(end, &meta) == Observed::Pass, expected, "{prints}");

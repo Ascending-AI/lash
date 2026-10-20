@@ -128,6 +128,7 @@ async fn a_terminal_wait_pinned_during_the_targets_terminal_commit_is_resolved()
             node: NodeId::new("terminal-law"),
             decodes: vec![target_formats, awaiter_formats],
             serves: Vec::new(),
+            held: Default::default(),
             ttl_millis: 60_000,
         })
         .await

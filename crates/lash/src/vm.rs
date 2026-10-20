@@ -33,7 +33,7 @@ pub use lash_vm_client::packages::refusal as package_refusal;
 ///
 /// A host names the dialects it runs: `dialect-typescript` and
 /// `dialect-python` are build features, neither a default, and each builds
-/// that dialect's helper releases for the parent. A single-binary host also
+/// that dialect's packages for the parent. A single-binary host also
 /// enables the `worker` feature and calls `worker_entry` with the worker
 /// configuration it builds, naming each dialect and supplying the natives
 /// of its own packages by function identity
@@ -69,8 +69,7 @@ pub use lash_vm_client::{
     PageBudgets as WorkerPageBudgets, PoolConfig as WorkerPoolConfig, WorkerCgroup,
     WorkerConfinement, WorkerEntry, WorkerTuning,
 };
-/// A helper release a worker retains beside its own functions (FIG-5799).
-pub use lash_vm_runtime::{HelperReleaseIndex, KernelProcessPluginFactory};
+pub use lash_vm_runtime::KernelProcessPluginFactory;
 /// The names of the dialects lash ships. A host passes one where it names
 /// the dialect its process documents are written in
 /// ([`KernelProcessPluginFactory::new`]); a session or process records it
@@ -128,6 +127,10 @@ pub use lash_vm_client::{
     SpoolRoot, SupervisorEvidence, TransportSequence, VmOwner, WorkerDeploymentFault, WorkerLimit,
     WorkerWork,
 };
+/// Why a process's run would not carry onto a successor pair's document
+/// (FIG-6121).
+#[cfg(feature = "codemode")]
+pub use lash_vm_runtime::HelperAdoptionRefusal;
 #[cfg(feature = "codemode")]
 pub use lash_vm_runtime::{
     DocumentRefusal as KernelDocumentRefusal, DocumentStoreError as KernelDocumentStoreError,
@@ -135,7 +138,7 @@ pub use lash_vm_runtime::{
     ParkedRefusal as KernelParkedRefusal, RefusedKernelCell, RefusedKernelProcess,
     UnmigratedKernelSession, migrate_function_value,
 };
-/// What still pins a helper release before this build's own, and why a
-/// process's run would not carry onto the build's helpers (FIG-5799).
+/// What a node keeps of the package artifacts it holds beside its own set,
+/// and the dependents that pin them (FIG-6918, RETAIN-SURVEY).
 #[cfg(feature = "codemode")]
-pub use lash_vm_runtime::{HelperAdoptionRefusal, HelperDependentProcess, HelperDependentSession};
+pub use lash_vm_runtime::{RetainDependent, RetainSurvey, StrandedDependent};

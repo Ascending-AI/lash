@@ -933,7 +933,7 @@ fn program_case(name: &str, text: &str, call_depth: u32) -> Case {
 fn formed(library: &PreparedLibrary, case: &Case) -> (usize, usize) {
     let document = parse_document(&case.document).expect("a region program parses");
     let program = Program {
-        release: crate::pages::RELEASE,
+        closure: crate::pages::CLOSURE,
         document: Arc::new(document),
         library: library.clone(),
     };

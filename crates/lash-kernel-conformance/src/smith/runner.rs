@@ -105,7 +105,7 @@ fn fault(error: impl std::fmt::Display) -> HarnessError {
 
 fn program(smith: &Smith) -> Program {
     Program {
-        release: crate::pages::RELEASE,
+        closure: crate::pages::CLOSURE,
         document: Arc::new(smith.document.clone()),
         library: library().prepared.clone(),
     }

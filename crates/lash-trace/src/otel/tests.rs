@@ -912,13 +912,15 @@ fn failed_cells_export_their_reason_without_failing_a_recovered_turn() {
                 observation_count: 0,
                 observation_projections: Vec::new(),
                 error: Some(crate::CellFailure::new(
-                    crate::CellFailureKind::HelperReleaseNotHeld { release: 7 },
-                    "the worker does not hold release 7",
+                    crate::CellFailureKind::PackagesNotHeld {
+                        packages: lash_kernel_doc::PackageSetDigest::from_bytes([7; 32]),
+                    },
+                    "the worker does not hold the package set",
                 )),
                 terminal_finish: None,
                 tool_calls: Vec::new(),
             },
-            "helper_release_not_held",
+            "packages_not_held",
         ),
         (
             TraceEvent::ExecCodeFailed {

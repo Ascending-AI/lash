@@ -14,8 +14,9 @@ use lash_kernel_state::paged::{Checkpoint, PageSource};
 use lash_kernel_vm::{
     Bounds, CellStart, Host, KernelMachine, Machine, Outcome, Program, Step, WaitId,
 };
+use lash_vm_broker::kernel::closure::{Closure, Natives};
 use lash_vm_broker::kernel::pages::{PageExchange, SharedPages};
-use lash_vm_broker::kernel::state::{GraphStateFailure, ReleaseGraph};
+use lash_vm_broker::kernel::state::GraphStateFailure;
 use lash_vm_broker::kernel::{
     DrivenMachine, KernelFailure, MachinePark, MachineStep, Machines, ParkedState,
 };
@@ -36,14 +37,12 @@ pub type CallHold = Arc<dyn Fn() -> Box<dyn std::any::Any + Send> + Send + Sync>
 pub struct InProcess<H> {
     hold: Option<CallHold>,
     program: Program,
-    /// The dialect the run's document is written in: a new run pins that
-    /// dialect's release.
-    dialect: String,
     bounds: Bounds,
     start: RunStart,
     document: DocumentId,
     host: Arc<std::sync::Mutex<H>>,
-    releases: OnceLock<Result<ReleaseGraph, GraphStateFailure>>,
+    /// The document's execution closure over the program's registry.
+    closure: OnceLock<Result<Closure, GraphStateFailure>>,
 }
 
 impl<H> InProcess<H> {
@@ -61,7 +60,7 @@ impl<H> InProcess<H> {
         self
     }
 
-    /// The run of `program`, written in `dialect`, from `start`, held to
+    /// The run of `program` from `start`, held to
     /// `bounds`, reading `host`.
     ///
     /// # Errors
@@ -69,7 +68,6 @@ impl<H> InProcess<H> {
     /// None today: the run's identity is the document's own.
     pub fn new(
         program: Program,
-        dialect: &str,
         bounds: Bounds,
         start: RunStart,
         host: H,
@@ -79,11 +77,10 @@ impl<H> InProcess<H> {
             hold: None,
             document: program.document.identity(),
             program,
-            dialect: dialect.to_owned(),
             bounds,
             start,
             host: Arc::new(std::sync::Mutex::new(host)),
-            releases: OnceLock::new(),
+            closure: OnceLock::new(),
         })
     }
 }
@@ -330,9 +327,16 @@ where
         self.bounds
     }
 
-    fn releases(&self) -> Result<&ReleaseGraph, KernelFailure> {
-        self.releases
-            .get_or_init(lash_vm_broker::kernel::state::release_manifests)
+    fn closure(&self) -> Result<&Closure, KernelFailure> {
+        self.closure
+            .get_or_init(|| {
+                lash_vm_broker::kernel::closure::derive(
+                    self.program.document.manifest.functions.keys().copied(),
+                    self.program.library.registry(),
+                    Natives::Required,
+                )
+                .map_err(|refusal| GraphStateFailure::Restore(refusal.into()))
+            })
             .as_ref()
             .map_err(|failure| KernelFailure::State(failure.clone()))
     }
@@ -342,18 +346,8 @@ where
         binding: NodeId,
         pages: SharedPages,
     ) -> Result<Self::Machine, KernelFailure> {
-        let release = self
-            .releases()?
-            .manifests
-            .current(&self.dialect)
-            .ok_or_else(|| {
-                KernelFailure::State(GraphStateFailure::Unwritable(format!(
-                    "the build holds no helper release of the dialect `{}`",
-                    self.dialect
-                )))
-            })?;
         let program = Program {
-            release: PageId(release.0),
+            closure: PageId(self.closure()?.reference().0),
             ..self.program.clone()
         };
         // A carried session crosses as a worker's would: each page under
@@ -402,7 +396,7 @@ where
             grant: grant_of(&pages.lock().await.issue(parked.root)),
         };
         let program = Program {
-            release: parked.header.release,
+            closure: PageId(self.closure()?.reference().0),
             ..self.program.clone()
         };
         let bounds = self.bounds;

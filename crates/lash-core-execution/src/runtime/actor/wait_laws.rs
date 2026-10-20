@@ -93,6 +93,7 @@ async fn node(backend: &Backend, name: &str, ttl_millis: i64) -> Result<NodeLeas
             node: NodeId::new(name),
             decodes: vec![formats()],
             serves: Vec::new(),
+            held: Default::default(),
             ttl_millis,
         })
         .await?)

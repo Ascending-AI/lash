@@ -31,15 +31,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 
-use lash_core_store::checkpoint_graph::node::immutable_closure;
 use lash_core_store::checkpoint_graph::{
     BlobEncoding, DecodeDimension, DecodeLimits, GraphRefusal, InstalledGraphMeasurement, NodeId,
     NodeSource, StoredNode, check_envelope, node::is_semantic,
 };
 use lash_durable::domain::DomainRefusal;
-use lash_durable::domain::graph::{
-    EffectAdmissionWrite, HydratedGraph, HydratedNode, ReleasePinWrite, RootOwner,
-};
+use lash_durable::domain::graph::{EffectAdmissionWrite, HydratedGraph, HydratedNode, RootOwner};
 use lash_durable::domain::graph_commit::{
     CheckedGraph, CheckedNode, EDGE_ROW_LOGICAL_BYTES, blob_row_logical_bytes,
 };
@@ -84,13 +81,6 @@ CREATE TABLE IF NOT EXISTS effect_admissions (
 );
 CREATE INDEX IF NOT EXISTS idx_effect_admissions_admission_ref
     ON effect_admissions (admission_ref);
-
--- A deliberately installed runnable release manifest.
-CREATE TABLE IF NOT EXISTS graph_release_pins (
-    release_key TEXT PRIMARY KEY,
-    root_ref BLOB NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT
-);
-CREATE INDEX IF NOT EXISTS idx_graph_release_pins_root_ref ON graph_release_pins (root_ref);
 
 -- A root lease (FIG-6191, D-LEASE): an activation's hold on the exact
 -- committed root it reads on demand, taken under its actor's fence or, for
@@ -152,7 +142,6 @@ CREATE VIEW IF NOT EXISTS graph_root_catalog AS
     UNION ALL SELECT 'admission_base', admission_base_checkpoint_ref FROM session_meta
         WHERE admission_base_checkpoint_ref IS NOT NULL
     UNION ALL SELECT 'artifact', blob_ref FROM artifact_refs
-    UNION ALL SELECT 'release', root_ref FROM graph_release_pins
     UNION ALL SELECT 'revision_config', config_ref FROM session_revisions
     UNION ALL SELECT 'answer', answer_ref FROM turn_phases WHERE answer_ref IS NOT NULL
     UNION ALL SELECT 'lease', root_ref FROM root_leases
@@ -416,9 +405,6 @@ pub(super) fn root_of(tx: &Connection, owner: &RootOwner) -> GraphAnswer<Option<
             SQL.sqlite.artifact_root.sql(),
             [namespace.as_str(), artifact.as_str()],
         )?,
-        RootOwner::ReleasePin { release } => {
-            one(tx, SQL.graph.release_root.sql(), [release.as_str()])?
-        }
     };
     Ok(stored.as_deref().map(node_of).transpose())
 }
@@ -657,10 +643,7 @@ impl FrontierReader {
                     }
                     if let Ok(children) = &body.children {
                         for child in children.iter().rev() {
-                            if self.discovered.insert(*child)
-                                && (self.roots.contains(child)
-                                    || immutable_closure(*child).is_none())
-                            {
+                            if self.discovered.insert(*child) {
                                 self.pending.entry(level + 1).or_default().push_back(*child);
                             }
                         }
@@ -700,44 +683,6 @@ fn walk_within(
         }
         #[cfg(test)]
         WALK_COUNTS.with_borrow_mut(|counts| *counts.1.entry(id).or_default() += 1);
-        // A stored node's edges keep every child it names stored, and the
-        // child's own edges keep its children: a member of the build's
-        // catalog a stored node reaches is stored with all it reaches. Its
-        // bytes are the build's under their digests, so none is read back.
-        if !roots.contains(&id)
-            && let Some(closure) = immutable_closure(id)
-        {
-            for node in closure.nodes() {
-                if nodes.contains_key(&node.id) {
-                    continue;
-                }
-                if let Err(refusal) = count(&nodes, &mut total, node.bytes.len(), limits) {
-                    return Ok(Err(refusal));
-                }
-                let len = node.bytes.len() as u64;
-                if len > limits.node_bytes {
-                    return Ok(Err(GraphRefusal::DecodeLimit {
-                        dimension: DecodeDimension::NodeBytes,
-                        actual: len,
-                        limit: limits.node_bytes,
-                    }));
-                }
-                visited.insert(node.id);
-                #[cfg(test)]
-                if node.id != id {
-                    WALK_COUNTS
-                        .with_borrow_mut(|counts| *counts.1.entry(node.id).or_default() += 1);
-                }
-                nodes.insert(
-                    node.id,
-                    HydratedNode {
-                        encoding: BlobEncoding::Graph,
-                        bytes: std::sync::Arc::clone(&node.bytes),
-                    },
-                );
-            }
-            continue;
-        }
         let ReadNode {
             encoding,
             bytes,
@@ -1068,45 +1013,6 @@ pub(super) fn clear_admissions_under(
         .collect()
 }
 
-/// Applies a release pin write.
-pub(super) fn apply_release_pin(
-    tx: &Connection,
-    commit: &Committing<'_>,
-    write: &ReleasePinWrite,
-) -> Answer<()> {
-    match write {
-        ReleasePinWrite::Install { release, root } => {
-            let installed = cached_execute(
-                tx,
-                SQL.graph.release_install.sql(),
-                rusqlite::params![release.as_str(), root.0.as_slice()],
-            )?;
-            if installed == 0 {
-                let pinned = tx
-                    .prepare_cached(SQL.graph.release_root.sql())?
-                    .query_row([release.as_str()], |row| crate::codec::hash_column(row, 0))?;
-                if pinned != root.to_hex() {
-                    return graph_refused(GraphRefusal::RevisionConflict);
-                }
-            }
-        }
-        ReleasePinWrite::Retire { release, expected } => {
-            let retired = tx
-                .prepare_cached(SQL.graph.release_retire.sql())?
-                .query_row(
-                    rusqlite::params![release.as_str(), expected.0.as_slice()],
-                    |_| Ok(()),
-                )
-                .optional()?;
-            if retired.is_none() {
-                return graph_refused(GraphRefusal::RevisionConflict);
-            }
-            commit.retired.closure(expected);
-        }
-    }
-    Ok(Ok(()))
-}
-
 /// Installs a checked graph inside the caller's fenced transaction: every
 /// node it references without supplying must be stored (a published root
 /// as a graph node), then each supplied blob in digest order, compared on
@@ -1351,7 +1257,7 @@ mod tests {
                     rusqlite::params![SqlHash(retained.as_str()), b"retained control".as_slice()],
                 )?;
                 tx.execute(
-                    "INSERT INTO graph_release_pins(release_key, root_ref) VALUES ('control', ?1)",
+                    "INSERT INTO retirement_holds(root_ref, closure, queued_at_ms) VALUES (?1, 1, 0)",
                     [SqlHash(retained.as_str())],
                 )?;
                 Ok(())
@@ -1371,7 +1277,7 @@ mod tests {
                     ],
                 )?;
                 tx.execute(
-                    "INSERT INTO graph_release_pins(release_key, root_ref) VALUES ('candidate', ?1)",
+                    "INSERT INTO retirement_holds(root_ref, closure, queued_at_ms) VALUES (?1, 1, 0)",
                     [SqlHash(absent.as_str())],
                 )?;
                 Ok(())
@@ -1396,7 +1302,7 @@ mod tests {
                     .collect::<rusqlite::Result<Vec<_>>>()?;
                 assert_eq!(keys, [(control.0, "blob".to_owned(), 32)]);
                 let rooted: i64 = connection.query_row(
-                    "SELECT count(*) FROM graph_release_pins JOIN blobs ON root_ref = hash",
+                    "SELECT count(*) FROM retirement_holds JOIN blobs ON root_ref = hash",
                     [],
                     |row| row.get(0),
                 )?;

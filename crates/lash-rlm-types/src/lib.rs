@@ -444,10 +444,12 @@ mod rlm_step_serde_tests {
             (program_failure(), serde_json::json!("program")),
             (
                 CellFailure::new(
-                    CellFailureKind::HelperReleaseNotHeld { release: 7 },
-                    "missing helpers",
+                    CellFailureKind::PackagesNotHeld {
+                        packages: lash_kernel_doc::PackageSetDigest::from_bytes([7; 32]),
+                    },
+                    "missing packages",
                 ),
-                serde_json::json!({"helper_release_not_held": {"release": 7}}),
+                serde_json::json!({"packages_not_held": {"packages": "07".repeat(32)}}),
             ),
         ] {
             let message = failure.message.clone();

@@ -668,9 +668,7 @@ impl KernelEffects for CellHost<'_> {
                 envelope
             }
             _ => {
-                let release =
-                    super::envelope::cell_release(&self.envelope.dialect).map_err(ParentFault)?;
-                let envelope = self.envelope.stage(staging, release).map_err(fault)?;
+                let envelope = self.envelope.stage(staging).map_err(fault)?;
                 staged.insert(envelope);
                 graph.envelope = Some(envelope);
                 envelope

@@ -430,10 +430,17 @@ impl Prepared {
             .registry
             .get(&function)
             .unwrap_or_else(|| unreachable!("registry index"));
-        let definition = Arc::clone(registered.definition());
-        let machine = machine_function(&definition);
+        // Its header alone: a body is decoded only to compile it, and a
+        // function the machine runs itself only by one of its names
+        // (FIG-6931).
+        let header = Arc::clone(registered.header());
+        let machine = if matches!(header.name.as_str(), "deref" | "tasks.unfinished") {
+            machine_function(registered.definition())
+        } else {
+            None
+        };
         let entry = if machine.is_some()
-            || definition.guard.is_some()
+            || header.guard.is_some()
             || !self.layout.shape().0.is_multiple_of(2)
         {
             None
@@ -482,18 +489,18 @@ impl Prepared {
             },
             (None, None, None) => unreachable!("registered functions have an implementation"),
         };
-        let params = &definition.signature.params;
-        let charge = Plan::new(&definition.charge, params);
-        let limit = definition
+        let params = &header.signature.params;
+        let charge = Plan::new(&header.charge, params);
+        let limit = header
             .guard
             .as_ref()
             .map(|guard| Plan::new(&guard.limit, params));
         let prepared = entry.map(|entry| {
-            let fast = Fast::new(&definition.charge, params, &charge, entry.immediate());
+            let fast = Fast::new(&header.charge, params, &charge, entry.immediate());
             (entry, fast)
         });
         let shared_params = if body_slot.is_some_and(|(_, slot)| slot.closures) {
-            parameters::shared(&definition)
+            parameters::shared(registered.definition())
         } else {
             Vec::new()
         };
@@ -501,10 +508,10 @@ impl Prepared {
             lib: Lib {
                 index: id,
                 shares_params: !shared_params.is_empty(),
-                operation: definition.has_native() && definition.body().is_some(),
+                operation: header.implementation == lash_kernel_doc::ImplementationKind::Both,
                 id: function,
                 arity: params.len(),
-                definition,
+                header,
                 run,
                 charge,
                 limit,
@@ -558,7 +565,7 @@ impl Prepared {
         let lib_of = |function: &FunctionId| self.lib_of(function);
         PreparedPlan::new(
             plan,
-            registered.definition(),
+            registered.header(),
             &lib_of,
             self.layout,
             CodeId(slot.base.codes),

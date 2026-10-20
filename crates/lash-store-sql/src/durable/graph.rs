@@ -3,7 +3,7 @@
 //!
 //! The graph tables are the content-addressed node store's edges
 //! (`blob_edges`), the graph-reference rows a commit owns roots through
-//! (`effect_admissions`, `graph_release_pins`; the graph
+//! (`effect_admissions`; the graph
 //! columns of `exec_snapshots`, `run_records`, `turn_phases` and
 //! `turn_namespaces` are their own domains' statements), and
 //! the root catalog view (`graph_root_catalog`) that names every root of
@@ -21,9 +21,6 @@ pub const EDGES_TABLE: &str = "blob_edges";
 /// `effect_admissions`: an execution's admitted effect, by effect identity,
 /// to its Admission node.
 pub const ADMISSIONS_TABLE: &str = "effect_admissions";
-
-/// `graph_release_pins`: an installed runnable release manifest.
-pub const RELEASE_PINS_TABLE: &str = "graph_release_pins";
 
 /// `graph_root_catalog`: the view of every root of every source.
 pub const CATALOG_VIEW: &str = "graph_root_catalog";
@@ -86,17 +83,6 @@ crate::statements! {
         /// Session `?1`'s admission base root.
         admission_base_root = "SELECT admission_base_checkpoint_ref FROM session_meta
              WHERE session_id = ?1";
-
-        /// Release `?1`'s pinned manifest.
-        release_root = "SELECT root_ref FROM graph_release_pins WHERE release_key = ?1";
-
-        /// Pin release `?1`'s manifest `?2`; nothing when it is pinned.
-        release_install = "INSERT INTO graph_release_pins (release_key, root_ref) VALUES (?1, ?2)
-             ON CONFLICT (release_key) DO NOTHING";
-
-        /// Retire release `?1`'s pin on `?2`. No row when it is not `?2`.
-        release_retire = "DELETE FROM graph_release_pins WHERE release_key = ?1 AND root_ref = ?2
-             RETURNING release_key";
 
         /// Up to `?2` blobs after `?1`, in digest order, that no root names
         /// and no edge reaches: one page of the orphan audit.

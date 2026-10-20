@@ -99,7 +99,7 @@ fn run(registry: &Arc<FunctionRegistry>, functions: &[FunctionId], main: &str) -
     }
     text.push_str(&format!("main {{\n{main}\n}}\n"));
     let program = Program {
-        release: PageId([8; 32]),
+        closure: PageId([8; 32]),
         document: Arc::new(parse_document(&text).unwrap()),
         library: lash_kernel_vm::PreparedLibrary::new(Arc::clone(registry)),
     };

@@ -23,10 +23,11 @@ use lash_durable::domain::pages::{LeaseFence, PageStore, RootLeaseId, RootLeaseR
 use lash_durable::domain::{ExecKey, RootOwner};
 use lash_execution_contracts::process::StepPages;
 use lash_kernel_state::AdmittedWait;
+use lash_vm_broker::kernel::closure::Closure;
 use lash_vm_broker::kernel::pages::{
     ActivationPages, CapabilityKey, PageLimits, SharedPages, SpoolRoot,
 };
-use lash_vm_broker::kernel::state::{ReleaseGraph, checkpoint_header, held_releases};
+use lash_vm_broker::kernel::state::checkpoint_header;
 use lash_vm_broker::kernel::{KernelFailure, ParkedState, next_stage_lease};
 
 use super::run::RunFault;
@@ -65,8 +66,8 @@ impl StepActivation {
     /// The activation of `process`'s run over `store`, staging in a spool
     /// of `spools`: resumed from `parked`, read under what it names, each
     /// of its waits' requests in `admissions`. Sealed pages may name the
-    /// run's owner binding `binding` and the release manifests its root
-    /// pins.
+    /// run's owner binding `binding` and `closure`, the execution closure
+    /// its roots pin.
     ///
     /// # Errors
     ///
@@ -82,18 +83,12 @@ impl StepActivation {
         parked: Option<(ParkedPage, ParkedUnder<'_>)>,
         admissions: Vec<AdmittedWait>,
         binding: NodeId,
-        releases: &ReleaseGraph,
+        closure: &Closure,
         spools: &SpoolRoot,
         clock: Arc<dyn Clock>,
         limits: PageLimits,
     ) -> Result<Self, KernelFailure> {
-        let mut references: Vec<NodeId> = releases
-            .manifests
-            .dialects()
-            .filter_map(|dialect| releases.manifests.current(dialect))
-            .map(|release| NodeId(release.0))
-            .collect();
-        references.push(binding);
+        let references = [closure.reference(), binding];
         let mut ttl = LEASE_TTL;
         let (lease, resumed) = match parked {
             None => (None, None),
@@ -157,7 +152,6 @@ impl StepActivation {
                         return Err(KernelFailure::State(failure));
                     }
                 };
-                references.push(NodeId(header.release.0));
                 let resumed = ParkedState {
                     exec_root: held,
                     root: parked.root,
@@ -191,14 +185,13 @@ impl StepActivation {
     }
 
     /// The candidate that publishes `root`, the CheckpointRoot the run
-    /// sealed at its park, pinning `release`, the release its header
-    /// names: installed with the run's first outcome, required after.
-    pub(crate) fn candidate(&self, root: NodeId, release: NodeId) -> RunCandidate {
+    /// sealed at its park, pinning `closure`, the execution closure its
+    /// header names: staged with the run's first outcome, required after.
+    pub(crate) fn candidate(&self, root: NodeId, closure: Closure) -> RunCandidate {
         RunCandidate {
             pages: Arc::clone(&self.pages),
-            store: Arc::clone(&self.store),
             root,
-            release,
+            closure,
             first: self.parked.is_none(),
         }
     }
@@ -224,15 +217,14 @@ fn fault(message: &str) -> KernelFailure {
 }
 
 /// The CheckpointRoot a run sealed at its park, published with the step's
-/// outcome from the activation's spool, with the release its header pins.
+/// outcome from the activation's spool, with the closure its header pins.
 /// Dropping the last holder of the activation drops what it staged.
 pub(crate) struct RunCandidate {
     pages: SharedPages,
-    store: Arc<dyn PageStore>,
     root: NodeId,
-    release: NodeId,
-    /// Whether this is the process's first root: no earlier one pinned
-    /// the release.
+    closure: Closure,
+    /// Whether this is the process's first root: no earlier one staged
+    /// the closure.
     first: bool,
 }
 
@@ -255,21 +247,7 @@ impl lash_execution_contracts::process::StepPublication for RunCandidate {
         commit: CommitId,
     ) -> Result<Box<dyn lash_core_store::checkpoint_graph::stage::CandidateManifest>, DurableError>
     {
-        let releases = held_releases().map_err(|failure| {
-            DurableError::Store(lash_durable::StoreFailure {
-                kind: lash_durable::StoreFailureKind::Corrupt,
-                message: format!("the build's releases: {failure}"),
-            })
-        })?;
-        releases
-            .pin(&*self.store, tx, self.release, self.first)
-            .await
-            .map_err(|unheld| {
-                DurableError::Store(lash_durable::StoreFailure {
-                    kind: lash_durable::StoreFailureKind::Corrupt,
-                    message: unheld.to_string(),
-                })
-            })?;
+        self.closure.stage(tx, self.first);
         let manifest = self
             .pages
             .lock()

@@ -185,7 +185,7 @@ synthetic-next = [
 ]
 
 [dev-dependencies]
-lash-vm-library = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
+lash-vm-releases = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
 lash-llm-transport = { workspace = true }
 # The dev-dependencies' testing client is paired with a testing worker when
 # the `worker` feature links one (FIG-4409).

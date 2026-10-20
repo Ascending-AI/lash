@@ -119,9 +119,6 @@ pub enum RootOwner {
     /// row, which roots its node for the referrers whose edges hold the row
     /// (FIG-6469).
     ArtifactBridge { namespace: String, artifact: String },
-    /// `graph_release_pins`, keyed by the release's dialect line and name
-    /// (`typescript/1.0`).
-    ReleasePin { release: String },
 }
 
 impl RootOwner {
@@ -141,7 +138,6 @@ impl RootOwner {
             Self::SessionRevision { .. } => RootSource::SessionRevision,
             Self::SessionAdmissionBase { .. } => RootSource::SessionAdmissionBase,
             Self::ArtifactBridge { .. } => RootSource::ArtifactBridge,
-            Self::ReleasePin { .. } => RootSource::ReleasePin,
         }
     }
 }
@@ -458,15 +454,6 @@ pub enum EffectAdmissionWrite {
     },
 }
 
-/// A release manifest pin write.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ReleasePinWrite {
-    /// Install a runnable manifest.
-    Install { release: String, root: NodeId },
-    /// Retire it; live envelope and bundle children keep their own owners.
-    Retire { release: String, expected: NodeId },
-}
-
 fn change(owner: RootOwner, expected: Option<NodeId>, next: Option<NodeId>) -> Option<RootChange> {
     match (expected, next) {
         (expected, Some(root)) => Some(RootChange::Put {
@@ -615,20 +602,6 @@ impl DomainWrite {
                 },
                 None,
                 *transcript,
-            )),
-            Self::ReleasePin(ReleasePinWrite::Install { release, root }) => one(change(
-                RootOwner::ReleasePin {
-                    release: release.clone(),
-                },
-                None,
-                Some(*root),
-            )),
-            Self::ReleasePin(ReleasePinWrite::Retire { release, expected }) => one(change(
-                RootOwner::ReleasePin {
-                    release: release.clone(),
-                },
-                Some(*expected),
-                None,
             )),
             Self::RunFact(RunFactWrite::Prune { .. })
             | Self::Turn(_)

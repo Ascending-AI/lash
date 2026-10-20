@@ -28,10 +28,6 @@
 
 #![allow(clippy::expect_used)]
 
-/// The dialect whose release the laws' runs pin: their documents call the
-/// kernel library alone, which every dialect's release holds.
-const DIALECT: &str = lash_vm_releases::TYPESCRIPT;
-
 use lash_vm_worker::in_process::InProcess;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -144,8 +140,10 @@ main {{
 }}
 "#
     );
+    // The in-process machines pin the closure they derive from the
+    // document over this registry.
     Program {
-        release: PageId([0; 32]),
+        closure: PageId([0; 32]),
         document: Arc::new(parse_document(&text).expect("a valid kernel fan-out document")),
         library: lash_kernel_vm::PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
     }
@@ -346,11 +344,9 @@ impl Shared {
             .expect("clock")
             .clone()
             .expect("the database opened first");
-        Ok(
-            InProcess::new(program.clone(), DIALECT, bounds(), start(), NoReads)
-                .map_err(|error| error.to_string())?
-                .with_hold(Arc::new(move || Box::new(clock.hold()))),
-        )
+        Ok(InProcess::new(program.clone(), bounds(), start(), NoReads)
+            .map_err(|error| error.to_string())?
+            .with_hold(Arc::new(move || Box::new(clock.hold()))))
     }
 
     fn violation(&self, violation: String) {
@@ -624,6 +620,7 @@ impl Activation for ParkActivation {
                                     session: law_session(&pages, finished.carry.as_ref()).await,
                                     end: End::Finished(finished),
                                     pages: &pages,
+                                    carried: &[],
                                     with: Vec::new(),
                                 },
                                 &host,
@@ -684,7 +681,7 @@ async fn two_orders(
     }
     let machines = shared.machines(program)?;
     let document = machines.document();
-    let releases = machines.releases().map_err(|error| refused(&error))?;
+    let closure = machines.closure().map_err(|error| refused(&error))?;
     let binding = lash_vm_broker::kernel::graph::owner_binding_node(&exec())
         .map_err(|error| refused(&error))?;
     let first = broker
@@ -703,7 +700,13 @@ async fn two_orders(
         return Err("the run parks first".into());
     };
     let state = broker
-        .sealed(&mut machine, &first, binding, &document)
+        .sealed(
+            &mut machine,
+            &first,
+            binding,
+            &document,
+            closure.reference(),
+        )
         .await
         .map_err(|error| refused(&error))?;
     let committed = store
@@ -712,7 +715,8 @@ async fn two_orders(
                 document,
                 state: state.clone(),
                 pages: &first.pages,
-                releases,
+                closure,
+                carried: &[],
                 ledger: EffectLedger::new(),
                 admit: admissions(host, 0, park.requests).await?,
                 with: Vec::new(),
@@ -811,7 +815,13 @@ async fn two_orders(
         return Err("both delivery orders park".into());
     };
     let state = broker
-        .sealed(&mut machine, &activation, binding, &document)
+        .sealed(
+            &mut machine,
+            &activation,
+            binding,
+            &document,
+            closure.reference(),
+        )
         .await
         .map_err(|error| refused(&error))?;
     store
@@ -820,7 +830,8 @@ async fn two_orders(
                 document,
                 state,
                 pages: &activation.pages,
-                releases,
+                closure,
+                carried: &[],
                 admit: admissions(host, ledger.next_park(), park.requests).await?,
                 ledger,
                 with: Vec::new(),

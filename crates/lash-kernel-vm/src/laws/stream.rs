@@ -287,7 +287,7 @@ fn program(expression: &str, layout: Layout, native_twice: bool) -> Program {
     );
     let document = parse_document(&text).unwrap_or_else(|error| panic!("{error}\n{text}"));
     Program {
-        release: PageId([8; 32]),
+        closure: PageId([8; 32]),
         document: std::sync::Arc::new(document),
         library: PreparedLibrary::with_layout(library.registry, layout),
     }

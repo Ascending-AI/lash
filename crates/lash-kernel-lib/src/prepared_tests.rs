@@ -98,7 +98,7 @@ impl Libraries {
         let document = Arc::new(parse_document(&text).unwrap_or_else(|error| panic!("{error}")));
         let run = |library: &PreparedLibrary, layout: Layout| -> (End, Meters) {
             let program = Program {
-                release: lash_kernel_doc::heap::PageId([8; 32]),
+                closure: lash_kernel_doc::heap::PageId([8; 32]),
                 document: Arc::clone(&document),
                 library: library.clone(),
             };
@@ -276,7 +276,7 @@ main {{
     let mut charges = Vec::new();
     for layout in [Layout(0), Layout(1)] {
         let program = Program {
-            release: lash_kernel_doc::heap::PageId([8; 32]),
+            closure: lash_kernel_doc::heap::PageId([8; 32]),
             document: Arc::clone(&document),
             library: if layout == Layout(0) {
                 libraries.fast.clone()

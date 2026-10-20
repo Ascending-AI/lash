@@ -181,9 +181,7 @@ fn lowered(dialect: &str, source: &str, effect: &EffectName) -> Program {
                 .expect("an admissible result schema"),
         ),
     )]);
-    let library = embedding
-        .library_for(lash_vm_library::HELPER_RELEASE)
-        .expect("the build's helper release");
+    let library = embedding.library();
     let lowered = embedding
         .lower(
             dialect,
@@ -202,8 +200,14 @@ fn lowered(dialect: &str, source: &str, effect: &EffectName) -> Program {
         .prepared_library()
         .expect("the document's library")
         .clone();
+    let closure = lash_vm_broker::kernel::closure::derive(
+        document.manifest.functions.keys().copied(),
+        library.registry(),
+        lash_vm_broker::kernel::closure::Natives::Required,
+    )
+    .expect("the worker holds the cell's functions");
     Program {
-        release: lash_kernel_doc::heap::PageId([0; 32]),
+        closure: lash_kernel_doc::heap::PageId(closure.reference().0),
         document: Arc::new(document),
         library,
     }

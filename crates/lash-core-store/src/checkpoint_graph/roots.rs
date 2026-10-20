@@ -37,8 +37,6 @@ pub enum RootSource {
     /// SQLite `artifact_refs.blob_ref`; PostgreSQL
     /// `lash_lash_vm_artifacts.graph_ref` where `storage_kind = 1`.
     ArtifactBridge = 9,
-    /// `graph_release_pins.root_ref`: installed runnable manifests.
-    ReleasePin = 10,
     /// Configuration named by a retained revision, the windows run
     /// terminals name among them (FIG-6606).
     RevisionConfig = 12,
@@ -71,7 +69,7 @@ pub struct RootField {
 
 impl RootSource {
     /// Every source, in catalog order.
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 15] = [
         Self::Exec,
         Self::RunFact,
         Self::EffectAdmission,
@@ -81,7 +79,6 @@ impl RootSource {
         Self::SessionRevision,
         Self::SessionAdmissionBase,
         Self::ArtifactBridge,
-        Self::ReleasePin,
         Self::RevisionConfig,
         Self::ModelAnswer,
         Self::ReadLease,
@@ -103,7 +100,6 @@ impl RootSource {
             Self::SessionRevision => "revision",
             Self::SessionAdmissionBase => "admission_base",
             Self::ArtifactBridge => "artifact",
-            Self::ReleasePin => "release",
             Self::RevisionConfig => "revision_config",
             Self::ModelAnswer => "answer",
             Self::ReadLease => "lease",
@@ -152,7 +148,6 @@ impl RootSource {
                 "graph_ref",
                 Some("storage_kind = 1"),
             ),
-            Self::ReleasePin => RootField::of("lash_graph_release_pins", "root_ref", None),
             Self::ModelAnswer => RootField::of("lash_turn_phases", "answer_ref", None),
             Self::ReadLease => RootField::of("lash_root_leases", "root_ref", None),
             Self::ModelCall => RootField::of("lash_model_call_records", "record_ref", None),
@@ -175,7 +170,6 @@ impl RootSource {
             Self::SessionRevision => ("session_revisions", "checkpoint_ref", None),
             Self::SessionAdmissionBase => ("session_meta", "admission_base_checkpoint_ref", None),
             Self::ArtifactBridge => ("artifact_refs", "blob_ref", None),
-            Self::ReleasePin => ("graph_release_pins", "root_ref", None),
             Self::ModelAnswer => ("turn_phases", "answer_ref", None),
             Self::ReadLease => ("root_leases", "root_ref", None),
             Self::ModelCall => ("model_call_records", "record_ref", None),

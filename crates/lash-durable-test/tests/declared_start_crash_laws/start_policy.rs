@@ -125,6 +125,17 @@ impl Activation for Switch {
             self.first.activate(owned).await
         }
     }
+
+    async fn hold(
+        &self,
+    ) -> Result<std::collections::BTreeSet<lash_durable::HeldArtifact>, lash_durable::DurableError>
+    {
+        if self.switched.load(Ordering::SeqCst) {
+            self.later.hold().await
+        } else {
+            self.first.hold().await
+        }
+    }
 }
 
 const POLICY_SESSION: &str = "start-policy-parent";

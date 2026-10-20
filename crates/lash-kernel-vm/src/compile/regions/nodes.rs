@@ -1005,7 +1005,7 @@ fn membership(function: &Lib) -> Option<Table> {
     {
         return None;
     }
-    match function.definition.name.as_str() {
+    match function.header.name.as_str() {
         "map.contains" => Some(Table::Map),
         "set.contains" => Some(Table::Set),
         "record.contains" => Some(Table::Record),

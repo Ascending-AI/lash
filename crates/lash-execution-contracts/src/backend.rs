@@ -65,9 +65,6 @@ pub enum DurableBuildError {
         /// The type.
         projection: String,
     },
-    /// The shipped helper release catalog or its retirement declaration is invalid.
-    #[error("invalid helper release catalog: {message}")]
-    HelperReleaseCatalog { message: String },
     /// The substrate parameters break a rule.
     #[error("invalid durable configuration: {0}")]
     InvalidConfig(#[from] DurableConfigError),
@@ -129,29 +126,34 @@ struct BackendInner {
     /// under, when it serves, takes its hints from here, so a mailbox commit
     /// made on this node reaches its actors without waiting for a poll.
     hints: Hints,
-    /// What this build no longer holds of an earlier release and counts
-    /// the actors still depending on, before its node starts
-    /// ([`Backend::with_retirement`]).
-    retirement: Option<Arc<dyn RetirementCheck>>,
+    /// The package code a node of this build holds, which it installs and
+    /// advertises before it starts ([`Backend::hold_packages`]). Like the
+    /// hints, it is the node's: every backend derived from this one shares
+    /// the slot, so an activation built before the registration holds it.
+    packages: Arc<std::sync::OnceLock<Arc<dyn NodePackages>>>,
 }
 
-/// What a build drops of an earlier release beside its format sets: the
-/// functions a run pins by identity (FIG-5799). A node of the build does not
-/// start while an unfinished actor still depends on one.
+/// The package code a node of this build holds (FIG-6918, S1-F2). Before
+/// the node starts it installs its artifacts and sets in the store, keeps
+/// each retained artifact a dependent still lists an identity of
+/// (RETAIN-SURVEY), and advertises what it holds: a node claims an actor
+/// only when it holds the set the actor's code was linked under
+/// (CLAIM-HOLDS), and a cell is written under a set only when every live
+/// serving node holds it (FLEET-SET).
 #[async_trait::async_trait]
-pub trait RetirementCheck: Send + Sync {
-    /// What the build no longer holds, as an operator reads it.
-    fn retired(&self) -> String;
-
-    /// The operator command that lists the actors still depending on it.
-    fn command(&self) -> String;
-
-    /// How many unfinished actors of `backend` still depend on it.
+pub trait NodePackages: Send + Sync {
+    /// Installs the node's artifacts and sets in `backend`'s store, surveys
+    /// what its dependents list, and answers the artifacts the node holds.
     ///
     /// # Errors
     ///
-    /// The store's.
-    async fn dependents(&self, backend: &Backend) -> Result<u64, lash_durable::DurableError>;
+    /// [`lash_durable::DurableError::RetiredDependents`] when a dependent
+    /// lists an identity no artifact the node holds declares: serving, the
+    /// node would strand it. The store's otherwise.
+    async fn hold(
+        &self,
+        backend: &Backend,
+    ) -> Result<std::collections::BTreeSet<lash_durable::HeldArtifact>, lash_durable::DurableError>;
 }
 
 impl Backend {
@@ -201,7 +203,7 @@ impl Backend {
                 formats,
                 surfaces: parts.formats,
                 hints: Hints::default(),
-                retirement: None,
+                packages: Arc::default(),
             }),
         })
     }
@@ -243,7 +245,7 @@ impl Backend {
                 formats: self.inner.formats.clone(),
                 surfaces: self.inner.surfaces.clone(),
                 hints: self.inner.hints.clone(),
-                retirement: self.inner.retirement.clone(),
+                packages: self.inner.packages.clone(),
             }),
         }
     }
@@ -278,7 +280,7 @@ impl Backend {
                 providers: Arc::clone(&self.inner.providers),
                 surfaces: self.inner.surfaces.clone(),
                 hints: self.inner.hints.clone(),
-                retirement: self.inner.retirement.clone(),
+                packages: self.inner.packages.clone(),
             }),
         }
     }
@@ -345,7 +347,7 @@ impl Backend {
                 providers: Arc::clone(&self.inner.providers),
                 surfaces: self.inner.surfaces.clone(),
                 hints: self.inner.hints.clone(),
-                retirement: self.inner.retirement.clone(),
+                packages: self.inner.packages.clone(),
             }),
         }
     }
@@ -375,55 +377,7 @@ impl Backend {
                 providers: Arc::clone(&self.inner.providers),
                 surfaces: self.inner.surfaces.clone(),
                 hints: self.inner.hints.clone(),
-                retirement: self.inner.retirement.clone(),
-            }),
-        }
-    }
-
-    /// This backend also decoding the sets of an earlier build whose actors
-    /// held `previous` beside the core's formats and whose engines wrote
-    /// this build's engine states: a build of a helper release this one
-    /// retains (FIG-5799). Its nodes claim what that build left and read it
-    /// as written.
-    #[must_use]
-    pub fn decoding(&self, previous: &[lash_durable::FormatSurface]) -> Self {
-        let durable = std::sync::OnceLock::from(Arc::clone(self.durable()));
-        Self {
-            inner: Arc::new(BackendInner {
-                stores: Arc::clone(&self.inner.stores),
-                durable,
-                config: self.inner.config,
-                formats: self.inner.formats.clone().decoding(previous),
-                engines: self.inner.engines.clone(),
-                migrations: self.inner.migrations.clone(),
-                status_projections: self.inner.status_projections.clone(),
-                providers: Arc::clone(&self.inner.providers),
-                surfaces: self.inner.surfaces.clone(),
-                hints: self.inner.hints.clone(),
-                retirement: self.inner.retirement.clone(),
-            }),
-        }
-    }
-
-    /// This backend dropping what `check` names of an earlier release: its
-    /// node does not start while an unfinished actor still depends on it
-    /// (FIG-5799).
-    #[must_use]
-    pub fn with_retirement(&self, check: Arc<dyn RetirementCheck>) -> Self {
-        let durable = std::sync::OnceLock::from(Arc::clone(self.durable()));
-        Self {
-            inner: Arc::new(BackendInner {
-                stores: Arc::clone(&self.inner.stores),
-                durable,
-                config: self.inner.config,
-                formats: self.inner.formats.clone(),
-                engines: self.inner.engines.clone(),
-                migrations: self.inner.migrations.clone(),
-                status_projections: self.inner.status_projections.clone(),
-                providers: Arc::clone(&self.inner.providers),
-                surfaces: self.inner.surfaces.clone(),
-                hints: self.inner.hints.clone(),
-                retirement: Some(check),
+                packages: self.inner.packages.clone(),
             }),
         }
     }
@@ -433,10 +387,17 @@ impl Backend {
         &self.inner.surfaces
     }
 
-    /// What this build drops of an earlier release beside its format sets,
-    /// when it drops anything.
-    pub fn retirement(&self) -> Option<&Arc<dyn RetirementCheck>> {
-        self.inner.retirement.as_ref()
+    /// The package code a node of this build holds, when the host
+    /// installed any.
+    pub fn packages(&self) -> Option<&Arc<dyn NodePackages>> {
+        self.inner.packages.get()
+    }
+
+    /// Register `packages` as the code this backend's node holds, which it
+    /// installs and advertises before it starts. A node holds one
+    /// registration: a later one is refused, answering `false`.
+    pub fn hold_packages(&self, packages: Arc<dyn NodePackages>) -> bool {
+        self.inner.packages.set(packages).is_ok()
     }
 
     /// This backend recording the status each of `projections` projects
@@ -464,7 +425,7 @@ impl Backend {
                 providers: Arc::clone(&self.inner.providers),
                 surfaces: self.inner.surfaces.clone(),
                 hints: self.inner.hints.clone(),
-                retirement: self.inner.retirement.clone(),
+                packages: self.inner.packages.clone(),
             }),
         }
     }

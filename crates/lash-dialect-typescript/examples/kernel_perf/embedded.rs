@@ -97,7 +97,7 @@ pub(super) fn main() -> Result<(), String> {
     let lower_ns = lower.elapsed().as_nanos();
     let compile = Instant::now();
     let program = Program {
-        release: pages::RELEASE,
+        closure: pages::CLOSURE,
         document: Arc::clone(document.shared()),
         library: prepared.unwrap_or_else(|| {
             lash_kernel_vm::kernel_internals::in_charge(
@@ -303,6 +303,6 @@ pub(super) fn write_frame() -> Result<(), String> {
     if args.next().is_some() {
         return Err("write-frame needs exactly one output path".into());
     }
-    let held = lash_vm_library::lash_packages().map_err(|error| error.to_string())?;
+    let held = lash_vm_releases::lash_packages().map_err(|error| error.to_string())?;
     std::fs::write(path, held.frame()).map_err(|error| error.to_string())
 }

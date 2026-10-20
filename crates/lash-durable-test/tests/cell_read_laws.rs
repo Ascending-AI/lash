@@ -755,6 +755,7 @@ async fn probe(
             node: NodeId::new("cell-read-probe"),
             decodes,
             serves,
+            held: Default::default(),
             ttl_millis: 15_000,
         })
         .await

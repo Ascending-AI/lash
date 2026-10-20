@@ -235,10 +235,20 @@ impl DurableStore for CloseDuringRead {
         self.inner.mark_draining(node).await
     }
 
-    async fn live_decodes(
+    async fn live_nodes(&self) -> Result<Vec<lash_durable::NodeCapability>, DurableError> {
+        self.inner.live_nodes().await
+    }
+
+    async fn install_packages(
         &self,
-    ) -> Result<Vec<Vec<lash_core::durable_port::FormatSet>>, DurableError> {
-        self.inner.live_decodes().await
+        artifacts: &[lash_durable::packages::ArtifactInstall],
+        sets: &[lash_durable::packages::SetInstall],
+    ) -> Result<(), DurableError> {
+        self.inner.install_packages(artifacts, sets).await
+    }
+
+    async fn package_catalog(&self) -> Result<lash_durable::PackageCatalog, DurableError> {
+        self.inner.package_catalog().await
     }
 
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {
@@ -334,6 +344,7 @@ async fn an_accepted_close_stays_pending_when_its_mail_is_acknowledged_between_r
             node: NodeId::new("close-observer-law"),
             decodes: vec![formats],
             serves: Vec::new(),
+            held: Default::default(),
             ttl_millis: 60_000,
         })
         .await

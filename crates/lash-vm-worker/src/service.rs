@@ -23,17 +23,11 @@ pub(crate) fn perform(
             bindings,
             functions,
             operations,
-            helpers,
+            packages,
         } => {
-            let library = match embedding.library_for(helpers) {
+            let library = match library_of(embedding, &packages)? {
                 Ok(library) => library,
-                Err(_) => {
-                    return rmp_serde::to_vec_named(&Response::HelperReleaseNotHeld {
-                        release: helpers,
-                    })
-                    .map(EncodedPayload)
-                    .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error));
-                }
+                Err(not_held) => return respond(&not_held),
             };
             let namespaces = match embedding.namespaces(operations) {
                 Ok(namespaces) => namespaces,
@@ -63,12 +57,12 @@ pub(crate) fn perform(
             operations,
             bindings,
             functions,
-            helpers,
+            packages,
         } => match (
-            embedding.library_for(helpers),
+            library_of(embedding, &packages)?,
             embedding.namespaces(operations),
         ) {
-            (Err(_), _) => Response::HelperReleaseNotHeld { release: helpers },
+            (Err(not_held), _) => not_held,
             (Ok(_), Err(refused)) => namespace_refused(&refused),
             (Ok(library), Ok(namespaces)) => match embedding.lower(
                 &dialect,
@@ -84,7 +78,19 @@ pub(crate) fn perform(
             ) {
                 None => Response::UnknownDialect { dialect },
                 Some(Ok(lowered)) => Response::Lowered {
-                    reads: reached(&lowered.document, library, &namespaces),
+                    reads: {
+                        // A dialect that validated while lowering spares the
+                        // run's admission the same check (FIG-6931).
+                        if lowered.validated
+                            && let Ok(prepared) = embedding.prepared_library()
+                        {
+                            prepared.note_validated(
+                                lowered.document.id(),
+                                lash_kernel_doc::KernelDataLimits::standard(),
+                            );
+                        }
+                        reached(&lowered.document, library, &namespaces)
+                    },
                     document: lowered.document.body().to_vec(),
                     source_map: lowered.source_map,
                     written: lowered.written,
@@ -102,14 +108,19 @@ pub(crate) fn perform(
             language,
             source,
             operations,
+            packages,
             limits,
         } => {
+            let packages = packages.unwrap_or_else(|| embedding.packages().own());
+            let library = match library_of(embedding, &packages)? {
+                Ok(library) => library,
+                Err(not_held) => return respond(&not_held),
+            };
             let namespaces = match embedding.namespaces(operations) {
                 Ok(namespaces) => namespaces,
                 Err(refused) => return respond(&namespace_refused(&refused)),
             };
-            let environment =
-                lash_kernel_dialect::Environment::new(embedding.library(), &namespaces);
+            let environment = lash_kernel_dialect::Environment::new(library, &namespaces);
             match import_module(embedding, language, &source, &environment, limits) {
                 None => Response::UnknownDialect {
                     dialect: dialect_name(language).into(),
@@ -184,6 +195,26 @@ fn namespace_refused(refused: &lash_kernel_dialect::NamespaceRefusal) -> Respons
         unsupported: false,
         repairs: vec!["offer the operation under another package path".to_owned()],
     })
+}
+
+/// The names of the package set `packages`, or the answer that the worker
+/// does not hold it (FIG-6918).
+///
+/// # Errors
+///
+/// A set the embedding holds whose names do not assemble: a defect of the
+/// build.
+fn library_of<'a>(
+    embedding: &'a Embedding,
+    packages: &lash_kernel_doc::PackageSetDigest,
+) -> Result<Result<&'a lash_kernel_dialect::NamedLibrary, Response>, PoolError> {
+    match embedding.library_of(packages) {
+        Ok(library) => Ok(Ok(library)),
+        Err(crate::embedding::EmbedError::PackagesNotHeld { packages }) => {
+            Ok(Err(Response::PackagesNotHeld { packages }))
+        }
+        Err(error) => Err(PoolError::payload(PayloadKind::ServiceRequest, error)),
+    }
 }
 
 /// The installed dialect's name for source in `language`.
@@ -341,7 +372,7 @@ mod tests {
             operations: Default::default(),
             bindings: Default::default(),
             functions,
-            helpers: lash_vm_library::HELPER_RELEASE,
+            packages: embedding.packages().own(),
         };
         let encoded =
             EncodedPayload(rmp_serde::to_vec_named(&lower(Default::default())).expect("request"));
@@ -385,6 +416,52 @@ mod tests {
             panic!("a lowering request");
         };
         assert_eq!(functions[&name].document.id(), identified.id());
+    }
+
+    /// S1-F1: a request names the cell's package set, and a worker that
+    /// does not hold it lowers nothing: it answers which set it lacks, for
+    /// a cell, a tool-call discovery and a workflow import alike.
+    #[test]
+    fn a_worker_lacking_the_cells_package_set_answers_which() {
+        let embedding =
+            crate::embedding::tests::every_dialect(&Default::default()).expect("embedding");
+        let unheld = lash_kernel_doc::PackageSetDigest::from_bytes([7; 32]);
+        assert!(embedding.packages().view(&unheld).is_err());
+        let source = "function advance(value) { return value + 2; }".to_owned();
+        for request in [
+            Request::Lower {
+                dialect: "typescript".to_owned(),
+                source: source.clone(),
+                operations: Default::default(),
+                bindings: Default::default(),
+                functions: Default::default(),
+                packages: unheld,
+            },
+            Request::ToolCalls {
+                dialect: "typescript".to_owned(),
+                source: source.clone(),
+                bindings: Default::default(),
+                functions: Default::default(),
+                operations: Default::default(),
+                packages: unheld,
+            },
+            Request::ImportWorkflow {
+                language: SourceLanguage::TypeScript,
+                source: source.clone(),
+                operations: Default::default(),
+                packages: Some(unheld),
+                limits: None,
+            },
+        ] {
+            let encoded = EncodedPayload(rmp_serde::to_vec_named(&request).expect("request"));
+            let response: Response =
+                rmp_serde::from_slice(&perform(&embedding, &encoded).expect("answered").0)
+                    .expect("response");
+            assert!(
+                matches!(response, Response::PackagesNotHeld { packages } if packages == unheld),
+                "a request under an unheld set answered {response:?}"
+            );
+        }
     }
 
     std::thread_local! {

@@ -5,8 +5,9 @@ The engine's tables (`nodes`, `actors`, `actor_mail`, and the domain tables
 the runtime lanes add to the fenced commit: `run_records`, `exec_snapshots`,
 `waits`, `turn_phases`, `turn_namespaces`, `session_close`, `session_scope_ends`,
 `prompt_snapshots`, `prompt_texts`, `prompt_snapshot_texts`, and the checkpoint graph's
-`effect_admissions`, `graph_release_pins`, and the persistent heap's
-`root_leases` and `retirement_holds`;
+`effect_admissions`, the persistent heap's `root_leases` and
+`retirement_holds`, and the package rows `package_artifacts`, `package_sets`,
+`package_set_members` and `node_artifacts`;
 `lash_`-prefixed on PostgreSQL) are written by one
 neutral statement set and one module per dialect. Since I0 (FIG-5194) each
 of those is a directory. Any file in the durable module directory belongs
@@ -61,7 +62,10 @@ TABLES = (
     "prompt_texts",
     "prompt_snapshot_texts",
     "effect_admissions",
-    "graph_release_pins",
+    "package_artifacts",
+    "package_sets",
+    "package_set_members",
+    "node_artifacts",
     "owner_commit_latches",
     "root_leases",
     "retirement_holds",

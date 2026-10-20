@@ -40,6 +40,7 @@ pub mod graph;
 mod hand_back;
 mod model_calls;
 pub mod node_wakes;
+mod packages;
 pub mod pages;
 mod parks;
 mod prompts;
@@ -62,6 +63,10 @@ pub use hand_back::an_abandoned_activation_hands_back_only_its_original_grant;
 pub use model_calls::{
     a_receipt_stands_beside_its_model_phase_until_the_next_phase,
     a_turn_counts_its_tool_admissions_atomically, a_turn_counts_the_model_calls_it_admitted,
+};
+pub use packages::{
+    a_node_claims_only_actors_whose_package_set_it_holds,
+    a_store_keeps_artifacts_and_sets_by_digest_and_derives_what_a_node_holds,
 };
 pub use parks::a_boot_redrives_only_the_session_parks_it_names;
 pub use prompts::{
@@ -123,6 +128,7 @@ async fn node(store: &dyn DurableStore, name: &str) -> Result<NodeLease, LawBrok
             node: NodeId::new(name),
             decodes: vec![formats()],
             serves: Vec::new(),
+            held: Default::default(),
             ttl_millis: TTL_MILLIS,
         })
         .await?)

@@ -45,7 +45,7 @@ pub fn embed<M: Machine>(
     environment.effects = document.manifest.signatures();
     lash_kernel_check::admit(&document, &environment).map_err(|e| e.to_string())?;
     let program = Program {
-        release: PageId([7; 32]),
+        closure: PageId([7; 32]),
         document: Arc::new(document),
         library: PreparedLibrary::new(registry),
     };

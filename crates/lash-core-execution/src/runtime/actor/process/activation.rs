@@ -263,6 +263,16 @@ impl Activation for ProcessActivation {
         self.forget_published(&owned, &process).await;
         exit
     }
+    /// The package code the backend's node holds (FIG-6918).
+    async fn hold(
+        &self,
+    ) -> Result<std::collections::BTreeSet<lash_durable::HeldArtifact>, lash_durable::DurableError>
+    {
+        match self.backend.packages() {
+            Some(packages) => packages.hold(&self.backend).await,
+            None => Ok(std::collections::BTreeSet::new()),
+        }
+    }
 }
 
 impl ProcessActivation {

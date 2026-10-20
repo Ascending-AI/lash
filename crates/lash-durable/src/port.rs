@@ -6,6 +6,7 @@ use crate::formats::FormatSet;
 use crate::ids::{
     ActorKey, BootId, CommitLabel, DurableInstant, Epoch, MailSeq, NodeId, StateRevision,
 };
+use crate::packages::{ArtifactInstall, HeldArtifact, NodeCapability, PackageCatalog, SetInstall};
 use crate::tx::{ActorTx, MailTx};
 
 /// An actor's scheduling state.
@@ -75,6 +76,11 @@ pub struct NodeSpec {
     /// The claim requirements this build serves: it runs an actor only when
     /// the actor's requirements are a subset (FIG-6034 D3).
     pub serves: Vec<String>,
+    /// The package artifacts this node holds, each installed in the store
+    /// first ([`DurableStore::install_packages`]): it runs an actor whose
+    /// code is linked under a set only when it holds every member
+    /// (CLAIM-HOLDS).
+    pub held: std::collections::BTreeSet<HeldArtifact>,
     /// How long one heartbeat keeps the lease, in milliseconds. Hosts take
     /// it from a validated [`LeaseConfig`](crate::LeaseConfig).
     pub ttl_millis: i64,
@@ -89,6 +95,8 @@ pub struct NodeLease {
     pub decodes: Vec<FormatSet>,
     /// The claim requirements it serves.
     pub serves: Vec<String>,
+    /// The package artifacts it holds.
+    pub held: std::collections::BTreeSet<HeldArtifact>,
     /// How long one heartbeat keeps the lease, in milliseconds.
     pub ttl_millis: i64,
     /// When the lease expires unless renewed, as of the registration.
@@ -139,11 +147,13 @@ pub struct Claimed {
 /// What a node claimed an actor for (ADR 0106 §1, ADR 0132 §11).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClaimPurpose {
-    /// The node decodes the actor's format set and serves every claim
-    /// requirement it carries: it runs the actor.
+    /// The node decodes the actor's format set, serves every claim
+    /// requirement it carries and holds the package set its code was linked
+    /// under: it runs the actor.
     Run,
-    /// The node does not decode the actor's format set, or does not serve a
-    /// requirement it carries, and claimed it only for its pending cancel:
+    /// The node does not decode the actor's format set, does not serve a
+    /// requirement it carries or does not hold its package set, and claimed
+    /// it only for its pending cancel:
     /// a process's cancel mail, or a session's close or `Immediate` turn
     /// cancel (FIG-6072). The activation ends it from registry state and
     /// never reads its engine state or calls its engine or a provider.
@@ -153,10 +163,14 @@ pub enum ClaimPurpose {
 impl ClaimPurpose {
     /// The purpose `node` claims an actor stored in `formats` and requiring
     /// `requires` for (FIG-6034 D3: a build that lacks a requirement never
-    /// claims the actor to run it).
+    /// claims the actor to run it), where `holds` is whether the node holds
+    /// the package set the actor's code was linked under, or the actor pins
+    /// none (CLAIM-HOLDS). The store derives `holds` from the set's members
+    /// and the node's held artifacts in the claim's own read.
     #[must_use]
-    pub fn of(node: &NodeLease, formats: &str, requires: &[String]) -> Self {
-        if node.decodes.iter().any(|set| set.as_str() == formats)
+    pub fn of(node: &NodeLease, formats: &str, requires: &[String], holds: bool) -> Self {
+        if holds
+            && node.decodes.iter().any(|set| set.as_str() == formats)
             && requires.iter().all(|required| {
                 lash_core_store::obligations::ObligationToken::is_served(required, &node.serves)
             })
@@ -177,6 +191,7 @@ impl ClaimPurpose {
         node: &NodeLease,
         formats: &str,
         requires: Option<&str>,
+        holds: bool,
     ) -> Result<Self, crate::DurableError> {
         let requires = parse_requires(requires).map_err(|error| {
             crate::DurableError::Store(crate::StoreFailure {
@@ -184,7 +199,7 @@ impl ClaimPurpose {
                 message: format!("actor claim requirements: {error}"),
             })
         })?;
-        Ok(Self::of(node, formats, &requires))
+        Ok(Self::of(node, formats, &requires, holds))
     }
 }
 
@@ -390,9 +405,26 @@ pub trait DurableStore: DurableReads {
     /// holds no live lease.
     async fn mark_draining(&self, node: &NodeLease) -> Result<(), DurableError>;
 
-    /// The format sets each live node decodes, one entry per node, for the
-    /// fleet-format gate ([`fleet_writable`](crate::fleet_writable)).
-    async fn live_decodes(&self) -> Result<Vec<Vec<FormatSet>>, DurableError>;
+    /// Each live node's format sets and held package artifacts, one entry
+    /// per node, by node id: what the fleet-format gate
+    /// ([`fleet_writable`](crate::fleet_writable)) and the package-set gate
+    /// read.
+    async fn live_nodes(&self) -> Result<Vec<NodeCapability>, DurableError>;
+
+    /// Install `artifacts` and `sets` in one transaction. An artifact or set
+    /// already stored is kept as it is; a new artifact takes the next
+    /// ordinal on its package line, and a new set the next install
+    /// sequence. A set naming an artifact neither stored nor installed here
+    /// is refused, and nothing is written.
+    async fn install_packages(
+        &self,
+        artifacts: &[ArtifactInstall],
+        sets: &[SetInstall],
+    ) -> Result<(), DurableError>;
+
+    /// Every stored artifact, by line and ordinal, and every stored set, by
+    /// install sequence, oldest first.
+    async fn package_catalog(&self) -> Result<PackageCatalog, DurableError>;
 
     /// The actors `node`'s boot owns now, with their current epochs, read
     /// unfenced. Each answers [`ClaimCause::Adopted`].

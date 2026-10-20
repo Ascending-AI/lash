@@ -161,32 +161,6 @@ impl CellEnvelope {
     }
 }
 
-/// The helper release manifest the envelope of a cell written in `dialect`
-/// pins: the build's own for that dialect, which its workers run a cell
-/// started here on.
-pub(super) fn cell_release(dialect: &str) -> Result<NodeId, String> {
-    static RELEASES: std::sync::OnceLock<Result<BTreeMap<String, NodeId>, String>> =
-        std::sync::OnceLock::new();
-    RELEASES
-        .get_or_init(|| {
-            let releases = lash_vm_broker::kernel::state::release_manifests()
-                .map_err(|failure| failure.to_string())?;
-            Ok(releases
-                .manifests
-                .dialects()
-                .filter_map(|dialect| {
-                    let release = releases.manifests.current(dialect)?;
-                    Some((dialect.to_owned(), NodeId(release.0)))
-                })
-                .collect())
-        })
-        .as_ref()
-        .map_err(Clone::clone)?
-        .get(dialect)
-        .copied()
-        .ok_or_else(|| format!("the build holds no helper release of the dialect `{dialect}`"))
-}
-
 /// A cell as its execution root holds it: the envelope it runs on, its
 /// host's records, prints and started processes, and the host graph its
 /// next park builds on.
@@ -241,7 +215,7 @@ pub(super) fn load_cell(
             (end.host, end.envelope, Some(session))
         }
     };
-    let (cell, _) = CellEnvelope::load(&mut decoder, envelope).map_err(text)?;
+    let cell = CellEnvelope::load(&mut decoder, envelope).map_err(text)?;
     let state = HostState::load(&mut decoder, host).map_err(text)?;
     let projections = super::host::DataProjections;
     let mut ledgers = CellHostLedgers {
@@ -586,12 +560,11 @@ struct EnvelopeBody {
     written: NodeId,
     function_values: Option<lash_kernel_doc::FunctionRepresentation>,
     effects: NodeId,
-    release: NodeId,
 }
 
 impl TokenCodec for EnvelopeBody {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(9);
+        out.seq(8);
         out.text(&self.code);
         out.text(&self.dialect);
         self.document_id.encode(out);
@@ -600,11 +573,10 @@ impl TokenCodec for EnvelopeBody {
         self.written.encode(out);
         encode_opt_tree(self.function_values.as_ref(), out);
         self.effects.encode(out);
-        self.release.encode(out);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(9)?;
+        input.expect_struct(8)?;
         Ok(Self {
             code: input.text()?.to_owned(),
             dialect: input.text()?.to_owned(),
@@ -614,25 +586,19 @@ impl TokenCodec for EnvelopeBody {
             written: NodeId::decode(input)?,
             function_values: decode_opt_tree(input)?,
             effects: NodeId::decode(input)?,
-            release: NodeId::decode(input)?,
         })
     }
 }
 
 impl CellEnvelope {
-    /// Stages the cell's envelope under the exact helper release `release`
-    /// (a ReleaseManifest), its document, source map and written table as
-    /// typed nodes, and returns the envelope's node.
+    /// Stages the cell's envelope, its document, source map and written
+    /// table as typed nodes, and returns the envelope's node.
     ///
     /// # Errors
     ///
     /// [`GraphRefusal::InvalidBody`] for a map of another document, or any
     /// refusal of the staging area.
-    pub fn stage(
-        &self,
-        staging: &mut GraphStaging,
-        release: NodeId,
-    ) -> Result<NodeId, GraphRefusal> {
+    pub fn stage(&self, staging: &mut GraphStaging) -> Result<NodeId, GraphRefusal> {
         // The document's identity is the digest of the logical body its
         // node is encoded from (`K-ID-001`): the envelope holds both.
         let logical = TypedBody::logical(self.document.body());
@@ -669,25 +635,19 @@ impl CellEnvelope {
                     reads: self.reads.clone(),
                 },
             )?,
-            release,
         };
         Ok(staging.encode_value(NodeKind::CELL_ENVELOPE, &body)?)
     }
 
-    /// Reads envelope `id` back, with the release manifest it pins,
-    /// checking every child's kind and that the document is the one its
+    /// Reads envelope `id` back, checking every child's kind and that the document is the one its
     /// semantic identity names.
     ///
     /// # Errors
     ///
     /// Any refusal of a node read, [`GraphRefusal::WrongChildKind`], or
     /// [`GraphRefusal::InvalidBody`] for a document of another identity.
-    pub fn load(
-        decoder: &mut GraphDecoder<'_>,
-        id: NodeId,
-    ) -> Result<(Self, NodeId), GraphRefusal> {
+    pub fn load(decoder: &mut GraphDecoder<'_>, id: NodeId) -> Result<Self, GraphRefusal> {
         let body: EnvelopeBody = decoder.decode(id, NodeKind::CELL_ENVELOPE)?;
-        decoder.child_kind(id, body.release, &[NodeKind::RELEASE_MANIFEST])?;
         let logical = decoder.logical_body(body.document, NodeKind::DOCUMENT)?;
         let document = IdentifiedDocument::decode(&logical, decoder.limits().kernel_data).map_err(
             |error| {
@@ -729,6 +689,6 @@ impl CellEnvelope {
             projected: table.projected,
             reads: table.reads,
         };
-        Ok((envelope, body.release))
+        Ok(envelope)
     }
 }

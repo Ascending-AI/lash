@@ -371,6 +371,14 @@ pub(super) async fn apply_owner(
             .await
             .map_err(sqlx_failure)?;
     }
+    if let Some(packages) = write.packages() {
+        crate::observed_sql::query(SQL.actor.stamp_packages.sql())
+            .bind(actor)
+            .bind(packages.map(|digest| digest.to_string()))
+            .execute(crate::observed_sql::executor(&mut ***tx))
+            .await
+            .map_err(sqlx_failure)?;
+    }
     if let Some(through) = write.ack() {
         crate::observed_sql::query(SQL.postgres.ack_through.sql())
             .bind(actor)

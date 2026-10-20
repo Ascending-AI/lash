@@ -24,4 +24,11 @@ impl Activation for ActorDispatch {
             ActorKind::Process => self.process.activate(owned).await,
         }
     }
+
+    /// The session activation's: both run over one node's backend.
+    async fn hold(
+        &self,
+    ) -> Result<std::collections::BTreeSet<crate::HeldArtifact>, crate::DurableError> {
+        self.session.hold().await
+    }
 }

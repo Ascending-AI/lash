@@ -363,7 +363,7 @@ impl ActorContext {
         if formats.carried_sessions().is_empty() || self.draining() {
             return Ok(false);
         }
-        let live = self.durable()?.live_decodes().await?;
+        let live = self.durable()?.live_nodes().await?;
         let mut candidates = vec![formats.session().clone()];
         candidates.extend(formats.carried_sessions().iter().cloned());
         Ok(lash_durable::fleet_writable(&candidates, &live) == Some(formats.session()))

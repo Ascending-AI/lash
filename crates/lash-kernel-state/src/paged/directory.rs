@@ -568,7 +568,7 @@ pub mod execution {
         fn children(&self, out: &mut Vec<PageRef>) {
             self.name.children(out);
             value_children(&self.meta, out);
-            out.push(self.release);
+            out.push(self.closure);
             out.extend(self.captures.values().map(|frozen| frozen.root));
             out.extend(
                 self.before
@@ -580,7 +580,7 @@ pub mod execution {
         fn grants(&mut self, children: &[PageRef]) -> Result<(), HeapFault> {
             self.name.grants(children)?;
             value_grants(&mut self.meta, children)?;
-            grant(&mut self.release, children)?;
+            grant(&mut self.closure, children)?;
             for frozen in self
                 .captures
                 .values_mut()

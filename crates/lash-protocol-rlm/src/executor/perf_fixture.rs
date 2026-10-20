@@ -60,7 +60,7 @@ impl CodeModeCheckpointPerfFixture {
                 channel: crate::plugin::RlmChannel::Cell,
                 code_renderer: crate::render::CodeRendererSlot::default(),
                 prompts: dialect.prompts(),
-                helpers: None,
+                packages: None,
                 kernel: KernelCarry::default(),
             },
             state,
@@ -117,9 +117,8 @@ impl CodeModeCheckpointPerfFixture {
         let label = CommitLabel::new("perf.head");
         let candidate = match encoded.execution {
             Some(root) => {
-                let reads = publisher.context.durable_reads().map_err(failed)?;
                 self.state
-                    .execution_candidate(root, CommitId::mint(), &mut tx, reads)
+                    .execution_candidate(root, CommitId::mint(), &mut tx)
                     .await?
             }
             None => None,
@@ -300,6 +299,7 @@ impl CodeModeCheckpointPerfPublisher {
                 node: NodeId::new(format!("rlm-checkpoint-perf-{session}")),
                 decodes: vec![FormatSet::new(FORMATS)],
                 serves: Vec::new(),
+                held: Default::default(),
                 ttl_millis: 600_000,
             })
             .await

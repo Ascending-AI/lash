@@ -238,12 +238,11 @@ impl RlmRuntimeState {
         root: lash_core_store::checkpoint_graph::NodeId,
         commit: lash_core_store::checkpoint_graph::CommitId,
         tx: &mut lash_durable::ActorTx,
-        reads: &dyn lash_durable::DurableReads,
     ) -> Result<Option<lash_core::plugin::ExecutionCandidate>, SessionError> {
         self.execution
             .lock()
             .await
-            .execution_candidate(root, commit, tx, reads)
+            .execution_candidate(root, commit, tx)
             .await
     }
 
@@ -448,11 +447,8 @@ impl CodeExecutorPlugin for CodeModeCodeExecutor {
         root: lash_core_store::checkpoint_graph::NodeId,
         commit: lash_core_store::checkpoint_graph::CommitId,
         tx: &mut lash_durable::ActorTx,
-        reads: &dyn lash_durable::DurableReads,
     ) -> Result<Option<lash_core::plugin::ExecutionCandidate>, SessionError> {
-        self.state
-            .execution_candidate(root, commit, tx, reads)
-            .await
+        self.state.execution_candidate(root, commit, tx).await
     }
 
     async fn hydrated_execution_graph(
@@ -729,10 +725,9 @@ mod tests {
             root: lash_core_store::checkpoint_graph::NodeId,
             commit: lash_core_store::checkpoint_graph::CommitId,
             tx: &mut lash_durable::ActorTx,
-            reads: &dyn lash_durable::DurableReads,
         ) -> Option<lash_core::plugin::ExecutionCandidate> {
             self.0
-                .execution_candidate(root, commit, tx, reads)
+                .execution_candidate(root, commit, tx)
                 .await
                 .expect("the capture's candidate builds")
         }

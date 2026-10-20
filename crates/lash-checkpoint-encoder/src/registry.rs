@@ -115,7 +115,7 @@ registry! {
     OPAQUE_LEAF = 9, "OpaqueLeaf", Enveloped, Node, Seams;
     DOCUMENT = 10, "Document", Enveloped, Node, Kernel;
     EFFECT_TABLE = 12, "EffectTable", Enveloped, Node, Host;
-    RELEASE_MANIFEST = 13, "ReleaseManifest", Enveloped, Node, Kernel;
+    EXECUTION_CLOSURE = 13, "ExecutionClosure", Enveloped, Node, Kernel;
     HELPER_DEFINITION = 14, "HelperDefinition", Enveloped, Node, Kernel;
     CELL_ENVELOPE = 15, "CellEnvelope", Enveloped, Node, Host;
     EFFECT_MEMBERSHIP = 17, "EffectMembership", Enveloped, Node, Host;

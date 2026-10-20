@@ -895,6 +895,37 @@ CREATE TABLE IF NOT EXISTS lash_nodes (
     draining BOOLEAN NOT NULL DEFAULT FALSE
 );
 
+-- An installed package artifact (FIG-6918), keyed by its digest, with the
+-- ordinal the store assigned it on its package line and its header.
+CREATE TABLE IF NOT EXISTS lash_package_artifacts (
+    artifact TEXT PRIMARY KEY,
+    path TEXT NOT NULL,
+    ordinal BIGINT NOT NULL,
+    header TEXT NOT NULL,
+    CONSTRAINT uq_lash_package_artifacts_line UNIQUE (path, ordinal)
+);
+
+-- An installed package set, keyed by its digest, at the store's install
+-- sequence: the only key behind "newest first".
+CREATE TABLE IF NOT EXISTS lash_package_sets (
+    digest TEXT PRIMARY KEY,
+    sequence BIGINT NOT NULL CONSTRAINT uq_lash_package_sets_sequence UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS lash_package_set_members (
+    set_digest TEXT NOT NULL REFERENCES lash_package_sets (digest),
+    artifact TEXT NOT NULL REFERENCES lash_package_artifacts (artifact),
+    PRIMARY KEY (set_digest, artifact)
+);
+
+-- The artifacts a live node holds, gone with its row.
+CREATE TABLE IF NOT EXISTS lash_node_artifacts (
+    node_id TEXT NOT NULL REFERENCES lash_nodes (node_id) ON DELETE CASCADE,
+    artifact TEXT NOT NULL REFERENCES lash_package_artifacts (artifact),
+    path TEXT NOT NULL,
+    PRIMARY KEY (node_id, artifact)
+);
+
 -- One scheduling row per session and per process: the only row a claim, a
 -- wake or a fence touches. `epoch` changes only by claim, reap and release,
 -- and every owner write is fenced on it; an actor has mail exactly when
@@ -911,6 +942,7 @@ CREATE TABLE IF NOT EXISTS lash_actors (
     next_due_ms BIGINT,
     formats TEXT NOT NULL,
     requires TEXT,
+    packages TEXT,
     state_revision BIGINT NOT NULL,
     mail_seq BIGINT NOT NULL,
     acked_seq BIGINT NOT NULL,
@@ -1221,14 +1253,6 @@ CREATE TABLE IF NOT EXISTS lash_effect_admissions (
 CREATE INDEX IF NOT EXISTS idx_lash_effect_admissions_admission_ref
     ON lash_effect_admissions (admission_ref);
 
--- A deliberately installed runnable release manifest.
-CREATE TABLE IF NOT EXISTS lash_graph_release_pins (
-    release_key TEXT PRIMARY KEY,
-    root_ref BYTEA NOT NULL REFERENCES lash_blobs(hash) ON DELETE RESTRICT
-);
-CREATE INDEX IF NOT EXISTS idx_lash_graph_release_pins_root_ref
-    ON lash_graph_release_pins (root_ref);
-
 -- An activation's or a reader's lease on the exact committed root it reads on demand
 -- (FIG-6191, D-LEASE): a root of the catalog until released or reaped,
 -- though reads and renewals past its expiry are refused.
@@ -1288,7 +1312,6 @@ CREATE OR REPLACE VIEW lash_graph_root_catalog AS
     UNION ALL SELECT 'admission_base', admission_base_checkpoint_ref FROM lash_session_meta
         WHERE admission_base_checkpoint_ref IS NOT NULL
     UNION ALL SELECT 'artifact', graph_ref FROM lash_lash_vm_artifacts WHERE storage_kind = 1
-    UNION ALL SELECT 'release', root_ref FROM lash_graph_release_pins
     UNION ALL SELECT 'revision_config', config_ref FROM lash_session_revisions
     UNION ALL SELECT 'answer', answer_ref FROM lash_turn_phases WHERE answer_ref IS NOT NULL
     UNION ALL SELECT 'lease', root_ref FROM lash_root_leases

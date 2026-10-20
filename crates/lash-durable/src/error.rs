@@ -107,22 +107,31 @@ pub enum DurableError {
         /// The operator command that carries them forward.
         command: String,
     },
-    /// The node's build no longer holds `retired`, the functions an earlier
-    /// release shipped, while `dependents` unfinished actors still pin one
-    /// of them (FIG-5799): serving, it would strand them, so it does not
-    /// start. Each ends, is carried by its host onto a successor pair over
-    /// this build's functions, or is ended by an operator first; `command`
-    /// lists them with a node of the build before this one serving.
+    /// The node holds no artifact declaring `retired`, an identity that
+    /// `dependents` unfinished dependents (parked roots, processes, saved
+    /// functions, published definitions) still list (FIG-6918,
+    /// RETAIN-SURVEY): serving, it would strand them, so it does not start.
+    /// Each ends, or is ended by an operator, first; `command` lists them
+    /// with a node that holds the artifact serving.
     #[error(
-        "{dependents} unfinished actors still depend on {retired}, which this build no longer holds: run `{command}` with a node of the build before this one serving, then start this one"
+        "{dependents} unfinished dependents still list {retired}, which this node does not hold: run `{command}` with a node that holds it serving, then start this one"
     )]
     RetiredDependents {
-        /// What the build no longer holds, such as `helper release 1.0`.
+        /// The identity no held artifact declares, and its name.
         retired: String,
-        /// How many unfinished actors depend on it.
+        /// How many dependents list it.
         dependents: u64,
         /// The operator command that lists them.
         command: String,
+    },
+    /// A package set's install named an artifact the store does not hold
+    /// and the install did not carry (FIG-6918): a set's members are
+    /// installed with it or before it. Nothing was written.
+    #[error("package set {set} names artifact {path}@{artifact}, which is not installed")]
+    UnknownArtifact {
+        set: crate::PackageSetDigest,
+        artifact: crate::ArtifactDigest,
+        path: String,
     },
 }
 

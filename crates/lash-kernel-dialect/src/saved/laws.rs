@@ -87,7 +87,7 @@ fn saved(heap: &mut PagedHeap, live: EntityId) -> SavedFunction {
             Name::new("capture"),
             heap.freeze(&PageValue::List(live), true).expect("freeze"),
         )]),
-        release: PageRef {
+        closure: PageRef {
             id: PageId([1; 32]),
             grant: PageGrant::NONE,
         },
@@ -262,7 +262,7 @@ fn saved_captures_use_names_when_free_variable_slots_are_reordered() {
                 controls: &BTreeMap::new(),
                 written: &BTreeMap::new(),
                 values: &lash_kernel_doc::FunctionRepresentation::Bare,
-                release: PageRef {
+                closure: PageRef {
                     id: PageId([1; 32]),
                     grant: PageGrant::NONE,
                 },
@@ -307,7 +307,7 @@ fn calling(name: &str, calls: &[&str], owners: &[&str]) -> SavedFunction {
         name: Name::new(name),
         document,
         captures: BTreeMap::new(),
-        release: PageRef {
+        closure: PageRef {
             id: PageId([1; 32]),
             grant: PageGrant::NONE,
         },
@@ -498,7 +498,7 @@ fn a_function_reaching_a_control_through_a_body_is_not_saved() {
             )]),
             written: &BTreeMap::new(),
             values: &lash_kernel_doc::FunctionRepresentation::Bare,
-            release: PageRef {
+            closure: PageRef {
                 id: PageId([1; 32]),
                 grant: PageGrant::NONE,
             },

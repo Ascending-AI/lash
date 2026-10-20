@@ -67,7 +67,7 @@ fn a_checkpoint_root_fits_its_root_bound() {
             },
             kernel: u32::MAX,
             document: DocumentId::from_bytes([1; 32]),
-            release: PageId([2; 32]),
+            closure: PageId([2; 32]),
             owner: PageId([3; 32]),
             target: CellTargetKind::Entry,
             functions: keyed(4),

@@ -59,7 +59,7 @@ fn program(source: &str) -> Program {
     }
     text.push_str(source);
     Program {
-        release: lash_kernel_doc::heap::PageId([8; 32]),
+        closure: lash_kernel_doc::heap::PageId([8; 32]),
         document: Arc::new(parse_document(&text).unwrap()),
         library: lash_kernel_vm::PreparedLibrary::new(registry),
     }
@@ -963,7 +963,7 @@ fn recorded_iteration(shard: &str) {
     for case in shard["cases"].as_array().unwrap() {
         let document = parse_document(case["document"].as_str().unwrap()).unwrap();
         let program = Program {
-            release: lash_kernel_doc::heap::PageId([8; 32]),
+            closure: lash_kernel_doc::heap::PageId([8; 32]),
             document: Arc::new(document),
             library: lash_kernel_vm::PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
         };

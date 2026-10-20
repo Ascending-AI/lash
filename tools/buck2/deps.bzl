@@ -147,7 +147,7 @@ PACKAGE_DEPS = {
             "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
-            "lash_vm_library": "//crates/lash-vm-library:lash-vm-library",
+            "lash_vm_releases": "//crates/lash-vm-releases:lash-vm-releases",
             "lash_vm_worker": "//crates/lash-vm-worker:lash-vm-worker",
             "libc": "//third-party/rust:p0188",
             "serde": "//third-party/rust:p0317",
@@ -510,6 +510,7 @@ PACKAGE_DEPS = {
             "futures_util": "//third-party/rust:p0127",
             "lash_core_ids": "//crates/lash-core-ids:lash-core-ids",
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
+            "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_protocol_types": "//crates/lash-protocol-types:lash-protocol-types",
             "lash_trace": "//crates/lash-trace:lash-trace",
             "serde_json": "//third-party/rust:p0322",
@@ -1003,6 +1004,7 @@ PACKAGE_DEPS = {
     "lash-internal-rlm-types": {
         "build": {},
         "dev": {
+            "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_protocol_types": "//crates/lash-protocol-types:lash-protocol-types",
             "lash_sansio": "//crates/lash-sansio:lash-sansio"
         },
@@ -1190,6 +1192,7 @@ PACKAGE_DEPS = {
         "dev": {
             "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
             "lash_durable_test": "//crates/lash-durable-test:lash-durable-test",
+            "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "lash_vm_releases": "//crates/lash-vm-releases:lash-vm-releases",
             "tempfile": "//third-party/rust:p0372",
             "tokio": "//third-party/rust:p0381"
@@ -1226,8 +1229,8 @@ PACKAGE_DEPS = {
             "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
             "lash_vm_broker": "//crates/lash-vm-broker:lash-vm-broker",
-            "lash_vm_library": "//crates/lash-vm-library:lash-vm-library",
             "lash_vm_protocol": "//crates/lash-vm-protocol:lash-vm-protocol",
+            "lash_vm_releases": "//crates/lash-vm-releases:lash-vm-releases",
             "libc": "//third-party/rust:p0188",
             "rmp_serde": "//third-party/rust:p0285",
             "schemars": "//third-party/rust:p0309",
@@ -1236,17 +1239,6 @@ PACKAGE_DEPS = {
             "serde_json": "//third-party/rust:p0322",
             "thiserror": "//third-party/rust:p0375",
             "tokio": "//third-party/rust:p0381"
-        }
-    },
-    "lash-internal-vm-library": {
-        "build": {},
-        "dev": {},
-        "normal": {
-            "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
-            "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
-            "lash_vm_releases": "//crates/lash-vm-releases:lash-vm-releases",
-            "serde_json": "//third-party/rust:p0322",
-            "thiserror": "//third-party/rust:p0375"
         }
     },
     "lash-internal-vm-protocol": {
@@ -1265,7 +1257,6 @@ PACKAGE_DEPS = {
     },
     "lash-internal-vm-releases": {
         "build": {
-            "lash_checkpoint_encoder": "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder",
             "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
             "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
             "lash_ext_date_ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma",
@@ -1291,6 +1282,7 @@ PACKAGE_DEPS = {
         },
         "normal": {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "serde": "//third-party/rust:p0317",
             "serde_json": "//third-party/rust:p0322",
             "thiserror": "//third-party/rust:p0375"
@@ -1299,7 +1291,7 @@ PACKAGE_DEPS = {
     "lash-internal-vm-runtime": {
         "build": {},
         "dev": {
-            "lash_vm_library": "//crates/lash-vm-library:lash-vm-library",
+            "lash_vm_releases": "//crates/lash-vm-releases:lash-vm-releases",
             "tokio": "//third-party/rust:p0381"
         },
         "normal": {
@@ -1322,7 +1314,6 @@ PACKAGE_DEPS = {
             "lash_trace": "//crates/lash-trace:lash-trace",
             "lash_vm_broker": "//crates/lash-vm-broker:lash-vm-broker",
             "lash_vm_client": "//crates/lash-vm-client:lash-vm-client",
-            "lash_vm_library": "//crates/lash-vm-library:lash-vm-library",
             "lash_vm_protocol": "//crates/lash-vm-protocol:lash-vm-protocol",
             "lash_vm_releases": "//crates/lash-vm-releases:lash-vm-releases",
             "serde": "//third-party/rust:p0317",
@@ -1379,7 +1370,6 @@ PACKAGE_DEPS = {
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
             "lash_vm_broker": "//crates/lash-vm-broker:lash-vm-broker",
             "lash_vm_client": "//crates/lash-vm-client:lash-vm-client",
-            "lash_vm_library": "//crates/lash-vm-library:lash-vm-library",
             "lash_vm_protocol": "//crates/lash-vm-protocol:lash-vm-protocol",
             "lash_vm_releases": "//crates/lash-vm-releases:lash-vm-releases",
             "libc": "//third-party/rust:p0188",
@@ -1547,7 +1537,7 @@ PACKAGE_DEPS = {
             "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_kernel_edit": "//crates/lash-kernel-edit:lash-kernel-edit",
-            "lash_vm_library": "//crates/lash-vm-library:lash-vm-library",
+            "lash_vm_releases": "//crates/lash-vm-releases:lash-vm-releases",
             "lash_vm_worker": "//crates/lash-vm-worker:lash-vm-worker"
         },
         "normal": {
@@ -1620,7 +1610,7 @@ PACKAGE_DEPS = {
             "lash_transport_failure": "//crates/lash-transport-failure:lash-transport-failure",
             "lash_vm_broker": "//crates/lash-vm-broker:lash-vm-broker",
             "lash_vm_client": "//crates/lash-vm-client:lash-vm-client",
-            "lash_vm_library": "//crates/lash-vm-library:lash-vm-library",
+            "lash_vm_releases": "//crates/lash-vm-releases:lash-vm-releases",
             "lash_vm_runtime": "//crates/lash-vm-runtime:lash-vm-runtime",
             "lash_vm_worker": "//crates/lash-vm-worker:lash-vm-worker",
             "libc": "//third-party/rust:p0188",
@@ -1702,7 +1692,7 @@ PACKAGE_DEPS = {
             "lash_provider_anthropic": "//crates/lash-provider-anthropic:lash-provider-anthropic",
             "lash_provider_openai": "//crates/lash-provider-openai:lash-provider-openai",
             "lash_sqlite_store": "//crates/lash-sqlite-store:lash-sqlite-store",
-            "lash_vm_library": "//crates/lash-vm-library:lash-vm-library",
+            "lash_vm_releases": "//crates/lash-vm-releases:lash-vm-releases",
             "lash_vm_runtime": "//crates/lash-vm-runtime:lash-vm-runtime",
             "lash_vm_worker": "//crates/lash-vm-worker:lash-vm-worker",
             "opentelemetry_sdk": "//third-party/rust:p0225",

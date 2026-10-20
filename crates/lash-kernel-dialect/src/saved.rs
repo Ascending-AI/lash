@@ -31,7 +31,8 @@ pub struct SavedFunction {
     pub name: Name,
     pub document: Document,
     pub captures: BTreeMap<Name, FrozenRef>,
-    pub release: PageRef,
+    /// The ExecutionClosure node of the cell that saved it.
+    pub closure: PageRef,
     pub helper_owners: BTreeSet<Name>,
     pub references: BTreeSet<Name>,
     pub written: Option<Written>,
@@ -117,7 +118,8 @@ pub struct Left<'a> {
     pub written: &'a BTreeMap<Site, Written>,
     /// How the dialect holds a function as a value.
     pub values: &'a FunctionRepresentation,
-    pub release: PageRef,
+    /// The cell's ExecutionClosure node.
+    pub closure: PageRef,
     /// The library the cell ran against: what the bodies its functions
     /// reach perform is read from it.
     pub catalog: &'a dyn FunctionCatalog,
@@ -381,7 +383,7 @@ fn save_closure(
         name: name.clone(),
         document,
         captures: gathered.captures,
-        release: left.release,
+        closure: left.closure,
         helper_owners: owners,
         references: gathered.references,
         written: left
@@ -676,7 +678,7 @@ pub fn closure_of<'a>(
 pub struct InstalledFunction {
     pub code: Function,
     pub captures: BTreeMap<Name, FrozenRef>,
-    pub release: PageRef,
+    pub closure: PageRef,
 }
 pub fn install(
     document: &mut Document,
@@ -758,7 +760,7 @@ pub fn install(
             InstalledFunction {
                 code,
                 captures: function.captures.clone(),
-                release: function.release,
+                closure: function.closure,
             },
         );
     }

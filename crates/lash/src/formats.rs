@@ -74,8 +74,8 @@ pub use lash_protocol_rlm::{
 pub use lash_protocol_types::TURN_CHECKPOINT_SCHEMA_VERSION;
 #[cfg(feature = "codemode")]
 pub use lash_vm_runtime::{
-    KERNEL_DOCUMENT_SCHEMA_VERSION, KERNEL_HELPER_RELEASE, KERNEL_PARKED_STATE_VERSION,
-    KERNEL_SAVED_FUNCTION_VERSION, LASH_KERNEL_VERSION,
+    KERNEL_DOCUMENT_SCHEMA_VERSION, KERNEL_PARKED_STATE_VERSION, KERNEL_SAVED_FUNCTION_VERSION,
+    LASH_KERNEL_VERSION,
 };
 
 /// One durable format whose version decides whether stored bytes open under
@@ -512,7 +512,7 @@ pub fn durable_format(format: DurableFormat) -> Option<DurableFormatEntry> {
 pub fn actor_state_surfaces() -> Vec<lash_core::durable_port::FormatSurface> {
     #[cfg(feature = "codemode")]
     {
-        kernel_actor_state_surfaces(KERNEL_PARKED_STATE_VERSION, KERNEL_HELPER_RELEASE)
+        kernel_actor_state_surfaces(KERNEL_PARKED_STATE_VERSION)
     }
     #[cfg(not(feature = "codemode"))]
     {
@@ -523,8 +523,7 @@ pub fn actor_state_surfaces() -> Vec<lash_core::durable_port::FormatSurface> {
 /// [`actor_state_surfaces`] as the previous build declared them, for the
 /// formats this build carries forward from it (ADR 0106 §1): with `codemode`,
 /// when this build also interprets the kernel version before its own, the
-/// parked kernel run of that version, written against the helper release
-/// before this build's when this build retains one (FIG-5799). A process
+/// parked kernel run of that version. A process
 /// the previous build parked is stamped with the set these make, and a
 /// node of this build claims it to migrate it. Empty when this build
 /// interprets one kernel version.
@@ -532,7 +531,7 @@ pub fn previous_actor_state_surfaces() -> Vec<lash_core::durable_port::FormatSur
     #[cfg(feature = "codemode")]
     {
         lash_vm_runtime::previous_kernel_version()
-            .map(|kernel| kernel_actor_state_surfaces(kernel, KERNEL_HELPER_RELEASE))
+            .map(kernel_actor_state_surfaces)
             .unwrap_or_default()
     }
     #[cfg(not(feature = "codemode"))]
@@ -541,38 +540,16 @@ pub fn previous_actor_state_surfaces() -> Vec<lash_core::durable_port::FormatSur
     }
 }
 
-/// The format surface that states which helper release an actor's cells
-/// and processes were written against (FIG-5799). A set without it is
-/// helper release 1's, the 1.0 baseline's.
-#[cfg(feature = "codemode")]
-pub const KERNEL_HELPERS_SURFACE: &str = "kernel-helpers";
-
 /// [`actor_state_surfaces`] as a build that parks kernel runs under kernel
-/// version `kernel`, written against helper release `helpers`, declares
-/// them.
+/// version `kernel` declares them. Which package set an actor's code was
+/// linked under is its own stamp, not a format (FIG-6918).
 #[cfg(feature = "codemode")]
-pub fn kernel_actor_state_surfaces(
-    kernel: u32,
-    helpers: u32,
-) -> Vec<lash_core::durable_port::FormatSurface> {
+pub fn kernel_actor_state_surfaces(kernel: u32) -> Vec<lash_core::durable_port::FormatSurface> {
     use lash_core::durable_port::FormatSurface;
-    let mut surfaces = vec![
+    vec![
         FormatSurface::new("kernel-parked-state", kernel),
         FormatSurface::new("kernel-saved-function", KERNEL_SAVED_FUNCTION_VERSION),
         #[cfg(feature = "rlm")]
         FormatSurface::new("codemode-snapshot", CODEMODE_SNAPSHOT_VERSION),
-    ];
-    if helpers > 1 {
-        surfaces.push(FormatSurface::new(KERNEL_HELPERS_SURFACE, helpers));
-    }
-    surfaces
-}
-
-/// The helper release a set holding `surfaces` was written against.
-#[cfg(feature = "codemode")]
-pub fn helper_release_of(surfaces: &[lash_core::durable_port::FormatSurface]) -> u32 {
-    surfaces
-        .iter()
-        .find(|surface| surface.id == KERNEL_HELPERS_SURFACE)
-        .map_or(1, |surface| surface.version)
+    ]
 }

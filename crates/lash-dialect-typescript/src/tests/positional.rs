@@ -156,7 +156,7 @@ impl lash_kernel_vm::CellSave for Saving {
                 controls: &Default::default(),
                 written: &self.written,
                 values: &crate::function_values(),
-                release: cell.release,
+                closure: cell.closure,
                 catalog: cell.catalog,
             },
             cell.held,
@@ -226,7 +226,7 @@ fn a_saved_positional_function_runs_and_resumes_without_its_partner_in_scope() {
     assert_eq!(bodies, 2, "both recursive base cases park");
     let saved = std::rc::Rc::default();
     let mut original = start(Program {
-        release: super::pages::RELEASE,
+        closure: super::pages::CLOSURE,
         document: Arc::new(document),
         library: machine::prepared().clone(),
     });
@@ -260,7 +260,7 @@ fn a_saved_positional_function_runs_and_resumes_without_its_partner_in_scope() {
         });
     }
     let program = Program {
-        release: super::pages::RELEASE,
+        closure: super::pages::CLOSURE,
         document: Arc::new(standalone),
         library: machine::prepared().clone(),
     };

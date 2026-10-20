@@ -44,7 +44,7 @@ fn earlier_kernel_formats() -> Option<BuildFormats> {
             kind: LASH_VM_ENGINE_KIND.to_owned(),
             version: kernel,
         }],
-        &crate::formats::kernel_actor_state_surfaces(kernel, crate::formats::KERNEL_HELPER_RELEASE),
+        &crate::formats::kernel_actor_state_surfaces(kernel),
     ))
 }
 
@@ -197,7 +197,7 @@ pub(crate) fn retiring(backend: &crate::Backend, kernel: u32) -> crate::Backend 
             kind: LASH_VM_ENGINE_KIND.to_owned(),
             version: kernel,
         },
-        &crate::formats::kernel_actor_state_surfaces(kernel, crate::formats::KERNEL_HELPER_RELEASE),
+        &crate::formats::kernel_actor_state_surfaces(kernel),
         KERNEL_MIGRATION_SWEEP,
     )
 }

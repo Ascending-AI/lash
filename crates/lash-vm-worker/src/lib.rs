@@ -94,7 +94,7 @@ pub fn built_dialects(tuning: &lash_vm_client::WorkerTuning) -> Result<Embedder,
 ///
 /// [`EmbedError`].
 pub fn built_embedding(tuning: &lash_vm_client::WorkerTuning) -> Result<Embedding, EmbedError> {
-    let packages = lash_vm_library::lash_packages()
+    let packages = lash_vm_releases::lash_packages()
         .map_err(|error| EmbedError::Registry(error.to_string()))?;
     built_dialects(tuning)?.finish(&packages)
 }

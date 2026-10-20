@@ -523,7 +523,7 @@ impl Embedder {
         let document = parse_document(&text).unwrap_or_else(|error| panic!("{error}\n{text}"));
         let document = Arc::new(document);
         let program = Program {
-            release: PageId([8; 32]),
+            closure: PageId([8; 32]),
             document: Arc::clone(&document),
             library: prepared
                 .unwrap_or_else(|| PreparedLibrary::new(Arc::clone(&library.registry))),
@@ -557,7 +557,7 @@ impl Embedder {
     pub(crate) fn program(&self, native_twice: bool) -> (Program, Library) {
         let library = library_with(native_twice, self.probes);
         let program = Program {
-            release: PageId([8; 32]),
+            closure: PageId([8; 32]),
             document: Arc::clone(&self.document),
             library: PreparedLibrary::new(Arc::clone(&library.registry)),
         };

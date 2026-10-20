@@ -104,7 +104,7 @@ fn program() -> &'static Program {
         document.manifest.functions =
             lash_kernel_check::requirements(&document, registry.as_ref()).functions;
         Program {
-            release: super::pages::RELEASE,
+            closure: super::pages::CLOSURE,
             document: Arc::new(document),
             library: lash_kernel_vm::PreparedLibrary::new(registry),
         }
@@ -569,7 +569,7 @@ fn smith_values() -> Vec<Datum> {
             host: Vec::new(),
         };
         let program = Program {
-            release: super::pages::RELEASE,
+            closure: super::pages::CLOSURE,
             document: Arc::new(smith.document),
             library: machine::prepared().clone(),
         };

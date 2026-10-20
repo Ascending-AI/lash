@@ -67,6 +67,7 @@ pub(crate) use generator::peel_loop;
 mod claim_facts;
 mod graph;
 mod head_commit;
+mod packages;
 pub(crate) use graph::{
     AUDIT_PAGE, GraphClosure, audit_page, graph_closure, graph_counts, install_staged, peel,
 };
@@ -152,11 +153,6 @@ impl Retired {
         } else {
             roots.0.insert(root);
         }
-    }
-
-    /// `root` was retired: retire its closure.
-    pub(crate) fn closure(&self, root: &lash_core_store::checkpoint_graph::NodeId) {
-        self.record(false, root.to_hex());
     }
 
     /// A stored root reference was retired: retire its closure.
@@ -620,13 +616,6 @@ async fn node_draining(tx: &mut PgConnection, node: &Owner) -> Result<Option<boo
         .map_err(sqlx_failure)
 }
 
-/// The format sets a node's stored `formats_json` names.
-fn decoded_sets(stored: &str) -> Result<Vec<FormatSet>, DurableError> {
-    let sets: Vec<String> =
-        serde_json::from_str(stored).map_err(|_| corrupt("node format sets", stored))?;
-    Ok(sets.into_iter().map(FormatSet::new).collect())
-}
-
 async fn release_owned_by(
     tx: &mut PgConnection,
     owner: &Owner,
@@ -787,7 +776,6 @@ async fn apply_domain(
         DomainWrite::RunFact(write) => run_records::apply(tx, committing, write).await,
         DomainWrite::ExecRoot(write) => snapshots::apply(tx, committing, write).await,
         DomainWrite::EffectAdmission(write) => graph::apply_admission(tx, committing, write).await,
-        DomainWrite::ReleasePin(write) => graph::apply_release_pin(tx, committing, write).await,
         DomainWrite::Wait(write) => waits::apply(tx, committing, write).await,
         DomainWrite::Process(write) => processes::apply(tx, committing, write).await,
         DomainWrite::SessionClose(write) => session_close::apply(tx, committing, write).await,
@@ -985,10 +973,12 @@ impl DurableStore for PostgresDurableStore {
                         .execute(crate::observed_sql::executor(&mut **tx))
                         .await
                         .map_err(sqlx_failure)?;
+                    packages::hold(&mut tx, lease_owner.node.as_str(), &spec.held).await?;
                     Ok(NodeLease {
                         owner: lease_owner,
                         decodes: spec.decodes.clone(),
                         serves: spec.serves.clone(),
+                        held: spec.held.clone(),
                         ttl_millis: spec.ttl_millis,
                         expires_at,
                     })
@@ -1152,7 +1142,12 @@ impl DurableStore for PostgresDurableStore {
                                 } else {
                                     ClaimCause::Ready
                                 },
-                                purpose: ClaimPurpose::of(node, &get::<String>(row, 3)?, &requires),
+                                purpose: ClaimPurpose::of(
+                                    node,
+                                    &get::<String>(row, 3)?,
+                                    &requires,
+                                    get::<bool>(row, 5)?,
+                                ),
                                 requires,
                             })
                         })
@@ -1170,7 +1165,7 @@ impl DurableStore for PostgresDurableStore {
 
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {
         self.within(CommitCapacity::Scheduler, async {
-            let rows: Vec<(String, i64, String, Option<String>)> =
+            let rows: Vec<(String, i64, String, Option<String>, bool)> =
                 crate::observed_sql::query_as(SQL.actor.owned_by.sql())
                     .bind(node.owner.node.as_str())
                     .bind(node.owner.boot.as_str())
@@ -1178,13 +1173,13 @@ impl DurableStore for PostgresDurableStore {
                     .await
                     .map_err(sqlx_failure)?;
             rows.into_iter()
-                .map(|(key, epoch, formats, requires)| {
+                .map(|(key, epoch, formats, requires, holds)| {
                     let requires = requires_of(requires)?;
                     Ok(Claimed {
                         actor: actor_key(&key)?,
                         epoch: Epoch(epoch),
                         cause: ClaimCause::Adopted,
-                        purpose: ClaimPurpose::of(node, &formats, &requires),
+                        purpose: ClaimPurpose::of(node, &formats, &requires, holds),
                         requires,
                     })
                 })
@@ -1217,16 +1212,35 @@ impl DurableStore for PostgresDurableStore {
         .await
     }
 
-    async fn live_decodes(&self) -> Result<Vec<Vec<FormatSet>>, DurableError> {
+    async fn live_nodes(&self) -> Result<Vec<lash_durable::NodeCapability>, DurableError> {
         self.within(CommitCapacity::Work, async {
             let mut connection = self.pools.work.acquire().await.map_err(sqlx_failure)?;
             let now = self.instant_on(&mut connection).await?;
-            let rows: Vec<String> = crate::observed_sql::query_scalar(SQL.node.live_decodes.sql())
-                .bind(now.0)
-                .fetch_all(crate::observed_sql::executor(&mut *connection))
-                .await
-                .map_err(sqlx_failure)?;
-            rows.iter().map(|stored| decoded_sets(stored)).collect()
+            packages::live_nodes(&mut connection, now).await
+        })
+        .await
+    }
+
+    async fn install_packages(
+        &self,
+        artifacts: &[lash_durable::packages::ArtifactInstall],
+        sets: &[lash_durable::packages::SetInstall],
+    ) -> Result<(), DurableError> {
+        self.within(CommitCapacity::Work, async {
+            crate::observed_sql::measure(&self.observer, CommitLabel::PACKAGES_INSTALL, 0, async {
+                let (mut tx, _now) = self.open(CommitLabel::PACKAGES_INSTALL).await?;
+                let outcome = packages::install(&mut tx, artifacts, sets).await;
+                finish(tx, outcome).await
+            })
+            .await
+        })
+        .await
+    }
+
+    async fn package_catalog(&self) -> Result<lash_durable::PackageCatalog, DurableError> {
+        self.within(CommitCapacity::Work, async {
+            let mut connection = self.pools.work.acquire().await.map_err(sqlx_failure)?;
+            packages::catalog(&mut connection).await
         })
         .await
     }

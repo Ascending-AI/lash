@@ -99,7 +99,7 @@ fn a_body_that_reaches_an_absent_function_refuses_its_document_until_it_is_regis
         let setup = Setup::default();
         crate::KernelMachine::start(
             Program {
-                release: PageId([8; 32]),
+                closure: PageId([8; 32]),
                 document: Arc::clone(&document),
                 library: PreparedLibrary::new(Arc::new(registry.clone())),
             },
@@ -114,4 +114,29 @@ fn a_body_that_reaches_an_absent_function_refuses_its_document_until_it_is_regis
     ));
     registry.register(inner, None).unwrap();
     assert!(start(&registry).is_ok());
+}
+
+/// FIG-6931: admission validates a document once per identity. An identity
+/// a caller validated against the library (a dialect that validates while
+/// it lowers) is admitted without being validated again, whichever copy of
+/// the document arrives; one no caller validated is validated, and an
+/// invalid one is refused.
+#[test]
+fn an_identity_validated_against_the_library_is_admitted_without_validating_it_again() {
+    let prepared = PreparedLibrary::new(Arc::clone(&library_with(true, None).registry));
+    // `break` outside a loop: validation refuses it.
+    let document =
+        Arc::new(parse_document("numbers by_spelling\nkernel 1\nmain { break }\n").unwrap());
+    let identity = document.identity();
+    let limits = lash_kernel_doc::KernelDataLimits::standard();
+    assert!(
+        !prepared.admit_identified(&document, identity, limits),
+        "validation refuses it"
+    );
+    prepared.note_validated(identity, limits);
+    let copy = Arc::new((*document).clone());
+    assert!(
+        prepared.admit_identified(&copy, identity, limits),
+        "an identity validated before is not validated again"
+    );
 }

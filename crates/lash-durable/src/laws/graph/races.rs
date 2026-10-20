@@ -10,7 +10,7 @@ use super::{
     ForeignWrite, GraphTier, big, exact, hydrate, leaf, owned, owner_commit, present, put_exec,
     refused, staging, value,
 };
-use crate::domain::graph::{ExecRootWrite, HydratedGraph, ReleasePinWrite, RootOwner};
+use crate::domain::graph::{ExecRootWrite, HydratedGraph, RootOwner};
 use crate::laws::{LawBroken, LawOutcome, ensure};
 use crate::{DomainWrite, DurableError};
 
@@ -37,20 +37,6 @@ pub trait ServerProbe: Send + Sync {
         owner: RootOwner,
         limits: DecodeLimits,
     ) -> (Result<HydratedGraph, GraphRefusal>, u64);
-}
-
-fn release_pin(release: &str, root: NodeId) -> DomainWrite {
-    DomainWrite::ReleasePin(ReleasePinWrite::Install {
-        release: release.into(),
-        root,
-    })
-}
-
-fn retire_release(release: &str, expected: NodeId) -> DomainWrite {
-    DomainWrite::ReleasePin(ReleasePinWrite::Retire {
-        release: release.into(),
-        expected,
-    })
 }
 
 /// Rounds a race law runs.
@@ -149,23 +135,16 @@ pub async fn an_audit_racing_commits_peels_nothing_they_rely_on(
             for round in 0..RACE_ROUNDS {
                 let mut nodes = staging();
                 let root = value(&mut nodes, &[&big("gc-race-shared"), &unique(round)], &[]);
-                let mut writes = vec![release_pin(&release(round), root)];
+                let mut writes = vec![super::pin(&release(round), root)];
                 if let (Some(previous), Some(before)) = (previous, round.checked_sub(1)) {
-                    writes.push(retire_release(&release(before), previous));
+                    writes.push(super::unpin(&release(before), previous));
                 }
                 owner_commit(tier, &owner, nodes.into_nodes(), writes)
                     .await
                     .map_err(|error| refused("a racing commit", error))?;
-                let hydrated = hydrate(
-                    tier,
-                    RootOwner::ReleasePin {
-                        release: release(round),
-                    },
-                    None,
-                    limits,
-                )
-                .await
-                .map_err(|error| refused("a racing commit's graph", error))?;
+                let hydrated = hydrate(tier, super::pinned(&release(round)), None, limits)
+                    .await
+                    .map_err(|error| refused("a racing commit's graph", error))?;
                 ensure!(
                     hydrated.nodes.len() == 3,
                     "a racing commit's graph read {} nodes",
@@ -358,7 +337,7 @@ pub async fn commits_and_reads_progress_while_the_audit_runs(
         tier,
         &owner,
         nodes.into_nodes(),
-        vec![release_pin("read", read)],
+        vec![super::pin("read", read)],
     )
     .await
     .map_err(|error| refused("the read root", error))?;
@@ -387,14 +366,12 @@ pub async fn commits_and_reads_progress_while_the_audit_runs(
                         tier,
                         &owner,
                         more.into_nodes(),
-                        vec![release_pin("write", root)],
+                        vec![super::pin("write", root)],
                     )
                     .await;
                     let hydrated = hydrate(
                         tier,
-                        RootOwner::ReleasePin {
-                            release: "read".into(),
-                        },
+                        super::pinned("read"),
                         None,
                         limits,
                     )

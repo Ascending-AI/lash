@@ -62,7 +62,7 @@ pub(crate) async fn import(
     limits: Option<WorkflowSourceLimits>,
 ) -> crate::Result<WorkflowImport> {
     let (document, source_map, captions) = match workers
-        .import_workflow(language, source, operations, limits)
+        .import_workflow(language, source, operations, None, limits)
         .await
     {
         Ok(imported) => imported,

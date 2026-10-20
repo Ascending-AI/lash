@@ -74,6 +74,7 @@ use lash_kernel_state::paged::CheckpointHeader;
 use lash_kernel_vm::{End, Outcome, WaitId};
 use tokio_util::sync::CancellationToken;
 
+use super::closure::Closure;
 use super::graph::{
     CellEnd, Disposition, EffectMembership, FrozenAdmission, FrozenRequest, MemberStatus,
     Projections, ResolvedAdmission, RootParts, stage_exec_root,
@@ -81,7 +82,7 @@ use super::graph::{
 use super::ledger::{AdmittedEffect, EffectLedger, PendingEffect, Standing};
 use super::pages::{Resolution, SharedPages};
 use super::run::KernelEffects;
-use super::state::{EndRecord, ReleaseGraph, checkpoint_header};
+use super::state::{EndRecord, checkpoint_header};
 use super::value::datum_from_json;
 use crate::effects::MemberDraft;
 use crate::members::{Decide, Driven, Undriven};
@@ -168,8 +169,12 @@ pub struct ParkSave<'a> {
     /// The activation's page service, whose spool holds the root's
     /// changed pages: the candidate the park publishes.
     pub pages: &'a SharedPages,
-    /// The helper releases the state may pin.
-    pub releases: &'a ReleaseGraph,
+    /// The execution closure the state's root names: the run's
+    /// document's.
+    pub closure: &'a Closure,
+    /// The closures of the session's earlier cells no commit installed:
+    /// each the park's pages name is staged with it.
+    pub carried: &'a [Closure],
     /// The ledger that matches it, before this park's admissions.
     pub ledger: EffectLedger,
     /// Every wait requested since the last park.
@@ -188,6 +193,9 @@ pub struct EndSave<'a> {
     /// staged in `pages`' spool, it is the candidate the end publishes.
     pub session: NodeId,
     pub pages: &'a SharedPages,
+    /// The closures of the session's earlier cells no commit installed:
+    /// each the end's pages name is staged with it.
+    pub carried: &'a [Closure],
     pub with: Vec<DomainWrite>,
 }
 
@@ -368,7 +376,7 @@ fn final_output<'a>(
 enum SavePhase<'a> {
     Parked {
         state: SealedPark,
-        releases: &'a ReleaseGraph,
+        closure: &'a Closure,
         /// The model response a fresh run's first park commits (FIG-6000).
         response: Option<&'a lash_core_execution::HeldResponse>,
     },
@@ -492,7 +500,8 @@ impl DurableSnapshotStore {
             document,
             state,
             pages,
-            releases,
+            closure,
+            carried,
             ledger,
             admit,
             with,
@@ -503,10 +512,10 @@ impl DurableSnapshotStore {
             ledger,
             SavePhase::Parked {
                 state,
-                releases,
+                closure,
                 response,
             },
-            pages,
+            (pages, carried),
             admit,
             with,
         )
@@ -533,7 +542,7 @@ impl DurableSnapshotStore {
                 end: save.end,
                 session: save.session,
             },
-            save.pages,
+            (save.pages, save.carried),
             Vec::new(),
             save.with,
         )
@@ -591,13 +600,15 @@ impl DurableSnapshotStore {
         document: &DocumentId,
         mut ledger: EffectLedger,
         phase: SavePhase<'_>,
-        pages: &SharedPages,
+        (pages, carried): (&SharedPages, &[Closure]),
         admit: Vec<EffectAdmission>,
         with: Vec<DomainWrite>,
     ) -> Result<FirstPark, QuietPointRefusal> {
-        let response = match phase {
-            SavePhase::Parked { response, .. } => response,
-            SavePhase::Ended { .. } => None,
+        let (response, own) = match &phase {
+            SavePhase::Parked {
+                response, closure, ..
+            } => (*response, Some(closure.reference())),
+            SavePhase::Ended { .. } => (None, None),
         };
         let mut members = self.members.lock().await;
         if matches!(phase, SavePhase::Ended { .. }) {
@@ -813,22 +824,13 @@ impl DurableSnapshotStore {
         // The candidate the commit publishes: the park's checkpoint root, or
         // the session descriptor an end hands the turn.
         let (status, state, format, membership, candidate) = match phase {
-            SavePhase::Parked {
-                state, releases, ..
-            } => {
+            SavePhase::Parked { state, closure, .. } => {
                 let membership = book.membership(&ledger).map_err(refused)?;
                 for write in book.retire_unnamed(&self.exec, &membership) {
                     tx.write(write);
                 }
-                releases
-                    .pin(
-                        self.cx.durable_reads().map_err(refused)?,
-                        &mut tx,
-                        NodeId(state.header.release.0),
-                        expected.is_none(),
-                    )
-                    .await
-                    .map_err(refused)?;
+                // `sealed` checked the root names this closure.
+                closure.stage(&mut tx, expected.is_none());
                 (
                     ExecStatus::Parked,
                     state.root,
@@ -888,11 +890,20 @@ impl DurableSnapshotStore {
             commit,
         )
         .map_err(refused)?;
-        let manifest = pages
+        let mut manifest = pages
             .lock()
             .await
             .candidate(candidate, expected.map(|held| held.root), root, commit)
             .map_err(refused)?;
+        // The run's own closure is staged with its park below.
+        super::closure::stage_named(
+            manifest.as_mut(),
+            carried
+                .iter()
+                .filter(|closure| Some(closure.reference()) != own),
+            &mut tx,
+        )
+        .map_err(refused)?;
         tx.stage_all(staging);
         for read in reads {
             tx.require(read);

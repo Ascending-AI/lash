@@ -1255,6 +1255,7 @@ async fn settled_payload_reuse() {
             node: lash_durable::NodeId::new("payload-reuse"),
             decodes: vec![FormatSet::new(FORMATS)],
             serves: Vec::new(),
+            held: Default::default(),
             ttl_millis: 15_000,
         })
         .await

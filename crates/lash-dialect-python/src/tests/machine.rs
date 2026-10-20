@@ -304,7 +304,7 @@ fn start(
         panic!("{refusal:?}\n{text}");
     }
     let program = Program {
-        release: pages::RELEASE,
+        closure: pages::CLOSURE,
         document: Arc::clone(lowered.document.shared()),
         library: installed().prepared.clone(),
     };
@@ -318,7 +318,7 @@ fn start(
 fn builtin_range_loop_uses_constant_space() {
     let lowered = lower("for i in range(100000):\n    print(i)\n    break\nprint(i)\n").unwrap();
     let program = Program {
-        release: pages::RELEASE,
+        closure: pages::CLOSURE,
         document: Arc::clone(lowered.document.shared()),
         library: installed().prepared.clone(),
     };
@@ -363,7 +363,7 @@ fn a_key_sort_computes_each_key_once_and_charges_alike_in_any_order() {
         );
         let lowered = lower(&source).unwrap_or_else(|error| panic!("{error}"));
         let program = Program {
-            release: pages::RELEASE,
+            closure: pages::CLOSURE,
             document: Arc::clone(lowered.document.shared()),
             library: installed().prepared.clone(),
         };
@@ -418,7 +418,7 @@ fn a_key_sort_bills_large_captured_keys_exactly_in_any_order() {
             );
             let lowered = lower(&source).unwrap_or_else(|error| panic!("{error}"));
             let program = Program {
-                release: pages::RELEASE,
+                closure: pages::CLOSURE,
                 document: Arc::clone(lowered.document.shared()),
                 library: installed().prepared.clone(),
             };
@@ -457,7 +457,7 @@ fn dict_same_size_key_replacement_raises_within_charge_bound() {
         let program = Program {
             document: Arc::clone(lowered.document.shared()),
             library: installed().prepared.clone(),
-            release: pages::RELEASE,
+            closure: pages::CLOSURE,
         };
         let bounds = Bounds {
             charge_limit: 20_000,
@@ -526,7 +526,7 @@ pub(super) fn entry_output(
 ) -> (Datum, Vec<String>) {
     let session = Session::default();
     let program = Program {
-        release: pages::RELEASE,
+        closure: pages::CLOSURE,
         document: Arc::new(document),
         library: installed().prepared.clone(),
     };
@@ -898,7 +898,7 @@ fn paged_arithmetic_keeps_held_definitions_and_exact_charge() {
         )
         .expect("the arithmetic witness lowers");
         let program = Program {
-            release: pages::RELEASE,
+            closure: pages::CLOSURE,
             document: Arc::clone(lowered.document.shared()),
             library: prepared.clone(),
         };
@@ -1130,7 +1130,7 @@ print(s)
     assert!(!kernel_text(source).contains("py.iadd"));
     let lowered = lower(source).expect("the integer loop lowers");
     let program = Program {
-        release: pages::RELEASE,
+        closure: pages::CLOSURE,
         document: Arc::clone(lowered.document.shared()),
         library: installed().prepared.clone(),
     };
@@ -1707,7 +1707,7 @@ await build()
     let lowered = lower(source).unwrap();
     let registry = Arc::clone(installed().prepared.registry());
     let program = |layout| Program {
-        release: pages::RELEASE,
+        closure: pages::CLOSURE,
         document: Arc::clone(lowered.document.shared()),
         library: prepare_with_layout(Arc::clone(&registry), layout),
     };

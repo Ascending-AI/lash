@@ -45,7 +45,7 @@ impl PageSource for Source {
     }
 }
 
-pub(crate) const RELEASE: PageId = PageId([7; 32]);
+pub(crate) const CLOSURE: PageId = PageId([7; 32]);
 pub(crate) const OWNER: PageId = PageId([9; 32]);
 #[derive(Clone, Default)]
 pub(crate) struct Session {

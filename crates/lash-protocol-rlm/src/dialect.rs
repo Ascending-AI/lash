@@ -306,9 +306,9 @@ pub(crate) struct CodeModeDialectServices {
     pub(crate) channel: crate::plugin::RlmChannel,
     /// What a stored kernel definition is carried forward with.
     pub(crate) kernel: crate::executor::KernelCarry,
-    /// Which helper release a cell is lowered against; `None` is the
-    /// build's own (FIG-5799).
-    pub(crate) helpers: Option<Arc<dyn crate::plugin::HelperReleaseGate>>,
+    /// Which package set a cell is lowered under; `None` is lash's own
+    /// (FIG-6918).
+    pub(crate) packages: Option<Arc<dyn crate::plugin::PackageGate>>,
 }
 
 /// The label under a discovery session's listed tools: whether the listing
@@ -398,7 +398,7 @@ impl SessionDialect {
                 presentation: crate::RlmPresentationConfig::standard(),
                 tool_presentation,
                 kernel: crate::executor::KernelCarry::default(),
-                helpers: None,
+                packages: None,
             },
         }
     }
@@ -829,7 +829,7 @@ impl DialectSession {
                 channel: self.services.channel,
                 code_renderer: self.services.code_renderer.clone(),
                 prompts: self.dialect.prompts(),
-                helpers: self.services.helpers.clone(),
+                packages: self.services.packages.clone(),
                 kernel: self.services.kernel.clone(),
             },
             session_projected_bindings,
@@ -862,11 +862,8 @@ impl DialectSession {
         root: lash_core_store::checkpoint_graph::NodeId,
         commit: lash_core_store::checkpoint_graph::CommitId,
         tx: &mut lash_durable::ActorTx,
-        reads: &dyn lash_durable::DurableReads,
     ) -> Result<Option<lash_core::plugin::ExecutionCandidate>, SessionError> {
-        self.state
-            .execution_candidate(root, commit, tx, reads)
-            .await
+        self.state.execution_candidate(root, commit, tx).await
     }
 
     pub(crate) async fn hydrated_execution_graph(
@@ -1253,7 +1250,7 @@ pub(crate) fn test_dialect_services() -> CodeModeDialectServices {
         execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
         code_renderer: Default::default(),
         channel: crate::plugin::RlmChannel::Cell,
-        helpers: None,
+        packages: None,
     }
 }
 

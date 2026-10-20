@@ -39,12 +39,13 @@ use lash_kernel_vm::{
 use lash_vm_protocol::{CheckpointRefusal, InfrastructureOutcome};
 use tokio_util::sync::CancellationToken;
 
+use super::closure::Closure;
 use super::graph::{FrozenRequest, Projections};
 use super::ledger::{AdmittedEffect, EffectLedger, Growth};
 use super::pages::{
     ActivationPages, CapabilityKey, PageLimits, SharedPages, SpoolRoot, renew_when_due,
 };
-use super::state::{GraphStateFailure, ReleaseGraph, checkpoint_header};
+use super::state::{GraphStateFailure, checkpoint_header};
 use super::store::{
     AdmitAs, AdmittedCall, Checkpoint, EffectAdmission, FirstPark, HostParts, ParkSave,
     ParkedState, SealedPark,
@@ -201,13 +202,22 @@ pub trait Machines: Send + Sync {
     /// The bounds the run is held to.
     fn bounds(&self) -> Bounds;
 
-    /// The helper releases this build holds: a park pins the manifest its
-    /// root names.
+    /// The execution closure of the run's document, over the functions
+    /// this host links documents against: what each root of the run names,
+    /// and what its first park stages.
     ///
     /// # Errors
     ///
-    /// [`KernelFailure::State`] when the build's releases do not stage.
-    fn releases(&self) -> Result<&ReleaseGraph, KernelFailure>;
+    /// [`KernelFailure::State`] when this host does not hold a function the
+    /// document reaches.
+    fn closure(&self) -> Result<&Closure, KernelFailure>;
+
+    /// The execution closures of the session's earlier cells that no
+    /// commit installed yet: a park whose pages name one, through a
+    /// function its cell saved, stages it.
+    fn carried(&self) -> &[Closure] {
+        &[]
+    }
 
     /// A machine that has executed nothing, whose every root is bound to
     /// the OwnerBinding node `binding`, its pages read and sealed through
@@ -565,7 +575,13 @@ impl KernelBroker<'_> {
             && let Some(running) = machine.as_mut()
         {
             let state = self
-                .sealed(running, &activation, binding, &document)
+                .sealed(
+                    running,
+                    &activation,
+                    binding,
+                    &document,
+                    machines.closure()?.reference(),
+                )
                 .await?;
             match self.grown(&ledger, &activation, 0).await {
                 Ok(growth) => ledger.grown(growth),
@@ -581,7 +597,8 @@ impl KernelBroker<'_> {
                 document,
                 state: state.clone(),
                 pages: &activation.pages,
-                releases: machines.releases()?,
+                closure: machines.closure()?,
+                carried: machines.carried(),
                 ledger,
                 admit: Vec::new(),
                 with: Vec::new(),
@@ -656,7 +673,13 @@ impl KernelBroker<'_> {
                 // run sealed since the last one: past a lifetime bound it
                 // admits nothing, and the run ends there.
                 let state = self
-                    .sealed(running, &activation, binding, &document)
+                    .sealed(
+                        running,
+                        &activation,
+                        binding,
+                        &document,
+                        machines.closure()?.reference(),
+                    )
                     .await?;
                 match self
                     .grown(&ledger, &activation, requests.len() as u64)
@@ -678,7 +701,8 @@ impl KernelBroker<'_> {
                     document,
                     state: state.clone(),
                     pages: &activation.pages,
-                    releases: machines.releases()?,
+                    closure: machines.closure()?,
+                    carried: machines.carried(),
                     ledger,
                     admit,
                     with: Vec::new(),
@@ -764,7 +788,7 @@ impl KernelBroker<'_> {
     /// The page service of one activation: leased on the run's committed
     /// root when it resumes from `parked`, on the host's fresh lease
     /// otherwise. Sealed pages may name the run's owner binding and the
-    /// release manifests its roots pin.
+    /// execution closure its roots pin.
     ///
     /// # Errors
     ///
@@ -781,16 +805,9 @@ impl KernelBroker<'_> {
             Some(parked) => (Some(self.lease(&store, parked.exec_root).await?), true),
             None => (self.pages.fresh.clone(), false),
         };
-        let releases = &machines.releases()?.manifests;
-        let mut references: Vec<NodeId> = releases
-            .dialects()
-            .filter_map(|dialect| releases.current(dialect))
-            .map(|release| NodeId(release.0))
-            .collect();
-        references.push(binding);
-        match parked {
-            Some(parked) => references.push(NodeId(parked.header.release.0)),
-            None => references.extend(self.pages.references.iter().copied()),
+        let mut references = vec![machines.closure()?.reference(), binding];
+        if parked.is_none() {
+            references.extend(self.pages.references.iter().copied());
         }
         let stage = next_stage_lease();
         let pages = ActivationPages::new(
@@ -873,7 +890,7 @@ impl KernelBroker<'_> {
 
     /// The root `running` seals at this safe point, its header read from
     /// the activation's spool and checked: this kernel, this document,
-    /// bound to this execution, pinning a release this build holds.
+    /// bound to this execution, pinning its document's execution closure.
     ///
     /// # Errors
     ///
@@ -885,8 +902,9 @@ impl KernelBroker<'_> {
         activation: &PageActivation,
         binding: NodeId,
         document: &DocumentId,
+        closure: NodeId,
     ) -> Result<SealedPark, KernelFailure> {
-        sealed(running, &activation.pages, binding, document).await
+        sealed(running, &activation.pages, binding, document, closure).await
     }
 
     /// The growth the run's next save leaves it with, appending `effects`
@@ -1053,8 +1071,8 @@ fn wait_of(request: &Request) -> WaitId {
 
 /// The root `running` seals at this safe point, its header read from the
 /// activation's spool through `pages` and checked: this kernel, this
-/// document, bound to the OwnerBinding node `binding`, pinning a release
-/// this build holds.
+/// document, bound to the OwnerBinding node `binding`, pinning `closure`,
+/// the document's execution closure.
 ///
 /// # Errors
 ///
@@ -1065,6 +1083,7 @@ pub async fn sealed<M: DrivenMachine>(
     pages: &SharedPages,
     binding: NodeId,
     document: &DocumentId,
+    closure: NodeId,
 ) -> Result<SealedPark, KernelFailure> {
     let root = running.seal().await?;
     let bytes = pages.lock().await.spool().read(&root)?;
@@ -1088,6 +1107,13 @@ pub async fn sealed<M: DrivenMachine>(
         return Err(CheckpointRefusal::WrongOwner {
             expected: binding.to_string(),
             found: NodeId(header.owner.0).to_string(),
+        }
+        .into());
+    }
+    if header.closure.0 != closure.0 {
+        return Err(CheckpointRefusal::WrongClosure {
+            expected: closure.to_string(),
+            found: NodeId(header.closure.0).to_string(),
         }
         .into());
     }

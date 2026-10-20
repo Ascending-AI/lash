@@ -1,102 +1,21 @@
-//! lash's own packages and each built dialect's current helper release,
-//! made by the build. A checkpoint pins its exact manifest and refuses a
-//! different release. Parents read definitions as data without linking
-//! dialect compilers.
+//! lash's own packages, made by the build (FIG-6917), and what a parent
+//! holds of them (FIG-5812). A parent links, admits and migrates documents
+//! against exactly the functions its workers hold, and runs none of them
+//! (ADR 0123): it decodes the packages as data, without linking a dialect
+//! or an extension, and registers them once as a [`HeldPackages`], from
+//! which its admission and every worker's registry are derived (V1). A
+//! build with no dialect feature holds `kernel` alone.
 
-mod manifest;
-mod releases;
+use std::sync::{Arc, OnceLock};
+
+use lash_kernel_package::{HeldPackages, Package, PackageHeader};
 
 /// The TypeScript dialect name recorded by sessions and runs.
 pub const TYPESCRIPT: &str = "typescript";
 /// The Python dialect name recorded by sessions and runs.
 pub const PYTHON: &str = "python";
-/// Dialects whose helpers the build may include.
+/// Dialects whose packages the build may include.
 pub const SHIPPED_DIALECTS: &[&str] = &[TYPESCRIPT, PYTHON];
-
-pub use manifest::{
-    HELPER_DEFINITION_KIND, HeldManifests, ManifestFunction, RELEASE_MANIFEST_KIND,
-    ReleaseManifest, ReleaseRefusal, stage_release,
-};
-pub use releases::{HeldReleases, HelperRelease, HelperReleaseIndex, ReleasedFunction};
-
-/// One dialect's helpers and helper releases, as the build defined and
-/// resolved them (`build.rs`).
-#[derive(Clone, Copy, Debug)]
-pub struct DialectReleases {
-    /// The dialect's name: what a session records and a run names.
-    pub dialect: &'static str,
-    /// The index of each helper release the build retains for the dialect,
-    /// oldest first.
-    pub helper_release_index: &'static [u8],
-    /// Every helper release the build holds for the dialect.
-    held: &'static str,
-    /// Canonical checkpoint nodes of the dialect's immutable helper
-    /// releases, encoded by the build as a sequence of
-    /// `(digest, envelope bytes)`.
-    pub checkpoint_nodes: &'static [u8],
-    /// Exact release manifests and root refs, in retained-release order,
-    /// encoded by the build beside `checkpoint_nodes`.
-    pub checkpoint_manifests: &'static [u8],
-}
-
-impl DialectReleases {
-    /// The single current helper release for this dialect.
-    ///
-    /// # Errors
-    ///
-    /// The decoder's message: a defect of the build.
-    pub fn held_releases(&self) -> Result<HeldReleases, String> {
-        HeldReleases::decode(self.held)
-    }
-}
-
-#[cfg(any(feature = "dialect-typescript", feature = "dialect-python"))]
-macro_rules! built {
-    ($dialect:literal) => {
-        DialectReleases {
-            dialect: $dialect,
-            helper_release_index: include_bytes!(concat!(
-                env!("OUT_DIR"),
-                "/",
-                $dialect,
-                "_helper_releases.json"
-            )),
-            held: include_str!(concat!(
-                env!("OUT_DIR"),
-                "/",
-                $dialect,
-                "_held_releases.json"
-            )),
-            checkpoint_nodes: include_bytes!(concat!(
-                env!("OUT_DIR"),
-                "/",
-                $dialect,
-                "_checkpoint_nodes.bin"
-            )),
-            checkpoint_manifests: include_bytes!(concat!(
-                env!("OUT_DIR"),
-                "/",
-                $dialect,
-                "_checkpoint_manifests.bin"
-            )),
-        }
-    };
-}
-
-/// The dialects this build holds helper releases for: the ones its
-/// features name, in [`SHIPPED_DIALECTS`]' order.
-pub const DIALECTS: &[DialectReleases] = &[
-    #[cfg(feature = "dialect-typescript")]
-    built!("typescript"),
-    #[cfg(feature = "dialect-python")]
-    built!("python"),
-];
-
-/// What the build holds for `dialect`, when it was built with it.
-#[must_use]
-pub fn dialect(dialect: &str) -> Option<&'static DialectReleases> {
-    DIALECTS.iter().find(|built| built.dialect == dialect)
-}
 
 #[cfg(test)]
 mod tests;
@@ -167,4 +86,68 @@ pub const PACKAGES: &[BuiltPackage] = &[
 #[must_use]
 pub fn package(path: &str) -> Option<&'static BuiltPackage> {
     PACKAGES.iter().find(|built| built.path == path)
+}
+
+/// Why lash's packages could not be assembled: a defect of the build,
+/// never of a document.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("lash's packages do not assemble: {message}")]
+pub struct LibraryError {
+    message: String,
+}
+
+impl LibraryError {
+    fn new(message: impl std::fmt::Display) -> Self {
+        Self {
+            message: message.to_string(),
+        }
+    }
+}
+
+fn standard_in(
+    slot: &OnceLock<Result<Arc<HeldPackages>, LibraryError>>,
+    assemble: impl FnOnce() -> Result<Arc<HeldPackages>, LibraryError>,
+) -> Result<Arc<HeldPackages>, LibraryError> {
+    // Assembly decodes and registers every package. Cold readers must
+    // wait for that work, rather than each allocating their own copy. A
+    // failure is a fixed defect of this build, so retain it as well.
+    slot.get_or_init(assemble).clone()
+}
+
+/// lash's packages, decoded from the build's images in dependency order.
+///
+/// # Errors
+///
+/// The decoder's message: a defect of the build.
+pub fn built() -> Result<Vec<Package>, String> {
+    PACKAGES
+        .iter()
+        .map(|built| {
+            let header: PackageHeader =
+                serde_json::from_str(built.header).map_err(|error| error.to_string())?;
+            let image = lash_kernel_doc::ReleasedFunctions::read(built.image)
+                .map_err(|error| error.to_string())?;
+            let package = Package::from_image(header, image).map_err(|error| error.to_string())?;
+            let display = lash_kernel_package::shipped_display::of(package.path())
+                .map_err(|error| error.to_string())?;
+            Ok(package.with_display(display))
+        })
+        .collect()
+}
+
+/// lash's own packages as this build holds them, registered once in a
+/// process: the set a host that installs no package of its own runs on,
+/// and the requirements a host's package is built against.
+///
+/// # Errors
+///
+/// [`LibraryError`].
+pub fn lash_packages() -> Result<Arc<HeldPackages>, LibraryError> {
+    static STANDARD: OnceLock<Result<Arc<HeldPackages>, LibraryError>> = OnceLock::new();
+    standard_in(&STANDARD, || {
+        Ok(Arc::new(
+            HeldPackages::install(built().map_err(LibraryError::new)?)
+                .map_err(LibraryError::new)?,
+        ))
+    })
 }

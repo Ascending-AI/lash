@@ -49,8 +49,8 @@ pub mod waits;
 
 pub use graph::{
     AdmissionMember, EffectAdmissionRow, EffectAdmissionWrite, EffectKey, ExecRootRow,
-    ExecRootWrite, HydratedGraph, HydratedNode, ReleasePinWrite, RootChange, RootOwner,
-    RunFactKind, RunFactRow, RunFactWrite, RunFacts,
+    ExecRootWrite, HydratedGraph, HydratedNode, RootChange, RootOwner, RunFactKind, RunFactRow,
+    RunFactWrite, RunFacts,
 };
 pub use keys::{CellId, ExecKey, Ordinal, OwnerKey, RunSeq, ScopeKey, StoredKeyError};
 /// The checkpoint graph format the domain's graph rows name.
@@ -109,8 +109,6 @@ pub enum DomainWrite {
     /// An admitted effect's lookup row: its Admission node, while a live
     /// kernel or a released member needs it.
     EffectAdmission(EffectAdmissionWrite),
-    /// A deliberately installed release manifest.
-    ReleasePin(ReleasePinWrite),
     /// L5: wait pinning, timeout, scope revocation and process-terminal
     /// resolution.
     Wait(WaitWrite),

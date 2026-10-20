@@ -22,8 +22,8 @@ use lash_protocol_types::{SessionId, ToolCallId, TurnId};
 
 use super::{LABEL, LawBroken, LawOutcome, create, ensure, node, session};
 use crate::domain::graph::{
-    EffectAdmissionWrite, EffectKey, ExecRootWrite, HydratedGraph, ReleasePinWrite, RootOwner,
-    RunFactKind, RunFactWrite,
+    EffectAdmissionWrite, EffectKey, ExecRootWrite, HydratedGraph, RootOwner, RunFactKind,
+    RunFactWrite,
 };
 use crate::domain::graph_commit::measure_owner_commit;
 use crate::domain::namespace_value::NamespaceValue;
@@ -251,6 +251,45 @@ fn turn(id: &str) -> TurnId {
     TurnId::try_from(id.to_owned()).unwrap_or_else(|_| panic!("a constant turn id"))
 }
 
+/// The execution of a root the laws install and retire at will, keyed by
+/// `key`: one effect admission of a cell of a session no law owns, which no
+/// other write touches.
+fn pin_exec(key: &str) -> ExecKey {
+    ExecKey::Cell(
+        SessionId::try_from("law-pins".to_owned())
+            .unwrap_or_else(|_| panic!("a constant session id")),
+        turn("pins"),
+        CellId::new(key),
+    )
+}
+
+/// The owner of the root pinned under `key`.
+pub(super) fn pinned(key: &str) -> RootOwner {
+    RootOwner::EffectAdmission {
+        exec: pin_exec(key),
+        effect: EffectKey(vec![0].into()),
+    }
+}
+
+/// Pin `root` under `key`.
+pub(super) fn pin(key: &str, root: NodeId) -> DomainWrite {
+    DomainWrite::EffectAdmission(EffectAdmissionWrite::Put {
+        exec: pin_exec(key),
+        effect: EffectKey(vec![0].into()),
+        member: None,
+        admission: root,
+    })
+}
+
+/// Retire the pin of `expected` under `key`.
+pub(super) fn unpin(key: &str, expected: NodeId) -> DomainWrite {
+    DomainWrite::EffectAdmission(EffectAdmissionWrite::Remove {
+        exec: pin_exec(key),
+        effect: EffectKey(vec![0].into()),
+        expected,
+    })
+}
+
 async fn owned(tier: &dyn GraphTier, id: &str) -> Result<Owned, LawBroken> {
     let store = tier.store();
     let actor = session(id)?;
@@ -386,10 +425,7 @@ pub async fn a_refused_owner_graph_commit_writes_nothing(tier: &dyn GraphTier) -
         orphan_nodes.insert(dangling, node.clone());
     }
     let mut orphan_writes = writes(None);
-    orphan_writes.push(DomainWrite::ReleasePin(ReleasePinWrite::Install {
-        release: "dangling".into(),
-        root: dangling,
-    }));
+    orphan_writes.push(pin("dangling", dangling));
     let answer = owner_commit(tier, &owner, orphan_nodes, orphan_writes).await;
     ensure!(
         answer == Err(DurableError::Graph(GraphRefusal::MissingNode(absent))),
@@ -402,9 +438,7 @@ pub async fn a_refused_owner_graph_commit_writes_nothing(tier: &dyn GraphTier) -
     );
     let released = hydrate(
         tier,
-        RootOwner::ReleasePin {
-            release: "dangling".into(),
-        },
+        pinned("dangling"),
         None,
         DecodeLimits::within_total(1 << 30),
     )
@@ -523,10 +557,7 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
     // The anchor shares the leaf with every source's root.
     let mut anchor_nodes = staging();
     let anchor = value(&mut anchor_nodes, &[&shared], &[]);
-    let install_anchor = DomainWrite::ReleasePin(ReleasePinWrite::Install {
-        release: "anchor".into(),
-        root: anchor,
-    });
+    let install_anchor = pin("anchor", anchor);
     owner_commit(
         tier,
         &owner,
@@ -739,16 +770,6 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                     Some(phase_over(phase_root, false)),
                 )
             }
-            RootSource::ReleasePin => (
-                Some(DomainWrite::ReleasePin(ReleasePinWrite::Install {
-                    release: "release".into(),
-                    root,
-                })),
-                Some(DomainWrite::ReleasePin(ReleasePinWrite::Retire {
-                    release: "release".into(),
-                    expected: root,
-                })),
-            ),
             // Sources whose writers are not graph commits: installed nodes
             // first, then their rows written directly.
             RootSource::SessionRevision
@@ -776,12 +797,9 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
             ));
         }
         if writes.is_empty() {
-            // Root the nodes through the anchor-free release pin for the
-            // install, then hand them to the source and retire the pin.
-            writes.push(DomainWrite::ReleasePin(ReleasePinWrite::Install {
-                release: "carrier".into(),
-                root,
-            }));
+            // Root the nodes through a pin for the install, then hand them
+            // to the source and retire the pin.
+            writes.push(pin("carrier", root));
         }
         owner_commit(tier, &owner, nodes.clone(), writes)
             .await
@@ -829,17 +847,9 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
                 | RootSource::ArtifactBridge
                 | RootSource::RunTranscript
         ) {
-            owner_commit(
-                tier,
-                &owner,
-                BTreeMap::new(),
-                vec![DomainWrite::ReleasePin(ReleasePinWrite::Retire {
-                    release: "carrier".into(),
-                    expected: root,
-                })],
-            )
-            .await
-            .map_err(|error| refused("the carrier", error))?;
+            owner_commit(tier, &owner, BTreeMap::new(), vec![unpin("carrier", root)])
+                .await
+                .map_err(|error| refused("the carrier", error))?;
         }
         ensure!(
             tier.roots().await.contains(&root.to_hex()),
@@ -990,17 +1000,9 @@ pub async fn every_root_source_retains_its_graph_and_shared_leaves_outlive_one_o
     );
     exact(tier, "the turn content's audit").await?;
     // The last owner goes: so does the shared leaf.
-    owner_commit(
-        tier,
-        &owner,
-        BTreeMap::new(),
-        vec![DomainWrite::ReleasePin(ReleasePinWrite::Retire {
-            release: "anchor".into(),
-            expected: anchor,
-        })],
-    )
-    .await
-    .map_err(|error| refused("the anchor's retirement", error))?;
+    owner_commit(tier, &owner, BTreeMap::new(), vec![unpin("anchor", anchor)])
+        .await
+        .map_err(|error| refused("the anchor's retirement", error))?;
     exact(tier, "the anchor's retirement").await?;
     ensure!(
         !present(tier, &shared_leaf).await,
@@ -1028,16 +1030,7 @@ pub async fn the_orphan_audit_peels_only_what_no_root_reaches(tier: &dyn GraphTi
         tier,
         &owner,
         nodes.clone(),
-        vec![
-            DomainWrite::ReleasePin(ReleasePinWrite::Install {
-                release: "live".into(),
-                root: live,
-            }),
-            DomainWrite::ReleasePin(ReleasePinWrite::Install {
-                release: "dead".into(),
-                root: dead,
-            }),
-        ],
+        vec![pin("live", live), pin("dead", dead)],
     )
     .await
     .map_err(|error| refused("the roots", error))?;
@@ -1050,17 +1043,9 @@ pub async fn the_orphan_audit_peels_only_what_no_root_reaches(tier: &dyn GraphTi
         root: Some(dead),
     })
     .await;
-    owner_commit(
-        tier,
-        &owner,
-        BTreeMap::new(),
-        vec![DomainWrite::ReleasePin(ReleasePinWrite::Retire {
-            release: "dead".into(),
-            expected: dead,
-        })],
-    )
-    .await
-    .map_err(|error| refused("the release's retirement", error))?;
+    owner_commit(tier, &owner, BTreeMap::new(), vec![unpin("dead", dead)])
+        .await
+        .map_err(|error| refused("the pin's retirement", error))?;
     tier.foreign(ForeignWrite::RevisionRoot {
         config: false,
         session: owner.session.clone(),

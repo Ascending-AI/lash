@@ -81,6 +81,18 @@ pub trait FunctionCatalog: Send + Sync {
         None
     }
 
+    /// The definition's header, its body undecoded where the catalog holds
+    /// it encoded (FIG-6931): what lowering, validation and a machine's
+    /// preparation read.
+    fn header(&self, function: &FunctionId) -> Option<Arc<crate::FunctionHeader>> {
+        match self.registered(function) {
+            Some(registered) => Some(Arc::clone(registered.header())),
+            None => self
+                .definition(function)
+                .map(|definition| Arc::new(crate::FunctionHeader::of(definition))),
+        }
+    }
+
     /// Finds registration facts without identifying the definition again.
     /// Only the exact immutable definition held by the catalog may use them.
     fn registration(&self, _definition: &FunctionDefinition) -> Option<&RegisteredFunction> {
@@ -125,6 +137,7 @@ struct ReleasedSet {
 #[derive(Default)]
 struct Facts {
     definition: OnceLock<Arc<FunctionDefinition>>,
+    header: OnceLock<Arc<crate::FunctionHeader>>,
     callees: OnceLock<BTreeSet<FunctionId>>,
     /// The empty requirement set for a definition with no body.
     no_effects: BTreeMap<EffectName, OperationRequirement>,
@@ -180,6 +193,28 @@ impl RegisteredFunction {
                 Err(error) => unreachable!("a build's release image decodes: {error}"),
             },
             Held::Defined(_) => unreachable!("a defined function holds its definition"),
+        })
+    }
+
+    /// The definition's header, read without decoding its body: a
+    /// released function's from its image, and once.
+    pub fn header(&self) -> &Arc<crate::FunctionHeader> {
+        let facts = self.facts();
+        facts.header.get_or_init(|| {
+            if let Some(definition) = facts.definition.get() {
+                return Arc::new(crate::FunctionHeader::of(definition));
+            }
+            match &self.held {
+                Held::Released(set, at) => {
+                    match crate::graph_codec::decode_header(
+                        set.image.definition_bytes(*at as usize),
+                    ) {
+                        Ok(header) => Arc::new(header),
+                        Err(error) => unreachable!("a build's release image decodes: {error}"),
+                    }
+                }
+                Held::Defined(_) => Arc::new(crate::FunctionHeader::of(self.definition())),
+            }
         })
     }
 

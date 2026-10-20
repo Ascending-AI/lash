@@ -736,8 +736,31 @@ impl DurableStore for FaultStore {
         .await
     }
 
-    async fn live_decodes(&self) -> Result<Vec<Vec<lash_durable::FormatSet>>, DurableError> {
-        self.read(self.inner.live_decodes()).await
+    async fn live_nodes(&self) -> Result<Vec<lash_durable::NodeCapability>, DurableError> {
+        self.read(self.inner.live_nodes()).await
+    }
+
+    async fn install_packages(
+        &self,
+        artifacts: &[lash_durable::packages::ArtifactInstall],
+        sets: &[lash_durable::packages::SetInstall],
+    ) -> Result<(), DurableError> {
+        self.write(
+            WriteKind::Lease,
+            CommitLabel::PACKAGES_INSTALL,
+            None,
+            self.call(|store| {
+                let artifacts = artifacts.to_vec();
+                let sets = sets.to_vec();
+                async move { store.install_packages(&artifacts, &sets).await }
+            }),
+            keep,
+        )
+        .await
+    }
+
+    async fn package_catalog(&self) -> Result<lash_durable::PackageCatalog, DurableError> {
+        self.read(self.inner.package_catalog()).await
     }
 
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {
@@ -1025,6 +1048,7 @@ mod tests {
                 node: lash_durable::NodeId::new(name),
                 decodes: vec![lash_durable::FormatSet::new(FORMATS)],
                 serves: Vec::new(),
+                held: Default::default(),
                 ttl_millis: 15_000,
             }
         }

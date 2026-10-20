@@ -27,9 +27,9 @@ pub struct RlmProtocolPluginFactory {
     /// stands in for the build before the synthetic successor.
     #[cfg(feature = "synthetic-next")]
     kernel_writes: Option<lash_kernel_doc::KernelVersion>,
-    /// Which helper release this host's cells are written against; `None`
-    /// is the build's own (FIG-5799).
-    helpers: Option<Arc<dyn super::HelperReleaseGate>>,
+    /// Which package set this host's cells are written under; `None` is
+    /// the node's own (FIG-6918).
+    gate: Option<Arc<dyn super::PackageGate>>,
 }
 
 impl RlmProtocolPluginFactory {
@@ -51,7 +51,7 @@ impl RlmProtocolPluginFactory {
             process_factory_preparations: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(feature = "synthetic-next")]
             kernel_writes: None,
-            helpers: None,
+            gate: None,
         }
     }
 
@@ -95,28 +95,27 @@ impl RlmProtocolPluginFactory {
         self
     }
 
-    /// This host as a build of helper release `release` (FIG-5799): its
-    /// cells are written against that release's functions, whatever the
-    /// fleet holds. The two-build laws run a node of each release from one
-    /// binary with it.
+    /// This host as a build that writes its cells under `packages`
+    /// (FIG-6918), whatever the fleet holds. The two-build laws run a node
+    /// of each build from one binary with it.
     #[cfg(feature = "synthetic-next")]
     #[must_use]
-    pub fn writing_helpers(self, release: u32) -> Self {
-        self.with_helper_gate(Arc::new(super::helpers::WritingRelease(release)))
+    pub fn writing_packages(self, packages: lash_kernel_doc::PackageSetDigest) -> Self {
+        self.with_package_gate(Arc::new(super::OneSet(super::CellPackages(packages))))
     }
 
-    /// Write this host's cells against the helper release `gate` answers
-    /// as each is lowered: the newest every live node of the fleet holds
-    /// (FIG-5799). A host whose fleet runs one build needs none.
+    /// Write this host's cells under the package set `gate` answers as each
+    /// is lowered: the first candidate every live serving node holds
+    /// (FIG-6918). A host whose fleet runs one build needs none.
     #[must_use]
-    pub fn with_helper_gate(mut self, gate: Arc<dyn super::HelperReleaseGate>) -> Self {
-        self.helpers = Some(gate);
+    pub fn with_package_gate(mut self, gate: Arc<dyn super::PackageGate>) -> Self {
+        self.gate = Some(gate);
         self
     }
 
-    /// Whether a helper release gate is installed.
-    pub fn has_helper_gate(&self) -> bool {
-        self.helpers.is_some()
+    /// Whether a package gate is installed.
+    pub fn has_package_gate(&self) -> bool {
+        self.gate.is_some()
     }
 
     /// Install the same package holdings in the executor and worker pools.
@@ -125,6 +124,20 @@ impl RlmProtocolPluginFactory {
         self.workers = self.workers.with_packages(Arc::clone(&packages));
         self.packages = Some(packages);
         self
+    }
+
+    /// The packages the host registered: its own, or lash's.
+    ///
+    /// # Errors
+    ///
+    /// lash's packages do not assemble: a defect of the build.
+    pub fn packages(
+        &self,
+    ) -> Result<Arc<lash_kernel_package::HeldPackages>, lash_vm_runtime::LibraryError> {
+        match &self.packages {
+            Some(packages) => Ok(Arc::clone(packages)),
+            None => lash_vm_runtime::lash_packages(),
+        }
     }
 
     /// The bounds a new process's run asks for: the deployment's
@@ -336,7 +349,14 @@ impl PluginFactory for RlmProtocolPluginFactory {
                                 .map(|packages| Arc::clone(packages.functions())),
                             writes,
                         ),
-                        helpers: self.helpers.clone(),
+                        packages: Some(match &self.gate {
+                            Some(gate) => Arc::clone(gate),
+                            None => Arc::new(super::OneSet(super::CellPackages(
+                                self.packages()
+                                    .map_err(|error| PluginError::Session(error.to_string()))?
+                                    .own(),
+                            ))),
+                        }),
                     };
                     let dialect = Arc::new(SessionDialect::new(dialect, services));
 

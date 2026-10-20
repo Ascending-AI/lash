@@ -653,7 +653,7 @@ impl KernelMachine {
                 "arity",
                 format!(
                     "`{}` takes {} argument(s); {} given",
-                    function.definition.name, function.arity, given
+                    function.header.name, function.arity, given
                 ),
             );
         }
@@ -666,7 +666,7 @@ impl KernelMachine {
             .operation()
             .then(|| {
                 self.operation_entry(task, exe, function, args)
-                    .map_err(|interrupt| interrupt.in_function(&function.definition.name))
+                    .map_err(|interrupt| interrupt.in_function(&function.header.name))
             })
             .transpose()?;
         let result =
@@ -699,7 +699,7 @@ impl KernelMachine {
         let entry = if function.operation() {
             Some(
                 self.operation_entry(task, exe, function, args)
-                    .map_err(|interrupt| interrupt.in_function(&function.definition.name))?,
+                    .map_err(|interrupt| interrupt.in_function(&function.header.name))?,
             )
         } else {
             None

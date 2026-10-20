@@ -596,6 +596,8 @@ impl TokenCodec for Datum {
 #[path = "graph_codec_forms.rs"]
 mod forms;
 
+pub(crate) use forms::decode_header;
+
 #[cfg(test)]
 #[path = "graph_codec_tests.rs"]
 mod tests;

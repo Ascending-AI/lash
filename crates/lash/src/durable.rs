@@ -15,7 +15,7 @@ pub use lash_core::durable_port::*;
 use lash_execution_contracts::backend::Backend;
 pub use lash_execution_contracts::backend::BackendParts;
 pub use lash_execution_contracts::backend::DurableBuildError;
-pub use lash_execution_contracts::backend::RetirementCheck;
+pub use lash_execution_contracts::backend::NodePackages;
 use lash_execution_contracts::backend::StoreSet;
 use lash_execution_contracts::process::ProcessEngine;
 pub use lash_execution_contracts::projection::NoProjectionProviders;

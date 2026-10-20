@@ -46,7 +46,7 @@ ALLOWLIST = Path("scripts/vm-static-state-allowlist.txt")
 # the machine's host boundary and the shipped library both sides hold. A new kernel crate joins the list by its name,
 # so its first static is reviewed like any other.
 VM_CRATE_PATTERN = re.compile(r"^lash-(kernel|dialect|ext)-|^lash-regress$")
-VM_CRATES = ("crates/lash-vm-runtime", "crates/lash-vm-library")
+VM_CRATES = ("crates/lash-vm-runtime", "crates/lash-vm-releases")
 WORKER_CRATE = "crates/lash-vm-worker"
 
 CHAR_LITERAL = re.compile(r"'(?:[^'\\\n]|\\[^\n]{1,9}?)'")

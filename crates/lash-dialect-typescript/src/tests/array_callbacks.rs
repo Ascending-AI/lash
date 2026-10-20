@@ -228,7 +228,7 @@ fn lowered(kernel: &Kernel, source: &str) -> Program {
     )
     .unwrap_or_else(|error| panic!("{error}\n{source}"));
     Program {
-        release: super::pages::RELEASE,
+        closure: super::pages::CLOSURE,
         document: Arc::clone(lowered.document.shared()),
         library: kernel.prepared.clone(),
     }
@@ -472,7 +472,7 @@ fn a_callback_that_parks_inside_a_method_resumes_identically() {
             );
             let document = parse_document(&text).unwrap_or_else(|error| panic!("{error}\n{text}"));
             Program {
-                release: super::pages::RELEASE,
+                closure: super::pages::CLOSURE,
                 document: Arc::new(document),
                 library: kernel.prepared.clone(),
             }

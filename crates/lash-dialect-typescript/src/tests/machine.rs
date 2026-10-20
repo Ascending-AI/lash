@@ -271,7 +271,7 @@ fn start_with_bindings(source: &str, values: super::pages::Session) -> (KernelMa
         panic!("{invalid}\n{text}");
     }
     let program = Program {
-        release: super::pages::RELEASE,
+        closure: super::pages::CLOSURE,
         document: Arc::clone(lowered.document.shared()),
         library: prepared().clone(),
     };
@@ -396,7 +396,7 @@ pub(crate) fn end_of_entry(
 ) -> (Vec<String>, Datum) {
     let text = lash_kernel_doc::print_document(&document);
     let program = Program {
-        release: super::pages::RELEASE,
+        closure: super::pages::CLOSURE,
         document: Arc::new(document),
         library: prepared().clone(),
     };
@@ -437,7 +437,7 @@ pub(crate) fn end_of_entry(
 /// source facts nor operand metadata may be required by resumed execution.
 pub(super) fn plain_record_resume(source: &str, slice: u64, restore: bool) -> (Datum, u64, usize) {
     let program = Program {
-        release: super::pages::RELEASE,
+        closure: super::pages::CLOSURE,
         document: Arc::clone(
             super::lower_with_effects(source)
                 .expect("law source")

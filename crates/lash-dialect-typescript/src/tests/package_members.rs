@@ -67,7 +67,7 @@ struct Fixture {
 fn fixture() -> &'static Fixture {
     static FIXTURE: OnceLock<Fixture> = OnceLock::new();
     FIXTURE.get_or_init(|| {
-        let lash = lash_vm_library::built().expect("lash's packages");
+        let lash = lash_vm_releases::built().expect("lash's packages");
         let kernel = lash
             .iter()
             .find(|package| package.path().to_string() == "kernel")
@@ -208,7 +208,7 @@ fn run_lowered(
         panic!("{invalid}\n{text}");
     }
     let program = Program {
-        release: super::pages::RELEASE,
+        closure: super::pages::CLOSURE,
         document: Arc::clone(lowered.document.shared()),
         library: fixture().prepared.clone(),
     };

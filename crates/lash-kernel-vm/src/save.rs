@@ -57,7 +57,7 @@ impl<'a> CellSaveContext<'a> {
         let record = FunctionRecord {
             name: NameRef::new(&function.name, self.heap.pages())?,
             meta: PageValue::Bytes(self.heap.bytes(description)?),
-            release: function.release,
+            closure: function.closure,
             captures: function.captures.clone(),
             before,
             after,

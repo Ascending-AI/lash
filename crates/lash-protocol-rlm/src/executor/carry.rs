@@ -112,7 +112,7 @@ impl KernelCarry {
         let Some(envelope) = body.envelope else {
             return Err(state("a parked cell root lacks its envelope".to_owned()));
         };
-        let (carried_cell, _) = CellEnvelope::load(&mut decoder, envelope).map_err(graph)?;
+        let carried_cell = CellEnvelope::load(&mut decoder, envelope).map_err(graph)?;
         let base = carried_cell.document;
         if base.manifest.kernel >= self.writes.number() {
             return Ok(());

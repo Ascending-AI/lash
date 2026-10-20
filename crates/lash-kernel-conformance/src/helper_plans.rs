@@ -556,7 +556,7 @@ fn control_program(source: &str) -> Program {
         ));
     }
     Program {
-        release: crate::pages::RELEASE,
+        closure: crate::pages::CLOSURE,
         document: Arc::new(lash_kernel_doc::parse_document(&source).unwrap()),
         library: lash_kernel_vm::PreparedLibrary::new(Arc::new(registry)),
     }

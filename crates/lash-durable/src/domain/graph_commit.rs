@@ -25,8 +25,7 @@ use lash_core_store::checkpoint_graph::{
 
 use super::DomainWrite;
 use super::graph::{
-    AdmissionMember, EffectAdmissionWrite, ExecRootWrite, ReleasePinWrite, RootChange, RootOwner,
-    RunFactWrite,
+    AdmissionMember, EffectAdmissionWrite, ExecRootWrite, RootChange, RootOwner, RunFactWrite,
 };
 use super::pages::CandidateOwner;
 
@@ -156,16 +155,6 @@ fn encode_graph_write(out: &mut TokenWriter, write: &DomainWrite) -> Result<(), 
             out.bytes(&effect.0);
             out.bytes(&expected.0);
         }
-        DomainWrite::ReleasePin(ReleasePinWrite::Install { release, root }) => {
-            out.sum(8, 2);
-            out.text(release);
-            out.bytes(&root.0);
-        }
-        DomainWrite::ReleasePin(ReleasePinWrite::Retire { release, expected }) => {
-            out.sum(9, 2);
-            out.text(release);
-            out.bytes(&expected.0);
-        }
         other => {
             return Err(GraphRefusal::InvalidBody {
                 kind: 0,
@@ -253,10 +242,6 @@ pub fn encode_owner(out: &mut TokenWriter, owner: &RootOwner) {
             out.sum(source, 2);
             out.text(namespace);
             out.text(artifact);
-        }
-        RootOwner::ReleasePin { release } => {
-            out.sum(source, 1);
-            out.text(release);
         }
     }
 }
@@ -1259,9 +1244,6 @@ mod tests {
             RootOwner::ArtifactBridge {
                 namespace: key.to_owned(),
                 artifact: key.to_owned(),
-            },
-            RootOwner::ReleasePin {
-                release: key.to_owned(),
             },
         ];
         let mut encodings = BTreeSet::new();

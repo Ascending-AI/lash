@@ -7,7 +7,8 @@ pub(crate) struct Lib {
     pub(crate) shares_params: bool,
     pub(crate) operation: bool,
     pub(crate) id: FunctionId,
-    pub(crate) definition: Arc<FunctionDefinition>,
+    /// Its definition's header: what a call reads of it without the body.
+    pub(crate) header: Arc<lash_kernel_doc::FunctionHeader>,
     pub(crate) run: LibRun,
     /// How many parameters the definition has.
     pub(crate) arity: usize,
@@ -35,7 +36,7 @@ impl Lib {
     /// test) is whether the value is a tuple of no members: a plan region
     /// and an island answer that test without building the tuple.
     pub(crate) fn is_same(&self) -> bool {
-        self.definition.name.as_str() == "same"
+        self.header.name.as_str() == "same"
             && matches!(self.run, LibRun::Native { .. })
             && self.arity == 2
     }
@@ -43,7 +44,7 @@ impl Lib {
     /// Whether it is `kind`, whose answer is a function of its operand's
     /// value kind alone.
     pub(crate) fn is_kind(&self) -> bool {
-        self.definition.name.as_str() == "kind"
+        self.header.name.as_str() == "kind"
             && matches!(self.run, LibRun::Native { .. })
             && self.arity == 1
     }
@@ -52,7 +53,7 @@ impl Lib {
     /// list has is the item there: a plan region reads it from the arena
     /// where the list is resident, as the native's own call reads it.
     pub(crate) fn item_read(&self) -> bool {
-        self.definition.name.as_str() == "list.get"
+        self.header.name.as_str() == "list.get"
             && matches!(self.run, LibRun::Native { .. })
             && self.arity == 2
             && self.limit.is_none()
@@ -65,7 +66,7 @@ impl Lib {
     /// of its formula, which measures nothing. `None` for every other
     /// function.
     pub(crate) fn length_read(&self) -> Option<u64> {
-        (self.definition.name.as_str() == "list.len"
+        (self.header.name.as_str() == "list.len"
             && matches!(self.run, LibRun::Native { .. })
             && self.arity == 1
             && self.limit.is_none()
@@ -139,7 +140,7 @@ impl PreparedPlan {
     )]
     pub(super) fn new<'l>(
         plan: &'static doc::plan::HelperPlan,
-        definition: &doc::FunctionDefinition,
+        header: &doc::FunctionHeader,
         lib_of: &dyn Fn(&FunctionId) -> Option<LibId>,
         layout: Layout,
         body: CodeId,
@@ -148,8 +149,8 @@ impl PreparedPlan {
         lib: &dyn Fn(LibId) -> Option<&'l Lib>,
     ) -> Result<Self, String> {
         use doc::plan::PlanLiteral;
-        let arity = definition.signature.params.len();
-        let operation = definition.has_native() && definition.body().is_some();
+        let arity = header.signature.params.len();
+        let operation = header.implementation == doc::ImplementationKind::Both;
         let callees = plan
             .callees
             .iter()

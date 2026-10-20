@@ -359,6 +359,12 @@ async fn kernel_run(
             save: None,
         },
         settings.bounds(),
+        lash_vm_broker::kernel::closure::derive(
+            document.manifest.functions.keys().copied(),
+            &engine.functions,
+            lash_vm_broker::kernel::closure::Natives::Declared,
+        )
+        .map_err(|refusal| RunFault(refusal.to_string()))?,
     )
     .map_err(|error| RunFault(error.to_string()))?;
     let Some(step_pages) = run.pages.as_ref() else {
@@ -536,7 +542,7 @@ async fn drive(
             .map(|held| held.admission.0.clone())
             .collect(),
         binding,
-        machines.releases()?,
+        machines.closure()?,
         &spools,
         clock,
         lash_vm_broker::kernel::pages::PageLimits::within(config.protocol.decode),
@@ -594,16 +600,14 @@ pub(super) async fn run_machine(
                     &activation.pages,
                     binding,
                     &machines.document(),
+                    machines.closure()?.reference(),
                 )
                 .await?;
                 let page = ParkedPage {
                     root: sealed.root,
                     kernel: sealed.header.kernel,
                 };
-                let candidate = activation.candidate(
-                    sealed.root,
-                    lash_core_store::checkpoint_graph::NodeId(sealed.header.release.0),
-                );
+                let candidate = activation.candidate(sealed.root, machines.closure()?.clone());
                 Some((page, candidate))
             }
             MachineStep::Ended(_) => None,

@@ -56,6 +56,7 @@ async fn nodes(url: &str, count: usize, tag: &str, formats: &FormatSet) -> Resul
                 node: NodeId::new(format!("{tag}-n{index}")),
                 decodes: vec![formats.clone()],
                 serves: Vec::new(),
+                held: Default::default(),
                 ttl_millis: TTL_MILLIS,
             })
             .await

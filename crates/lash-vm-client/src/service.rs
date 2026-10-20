@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
-use lash_kernel_doc::{EffectName, Name, Site};
+use lash_kernel_doc::{EffectName, Name, PackageSetDigest, Site};
 use lash_vm_protocol::{EncodedPayload, FrameEpoch, OwnerEpoch, VmOwner};
 use serde::{Deserialize, Serialize};
 
@@ -27,7 +27,8 @@ pub enum Request {
         /// The operations the cell is offered.
         #[serde(with = "lash_kernel_dialect::operation_keys")]
         operations: lash_kernel_dialect::Operations,
-        helpers: u32,
+        /// The package set whose names the source resolves against.
+        packages: PackageSetDigest,
     },
     /// Lower `source`, written in `dialect`, to a kernel document against
     /// the operations the host offers and the session bindings in scope.
@@ -43,9 +44,10 @@ pub enum Request {
         /// The functions the session holds: the document declares the
         /// ones the source names.
         functions: BTreeMap<Name, LowerFunction>,
-        /// The helper release whose names the source resolves against: the
-        /// newest every live node holds (FIG-5799).
-        helpers: u32,
+        /// The package set whose names the source resolves against: the
+        /// cell's, the first candidate every live serving node holds
+        /// (FIG-6918).
+        packages: PackageSetDigest,
     },
     /// Lower a host-authored workflow module in the worker, in the dialect
     /// of `language`, under the shared workflow contract. Without `limits`
@@ -56,6 +58,10 @@ pub enum Request {
         /// The operations the workflow is offered.
         #[serde(with = "lash_kernel_dialect::operation_keys")]
         operations: lash_kernel_dialect::Operations,
+        /// The package set whose names the module resolves against; `None`
+        /// is the worker's own set, for host authoring outside any cell.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        packages: Option<PackageSetDigest>,
         limits: Option<lash_kernel_dialect::workflow::WorkflowSourceLimits>,
     },
     /// Print `document` (its token body) in the selected generated format,
@@ -113,14 +119,14 @@ impl From<&lash_kernel_dialect::SavedFunction> for LowerFunction {
 
 impl LowerFunction {
     /// The saved function lowering installs: no captures, which only a
-    /// call instantiates, and no release, which only the machine pins.
+    /// call instantiates, and no closure, which only the machine pins.
     #[must_use]
     pub fn into_saved(self) -> lash_kernel_dialect::SavedFunction {
         lash_kernel_dialect::SavedFunction {
             name: self.name,
             document: self.document.into_document(),
             captures: BTreeMap::new(),
-            release: lash_kernel_doc::heap::PageRef {
+            closure: lash_kernel_doc::heap::PageRef {
                 id: lash_kernel_doc::heap::PageId([0; 32]),
                 grant: lash_kernel_doc::heap::PageGrant::NONE,
             },
@@ -252,9 +258,9 @@ pub enum Response {
     UnknownDialect {
         dialect: String,
     },
-    /// The worker holds no such helper release.
-    HelperReleaseNotHeld {
-        release: u32,
+    /// The worker holds no such package set.
+    PackagesNotHeld {
+        packages: PackageSetDigest,
     },
 }
 
@@ -389,16 +395,6 @@ impl Service {
         if let Some(pool) = slot.as_ref() {
             return Ok(pool.clone());
         }
-        // The ready pool includes the build's immutable checkpoint catalog,
-        // checked. Independent cells share these nodes instead of staging the
-        // library on their first park or session capture.
-        lash_vm_broker::kernel::state::release_manifests()
-            .and_then(|releases| releases.check())
-            .map_err(|error| {
-                PoolError::breach(lash_vm_protocol::ProtocolBreach::Machine {
-                    detail: lash_vm_protocol::Detail::new(error),
-                })
-            })?;
         let pool = WorkerPool::new_observed(self.config.as_ref().clone(), self.phases.clone())?;
         *slot = Some(pool.clone());
         Ok(pool)

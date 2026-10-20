@@ -721,26 +721,25 @@ body {
 
 #[cfg(all(feature = "dialect-python", feature = "dialect-typescript"))]
 pub(super) fn current_census() -> String {
+    let read = |built: &crate::BuiltPackage| {
+        lash_kernel_doc::ReleasedFunctions::read(built.image).expect("a package reads")
+    };
+    let mut definitions = BTreeMap::new();
+    for built in crate::PACKAGES {
+        let code = read(built);
+        for at in 0..code.len() {
+            let definition = code.definition(at).expect("a definition reads");
+            definitions.insert(definition.identity(), definition);
+        }
+    }
     let mut actual = String::new();
-    let mut dialects: Vec<_> = crate::DIALECTS.iter().collect();
-    dialects.sort_by_key(|built| built.dialect);
-    assert_eq!(dialects.len(), 2, "the census checks both shipped dialects");
-    for built in dialects {
-        let helpers = lash_kernel_doc::ReleasedFunctions::read(
-            crate::package(built.dialect)
-                .expect("the dialect's package")
-                .image,
-        )
-        .expect("helpers read");
-        let exports = helpers.ids().collect();
-        let held = built.held_releases().expect("releases decode");
-        let definitions: BTreeMap<_, _> = held
-            .retained
-            .last()
-            .expect("the building release")
-            .functions
-            .iter()
-            .map(|held| (held.function, held.definition.clone()))
+    for dialect in [crate::PYTHON, crate::TYPESCRIPT] {
+        // A package's generated `<path>.__built` is no helper (FIG-6921).
+        let built = format!("{dialect}.__built");
+        let code = read(crate::package(dialect).expect("the dialect's package"));
+        let exports = (0..code.len())
+            .filter(|at| code.name(*at) != built)
+            .map(|at| code.id(at))
             .collect();
         actual.push_str(&census(&definitions, &exports));
     }

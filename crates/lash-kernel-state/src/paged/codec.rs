@@ -176,7 +176,7 @@ record!(CheckpointRoot {
     limits: SavedLimits,
     kernel: u32,
     document: DocumentId,
-    release: PageId,
+    closure: PageId,
     owner: PageId,
     target: CellTargetKind,
     functions: KeyedRoot,
@@ -426,7 +426,7 @@ impl TokenCodec for EndedTask {
 record!(FunctionRecord {
     name: NameRef,
     meta: PageValue,
-    release: PageRef,
+    closure: PageRef,
     captures: std::collections::BTreeMap<lash_kernel_doc::Name, FrozenRef>,
     before: Vec<FrozenRef>,
     after: Vec<FrozenRef>

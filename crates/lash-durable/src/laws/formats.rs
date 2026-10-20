@@ -36,6 +36,7 @@ async fn node(
             node: NodeId::new(name),
             decodes,
             serves: Vec::new(),
+            held: Default::default(),
             ttl_millis: TTL_MILLIS,
         })
         .await?)
@@ -164,10 +165,10 @@ pub async fn a_newer_format_is_not_written_while_an_older_node_is_live(
     let older = node(store, "older", vec![old()]).await?;
     node(store, "newer", vec![old(), new()]).await?;
     node(store, "elsewhere", vec![FormatSet::new("law:other")]).await?;
-    let live = store.live_decodes().await?;
+    let live = store.live_nodes().await?;
     super::ensure!(
         live.len() == 3,
-        "live_decodes answered {} nodes, not 3",
+        "live_nodes answered {} nodes, not 3",
         live.len()
     );
     super::ensure!(
@@ -175,7 +176,7 @@ pub async fn a_newer_format_is_not_written_while_an_older_node_is_live(
         "a newer format was writable while an older node is live: {live:?}"
     );
     store.release_node(&older).await?;
-    let live = store.live_decodes().await?;
+    let live = store.live_nodes().await?;
     super::ensure!(
         fleet_writable(&candidates, &live) == Some(&new()),
         "the newer format was not writable once the older node left: {live:?}"

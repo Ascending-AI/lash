@@ -47,7 +47,7 @@ fn comparison_package(name: &str, title: &str, kernel: &Package) -> Package {
 /// two packages never overwrites either title, and an unknown member has none.
 #[test]
 fn labels_are_keyed_by_package_and_member_in_the_selected_set() {
-    let built = lash_vm_library::lash_packages().unwrap();
+    let built = lash_vm_releases::lash_packages().unwrap();
     let built_view = built.view(&built.own()).unwrap();
     for (name, title) in [
         ("ts.array.map", "TypeScript array map"),
@@ -118,7 +118,7 @@ fn labels_are_keyed_by_package_and_member_in_the_selected_set() {
 /// A view of another set must not borrow a declaration from a global table.
 #[test]
 fn comparisons_come_from_the_supplied_package_set() {
-    let built = lash_vm_library::lash_packages().unwrap();
+    let built = lash_vm_releases::lash_packages().unwrap();
     let built_view = built.view(&built.own()).unwrap();
     let kernel = built_view.package(&path("kernel")).unwrap();
     let package = comparison_package("demo", "Compare items", kernel);

@@ -804,7 +804,9 @@ fn validated_functions_join_only_the_registry_they_were_validated_against() {
 
 /// FIG-6843: a registry takes a build's release image in place. Each
 /// function's name, implementation, kernel version, listed callees and
-/// census answer without decoding its definition; reading the definition
+/// census, and its header (FIG-6931: signature, charge, guard and which
+/// implementations it states), answer without decoding its definition's
+/// body; reading the definition
 /// decodes it once, for every clone of the registry; and the definition is
 /// the one validated.
 #[test]
@@ -855,10 +857,13 @@ fn a_release_image_registers_without_decoding_a_definition() {
         registry.named("helper.joined").collect::<Vec<_>>(),
         vec![definition("helper.joined", false).identity()]
     );
+    let header = crate::FunctionCatalog::header(&registry, &calling_id).unwrap();
+    assert_eq!(*header, crate::FunctionHeader::of(&calling));
+    assert!(header.has_body() && !header.has_native());
     assert_eq!(
         decoded(),
         before,
-        "registering and reading facts decode nothing"
+        "registering and reading facts and headers decode nothing"
     );
     let clone = registry.clone();
     assert_eq!(**registry.get(&calling_id).unwrap().definition(), calling);

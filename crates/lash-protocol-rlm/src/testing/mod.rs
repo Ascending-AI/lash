@@ -87,7 +87,7 @@ pub(crate) fn cell_services(
         channel: crate::plugin::RlmChannel::Cell,
         code_renderer: crate::render::CodeRendererSlot::default(),
         prompts: dialect.prompts(),
-        helpers: None,
+        packages: None,
         kernel: crate::executor::KernelCarry::default(),
     }
 }

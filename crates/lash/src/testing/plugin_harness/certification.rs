@@ -512,6 +512,7 @@ async fn unserved_law(
             node: NodeId::new(format!("callback-writer-{ordinal}")),
             decodes: formats.clone(),
             serves: vec![token.clone()],
+            held: Default::default(),
             ttl_millis: 60000,
         })
         .await?;
@@ -535,6 +536,7 @@ async fn unserved_law(
             node: NodeId::new(format!("unserved-callback-{ordinal}")),
             decodes: formats,
             serves: Vec::new(),
+            held: Default::default(),
             ttl_millis: 60000,
         })
         .await?;

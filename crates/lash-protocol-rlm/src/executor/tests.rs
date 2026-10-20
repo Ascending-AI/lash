@@ -36,23 +36,16 @@ fn typescript_services() -> super::CellServices {
     )
 }
 
-/// FIG-6124: a worker's missing helper release reaches the cell's host
-/// result as data, including after the result crosses its serialized boundary.
+/// FIG-6124, S1-F1: a worker's missing package set reaches the cell's host
+/// result as data naming the set, including after the result crosses its
+/// serialized boundary.
 #[tokio::test]
-async fn a_worker_helper_release_refusal_keeps_the_release_typed() {
-    struct MissingRelease;
-
-    #[async_trait::async_trait]
-    impl crate::plugin::HelperReleaseGate for MissingRelease {
-        async fn writable(&self) -> Result<u32, lash_core::RuntimeEffectControllerError> {
-            Ok(u32::MAX)
-        }
-    }
-
+async fn a_worker_package_set_refusal_keeps_the_set_typed() {
+    let unheld = lash_kernel_doc::PackageSetDigest::from_bytes([9; 32]);
     let host = open_host().await;
     let mut state = typescript_state();
     let mut services = typescript_services();
-    services.helpers = Some(Arc::new(MissingRelease));
+    services.packages = Some(Arc::new(crate::plugin::OneSet(crate::CellPackages(unheld))));
     let response = run_cell(
         &mut state,
         cell_context(
@@ -66,17 +59,17 @@ async fn a_worker_helper_release_refusal_keeps_the_release_typed() {
         "const value = 1;",
     )
     .await;
-    let failure = response.error().expect("the worker refuses the release");
+    let failure = response.error().expect("the worker refuses the set");
     let recorded = serde_json::to_value(failure).expect("the failure serializes");
     assert_eq!(
         recorded["kind"],
-        serde_json::json!({"helper_release_not_held": {"release": u32::MAX}})
+        serde_json::json!({"packages_not_held": {"packages": unheld.to_string()}})
     );
     let restored: lash_core::CellFailure =
         serde_json::from_value(recorded).expect("the failure restores");
     assert_eq!(
         restored.kind,
-        lash_core::CellFailureKind::HelperReleaseNotHeld { release: u32::MAX }
+        lash_core::CellFailureKind::PackagesNotHeld { packages: unheld }
     );
 }
 

@@ -83,6 +83,8 @@ macro_rules! digest {
                 text.parse().map_err(serde::de::Error::custom)
             }
         }
+
+        crate::name::string_schema!($name, stringify!($name), "^[0-9a-f]{64}$");
     };
 }
 

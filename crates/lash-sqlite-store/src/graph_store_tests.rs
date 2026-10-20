@@ -583,7 +583,7 @@ law!(an_audit_racing_commits_peels_nothing_they_rely_on);
 law!(a_reference_racing_its_roots_retirement_installs_whole_or_refuses);
 
 /// GRAPH-PEEL-WORK: retirement touches edges only of nodes it deletes, and
-/// reads their children from their own bytes (FIG-6939). A pinned manifest
+/// reads their children from their own bytes (FIG-6939). A pinned root
 /// and a subtree another parent reaches both stop the peel before their
 /// children; releasing the last references reclaims them.
 #[tokio::test]
@@ -591,8 +591,7 @@ async fn retiring_a_root_does_not_read_edges_of_retained_descendants() {
     use lash_core_store::checkpoint_graph::{
         EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TokenWriter, TypedBody,
     };
-    use lash_durable::domain::graph::ReleasePinWrite;
-    use lash_durable::{ActorKey, CommitLabel, DomainWrite, Epoch};
+    use lash_durable::{ActorKey, CommitLabel, Epoch};
 
     let tier = tier(false).await;
     let identity = lash_core_execution::testing::sql_work::owner_commit(&tier._set).await;
@@ -613,22 +612,11 @@ async fn retiring_a_root_does_not_read_edges_of_retained_descendants() {
     let leaves: Vec<_> = (0..32)
         .map(|index| encode(&format!("leaf-{index}"), &[]))
         .collect();
-    let pinned = encode("pinned manifest", &leaves[..16]);
+    let pinned = encode("pinned root", &leaves[..16]);
     let shared = encode("shared subtree", &leaves[16..]);
     let holder = encode("other parent", &[shared]);
     let retired = encode("retired root", &[pinned, shared]);
-    let pin = |release: &str, root| {
-        DomainWrite::ReleasePin(ReleasePinWrite::Install {
-            release: release.into(),
-            root,
-        })
-    };
-    let retire = |release: &str, expected| {
-        DomainWrite::ReleasePin(ReleasePinWrite::Retire {
-            release: release.into(),
-            expected,
-        })
-    };
+    let retire = unpin;
     let mut tx = tier
         .store
         .begin(&actor, Epoch(identity.epoch))
@@ -735,8 +723,7 @@ async fn a_peeled_node_whose_bytes_changed_still_releases_its_children() {
     use lash_core_store::checkpoint_graph::{
         EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TokenWriter, TypedBody,
     };
-    use lash_durable::domain::graph::ReleasePinWrite;
-    use lash_durable::{ActorKey, CommitLabel, DomainWrite, Epoch};
+    use lash_durable::{ActorKey, CommitLabel, Epoch};
 
     let tier = tier(false).await;
     let identity = lash_core_execution::testing::sql_work::owner_commit(&tier._set).await;
@@ -758,17 +745,13 @@ async fn a_peeled_node_whose_bytes_changed_still_releases_its_children() {
         .map(|index| encode(&format!("leaf-{index}"), &[]))
         .collect();
     let root = encode("changed root", &leaves);
-    let pin = |write| DomainWrite::ReleasePin(write);
     let mut tx = tier
         .store
         .begin(&actor, Epoch(identity.epoch))
         .await
         .unwrap();
     tx.stage(staging.into_nodes().into_values());
-    tx.write(pin(ReleasePinWrite::Install {
-        release: "changed".into(),
-        root,
-    }));
+    tx.write(pin("changed", root));
     tier.store
         .commit(tx, CommitLabel::new("peel.install"))
         .await
@@ -784,10 +767,7 @@ async fn a_peeled_node_whose_bytes_changed_still_releases_its_children() {
         .begin(&actor, Epoch(identity.epoch))
         .await
         .unwrap();
-    tx.write(pin(ReleasePinWrite::Retire {
-        release: "changed".into(),
-        expected: root,
-    }));
+    tx.write(unpin("changed", root));
     tier.store
         .commit(tx, CommitLabel::new("peel.retire"))
         .await
@@ -923,8 +903,7 @@ async fn absent_graph_bodies_install_in_bounded_batches() {
     use lash_core_store::checkpoint_graph::{
         EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TokenWriter, TypedBody,
     };
-    use lash_durable::domain::graph::ReleasePinWrite;
-    use lash_durable::{ActorKey, CommitLabel, DomainWrite, Epoch};
+    use lash_durable::{ActorKey, CommitLabel, Epoch};
 
     let tier = tier(false).await;
     let identity = lash_core_execution::testing::sql_work::owner_commit(&tier._set).await;
@@ -963,10 +942,7 @@ async fn absent_graph_bodies_install_in_bounded_batches() {
                 .unwrap();
             tx.stage(nodes.values().cloned());
             if let Some(root) = root {
-                tx.write(DomainWrite::ReleasePin(ReleasePinWrite::Install {
-                    release: format!("batch-{size}-{attempt}"),
-                    root,
-                }));
+                tx.write(pin(&format!("batch-{size}-{attempt}"), root));
             }
             let (answer, receipt) = lash_core_ids::operational_metrics::sql::collect(
                 "graph.batch",
@@ -1046,10 +1022,7 @@ async fn absent_graph_bodies_install_in_bounded_batches() {
                     .await
                     .unwrap();
                 tx.stage(mixed.values().cloned());
-                tx.write(DomainWrite::ReleasePin(ReleasePinWrite::Install {
-                    release: "refused-batch".into(),
-                    root: added,
-                }));
+                tx.write(pin("refused-batch", added));
                 assert_eq!(
                     tier.store
                         .commit(tx, CommitLabel::new("graph.batch.refused"))
@@ -1277,4 +1250,37 @@ mod turn_and_owned_model_calls_survive_an_idempotent_outcome_commit {
     async fn file() {
         run(true).await;
     }
+}
+
+/// The execution of a root a test pins at will under `key`: one effect
+/// admission of a cell of a session no test owns.
+fn pin_exec(key: &str) -> lash_durable::domain::ExecKey {
+    lash_durable::domain::ExecKey::Cell(
+        lash_protocol_types::SessionId::parse("test-pins").expect("a session id"),
+        lash_protocol_types::TurnId::try_from("pins".to_owned()).expect("a turn id"),
+        lash_durable::domain::CellId::new(key),
+    )
+}
+
+/// Pin `root` under `key`.
+fn pin(key: &str, root: NodeId) -> lash_durable::DomainWrite {
+    lash_durable::DomainWrite::EffectAdmission(
+        lash_durable::domain::graph::EffectAdmissionWrite::Put {
+            exec: pin_exec(key),
+            effect: lash_durable::domain::graph::EffectKey(vec![0].into()),
+            member: None,
+            admission: root,
+        },
+    )
+}
+
+/// Retire the pin of `expected` under `key`.
+fn unpin(key: &str, expected: NodeId) -> lash_durable::DomainWrite {
+    lash_durable::DomainWrite::EffectAdmission(
+        lash_durable::domain::graph::EffectAdmissionWrite::Remove {
+            exec: pin_exec(key),
+            effect: lash_durable::domain::graph::EffectKey(vec![0].into()),
+            expected,
+        },
+    )
 }

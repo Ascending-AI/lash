@@ -143,7 +143,7 @@ impl GuestSymbols {
                         LibRun::Machine(_) => LibKind::Machine,
                         LibRun::Body(_) => LibKind::Body,
                     },
-                    name: lib.definition.name.to_string(),
+                    name: lib.header.name.to_string(),
                     function: lib.id,
                 }
             })

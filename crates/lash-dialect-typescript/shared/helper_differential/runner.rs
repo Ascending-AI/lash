@@ -130,7 +130,7 @@ impl Runner {
         admission.effects = effects;
         lash_kernel_check::admit(&lowered.document, &admission).map_err(|e| format!("{e:?}"))?;
         Ok(Lowered::Program(Program {
-            release: crate::pages::RELEASE,
+            closure: crate::pages::CLOSURE,
             document: Arc::clone(lowered.document.shared()),
             library: self.prepared.clone(),
         }))

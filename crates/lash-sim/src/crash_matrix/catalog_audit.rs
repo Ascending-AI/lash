@@ -31,7 +31,7 @@ pub enum Coverage {
 }
 
 /// Every catalog label and how the matrix covers it.
-pub const COVERAGE: [(CommitLabel, Coverage); 48] = [
+pub const COVERAGE: [(CommitLabel, Coverage); 49] = [
     (CommitLabel::CLAIM, Coverage::Cases(&[Case::Turn])),
     (CommitLabel::HEARTBEAT, Coverage::Cases(&[Case::Turn])),
     (CommitLabel::REAP, Coverage::Cases(&[Case::CellKilled])),
@@ -189,6 +189,12 @@ pub const COVERAGE: [(CommitLabel, Coverage); 48] = [
     ),
     (CommitLabel::MAIL_PROCESS, Coverage::Cases(&[Case::Cancel])),
     (CommitLabel::DRAIN_RELEASE, Coverage::Cases(&[Case::Drain])),
+    (
+        CommitLabel::PACKAGES_INSTALL,
+        Coverage::Unemitted(
+            "a node installs package rows before it registers only when its backend holds packages (Backend::with_packages, FIG-6918); the matrix's nodes hold none",
+        ),
+    ),
 ];
 
 /// What the audit found over the uncut runs: the violations, and the share

@@ -461,22 +461,19 @@ pub fn check_statement(
     Ok(())
 }
 
-fn native_call<'c>(
-    function: &FunctionId,
-    catalog: &'c dyn FunctionCatalog,
-) -> Result<&'c FunctionDefinition, InvalidReason> {
-    let Some(definition) = catalog.definition(function) else {
+fn native_call(function: &FunctionId, catalog: &dyn FunctionCatalog) -> Result<(), InvalidReason> {
+    let Some(header) = catalog.header(function) else {
         return Err(InvalidReason::FunctionNotResolved {
             function: *function,
         });
     };
-    if !definition.has_native() {
+    if !header.has_native() {
         return Err(InvalidReason::CallNotNative {
             function: *function,
-            name: definition.name.clone(),
+            name: header.name.clone(),
         });
     }
-    Ok(definition)
+    Ok(())
 }
 
 struct Scope<'a> {
@@ -668,8 +665,8 @@ impl Scope<'_> {
         let callable = match &act.kind {
             ActKind::Call(Callee::Library(function)) => self
                 .catalog
-                .definition(function)
-                .is_some_and(FunctionDefinition::has_native),
+                .header(function)
+                .is_some_and(|header| header.has_native()),
             ActKind::Call(Callee::Value(_)) => true,
             _ => false,
         };
@@ -752,8 +749,8 @@ impl Scope<'_> {
                 ..
             } => self
                 .catalog
-                .definition(function)
-                .is_some_and(FunctionDefinition::has_native),
+                .header(function)
+                .is_some_and(|header| header.has_native()),
             Action::Call {
                 callee: Callee::Value(_),
                 ..
@@ -885,8 +882,12 @@ impl Scope<'_> {
             })
     }
 
-    /// The definition of a library function this code lists.
-    fn listed(&self, function: &FunctionId, site: &Site) -> Result<&FunctionDefinition, Invalid> {
+    /// The header of a library function this code lists.
+    fn listed(
+        &self,
+        function: &FunctionId,
+        site: &Site,
+    ) -> Result<std::sync::Arc<crate::FunctionHeader>, Invalid> {
         if !self.functions.contains_key(function) {
             return Err(invalid(
                 Some(site),
@@ -895,7 +896,7 @@ impl Scope<'_> {
                 },
             ));
         }
-        self.catalog.definition(function).ok_or_else(|| {
+        self.catalog.header(function).ok_or_else(|| {
             invalid(
                 Some(site),
                 InvalidReason::FunctionNotResolved {

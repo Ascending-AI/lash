@@ -279,15 +279,27 @@ impl LashCore {
         backend: Backend,
         factory: crate::rlm::RlmProtocolPluginFactory,
     ) -> LashCoreBuilder {
-        // While a node of a build of an earlier helper release is live,
-        // cells are written against the newest release it holds too
-        // (FIG-5799).
-        let factory = if factory.has_helper_gate() {
-            factory
-        } else {
-            factory.with_helper_gate(Arc::new(crate::helper_releases::FleetHelperWrites::new(
-                backend.clone(),
-            )))
+        // The node installs and advertises the package code the host
+        // registered, and while a live serving node lacks a set, cells are
+        // written under the first set every one holds (FIG-6918).
+        let factory = match factory.packages() {
+            Ok(packages) => {
+                let hold = Arc::new(crate::packages::NodeHold::new(packages));
+                // A node built twice over one backend keeps its first
+                // registration; this gate then reads its own set alone.
+                let _ = backend.hold_packages(Arc::clone(&hold) as _);
+                if factory.has_package_gate() {
+                    factory
+                } else {
+                    factory.with_package_gate(Arc::new(crate::packages::FleetPackages::new(
+                        backend.clone(),
+                        hold,
+                    )))
+                }
+            }
+            // lash's packages do not assemble: a defect of the build, which
+            // each cell reports when it is lowered.
+            Err(_) => factory,
         };
         LashCore::builder(backend).protocol_plugin(Arc::new(factory))
     }

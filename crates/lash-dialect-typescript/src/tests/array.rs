@@ -83,7 +83,7 @@ fn drive_document(
     let kernel = kernel();
     let text = lash_kernel_doc::print_document(&document);
     let program = Program {
-        release: super::pages::RELEASE,
+        closure: super::pages::CLOSURE,
         document: Arc::new(document),
         library: kernel.prepared.clone(),
     };
@@ -855,7 +855,7 @@ fn observe_array_path(method: &str, setup: &str, generic: bool) -> (String, Vec<
         lash_kernel_doc::parse_document(&source).unwrap_or_else(|error| panic!("{error}\n{setup}"));
     let mut machine = super::pages::start(
         Program {
-            release: super::pages::RELEASE,
+            closure: super::pages::CLOSURE,
             document: Arc::new(document),
             library: kernel().prepared.clone(),
         },

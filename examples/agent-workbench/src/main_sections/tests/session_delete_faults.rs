@@ -327,8 +327,20 @@ impl DurableStore for DeleteDurableStore {
         self.inner.mark_draining(node).await
     }
 
-    async fn live_decodes(&self) -> Result<Vec<Vec<lash::durable::FormatSet>>, DurableError> {
-        self.inner.live_decodes().await
+    async fn live_nodes(&self) -> Result<Vec<lash::durable::NodeCapability>, DurableError> {
+        self.inner.live_nodes().await
+    }
+
+    async fn install_packages(
+        &self,
+        artifacts: &[lash::durable::packages::ArtifactInstall],
+        sets: &[lash::durable::packages::SetInstall],
+    ) -> Result<(), DurableError> {
+        self.inner.install_packages(artifacts, sets).await
+    }
+
+    async fn package_catalog(&self) -> Result<lash::durable::PackageCatalog, DurableError> {
+        self.inner.package_catalog().await
     }
 
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {

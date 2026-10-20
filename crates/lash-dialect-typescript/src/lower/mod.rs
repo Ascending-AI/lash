@@ -585,7 +585,7 @@ pub(crate) fn lower(
             &lowerer.saved_used,
             &crate::function_values(),
             environment.namespaces,
-            &|function| catalog.definition(function).is_some(),
+            &|function| catalog.header(function).is_some(),
         )
         .map_err(|unusable| {
             Diagnostic::new(
@@ -628,6 +628,7 @@ pub(crate) fn lower(
         source_map: Some(layers.source_map),
         written: layers.written,
         captions: layers.captions,
+        validated: false,
     })
 }
 
@@ -1195,25 +1196,21 @@ impl Lowerer<'_> {
     /// Native and body helpers both nest, using their admitted call form.
     pub(crate) fn invoke(&mut self, function: &str, args: &[Operand], ty: Ty) -> Lowering<Operand> {
         let function = self.function(function)?;
+        // Its header alone: a first use decodes no body (FIG-6931).
+        let header = self.library.header(&function);
         // A helper's checked Text result is representation proof. Losing it
         // makes a later member read emit impossible record/list branches,
         // which admission correctly rejects (FIG-6372).
         let ty = if ty == Ty::Unknown
-            && self
-                .library
-                .definition(&function)
-                .is_some_and(|definition| {
-                    definition.signature.result == lash_kernel_doc::Type::Text
-                }) {
+            && header
+                .as_ref()
+                .is_some_and(|header| header.signature.result == lash_kernel_doc::Type::Text)
+        {
             Ty::Text
         } else {
             ty
         };
-        if self
-            .library
-            .definition(&function)
-            .is_some_and(|definition| definition.has_native())
-        {
+        if header.as_ref().is_some_and(|header| header.has_native()) {
             return Ok(self.inline(
                 Expr::Call {
                     function,

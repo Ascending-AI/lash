@@ -78,10 +78,6 @@ pub enum GraphRefusal {
     ExecutableMismatch,
     #[error("the root's kernel is not the reader's")]
     KernelMismatch,
-    #[error("the root's helper release is not the installed one")]
-    ReleaseMismatch,
-    #[error("a pinned helper is not installed")]
-    MissingHelper,
     #[error("a native implementation's fingerprint is not the pinned one")]
     NativeFingerprintMismatch,
     #[error("no admission holds effect {0:?}")]

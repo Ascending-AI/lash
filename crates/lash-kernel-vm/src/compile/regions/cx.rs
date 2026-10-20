@@ -543,7 +543,7 @@ impl Cx<'_> {
         let accumulator = self.accumulator.as_ref()?;
         (accumulator.made.is_none()
             && matches!(self.args[args.clone()].first(), Some(Value::LongText(left)) if *left == accumulator.left)
-            && function.definition.name.as_str() == "text.concat")
+            && function.header.name.as_str() == "text.concat")
             .then_some(accumulator.owned)
     }
 

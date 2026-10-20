@@ -72,18 +72,27 @@ lash_store_sql::statements! {
 
         /// Up to `?3` actors claimable at `?1` in a format set of JSON array
         /// `?2` whose claim requirements are served by JSON array `?5`,
-        /// including retired-owner tokens; process
+        /// including retired-owner tokens, and whose package set node `?7`
+        /// holds (CLAIM-HOLDS); process
         /// actors in another set or with another requirement with mail of
         /// kind `?4` (a cancel) pending; and session actors in a set of `?2`
         /// with another requirement whose open turn holds an `immediate`
         /// cancel request, with mail of kind `?6` (a close) pending, or
         /// whose close has not reached its tombstone (FIG-6072); oldest
-        /// first, with the state that made each claimable, its format set
-        /// and its requirements.
-        claimable = "SELECT a.actor_key, a.state, a.formats, a.requires FROM actors a
+        /// first, with the state that made each claimable, its format set,
+        /// its requirements and whether node `?7` holds its package set.
+        claimable = "SELECT a.actor_key, a.state, a.formats, a.requires,
+                    (a.packages IS NULL OR (
+                        EXISTS (SELECT 1 FROM package_sets AS ps WHERE ps.digest = a.packages)
+                        AND NOT EXISTS (SELECT 1 FROM package_set_members AS pm
+                            WHERE pm.set_digest = a.packages
+                              AND NOT EXISTS (SELECT 1 FROM node_artifacts AS nh
+                                  WHERE nh.node_id = ?7 AND nh.artifact = pm.artifact))))
+                        AS holds
+             FROM actors a
              WHERE ((a.state = 'ready' AND a.ready_at_ms <= ?1)
                  OR (a.state = 'waiting' AND a.next_due_ms <= ?1))
-               AND ((a.formats IN (SELECT value FROM json_each(?2))
+               AND ((holds AND a.formats IN (SELECT value FROM json_each(?2))
                      AND (a.requires IS NULL OR NOT EXISTS (
                          SELECT 1 FROM json_each(a.requires) r
                          WHERE NOT EXISTS (

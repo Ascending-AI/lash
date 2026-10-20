@@ -19,6 +19,7 @@ mod inline;
 mod migrate;
 mod pages;
 mod replay;
+mod retain;
 mod run;
 mod state;
 mod succession;
@@ -41,10 +42,7 @@ pub use documents::{
     DocumentStoreError, ExecutionDocument, KernelDocuments, StoredSourceMap, StoredWorkflow,
     Unretained,
 };
-pub use helpers::{
-    AdoptedRun, HelperAdoptionRefusal, HelperDependentProcess, HelperDependentSession,
-    RetiredHelpers, plan_helper_adoption, retired_functions_reached, survey_helper_processes,
-};
+pub use helpers::{AdoptedRun, HelperAdoptionRefusal};
 pub use migrate::{
     KernelMigrationRefusal, KernelMigrationSurvey, KernelMigrationSurveyError,
     KernelStateMigration, PlannedMigration, RefusedKernelCell, RefusedKernelProcess,
@@ -55,6 +53,7 @@ pub use replay::{
     ProcessReplayRequest, ReplayFault, ReplayPath, ReplaySegments, SegmentAnswer, SegmentReplay,
     TaskPath, Unreplayable,
 };
+pub use retain::{RetainDependent, RetainSurvey, StrandedDependent, retained_processes};
 pub use state::{KERNEL_RUN_STEP, KernelProcessDefinition, KernelProcessInput};
 pub use workflow::{
     AdmittedWorkflow, WorkflowAdmissionOutcome, WorkflowAdmissionRefusal, WorkflowAdmissionRequest,
@@ -434,12 +433,12 @@ impl KernelProcessEngine {
         dialect: &str,
         workers: lash_vm_client::service::Service,
         bounds: lash_kernel_vm::Bounds,
-    ) -> Result<Self, lash_vm_library::LibraryError> {
+    ) -> Result<Self, lash_vm_releases::LibraryError> {
         let packages = workers
             .config()
             .packages
             .clone()
-            .map_or_else(lash_vm_library::lash_packages, Ok)?;
+            .map_or_else(lash_vm_releases::lash_packages, Ok)?;
         Ok(Self::with_packages(
             documents, dialect, packages, workers, bounds,
         ))

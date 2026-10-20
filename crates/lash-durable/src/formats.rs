@@ -130,10 +130,11 @@ fn escape(id: &str) -> String {
 #[must_use]
 pub fn fleet_writable<'a>(
     candidates: &'a [FormatSet],
-    live: &[Vec<FormatSet>],
+    live: &[crate::NodeCapability],
 ) -> Option<&'a FormatSet> {
     let serving: Vec<&Vec<FormatSet>> = live
         .iter()
+        .map(|node| &node.decodes)
         .filter(|decodes| candidates.iter().any(|set| decodes.contains(set)))
         .collect();
     candidates

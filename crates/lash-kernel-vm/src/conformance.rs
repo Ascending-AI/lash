@@ -65,7 +65,7 @@ pub fn checkpoint(
     };
     reader.put(&root.kernel);
     reader.put(&root.document);
-    reader.put(&root.release);
+    reader.put(&root.closure);
     reader.put(&root.owner);
     reader.put(&root.target);
     match &root.status {
@@ -286,7 +286,7 @@ impl Reader {
         self.tree(tree, |r, f| {
             r.put(&f.name.resolve(r.heap.pages())?);
             r.value(&f.meta)?;
-            r.put(&f.release.id);
+            r.put(&f.closure.id);
             r.put(&(f.captures.len() as u64));
             for (name, value) in &f.captures {
                 r.put(name);

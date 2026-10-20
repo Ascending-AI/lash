@@ -391,7 +391,7 @@ fn helper_bodies_compile_only_when_the_body_runs() {
                 .unwrap();
         let mut machine = KernelMachine::start(
             Program {
-                release: PageId([8; 32]),
+                closure: PageId([8; 32]),
                 document: Arc::new(document),
                 library: prepared.clone(),
             },

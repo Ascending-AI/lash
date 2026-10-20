@@ -222,7 +222,7 @@ async fn exact_host_import_does_not_resolve_ambiguous_library_labels() {
     };
     let first = std::sync::Arc::new(package("1", 1));
     let second = std::sync::Arc::new(package("2", 2));
-    let shipped = lash_vm_library::lash_packages().expect("shipped packages");
+    let shipped = lash_vm_releases::lash_packages().expect("shipped packages");
     let set = |artifact: &lash::package::Package| {
         lash::package::PackageSet::new(
             shipped

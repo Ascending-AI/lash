@@ -18,9 +18,9 @@ fn main() {
                 "os": std::env::consts::OS,
                 "debug": cfg!(debug_assertions),
                 "testing": cfg!(feature = "testing"),
-                "dialects": lash_vm_releases::DIALECTS
+                "dialects": lash_vm_releases::SHIPPED_DIALECTS
                     .iter()
-                    .map(|built| built.dialect)
+                    .filter(|dialect| lash_vm_releases::package(dialect).is_some())
                     .collect::<Vec<_>>(),
             })
         );

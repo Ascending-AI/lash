@@ -541,6 +541,7 @@ async fn a_deferred_only_granted_cell_call_executes_once_or_parks_for_missing_re
             node: NodeId::new("deferred-cell-law"),
             decodes: vec![formats],
             serves: Vec::new(),
+            held: Default::default(),
             ttl_millis: 60_000,
         })
         .await

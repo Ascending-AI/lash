@@ -165,6 +165,16 @@ law!(
     |store, _advance| { laws::a_node_claims_only_actors_whose_formats_it_decodes(store) }
 );
 law!(
+    a_node_claims_only_actors_whose_package_set_it_holds,
+    |store, _advance| { laws::a_node_claims_only_actors_whose_package_set_it_holds(store) }
+);
+law!(
+    a_store_keeps_artifacts_and_sets_by_digest_and_derives_what_a_node_holds,
+    |store, _advance| {
+        laws::a_store_keeps_artifacts_and_sets_by_digest_and_derives_what_a_node_holds(store)
+    }
+);
+law!(
     a_newer_format_is_not_written_while_an_older_node_is_live,
     |store, _advance| { laws::a_newer_format_is_not_written_while_an_older_node_is_live(store) }
 );
@@ -237,6 +247,7 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
             node: NodeId::new("fragment-owner"),
             decodes: vec![formats],
             serves: Vec::new(),
+            held: Default::default(),
             ttl_millis: 15_000,
         })
         .await

@@ -79,8 +79,8 @@ pub trait CellSave {
 /// A cell's end as its saving reads it.
 pub struct SaveCell<'a> {
     pub document: &'a lash_kernel_doc::Document,
-    /// The helper release the cell's code calls into.
-    pub release: PageRef,
+    /// The execution closure the cell's code calls into.
+    pub closure: PageRef,
     /// The bindings the carry drops, and the session's bindings of the
     /// functions it already holds, by name.
     pub bindings: &'a BTreeMap<Name, PageValue>,
@@ -110,7 +110,7 @@ pub struct SealedRoot {
     /// The sealed [`CheckpointRoot`] page.
     pub page: PageRef,
     /// Its decoded header, which the embedder's control record copies
-    /// (kernel, document, release, owner, waits summary, meters).
+    /// (kernel, document, closure, owner, waits summary, meters).
     pub(crate) root: CheckpointRoot,
 }
 

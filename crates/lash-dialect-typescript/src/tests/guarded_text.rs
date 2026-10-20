@@ -72,7 +72,7 @@ fn program() -> &'static Program {
         source = source.replacen("numbers float\n", &format!("numbers float\nuse error.new = @{id}\n"), 1);
         let mut document = parse_document(&source).unwrap_or_else(|error| panic!("{error}\n{source}"));
         document.manifest.functions = lash_kernel_check::requirements(&document, registry.as_ref()).functions;
-        Program { release: super::pages::RELEASE, document: Arc::new(document), library: machine::prepared().clone() }
+        Program { closure: super::pages::CLOSURE, document: Arc::new(document), library: machine::prepared().clone() }
     })
 }
 

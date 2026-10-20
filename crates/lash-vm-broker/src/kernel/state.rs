@@ -1,25 +1,20 @@
 //! What the parent reads and writes of a kernel run beside its heap pages
-//! (FIG-6193): the checkpoint root's header, a recorded end, the
-//! admissions a resumed run is handed and the helper releases a run pins.
+//! (FIG-6193): the checkpoint root's header, a recorded end and the
+//! admissions a resumed run is handed.
 //!
 //! A run's state is its persistent heap: pages the worker seals into the
 //! activation's spool and a park publishes (S5, S6). The parent never
 //! decodes the heap. It reads one page of it, the root-bounded
-//! [`CheckpointRoot`] header, for the release and owner the root pins
+//! [`CheckpointRoot`] header, for the closure and owner the root pins
 //! ([`checkpoint_header`]). A run's end is a small host record
 //! ([`EndRecord`]) whose datums are frozen values.
 //!
-//! A run pins the exact helper release manifest it was written under. Its
-//! nodes are installed beside the root by whoever pins the release
-//! ([`release_manifests`] stages them deterministically on either side), so
-//! a root carries only the manifest's reference.
-
-use std::collections::BTreeMap;
-use std::sync::Arc;
+//! A run pins the library functions it calls by identity, through its
+//! execution closure ([`super::closure`]): the root carries only the
+//! closure's reference.
 
 use lash_core_store::checkpoint_graph::{
-    DecodeLimits, EncodedNode, GraphDecoder, GraphRefusal, GraphStaging, NodeId, NodeKind,
-    check_envelope,
+    GraphDecoder, GraphRefusal, GraphStaging, NodeId, NodeKind,
 };
 use lash_kernel_doc::graph_tokens::{ChildRef, TokenCodec, TokenError, TokenReader, TokenWriter};
 use lash_kernel_doc::heap::{PageGrant, PageId, PageRef};
@@ -28,7 +23,6 @@ use lash_kernel_state::AdmittedWait;
 use lash_kernel_state::paged::{CheckpointHeader, inspect_checkpoint};
 use lash_kernel_vm::{Bound, BoundExceeded, End, Finished, RunError};
 use lash_vm_protocol::{EncodedPayload, KernelRestoreRefusal};
-use lash_vm_releases::HeldManifests;
 
 /// Why a run's graph state was not written or not read.
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
@@ -57,174 +51,6 @@ fn freeze(staging: &mut GraphStaging, datum: &FrozenDatum) -> Result<ChildRef, G
         .encode_value(NodeKind::FROZEN_VALUE, datum)
         .map(|id| id.child_ref())
         .map_err(GraphRefusal::from)
-}
-
-/// The helper releases this build holds as graph nodes.
-#[derive(Clone, Debug)]
-pub struct ReleaseGraph {
-    /// Each retained release's manifest, by reference.
-    pub manifests: HeldManifests,
-    /// Every manifest and helper-definition node: what a parent installs to
-    /// pin the releases.
-    pub nodes: BTreeMap<NodeId, EncodedNode>,
-}
-
-impl ReleaseGraph {
-    /// Checks every node of every release this build holds, each once per
-    /// process: a host that installs the releases does it before its pool
-    /// is ready, so no turn checks them. A worker checks only what it reads.
-    ///
-    /// # Errors
-    ///
-    /// The refusal of a node that does not check: a defect of the build.
-    pub fn check(&self) -> Result<(), GraphStateFailure> {
-        for (id, node) in &self.nodes {
-            check_envelope(&node.bytes, *id, &DecodeLimits::within_total(u64::MAX))
-                .map_err(GraphRefusal::from)?;
-            if self.manifests.get(&id.child_ref()).is_some() {
-                let _ = lash_core_store::checkpoint_graph::node::immutable_closure(*id);
-            }
-        }
-        Ok(())
-    }
-
-    /// The key the release manifest `release` names is pinned under
-    /// ([`HeldManifests::pin_key`]) and every node it reaches, when this
-    /// build holds it: what a park that pins it installs.
-    #[must_use]
-    pub fn pinned(&self, release: NodeId) -> Option<(String, BTreeMap<NodeId, EncodedNode>)> {
-        let key = self.manifests.pin_key(&release.child_ref())?;
-        let mut nodes = BTreeMap::new();
-        let mut pending = vec![release];
-        while let Some(id) = pending.pop() {
-            if nodes.contains_key(&id) {
-                continue;
-            }
-            let node = self.nodes.get(&id)?;
-            pending.extend(
-                check_envelope(&node.bytes, id, &DecodeLimits::within_total(u64::MAX))
-                    .ok()?
-                    .children
-                    .iter(),
-            );
-            nodes.insert(id, node.clone());
-        }
-        Some((key, nodes))
-    }
-
-    /// Pins `release`, the release a checkpoint root's header names, in
-    /// `tx`: the store installs a release's nodes with its pin once, under
-    /// its dialect's key ([`HeldManifests::pin_key`]), on the first root of
-    /// the first execution that pins it; every later root requires them.
-    /// Only a `first` root reads whether the store pins it already, within
-    /// the release's own size. Nothing of the heap is decoded.
-    ///
-    /// # Errors
-    ///
-    /// [`UnheldRelease`] when this build does not hold `release`.
-    pub async fn pin(
-        &self,
-        reads: &dyn lash_durable::DurableReads,
-        tx: &mut lash_durable::ActorTx,
-        release: NodeId,
-        first: bool,
-    ) -> Result<(), UnheldRelease> {
-        if self.manifests.pin_key(&release.child_ref()).is_none() {
-            return Err(UnheldRelease);
-        }
-        if !first {
-            tx.require(release);
-            return Ok(());
-        }
-        let (key, nodes) = self.pinned(release).ok_or(UnheldRelease)?;
-        // A release this store already pins is stored whole: the commit
-        // rechecks the requirement under its protection. A pin this read
-        // cannot confirm is installed again, and the commit compares it.
-        let size = nodes.values().map(EncodedNode::len).sum();
-        let pinned = reads
-            .hydrate(
-                lash_durable::domain::RootOwner::ReleasePin {
-                    release: key.clone(),
-                },
-                Some(release),
-                DecodeLimits::within_total(size),
-            )
-            .await
-            .is_ok();
-        if pinned {
-            tx.require(release);
-            return Ok(());
-        }
-        tx.stage(nodes.into_values());
-        tx.write(lash_durable::DomainWrite::ReleasePin(
-            lash_durable::domain::ReleasePinWrite::Install {
-                release: key,
-                root: release,
-            },
-        ));
-        Ok(())
-    }
-}
-
-/// A checkpoint root's header pins a release this build does not hold.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("the state pins a release this build does not hold")]
-pub struct UnheldRelease;
-
-/// The helper releases this build holds for the dialects it was built with,
-/// staged. Staging is deterministic:
-/// a parent and a worker of one build name every manifest alike. The build's
-/// immutable nodes are staged once per process and shared by every cell.
-///
-/// # Errors
-///
-/// A refusal of the graph, or the build's own releases not decoding.
-pub fn release_manifests() -> Result<ReleaseGraph, GraphStateFailure> {
-    held_releases().cloned()
-}
-
-/// [`release_manifests`], borrowed from the process's one staging.
-///
-/// # Errors
-///
-/// As [`release_manifests`].
-pub fn held_releases() -> Result<&'static ReleaseGraph, GraphStateFailure> {
-    static RELEASES: std::sync::OnceLock<Result<ReleaseGraph, GraphStateFailure>> =
-        std::sync::OnceLock::new();
-    RELEASES
-        .get_or_init(read_release_manifests)
-        .as_ref()
-        .map_err(Clone::clone)
-}
-
-fn read_release_manifests() -> Result<ReleaseGraph, GraphStateFailure> {
-    use lash_kernel_doc::graph_tokens::{TokenCodec as _, TokenReader};
-    let build_error = |error: lash_kernel_doc::graph_tokens::TokenError| {
-        GraphStateFailure::Unwritable(error.to_string())
-    };
-    let mut manifests = HeldManifests::default();
-    let mut nodes = BTreeMap::new();
-    // Two dialects share the kernel library's definition nodes, by digest.
-    for built in lash_vm_releases::DIALECTS {
-        manifests
-            .add_staged(built.dialect, built.checkpoint_manifests)
-            .map_err(build_error)?;
-        let mut input = TokenReader::new(built.checkpoint_nodes);
-        let count = input.seq().map_err(build_error)?;
-        for _ in 0..count {
-            input.expect_struct(2).map_err(build_error)?;
-            let id = NodeId(ChildRef::decode(&mut input).map_err(build_error)?.0);
-            let bytes = input.bytes().map_err(build_error)?;
-            nodes.entry(id).or_insert_with(|| EncodedNode {
-                id,
-                bytes: Arc::from(bytes),
-            });
-        }
-        input.finish().map_err(build_error)?;
-    }
-    // Each node is checked the first time a reader meets it.
-    lash_core_store::checkpoint_graph::node::register_immutable_catalog(&nodes);
-    Ok(ReleaseGraph { manifests, nodes })
 }
 
 fn thaw(decoder: &mut GraphDecoder<'_>, child: ChildRef) -> Result<Datum, GraphRefusal> {
@@ -511,24 +337,9 @@ impl EndRecord {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::sync::Arc;
+    use lash_core_store::checkpoint_graph::DecodeLimits;
 
-    /// FIG-5894: immutable build release nodes are shared by independent
-    /// cells, rather than encoding the entire helper catalog for each cell.
-    #[test]
-    fn independent_cells_share_the_builds_staged_release_nodes() {
-        let first = release_manifests().expect("the build's release graph");
-        let second = release_manifests().expect("the same build's release graph");
-        assert!(!first.nodes.is_empty());
-        assert_eq!(first.manifests, second.manifests);
-        for (id, node) in &first.nodes {
-            assert!(
-                Arc::ptr_eq(&node.bytes, &second.nodes[id].bytes),
-                "independent cells restaged release node {id:?}"
-            );
-        }
-    }
+    use super::*;
 
     /// `K-ERR-003`, ADR 0132 §8: a recorded end reads back as the end it
     /// records, the thrown value unchanged even when it is not an error.
@@ -577,29 +388,5 @@ mod tests {
         let nodes = staging.into_nodes();
         let mut decoder = GraphDecoder::new(&nodes, DecodeLimits::within_total(u64::MAX));
         assert_eq!(record.end(&mut decoder).expect("the end reads back"), end);
-    }
-
-    /// The stored catalog carries the 1.0 release line under each dialect's
-    /// own pin key, independent of the release builder and its encoder.
-    #[test]
-    fn the_stored_release_catalog_preserves_its_1_0_pin_keys() {
-        let built = release_manifests().expect("the stored catalog");
-        assert!(built.manifests.current("typescript").is_some());
-        for dialect in ["python", "typescript"] {
-            if !lash_vm_releases::DIALECTS
-                .iter()
-                .any(|d| d.dialect == dialect)
-            {
-                continue;
-            }
-            let reference = built.manifests.current(dialect).expect("current release");
-            let manifest = built.manifests.get(&reference).expect("manifest");
-            assert_eq!((manifest.release.as_str(), manifest.ordinal), ("1.0", 1));
-            assert_eq!(
-                built.manifests.pin_key(&reference),
-                Some(format!("{dialect}/1.0"))
-            );
-            assert_eq!(built.manifests.of_dialect(dialect).count(), 1);
-        }
     }
 }

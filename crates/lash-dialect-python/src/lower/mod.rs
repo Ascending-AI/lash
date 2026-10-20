@@ -438,6 +438,7 @@ pub(crate) fn lower_with_calls(
         source_map: Some(source_map),
         written,
         captions,
+        validated: true,
     })
 }
 

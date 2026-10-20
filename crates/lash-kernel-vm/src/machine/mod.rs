@@ -144,7 +144,7 @@ impl Interrupt {
             crate::compile::LibRun::Plan { .. } | crate::compile::LibRun::DeferredPlan { .. } => {
                 self
             }
-            _ => self.in_function(&lib.definition.name),
+            _ => self.in_function(&lib.header.name),
         }
     }
 }
@@ -378,7 +378,7 @@ pub struct KernelMachine {
     /// The objects the run executes on; the heap is their projection.
     arena: SharedArena,
     limits: lash_kernel_doc::KernelDataLimits,
-    release: PageId,
+    closure: PageId,
     owner: PageId,
     tasks: tasks::Tasks,
     ready: queue::Queue<TaskId>,
@@ -1337,14 +1337,14 @@ impl KernelMachine {
                     if let Some(lib) = operation
                         && (exceeded.bound != Bound::Charge || exceeded.function.is_none())
                     {
-                        exceeded.function = Some(self.exe.lib(lib).definition.name.clone());
+                        exceeded.function = Some(self.exe.lib(lib).header.name.clone());
                     } else if exceeded.function.is_none()
                         && let Some(lib) = self
                             .frame(task)
                             .ok()
                             .and_then(|frame| frame.library.as_ref().map(|call| call.lib))
                     {
-                        exceeded.function = Some(self.exe.lib(lib).definition.name.clone());
+                        exceeded.function = Some(self.exe.lib(lib).header.name.clone());
                     }
                     return Ok(self.finish_with(End::Error(RunError::Bound(*exceeded))));
                 }

@@ -97,8 +97,8 @@ pub use document::{
     Ordinals,
 };
 pub use function::{
-    FIRST_NATIVE_VERSION, Formula, FunctionBody, FunctionDeclarations, FunctionDefinition, Guard,
-    Implementation, Measure, Operand,
+    FIRST_NATIVE_VERSION, Formula, FunctionBody, FunctionDeclarations, FunctionDefinition,
+    FunctionHeader, Guard, Implementation, ImplementationKind, Measure, Operand,
 };
 pub use function_value::{
     FUNCTION_VALUE_ENTRY, FUNCTION_VALUE_TAG, FunctionRepresentation, FunctionValue,

@@ -429,20 +429,18 @@ pub trait CodeExecutorPlugin: Send + Sync {
 
     /// The candidate that publishes `root`'s pages, staged under the
     /// pending capture, under `commit` (FIG-6418): what they name beyond
-    /// the heap that the store may not hold (a helper release) is pinned in
-    /// `tx`, after `reads` of whether the store pins it already. `None`
-    /// when no pending capture stages `root`: the store holds its pages.
+    /// the heap that the store may not hold (an execution closure) is
+    /// staged in `tx`. `None` when no pending capture stages `root`: the
+    /// store holds its pages.
     ///
     /// # Errors
     ///
-    /// [`crate::SessionError`] when the staged pages do not stream or a
-    /// release they name is not held.
+    /// [`crate::SessionError`] when the staged pages do not stream.
     async fn execution_candidate(
         &self,
         _root: lash_core_store::checkpoint_graph::NodeId,
         _commit: lash_core_store::checkpoint_graph::CommitId,
         _tx: &mut lash_durable::ActorTx,
-        _reads: &dyn lash_durable::DurableReads,
     ) -> Result<Option<ExecutionCandidate>, crate::SessionError> {
         Ok(None)
     }

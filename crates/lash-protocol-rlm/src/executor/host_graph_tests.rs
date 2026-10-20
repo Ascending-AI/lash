@@ -240,11 +240,10 @@ fn a_hosts_control_cancel_and_limit_facts_survive_collection() {
 }
 
 /// A cell's envelope is staged once, as typed document, source map and
-/// effect-table nodes under its exact release manifest: staging it again
-/// at a later park makes the same node, so no park copies it. A cell's end
-/// names its terminal, its adopted session state, its host root and its
-/// envelope, and after an immediate collection under the end they all read
-/// back exactly; an envelope whose release is not a manifest is refused.
+/// effect-table nodes: staging it again at a later park makes the same
+/// node, so no park copies it. A cell's end names its terminal, its adopted
+/// session state, its host root and its envelope, and after an immediate
+/// collection under the end they all read back exactly.
 #[test]
 fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
     use crate::executor::envelope::{CellEnvelope, RecordedEffect};
@@ -288,11 +287,8 @@ fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
         reads: std::collections::BTreeMap::new(),
     };
     let mut staging = staging();
-    let release = staging
-        .encode_value(NodeKind::RELEASE_MANIFEST, &1_u64)
-        .unwrap();
-    let node = envelope.stage(&mut staging, release).unwrap();
-    assert_eq!(envelope.stage(&mut staging, release).unwrap(), node);
+    let node = envelope.stage(&mut staging).unwrap();
+    assert_eq!(envelope.stage(&mut staging).unwrap(), node);
 
     let mut host = HostState::default();
     host.prints.push(PrintEvent(Datum::Int(1.into())));
@@ -326,8 +322,7 @@ fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
     let kept = collected(staging.nodes(), root);
     let mut decoder = GraphDecoder::new(&kept, DecodeLimits::within_total(1 << 24));
     assert_eq!(CellEnd::load(&mut decoder, root).unwrap(), end);
-    let (loaded, pinned) = CellEnvelope::load(&mut decoder, end.envelope).unwrap();
-    assert_eq!(pinned, release);
+    let loaded = CellEnvelope::load(&mut decoder, end.envelope).unwrap();
     assert_eq!(loaded.document, envelope.document);
     assert_eq!(loaded.source_map, envelope.source_map);
     assert_eq!(loaded.effects, envelope.effects);
@@ -340,11 +335,4 @@ fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
             .items(),
         host.prints.items()
     );
-
-    let wrong = envelope.stage(&mut staging, end.host).unwrap();
-    let mut decoder = GraphDecoder::new(&staging, DecodeLimits::within_total(1 << 24));
-    assert!(matches!(
-        CellEnvelope::load(&mut decoder, wrong),
-        Err(GraphRefusal::WrongChildKind { .. })
-    ));
 }

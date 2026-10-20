@@ -106,6 +106,10 @@ pub struct Lowered {
     /// Like the source map, they never change
     /// behaviour or the document's identity (`K-CAP-001`).
     pub captions: Captions,
+    /// Whether lowering validated the document against the environment's
+    /// library under the standard data limits: a machine over that library
+    /// then admits it without validating it again (FIG-6931).
+    pub validated: bool,
 }
 
 /// Lowers source in one language to a kernel document.

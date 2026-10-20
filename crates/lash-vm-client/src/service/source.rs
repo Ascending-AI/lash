@@ -21,6 +21,12 @@ pub enum SourceServiceError {
     Dialect(DialectRefusal),
     #[error("the worker has no `{dialect}` dialect")]
     UnknownDialect { dialect: String },
+    /// The worker does not hold the package set the source was to resolve
+    /// against.
+    #[error("the worker does not hold package set {packages}")]
+    PackagesNotHeld {
+        packages: lash_kernel_doc::PackageSetDigest,
+    },
 }
 
 impl Service {
@@ -58,7 +64,9 @@ impl Service {
     }
 
     /// Lower a whole authored workflow module in the dialect of `language`,
-    /// under the host's source limits or, without them, the dialect's
+    /// against the names of the package set `packages` (the worker's own
+    /// set when `None`), under the host's
+    /// source limits or, without them, the dialect's
     /// standard policy. Exported source is read back against its base
     /// document with [`Self::read_exported`] instead.
     pub async fn import_workflow(
@@ -66,6 +74,7 @@ impl Service {
         language: lash_kernel_doc::SourceLanguage,
         source: &str,
         operations: &lash_kernel_dialect::Operations,
+        packages: Option<lash_kernel_doc::PackageSetDigest>,
         limits: Option<lash_kernel_dialect::workflow::WorkflowSourceLimits>,
     ) -> Result<(Document, lash_kernel_doc::SourceMap, Captions), SourceServiceError> {
         let response = self
@@ -73,6 +82,7 @@ impl Service {
                 language,
                 source: source.to_owned(),
                 operations: operations.clone(),
+                packages,
                 limits,
             })
             .await?;
@@ -158,6 +168,7 @@ fn refused(response: Response) -> SourceServiceError {
     match response {
         Response::DialectRefused(refusal) => SourceServiceError::Dialect(refusal),
         Response::UnknownDialect { dialect } => SourceServiceError::UnknownDialect { dialect },
+        Response::PackagesNotHeld { packages } => SourceServiceError::PackagesNotHeld { packages },
         _ => PoolError::breach(SequenceFault::UnexpectedServiceResponse).into(),
     }
 }

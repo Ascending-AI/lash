@@ -8,7 +8,6 @@ use std::time::Instant;
 use crate::PoolError;
 use crate::embedding::Embedding;
 use crate::host::{PagePort, Wire, WireHost, WireLimiter, WirePageSource, grant_of, link_grant};
-use lash_kernel_doc::graph_tokens::ChildRef;
 use lash_kernel_doc::heap::{PageId, PageRef};
 use lash_kernel_doc::{Datum, IdentifiedDocument};
 use lash_kernel_state::paged::{Checkpoint, PageSource};
@@ -116,14 +115,9 @@ impl<'embedding> Server<'embedding> {
         bootstrap: Bootstrap,
         embedding: &'embedding Embedding,
     ) -> Result<Self, PoolError> {
-        // A ready worker can publish and restore checkpoints without first
-        // staging its immutable helper catalog during a guest turn, and runs
-        // its first document over a library compiled here, before the
-        // parent hands it one: its first turn costs what a warm one does
-        // (FIG-5922).
-        embedding
-            .release_manifests()
-            .map_err(|error| machine_breach(error.to_string()))?;
+        // A ready worker runs its first document over a library compiled
+        // here, before the parent hands it one: its first turn costs what a
+        // warm one does (FIG-5922).
         embedding
             .prepared_library()
             .map_err(|error| machine_breach(error.to_string()))?;
@@ -497,7 +491,8 @@ impl<'embedding> Server<'embedding> {
                 detail: Detail::new(error),
             })
         };
-        let mut program = self.program(&start.document)?;
+        let fresh = matches!(start.from, StartFrom::Fresh(_));
+        let program = self.program(&start.document, fresh)?;
         let path = start.observe_path.then(|| program.document.site_ordinals());
         let bounds = Bounds {
             memory_meter: match start.bounds.memory_meter {
@@ -519,11 +514,6 @@ impl<'embedding> Server<'embedding> {
         let mut source = WirePageSource::new(self.wire()?, self.bootstrap.tuning.pages.clean_bytes);
         let port = source.port();
         port.warm(&start.warm).map_err(heap_fault)?;
-        let manifests = &self
-            .embedding
-            .release_manifests()
-            .map_err(machine_breach)?
-            .manifests;
         let save = start
             .save
             .as_ref()
@@ -551,13 +541,6 @@ impl<'embedding> Server<'embedding> {
                 self.codec.check_payload(&payload.0)?;
                 let from: StartWire = wire::decode(PayloadKind::Start, &payload)
                     .map_err(|error| undecodable(RunInput::Start, &error))?;
-                let release = manifests.current(&start.dialect).ok_or_else(|| {
-                    machine_breach(format!(
-                        "the build holds no helper release of the dialect `{}`",
-                        start.dialect
-                    ))
-                })?;
-                program.release = PageId(release.0);
                 let session = from
                     .session
                     .as_ref()
@@ -613,17 +596,6 @@ impl<'embedding> Server<'embedding> {
                         },
                     }));
                 }
-                if manifests
-                    .dialect_of(&ChildRef(root.header().release.0))
-                    .is_none()
-                {
-                    return Err(PoolError::refused(RunRefusal::Restore {
-                        refusal: KernelRestoreRefusal::ReleaseMismatch {
-                            pinned: hex(&root.header().release.0),
-                        },
-                    }));
-                }
-                program.release = root.header().release;
                 KernelMachine::open(program, bounds, &root, Box::new(source)).map_err(|error| {
                     match error {
                         OpenError::Heap(fault) => heap_fault(fault),
@@ -673,8 +645,12 @@ impl<'embedding> Server<'embedding> {
     /// identity. Holding the same Arc also reuses PreparedLibrary's
     /// admission and code; eviction lets its weak document entries be
     /// reclaimed on admission. A miss decodes the body once, under the
-    /// worker's data limits; nothing is encoded or identified here.
-    fn program(&mut self, encoded: &EncodedPayload) -> Result<Program, PoolError> {
+    /// worker's data limits, and derives its execution closure over the
+    /// worker's registry: a resume needs every function the closure lists,
+    /// and the native of each native-only one (`K-MACH-008`). A `fresh`
+    /// start that reaches a function the worker lacks is refused as a start
+    /// is, and a resume as a restore, naming the function.
+    fn program(&mut self, encoded: &EncodedPayload, fresh: bool) -> Result<Program, PoolError> {
         if let Some(index) = self
             .documents
             .iter()
@@ -697,9 +673,29 @@ impl<'embedding> Server<'embedding> {
                 detail: Detail::new(error),
             })
         })?;
-        // A run's start names the release it pins.
+        let closure = lash_vm_broker::kernel::closure::derive(
+            document.manifest.functions.keys().copied(),
+            library.registry(),
+            lash_vm_broker::kernel::closure::Natives::Required,
+        )
+        .map_err(|refusal| match fresh {
+            true => PoolError::refused(RunRefusal::Start {
+                detail: Detail::new(refusal),
+            }),
+            false => PoolError::refused(RunRefusal::Restore {
+                refusal: refusal.into(),
+            }),
+        })?;
+        // Admitted by identity: one validated before, in lowering or an
+        // earlier decode, is not validated again (FIG-6931). A refusal is
+        // the start's, which admits it again.
+        library.admit_identified(
+            document.shared(),
+            document.id(),
+            self.bootstrap.tuning.kernel_data,
+        );
         let program = Program {
-            release: PageId([0; 32]),
+            closure: PageId(closure.reference().0),
             document: Arc::clone(document.shared()),
             library: library.clone(),
         };
@@ -1175,7 +1171,7 @@ mod tests {
             ))
             .expect("document");
             server
-                .program(&EncodedPayload(next.canonical_bytes()))
+                .program(&EncodedPayload(next.canonical_bytes()), true)
                 .expect("preparation");
         }
         assert_eq!(server.documents.len(), 16);

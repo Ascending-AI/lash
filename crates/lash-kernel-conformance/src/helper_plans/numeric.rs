@@ -124,7 +124,7 @@ fn generated_scalar_templates_agree_with_their_bodies() {
                     args.join(", ")
                 );
                 let mut program = Program {
-                    release: base.release,
+                    closure: base.closure,
                     document: Arc::new(parse_document(&source).unwrap()),
                     library: base.library.clone(),
                 };
@@ -163,7 +163,7 @@ fn generated_scalar_templates_agree_with_their_bodies() {
                     args.join(", ")
                 );
                 let mut program = Program {
-                    release: base.release,
+                    closure: base.closure,
                     document: Arc::new(parse_document(&source).unwrap()),
                     library: base.library.clone(),
                 };

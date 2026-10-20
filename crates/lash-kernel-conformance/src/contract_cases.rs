@@ -494,7 +494,7 @@ fn charge_invariance(shard: &Shard, registry: &FunctionRegistry) {
     for native in [false, true] {
         for layout in [Layout(0), Layout(37)] {
             let program = Program {
-                release: crate::pages::RELEASE,
+                closure: crate::pages::CLOSURE,
                 document: Arc::new(document.clone()),
                 library: PreparedLibrary::new(Arc::new(same_registry(BOTH, native))),
             };
@@ -537,7 +537,7 @@ fn instance_isolation(shard: &Shard, registry: &FunctionRegistry) {
 
 fn program(case: &Case, registry: &FunctionRegistry) -> Program {
     Program {
-        release: crate::pages::RELEASE,
+        closure: crate::pages::CLOSURE,
         document: Arc::new(doc(&case.document)),
         library: PreparedLibrary::new(Arc::new(registry.clone())),
     }

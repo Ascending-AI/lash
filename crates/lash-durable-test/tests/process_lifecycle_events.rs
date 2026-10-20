@@ -727,6 +727,13 @@ impl lash_durable::runner::Activation for MeasuredActivation {
     async fn activate(&self, owned: lash_durable::runner::Owned) -> lash_durable::runner::Exit {
         self.window.within(self.inner.activate(owned)).await
     }
+
+    async fn hold(
+        &self,
+    ) -> Result<std::collections::BTreeSet<lash_durable::HeldArtifact>, lash_durable::DurableError>
+    {
+        self.inner.hold().await
+    }
 }
 
 /// FIG-6260: incorporating a sequential effect must not hydrate and decode

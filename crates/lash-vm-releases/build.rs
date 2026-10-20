@@ -1,6 +1,6 @@
-//! Makes lash's own packages once (FIG-6917), and from their definitions
-//! each built dialect's current helper release. Workers and parents read
-//! the same build artifacts.
+//! Makes lash's own packages once (FIG-6917) and checks each built
+//! dialect's helper names. Workers and parents read the same build
+//! artifacts.
 
 #![cfg_attr(
     not(any(feature = "dialect-typescript", feature = "dialect-python")),
@@ -13,30 +13,13 @@
 
 #[path = "src/library.rs"]
 mod library;
-#[path = "src/build/release.rs"]
-mod release;
-#[expect(
-    dead_code,
-    reason = "the build writes releases; decoding the held set are the library's"
-)]
-#[path = "src/releases.rs"]
-mod releases;
 #[path = "src/build/sets.rs"]
 mod sets;
-
-#[expect(
-    dead_code,
-    reason = "the build stages manifests; restore admission belongs to the runtime"
-)]
-#[path = "src/manifest.rs"]
-mod manifest;
 
 use std::collections::BTreeSet;
 
 use lash_kernel_doc::{FunctionDefinition, FunctionId, FunctionRegistry};
 use lash_kernel_package::{Package, PackagePath, Root};
-
-use crate::releases::{HelperRelease, HelperReleaseIndex};
 
 type BuildError = Box<dyn std::error::Error>;
 
@@ -82,12 +65,7 @@ fn main() -> Result<(), BuildError> {
             write_package(&out, package, &[&kernel])?;
         }
         write_package(&out, &typescript, &requires)?;
-        dialect(
-            &out,
-            "typescript",
-            &[&kernel, &regex, &date, &url, &typescript],
-            &typescript,
-        )?;
+        dialect(&[&kernel, &regex, &date, &url, &typescript])?;
     }
     #[cfg(feature = "dialect-python")]
     {
@@ -95,7 +73,7 @@ fn main() -> Result<(), BuildError> {
             Ok(lash_dialect_python::define_helpers(library)?)
         })?;
         write_package(&out, &python, &[&kernel])?;
-        dialect(&out, "python", &[&kernel, &python], &python)?;
+        dialect(&[&kernel, &python])?;
     }
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src");
@@ -170,12 +148,38 @@ fn defined_since(
     registry: &FunctionRegistry,
     before: &BTreeSet<FunctionId>,
 ) -> Vec<FunctionDefinition> {
-    release::current(registry)
-        .functions
+    let mut listed = BTreeSet::new();
+    let mut functions = Vec::new();
+    for (function, _) in registry.iter() {
+        in_call_order(*function, registry, &mut listed, &mut functions);
+    }
+    functions
         .into_iter()
-        .filter(|function| !before.contains(&function.function))
-        .map(|function| function.definition)
+        .filter(|(function, _)| !before.contains(function))
+        .map(|(_, definition)| definition)
         .collect()
+}
+
+/// Lists `function` after every function it calls.
+fn in_call_order(
+    function: FunctionId,
+    registry: &FunctionRegistry,
+    listed: &mut BTreeSet<FunctionId>,
+    functions: &mut Vec<(FunctionId, FunctionDefinition)>,
+) {
+    if listed.contains(&function) {
+        return;
+    }
+    let Some(registered) = registry.get(&function) else {
+        return;
+    };
+    if let Some(body) = registered.definition().body() {
+        for called in body.functions.keys() {
+            in_call_order(*called, registry, listed, functions);
+        }
+    }
+    listed.insert(function);
+    functions.push((function, FunctionDefinition::clone(registered.definition())));
 }
 
 /// A declarations registry holding the code of every package of `packages`.
@@ -264,63 +268,11 @@ fn write_package(
     Ok(())
 }
 
-/// Resolves and checks `dialect`'s helper releases over `packages`, the
-/// packages it ships with, `helpers` its own, and writes them under the
-/// dialect's name.
+/// Checks a dialect's helper names over `packages`, the packages it ships
+/// with.
 #[cfg(any(feature = "dialect-typescript", feature = "dialect-python"))]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "a build script writes its OUT_DIR artifacts"
-)]
-fn dialect(
-    out: &std::path::Path,
-    dialect: &str,
-    packages: &[&Package],
-    helpers: &Package,
-) -> Result<(), BuildError> {
-    let write =
-        |file: &str, bytes: &[u8]| std::fs::write(out.join(format!("{dialect}_{file}")), bytes);
+fn dialect(packages: &[&Package]) -> Result<(), BuildError> {
     let registry = registry_of(packages)?;
-    let _ = helpers;
     sets::validate(&registry, packages)?;
-    let held = releases::HeldReleases {
-        retained: vec![release::current(&registry)],
-    };
-    let index: Vec<HelperReleaseIndex> = held.retained.iter().map(HelperRelease::index).collect();
-    write("helper_releases.json", &serde_json::to_vec(&index)?)?;
-    write("held_releases.json", &serde_json::to_vec(&held)?)?;
-    let (manifests, nodes) = checkpoint_catalog(&held)?;
-    write("checkpoint_manifests.bin", &manifests)?;
-    write("checkpoint_nodes.bin", &nodes)?;
     Ok(())
-}
-
-/// Encodes a dialect's immutable build catalog once, rather than in every
-/// worker: its release manifests with their references, and every node.
-#[cfg(any(feature = "dialect-typescript", feature = "dialect-python"))]
-fn checkpoint_catalog(held: &releases::HeldReleases) -> Result<(Vec<u8>, Vec<u8>), BuildError> {
-    use lash_checkpoint_encoder::{EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TypedBody};
-    use lash_kernel_doc::graph_tokens::{TokenCodec as _, TokenWriter};
-
-    let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
-    let mut manifests = TokenWriter::new();
-    manifests.seq(held.retained.len() as u64);
-    for release in &held.retained {
-        let (manifest, reference) = manifest::stage_release(release, &mut |kind, logical| {
-            staging
-                .encode(NodeKind(kind), TypedBody::logical(logical))
-                .map(|id| id.child_ref())
-        })?;
-        manifests.seq(2);
-        manifests.child(reference);
-        manifest.encode(&mut manifests);
-    }
-    let mut nodes = TokenWriter::new();
-    nodes.seq(staging.nodes().len() as u64);
-    for (id, node) in staging.nodes() {
-        nodes.seq(2);
-        nodes.child(id.child_ref());
-        nodes.bytes(&node.bytes);
-    }
-    Ok((manifests.into_bytes(), nodes.into_bytes()))
 }

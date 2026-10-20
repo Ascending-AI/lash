@@ -125,9 +125,11 @@ pub enum CellFailureKind {
     Program,
     /// Host infrastructure failed while preparing or executing the program.
     Host,
-    /// The worker cannot lower the cell against the helper release it names.
-    /// The host can route the work to a build that retains this release.
-    HelperReleaseNotHeld { release: u32 },
+    /// The worker does not hold the package set the cell is written under
+    /// (FIG-6918). The host can serve the work on a node that holds it.
+    PackagesNotHeld {
+        packages: lash_kernel_doc::PackageSetDigest,
+    },
 }
 
 /// Structured failure returned by a code executor.

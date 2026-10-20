@@ -122,8 +122,7 @@ impl Parent {
         let lease = ExecutionLease(self.lease);
         self.outgoing = MessageFence::new(lease, OwnerEpoch(0), FrameEpoch(0));
         self.incoming = MessageFence::new(lease, OwnerEpoch(0), FrameEpoch(0));
-        self.pages = Some(
-            ActivationPages::new(
+        self.pages = Some(ActivationPages::new(
             Arc::new(Unread),
             None,
             Duration::from_secs(20),
@@ -133,10 +132,27 @@ impl Parent {
             Arc::new(lash_core_execution::runtime::SystemClock),
             Duration::from_secs(120),
             PageLimits::within(self.codec.limits()),
+        ));
+    }
+
+    /// Lets the turn's sealed pages name the host nodes a parked root
+    /// names: its document's execution closure and its binding.
+    fn name_hosts(&mut self, document: &[u8]) {
+        let document = lash_kernel_doc::IdentifiedDocument::decode(
+            document,
+            lash_kernel_doc::KernelDataLimits::standard(),
         )
-        // The host nodes a parked root names: its release and its binding.
-        .with_references([release(), NodeId(BINDING)]),
-        );
+        .expect("the lowered document");
+        let closure = lash_vm_broker::kernel::closure::derive(
+            document.manifest.functions.keys().copied(),
+            lash_vm_releases::lash_packages()
+                .expect("the parent's packages")
+                .functions(),
+            lash_vm_broker::kernel::closure::Natives::Declared,
+        )
+        .expect("the parent holds the cell's functions");
+        let pages = self.pages.take().expect("a lease's pages");
+        self.pages = Some(pages.with_references([closure.reference(), NodeId(BINDING)]));
     }
 
     /// The worker's answer to `message`, past its progress and its page
@@ -203,12 +219,6 @@ impl Parent {
 /// The owner binding each turn's run names.
 const BINDING: [u8; 32] = [5; 32];
 
-/// The helper release the build holds of the cell's dialect.
-fn release() -> NodeId {
-    let releases = lash_vm_broker::kernel::state::release_manifests().expect("releases");
-    NodeId(releases.manifests.current(DIALECT).expect("a release").0)
-}
-
 fn tool() -> Signature {
     Signature {
         params: vec![Param {
@@ -241,7 +251,9 @@ fn lower() -> EncodedPayload {
         .clone(),
         bindings: BTreeSet::new(),
         functions: BTreeMap::new(),
-        helpers: lash_vm_library::HELPER_RELEASE,
+        packages: lash_vm_releases::lash_packages()
+            .expect("the parent's packages")
+            .own(),
     };
     EncodedPayload(rmp_serde::to_vec_named(&request).expect("request"))
 }
@@ -260,6 +272,7 @@ fn turn(parent: &mut Parent, bounds: RunBounds) {
     else {
         panic!("the cell lowers")
     };
+    parent.name_hosts(&document);
     let start = Start {
         owner: VmOwner::new("codemode:session"),
         dialect: DIALECT.into(),

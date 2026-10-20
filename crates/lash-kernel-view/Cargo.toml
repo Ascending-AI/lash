@@ -31,7 +31,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-lash-vm-library = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
+lash-vm-releases = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
 lash-dialect-typescript = { workspace = true }
 lash-dialect-python = { workspace = true }
 lash-kernel-dialect = { workspace = true }

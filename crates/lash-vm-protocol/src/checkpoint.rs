@@ -25,6 +25,9 @@ pub enum CheckpointRefusal {
     WrongRootKind { found: u32 },
     #[error("the checkpoint is bound to execution {found}, expected {expected}")]
     WrongOwner { expected: String, found: String },
+    /// The root pins another execution closure than its document's.
+    #[error("the checkpoint pins execution closure {found}, expected its document's {expected}")]
+    WrongClosure { expected: String, found: String },
     #[error("the checkpoint's root does not decode: {problem}")]
     Malformed { problem: String },
 }
@@ -48,14 +51,8 @@ pub enum KernelRestoreRefusal {
     AdmissionUnresolved { effect: String },
     #[error("the parked state is malformed: {problem}")]
     Malformed { problem: String },
-    /// The run pins a release manifest this worker does not hold exactly.
-    #[error("the run pins release manifest {pinned}, which this worker does not hold")]
-    ReleaseMismatch { pinned: String },
-    /// The pinned release or this worker lacks a function the run calls.
-    #[error("function {function} is not held by the pinned release or this worker")]
-    MissingHelper { function: String },
-    /// The pinned release records a native implementation this worker
-    /// lacks.
+    /// The run's closure lists a function that only a native implements,
+    /// and this worker has no native for it.
     #[error("function {function} needs a native implementation this worker lacks")]
     MissingNative { function: String },
     /// The admission under this execution holds a request of another kind

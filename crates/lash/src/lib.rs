@@ -217,9 +217,9 @@ pub mod render {
     pub use lash_render::*;
 }
 #[cfg(feature = "codemode")]
-mod helper_releases;
-#[cfg(feature = "codemode")]
 mod kernel_migration;
+#[cfg(feature = "codemode")]
+mod packages;
 #[cfg(feature = "rlm")]
 /// RLM-specific turn-builder extensions.
 pub mod rlm;
@@ -238,6 +238,9 @@ pub mod vm;
 /// natives only, by function identity.
 #[cfg(any(feature = "codemode", feature = "workflow-view"))]
 pub mod package {
+    /// The rows a node installs before it serves, and the artifacts of its
+    /// own set (FIG-6918): for a host that runs its own node runner.
+    pub use crate::packages::{install_rows, own_artifacts};
     pub use lash_kernel_package::*;
     /// lash's own packages as this build holds them, and why they did not
     /// assemble: a defect of the build.

@@ -7,8 +7,8 @@
 //! refers to another by name, so no bundle names another bundle and no
 //! content hash is cyclic. A member's document is a node of its own, shared
 //! by every bundle that holds it; its captures and token data are frozen
-//! page references in the member's row, and its exact helper release is named
-//! by an exact manifest reference.
+//! page references in the member's row, and the library functions it reaches
+//! are named by its execution closure node.
 //!
 //! This module writes and reads the bundle's logical body. Nodes are staged
 //! by the caller's `stage` function, so this crate depends on no store.
@@ -125,7 +125,7 @@ impl Bundle {
     }
 
     /// Stages the bundle: each member's document as a Document node, then
-    /// the bundle itself. Each member names its exact helper release and
+    /// the bundle itself. Each member names its execution closure and
     /// frozen capture pages. Answers the bundle's
     /// reference.
     ///
@@ -143,7 +143,7 @@ impl Bundle {
                 name: name.clone(),
                 document,
                 captures: function.captures.clone(),
-                release: function.release,
+                closure: function.closure,
                 references: function.references.clone(),
                 helper_owners: function.helper_owners.clone(),
                 written: function.written.clone(),
@@ -158,7 +158,7 @@ impl Bundle {
     }
 
     /// The bundle a decoded body holds, its documents read by `document`,
-    /// and the release it names. A member must be declared by its own
+    /// and the execution closure each member names. A member must be declared by its own
     /// document, and the required effects must be exactly the members'.
     ///
     /// # Errors
@@ -174,7 +174,7 @@ impl Bundle {
                 name: member.name.clone(),
                 document: document(member.document)?,
                 captures: member.captures,
-                release: member.release,
+                closure: member.closure,
                 references: member.references,
                 helper_owners: member.helper_owners,
                 written: member.written,
@@ -211,7 +211,7 @@ pub struct MemberBody {
     pub name: Name,
     pub document: ChildRef,
     pub captures: BTreeMap<Name, FrozenRef>,
-    pub release: PageRef,
+    pub closure: PageRef,
     pub references: BTreeSet<Name>,
     pub helper_owners: BTreeSet<Name>,
     pub written: Option<Written>,
@@ -258,7 +258,7 @@ impl TokenCodec for MemberBody {
         self.name.encode(out);
         self.document.encode(out);
         self.captures.encode(out);
-        self.release.encode(out);
+        self.closure.encode(out);
         self.references.encode(out);
         self.helper_owners.encode(out);
         self.written.encode(out);
@@ -271,7 +271,7 @@ impl TokenCodec for MemberBody {
             name: Name::decode(input)?,
             document: ChildRef::decode(input)?,
             captures: BTreeMap::decode(input)?,
-            release: PageRef::decode(input)?,
+            closure: PageRef::decode(input)?,
             references: BTreeSet::decode(input)?,
             helper_owners: BTreeSet::decode(input)?,
             written: Option::decode(input)?,

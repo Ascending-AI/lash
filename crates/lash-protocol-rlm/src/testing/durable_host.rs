@@ -23,15 +23,14 @@ const FORMATS: &str = "rlm-cell-law/1";
 /// as the session's executor does for a turn's (FIG-6418).
 #[async_trait::async_trait]
 pub(crate) trait Candidates: Send {
-    /// The candidate of the pending capture of `root` under `commit`, its
-    /// releases pinned in `tx` after `reads`; none when the store holds its
+    /// The candidate of the pending capture of `root` under `commit`, the
+    /// closures it names staged in `tx`; none when the store holds its
     /// pages.
     async fn candidate(
         &mut self,
         root: lash_core_store::checkpoint_graph::NodeId,
         commit: lash_core_store::checkpoint_graph::CommitId,
         tx: &mut lash_durable::ActorTx,
-        reads: &dyn lash_durable::DurableReads,
     ) -> Option<lash_core::plugin::ExecutionCandidate>;
 }
 
@@ -42,9 +41,8 @@ impl Candidates for crate::executor::CodeModeExecutionState {
         root: lash_core_store::checkpoint_graph::NodeId,
         commit: lash_core_store::checkpoint_graph::CommitId,
         tx: &mut lash_durable::ActorTx,
-        reads: &dyn lash_durable::DurableReads,
     ) -> Option<lash_core::plugin::ExecutionCandidate> {
-        self.execution_candidate(root, commit, tx, reads)
+        self.execution_candidate(root, commit, tx)
             .await
             .expect("the capture's candidate builds")
     }
@@ -182,16 +180,7 @@ impl DurableHost {
         }));
         let commit = lash_core_store::checkpoint_graph::CommitId::mint();
         let label = CommitLabel::new("law.working");
-        let candidate = candidates
-            .candidate(
-                *root,
-                commit,
-                &mut tx,
-                self.context
-                    .durable_reads()
-                    .expect("the host's store reads"),
-            )
-            .await;
+        let candidate = candidates.candidate(*root, commit, &mut tx).await;
         let published = candidate
             .as_ref()
             .map_or(0, |candidate| candidate.manifest.summary().fresh_nodes);
@@ -277,6 +266,7 @@ async fn register(backend: &lash_execution_contracts::backend::Backend, index: u
             node: NodeId::new(format!("rlm-cell-law-{index}")),
             decodes: vec![FormatSet::new(FORMATS)],
             serves: Vec::new(),
+            held: Default::default(),
             ttl_millis: 600_000,
         })
         .await

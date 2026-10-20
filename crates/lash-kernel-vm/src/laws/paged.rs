@@ -21,7 +21,7 @@ fn a_parked_kir_frame_resumes_from_its_sealed_record() {
     assert!(matches!(embedder.run(), Step::Parked(_)));
     let root = reopen(&mut embedder);
     assert_eq!(root.owner, lash_kernel_doc::heap::PageId([9; 32]));
-    assert_eq!(root.release, lash_kernel_doc::heap::PageId([8; 32]));
+    assert_eq!(root.closure, lash_kernel_doc::heap::PageId([8; 32]));
     embedder.deliver("echo");
     assert_eq!(result(embedder.run_to_end(&[])), int(7));
 }
@@ -335,7 +335,7 @@ fn argument_freezing_preserves_a_page_ports_typed_failure() {
         }
     }
     let program = Program {
-        release: PageId([8; 32]),
+        closure: PageId([8; 32]),
         document: Arc::new(parse_document("kernel 1\nnumbers by_spelling\nentry f(x: Any) -> Any\nfn f(x) { return x }\nmain { }").unwrap()),
         library: PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
     };
@@ -390,14 +390,14 @@ fn a_megabyte_native_error_survives_a_parked_finally() {
     assert_eq!(error.data, lash_kernel_doc::Datum::Null);
 }
 
-/// `K-SES-003` across helper releases (FIG-6193): the session a main
-/// cell under one release carries, classified by `classify_carry` over the
-/// real heap and census, is adopted by the next cell under the same
-/// release or another one with every binding it carried and their aliases,
-/// a closure dropped with its typed diagnostic, and that cell's root pins
-/// its own release.
+/// `K-SES-003` across execution closures (FIG-6193): the session a main
+/// cell carries, classified by `classify_carry` over the real heap and
+/// census, is adopted by the next cell whatever closure that cell's
+/// document derives, with every binding it carried and their aliases, a
+/// closure dropped with its typed diagnostic, and that cell's root pins
+/// its own closure.
 #[test]
-fn a_session_carried_under_one_release_is_adopted_under_another() {
+fn a_session_carried_under_one_closure_is_adopted_under_another() {
     let mut first = Embedder::new(
         "main { let xs = [1, 2] let ys = xs let n = num.add(40, 2) let f = fn(k) { return num.add(k, 1) } return null }",
     );
@@ -417,7 +417,7 @@ fn a_session_carried_under_one_release_is_adopted_under_another() {
         lash_kernel_state::kernel_internals::session_heap(&session),
     )
     .unwrap();
-    for release in [
+    for closure in [
         lash_kernel_doc::heap::PageId([8; 32]),
         lash_kernel_doc::heap::PageId([7; 32]),
     ] {
@@ -425,7 +425,7 @@ fn a_session_carried_under_one_release_is_adopted_under_another() {
             "main { set ys[0] = 5 let got = num.add(num.add(n, xs[1]), xs[0]) let r = perform echo(1) as Any return got }",
         );
         let (mut program, _) = next.program(true);
-        program.release = release;
+        program.closure = closure;
         next.source = first.source.clone();
         next.machine = crate::KernelMachine::start_with_census(
             program,
@@ -453,14 +453,14 @@ fn a_session_carried_under_one_release_is_adopted_under_another() {
             .unwrap()
             .unwrap();
         assert_eq!(
-            sealed.root.release, release,
-            "the next cell pins its own release"
+            sealed.root.closure, closure,
+            "the next cell pins its own closure"
         );
         next.deliver("echo");
         let crate::End::Finished(ended) = next.run_to_end(&[]) else {
-            panic!("the next cell finishes under {release:?}")
+            panic!("the next cell finishes under {closure:?}")
         };
-        assert_eq!(ended.result, int(49), "under {release:?}");
+        assert_eq!(ended.result, int(49), "under {closure:?}");
     }
 }
 

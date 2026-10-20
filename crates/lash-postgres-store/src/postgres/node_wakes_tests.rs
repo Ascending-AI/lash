@@ -147,6 +147,7 @@ async fn a_saturated_shared_pool_cannot_starve_the_heartbeat() {
             node: NodeId::new("watcher"),
             decodes: vec![formats()],
             serves: Vec::new(),
+            held: Default::default(),
             ttl_millis: i64::try_from(lease.ttl.as_millis()).expect("ttl fits"),
         })
         .await

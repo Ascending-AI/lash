@@ -1422,6 +1422,31 @@ impl TokenCodec for Implementation {
     }
 }
 
+/// The header of the definition whose token body is `bytes`, read without
+/// decoding its body (FIG-6931): the fields before the implementation, and
+/// which implementation it states.
+pub(crate) fn decode_header(bytes: &[u8]) -> Result<crate::FunctionHeader, TokenError> {
+    let mut input = TokenReader::new(bytes).with_data_limits(crate::KernelDataLimits::standard());
+    input.expect_struct(8)?;
+    Ok(crate::FunctionHeader {
+        kernel: input.unsigned_u32()?,
+        name: QualifiedName::decode(&mut input)?,
+        signature: Signature::decode(&mut input)?,
+        errors: BTreeSet::decode(&mut input)?,
+        charge: Formula::decode(&mut input)?,
+        guard: Option::decode(&mut input)?,
+        implementation: match variant(&mut input, |variant| match variant {
+            0 => Some(0),
+            1 | 2 => Some(1),
+            _ => None,
+        })? {
+            0 => crate::ImplementationKind::Native,
+            1 => crate::ImplementationKind::Body,
+            _ => crate::ImplementationKind::Both,
+        },
+    })
+}
+
 /// Node kind 14's typed body.
 impl TokenCodec for FunctionDefinition {
     fn encode(&self, out: &mut TokenWriter) {

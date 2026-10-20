@@ -102,9 +102,9 @@ pub enum Unreplayable {
     Pruned,
     /// The segment ran under a kernel version this build does not run.
     KernelVersion,
-    /// The segment's run pins a helper release or function this build's
-    /// workers do not hold.
-    ReleaseMissing,
+    /// The segment's run pins a function this build's workers do not
+    /// hold, or whose native they lack.
+    FunctionMissing,
     /// The segment recorded no tape or start: it ran before they were
     /// recorded, or it reached no recorded end.
     NoTape,
@@ -354,11 +354,9 @@ fn failed(host: &ReplayHost, failure: KernelFailure) -> Result<SegmentAnswer, Re
         } => match refusal {
             RunRefusal::Restore {
                 refusal:
-                    KernelRestoreRefusal::ReleaseMismatch { .. }
-                    | KernelRestoreRefusal::MissingHelper { .. }
-                    | KernelRestoreRefusal::MissingNative { .. }
+                    KernelRestoreRefusal::MissingNative { .. }
                     | KernelRestoreRefusal::MissingFunction { .. },
-            } => unreplayable(Unreplayable::ReleaseMissing),
+            } => unreplayable(Unreplayable::FunctionMissing),
             RunRefusal::Restore {
                 refusal: KernelRestoreRefusal::KernelVersion { .. },
             }
@@ -496,6 +494,13 @@ impl KernelProcessEngine {
         let Ok(args) = entry_args(&document, &input) else {
             return unreplayable(Unreplayable::NoTape);
         };
+        let Ok(closure) = lash_vm_broker::kernel::closure::derive(
+            document.manifest.functions.keys().copied(),
+            &self.functions,
+            lash_vm_broker::kernel::closure::Natives::Declared,
+        ) else {
+            return unreplayable(Unreplayable::FunctionMissing);
+        };
         let host = Arc::new(ReplayHost::of(reads));
         let machines = lash_vm_client::RemoteMachines::new(
             self.workers.clone(),
@@ -514,6 +519,7 @@ impl KernelProcessEngine {
                 save: None,
             },
             settings.bounds(),
+            closure,
         )
         .map_err(|error| ReplayFault(error.to_string()))?;
         let lease = self.policy.replay_lease;
@@ -532,8 +538,8 @@ impl KernelProcessEngine {
             .workers
             .spools()
             .map_err(|failure| ReplayFault(failure.to_string()))?;
-        let releases = machines
-            .releases()
+        let closure = machines
+            .closure()
             .map_err(|failure| ReplayFault(failure.to_string()))?;
         let parked = start.parked.map(|(page, fact)| {
             (
@@ -559,7 +565,7 @@ impl KernelProcessEngine {
                 .map(|admission| admission.0.clone())
                 .collect(),
             binding,
-            releases,
+            closure,
             &spools,
             // A host-side replay runs outside the engine: it times its
             // reader's lease on the system clock.

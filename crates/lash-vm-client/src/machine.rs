@@ -18,8 +18,8 @@ use lash_kernel_doc::{
 use lash_kernel_state::paged::SessionRoot;
 use lash_kernel_vm::{Bounds, EffectModes, End, Outcome, Target, WaitId};
 use lash_vm_broker::ParentFault;
+use lash_vm_broker::kernel::closure::Closure;
 use lash_vm_broker::kernel::pages::{PageExchange, SharedPages};
-use lash_vm_broker::kernel::state::{GraphStateFailure, ReleaseGraph};
 use lash_vm_broker::kernel::{
     DrivenMachine, KernelFailure, MachinePark, MachineStep, Machines, ParkedState,
 };
@@ -167,19 +167,23 @@ pub struct RemoteMachines {
     pub host: Arc<dyn RunHost>,
     document: DocumentId,
     /// The dialect the run's document is written in, as its session or
-    /// process recorded it: the worker refuses one its embedding lacks, and
-    /// a new run pins that dialect's helper release.
+    /// process recorded it: the worker refuses one its embedding lacks.
     dialect: String,
     /// The document's token body, as every checkout's `Start` carries it.
     body: Arc<[u8]>,
     start: RunStart,
     bounds: Bounds,
-    releases: std::sync::OnceLock<Result<ReleaseGraph, GraphStateFailure>>,
+    /// The document's execution closure, as the parent derived it over the
+    /// functions it links documents against.
+    closure: Closure,
+    /// The closures of the session's earlier cells no commit installed.
+    carried: Vec<Closure>,
 }
 
 impl RemoteMachines {
     /// The run of `document`, written in `dialect`, from `start`, held to
-    /// `bounds`.
+    /// `bounds`, its roots pinning `closure`, the document's execution
+    /// closure.
     /// `dialect` is recorded configuration: what the run's session or
     /// process recorded at creation, never a live read. The document
     /// crosses to each checkout as the token body it already holds:
@@ -199,6 +203,7 @@ impl RemoteMachines {
         dialect: &str,
         start: RunStart,
         bounds: Bounds,
+        closure: Closure,
     ) -> Result<Self, KernelFailure> {
         lash_kernel_vm::CellStart::admit_host_metadata(
             start.host.iter().map(|(name, _)| name.as_str()),
@@ -214,8 +219,18 @@ impl RemoteMachines {
             body: Arc::clone(document.shared_body()),
             start,
             bounds,
-            releases: std::sync::OnceLock::new(),
+            closure,
+            carried: Vec::new(),
         })
+    }
+
+    /// These machines, whose session's earlier cells ran under `carried`,
+    /// closures no commit installed yet: a park whose pages name one
+    /// stages it.
+    #[must_use]
+    pub fn with_carried(mut self, carried: Vec<Closure>) -> Self {
+        self.carried = carried;
+        self
     }
 
     /// A checkout holding the run: the one that lowered its document when
@@ -343,11 +358,12 @@ impl Machines for RemoteMachines {
         self.bounds
     }
 
-    fn releases(&self) -> Result<&ReleaseGraph, KernelFailure> {
-        self.releases
-            .get_or_init(lash_vm_broker::kernel::state::release_manifests)
-            .as_ref()
-            .map_err(|failure| KernelFailure::State(failure.clone()))
+    fn closure(&self) -> Result<&Closure, KernelFailure> {
+        Ok(&self.closure)
+    }
+
+    fn carried(&self) -> &[Closure] {
+        &self.carried
     }
 
     async fn start(

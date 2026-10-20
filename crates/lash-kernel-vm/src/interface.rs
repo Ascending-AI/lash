@@ -58,8 +58,10 @@ pub use lash_kernel_state::paged::{Charge, MemoryMeter};
 /// saved. Replacing the document or library requires a fresh admission.
 #[derive(Clone, Debug)]
 pub struct Program {
-    /// The exact helper release selected by composition.
-    pub release: lash_kernel_doc::heap::PageId,
+    /// The ExecutionClosure node derived from the document: every library
+    /// function it reaches, by identity. A root records it, and a resume
+    /// opens only under the closure the root names.
+    pub closure: lash_kernel_doc::heap::PageId,
     pub document: Arc<Document>,
     pub library: PreparedLibrary,
 }

@@ -49,6 +49,8 @@ tokio-util = { workspace = true }
 # The laws' runs pin a dialect's release, so their build holds one.
 lash-vm-releases = { workspace = true, features = ["dialect-typescript"] }
 lash-core-execution = { workspace = true, features = ["testing"] }
+# The resume law builds two releases of one package line.
+lash-kernel-package = { workspace = true }
 # The lease laws time an activation on the simulated clock.
 lash-durable-test = { workspace = true }
 tempfile = { workspace = true }

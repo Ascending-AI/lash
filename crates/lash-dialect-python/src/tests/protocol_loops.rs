@@ -20,7 +20,7 @@ fn run(source: &str) -> (String, Vec<String>) {
     let program = Program {
         document: Arc::clone(lowered.document.shared()),
         library: installed().prepared.clone(),
-        release: pages::RELEASE,
+        closure: pages::CLOSURE,
     };
     let bounds = Bounds {
         charge_limit: 200_000,

@@ -71,9 +71,9 @@ pub(crate) struct CellServices {
     pub code_renderer: crate::render::CodeRendererSlot,
     /// How the session's dialect words what a model reads.
     pub prompts: Arc<dyn crate::dialect::DialectPrompts>,
-    /// Which helper release the cell is lowered against; `None` is the
-    /// build's own (FIG-5799).
-    pub helpers: Option<Arc<dyn crate::plugin::HelperReleaseGate>>,
+    /// Which package set the cell is lowered under; `None` is lash's own
+    /// (FIG-6918).
+    pub packages: Option<Arc<dyn crate::plugin::PackageGate>>,
     /// The library the workers hold, which a cell's document is retained
     /// with the declarations of.
     pub kernel: KernelCarry,
@@ -248,8 +248,8 @@ enum Refused {
     Cell(Box<lash_core::CellFailure>),
     /// A nested effect of the cell's setup failed: recorded for the turn.
     Nested(Box<lash_core::RuntimeEffectControllerError>),
-    /// The fleet cannot yet supply definitions every co-serving node reads.
-    Helpers(Box<lash_core::RuntimeEffectControllerError>),
+    /// No package set is yet held by every live serving node.
+    Packages(Box<lash_core::RuntimeEffectControllerError>),
     /// A worker fault.
     Worker(Box<lash_vm_client::PoolError>),
 }
@@ -385,14 +385,22 @@ async fn link_cell(
     let mut names = state.names();
     names.extend(projected.keys().map(|name| Name::new(name.as_str())));
 
-    // A cell is written against the newest helper release every live node
-    // holds (FIG-5799).
-    let helpers = match &services.helpers {
-        Some(gate) => gate
-            .writable()
-            .await
-            .map_err(|error| Refused::Helpers(Box::new(error)))?,
-        None => lash_vm_runtime::KERNEL_HELPER_RELEASE,
+    // A cell is written under the first package set every live serving
+    // node holds (FIG-6918, FLEET-SET).
+    let packages = match &services.packages {
+        Some(gate) => {
+            let packages = gate
+                .writable()
+                .await
+                .map_err(|error| Refused::Packages(Box::new(error)))?;
+            state.writes_under(packages.digest());
+            packages
+        }
+        None => crate::plugin::CellPackages(
+            lash_vm_runtime::lash_packages()
+                .map_err(|error| host_failure(error.to_string()))?
+                .own(),
+        ),
     };
 
     // gather → decide → offer: the run's deferred provider matches the
@@ -410,7 +418,7 @@ async fn link_cell(
                     bindings: names.clone(),
                     functions: state.lowering_functions(),
                     operations: boundary.operations().clone(),
-                    helpers,
+                    packages: packages.digest(),
                 })
                 .await;
             let calls = match calls {
@@ -480,7 +488,7 @@ async fn link_cell(
                     operations,
                     bindings: names,
                     functions: state.lowering_functions(),
-                    helpers,
+                    packages: packages.digest(),
                 })
                 .await
         }
@@ -509,10 +517,10 @@ async fn link_cell(
                 "this session's cells are written in `{dialect}`, and no worker has that dialect installed"
             )));
         }
-        Ok(Response::HelperReleaseNotHeld { release }) => {
+        Ok(Response::PackagesNotHeld { packages }) => {
             return Err(lash_core::CellFailure::new(
-                lash_core::CellFailureKind::HelperReleaseNotHeld { release },
-                format!("this session's cells are written against helper release {release}, and the worker does not hold it"),
+                lash_core::CellFailureKind::PackagesNotHeld { packages },
+                format!("this cell is written under package set {packages}, and the worker does not hold it"),
             ).into());
         }
         Ok(Response::Printed(_) | Response::Read { .. } | Response::ToolCalls(_)) => {
@@ -747,7 +755,7 @@ async fn run_linked_cell(
                 lash_core::CellFailure::new(lash_core::CellFailureKind::Host, message),
             );
         }
-        Err(Refused::Helpers(error)) => {
+        Err(Refused::Packages(error)) => {
             let message = error.to_string();
             ctx.record_nested_effect_error(*error);
             return exec_setup_failure_or_stop(
@@ -946,6 +954,31 @@ async fn run_linked_cell(
         controls: host.boundary.controls(),
         written: host.envelope.written.clone(),
     };
+    // The cell's roots pin its document's execution closure, and a saved
+    // function's record names it: a capture stages it with them.
+    let closure = match services
+        .kernel
+        .library()
+        .map_err(|refusal| refusal.to_string())
+        .and_then(|functions| {
+            lash_vm_broker::kernel::closure::derive(
+                document.manifest.functions.keys().copied(),
+                &functions,
+                lash_vm_broker::kernel::closure::Natives::Declared,
+            )
+            .map_err(|refusal| refusal.to_string())
+        }) {
+        Ok(closure) => closure,
+        Err(message) => {
+            return exec_setup_failure_or_stop(
+                state,
+                &ctx,
+                lash_core::CellFailure::new(lash_core::CellFailureKind::Host, message),
+            );
+        }
+    };
+    let carried = state.carried_closures();
+    state.runs_under(&closure);
     let machines = match lash_vm_client::RemoteMachines::new(
         services.workers.clone(),
         owner,
@@ -963,8 +996,9 @@ async fn run_linked_cell(
             save: Some(save),
         },
         bounds,
+        closure,
     ) {
-        Ok(machines) => machines,
+        Ok(machines) => machines.with_carried(carried),
         Err(error) => {
             return exec_setup_failure_or_stop(
                 state,
@@ -1285,6 +1319,7 @@ async fn record_end(
     let session = state.end_descriptor().map_err(|error| {
         KernelFailure::Checkpoint(lash_vm_broker::QuietPointRefusal(error.to_string()))
     })?;
+    let carried = state.carried_closures();
     snapshots
         .commit_run_end(
             lash_vm_broker::kernel::EndSave {
@@ -1293,6 +1328,7 @@ async fn record_end(
                 end,
                 session,
                 pages,
+                carried: &carried,
                 with: Vec::new(),
             },
             host,

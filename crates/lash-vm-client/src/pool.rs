@@ -66,7 +66,7 @@ impl WorkerPool {
         }
         let held = match &config.packages {
             Some(packages) => packages.clone(),
-            None => lash_vm_library::lash_packages().map_err(|error| {
+            None => lash_vm_releases::lash_packages().map_err(|error| {
                 PoolError::breach(ProtocolBreach::Machine {
                     detail: Detail::new(error),
                 })

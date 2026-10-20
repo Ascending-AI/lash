@@ -171,6 +171,7 @@ async fn every_role_names_itself_in_pg_stat_activity() {
             node: NodeId::new("named"),
             decodes: vec![FormatSet::new("law-formats")],
             serves: Vec::new(),
+            held: Default::default(),
             ttl_millis: 15_000,
         })
         .await

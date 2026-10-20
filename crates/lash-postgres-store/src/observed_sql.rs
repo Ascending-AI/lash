@@ -907,7 +907,7 @@ mod tests {
 
 #[path = "observed_sql/bindings.rs"]
 pub(crate) mod bindings;
-pub(crate) use bindings::{Query, query, query_as, query_scalar};
+pub(crate) use bindings::{query, query_as, query_scalar};
 
 /// Carry the execution token to SQLx's argument extraction, wherever its
 /// future is polled. No task/thread identity guess joins binds to a statement.

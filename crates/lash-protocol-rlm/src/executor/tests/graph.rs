@@ -141,9 +141,6 @@ async fn a_working_state_is_adopted_whole_and_a_cancelled_cell_never_promotes_it
                 working,
                 lash_core_store::checkpoint_graph::CommitId::mint(),
                 &mut probe,
-                host.context()
-                    .durable_reads()
-                    .expect("the host's store reads"),
             )
             .await
             .expect("the candidate builds")

@@ -390,24 +390,22 @@
         },
         {
           "additionalProperties": false,
-          "description": "The worker cannot lower the cell against the helper release it names.\nThe host can route the work to a build that retains this release.",
+          "description": "The worker does not hold the package set the cell is written under\n(FIG-6918). The host can serve the work on a node that holds it.",
           "properties": {
-            "helper_release_not_held": {
+            "packages_not_held": {
               "properties": {
-                "release": {
-                  "format": "uint32",
-                  "minimum": 0,
-                  "type": "integer"
+                "packages": {
+                  "$ref": "#/$defs/PackageSetDigest"
                 }
               },
               "required": [
-                "release"
+                "packages"
               ],
               "type": "object"
             }
           },
           "required": [
-            "helper_release_not_held"
+            "packages_not_held"
           ],
           "type": "object"
         }
@@ -1412,6 +1410,10 @@
         "class"
       ],
       "type": "object"
+    },
+    "PackageSetDigest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
     },
     "ProcessStartPhase": {
       "description": "A phase of a host process start, in the order a start passes them. Each\nphase a start reached carries its duration on the start's producer.",

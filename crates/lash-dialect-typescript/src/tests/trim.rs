@@ -103,7 +103,7 @@ fn native_trim_agrees_with_generic_utf16_scan() {
     let make_program = |helper: &str| {
         let document = parse_document(&format!("{header}entry trim(text: Text, leading: Bool, trailing: Bool) -> Text\nfn trim(text, leading, trailing) {{ let output = invoke {helper}(text, leading, trailing) print output return output }} main {{}}")).unwrap();
         Program {
-            release: super::pages::RELEASE,
+            closure: super::pages::CLOSURE,
             document: Arc::new(document),
             library: prepared.clone(),
         }

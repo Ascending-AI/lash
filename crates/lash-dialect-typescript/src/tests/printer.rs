@@ -41,7 +41,7 @@ impl Host for Observer {
 fn run(document: &k::Document, library: &PreparedLibrary, target: Target) -> (End, Vec<String>) {
     let mut machine = super::pages::start(
         Program {
-            release: super::pages::RELEASE,
+            closure: super::pages::CLOSURE,
             document: Arc::new(document.clone()),
             library: library.clone(),
         },

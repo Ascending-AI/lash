@@ -77,7 +77,8 @@ fn main() -> Result<()> {
     );
     let counter = Counter::open()?;
     let (standard, assembly) = counter.measure(|| {
-        lash_vm_library::lash_packages().map(|packages| std::sync::Arc::clone(packages.functions()))
+        lash_vm_releases::lash_packages()
+            .map(|packages| std::sync::Arc::clone(packages.functions()))
     })?;
     let standard = standard?;
     let (embedding, boot) = counter

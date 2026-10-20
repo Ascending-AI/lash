@@ -118,7 +118,8 @@ pub(super) fn claim_within(
                 limit,
                 CANCEL_MAIL,
                 serves,
-                lash_durable::domain::SESSION_CLOSE_MAIL
+                lash_durable::domain::SESSION_CLOSE_MAIL,
+                owner.node.as_str()
             ],
             |row| {
                 Ok((
@@ -126,13 +127,14 @@ pub(super) fn claim_within(
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, Option<String>>(3)?,
+                    row.get::<_, bool>(4)?,
                 ))
             },
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut claimed = Vec::with_capacity(candidates.len());
-    for (key, state, stored_formats, requires) in candidates {
-        let purpose = ClaimPurpose::of_stored(lease, &stored_formats, requires.as_deref());
+    for (key, state, stored_formats, requires, holds) in candidates {
+        let purpose = ClaimPurpose::of_stored(lease, &stored_formats, requires.as_deref(), holds);
         let purpose = match purpose {
             Ok(purpose) => purpose,
             Err(error) => return Ok(Err(error)),

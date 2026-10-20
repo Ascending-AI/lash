@@ -5,7 +5,7 @@ mod config;
 mod config_owner;
 mod config_types;
 mod factory;
-mod helpers;
+mod packages;
 mod prose_projector;
 mod protocol_driver;
 pub(crate) mod protocol_session;
@@ -32,7 +32,8 @@ pub use config_types::{
     MemoryLimiter, MemoryMeter,
 };
 pub use factory::RlmProtocolPluginFactory;
-pub use helpers::HelperReleaseGate;
+pub(crate) use packages::OneSet;
+pub use packages::{CellPackages, PackageGate};
 pub use protocol_session::{RlmSessionConfigDecodeError, rlm_session_config};
 
 mod channel;

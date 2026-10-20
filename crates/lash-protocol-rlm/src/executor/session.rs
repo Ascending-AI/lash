@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use lash_core::SessionError;
 use lash_core::plugin::SessionPages;
-use lash_core_store::checkpoint_graph::stage::{ManifestEntry, StageFault, StageSpool};
+use lash_core_store::checkpoint_graph::stage::{StageFault, StageSpool};
 use lash_core_store::checkpoint_graph::{CommitId, NodeId};
 use lash_core_store::execution_state::{
     ExecutionGraphCapture, ExecutionGraphPurpose, HydratedExecutionGraph,
@@ -32,6 +32,7 @@ use lash_kernel_doc::{Datum, FunctionId, KERNEL_VERSION, Name, NumberPolicy};
 use lash_kernel_state::paged::session::{Note, SessionNotes, edit_notes, read_notes};
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource, SessionRoot};
 use lash_kernel_vm::{SessionEditor, SessionValue};
+use lash_vm_broker::kernel::closure::Closure;
 use lash_vm_broker::kernel::pages::{ParentSeal, SharedSpool, SpoolRoot, answer_page};
 use lash_vm_client::service::LowerFunction;
 
@@ -42,9 +43,6 @@ mod graph;
 
 /// The reserved binding the history projection answers; no cell binds it.
 pub(crate) const HISTORY_BINDING: &str = "history";
-
-/// The most manifest entries one read of a capture's candidate takes.
-const MANIFEST_BATCH: usize = 1024;
 
 /// One version of the session: its descriptor and what the descriptor
 /// states.
@@ -119,10 +117,12 @@ struct Pending {
     /// The spool candidate built for the capture's commit, once one was.
     commit: Option<CommitId>,
     purpose: ExecutionGraphPurpose,
-    /// The helper releases the capture's commit pins.
-    releases: BTreeSet<NodeId>,
+    /// The execution closures the capture's commit stages.
+    closures: BTreeSet<NodeId>,
     /// The held runs whose carries the capture owns once committed.
     runs: usize,
+    /// The package stamp the capture's commit writes, when it changes it.
+    stamp: Option<Option<lash_kernel_doc::PackageSetDigest>>,
 }
 
 /// What a finished cell changed in the session's bindings.
@@ -139,10 +139,21 @@ pub struct CodeModeExecutionState {
     /// The descriptor the store holds as of the last acknowledged capture
     /// or restore.
     installed: Option<NodeId>,
-    /// The helper releases an acknowledged capture installed: a saved
-    /// function's record names the release its code calls into, and a
-    /// capture sends that release's closure until a commit installs it.
-    releases: BTreeSet<NodeId>,
+    /// The execution closures of the cells this state ran, by reference: a
+    /// saved function's record names the closure of the cell that saved
+    /// it, and a capture that names one stages it until a commit installs
+    /// it.
+    closures: BTreeMap<NodeId, Closure>,
+    /// The closures an acknowledged capture installed.
+    installed_closures: BTreeSet<NodeId>,
+    /// The package set the fleet gate wrote this state's last cell under:
+    /// a capture of the cell parked stamps the session with it, so only a
+    /// node that holds the set claims the turn (FIG-6918, CLAIM-HOLDS).
+    packages: Option<lash_kernel_doc::PackageSetDigest>,
+    /// The stamp an acknowledged capture left on the session, once one did:
+    /// a capture rewrites it only when it changes, since a stamping commit
+    /// takes the store's explicit-transaction path.
+    stamped: Option<Option<lash_kernel_doc::PackageSetDigest>>,
     pending: Option<Pending>,
     /// Whether the state as it stands is a turn's working state no session
     /// revision publishes yet: the turn's final capture owes it even when
@@ -187,7 +198,10 @@ impl CodeModeExecutionState {
             numbers,
             current: Version::default(),
             installed: None,
-            releases: BTreeSet::new(),
+            closures: BTreeMap::new(),
+            installed_closures: BTreeSet::new(),
+            packages: None,
+            stamped: None,
             pending: None,
             final_owed: false,
             active: None,
@@ -788,10 +802,36 @@ impl CodeModeExecutionState {
             root: graph.root,
             commit: None,
             purpose,
-            releases: BTreeSet::new(),
+            closures: BTreeSet::new(),
             runs: self.pages.held(),
+            stamp: None,
         });
         Ok(ExecutionGraphCapture::Replace(graph))
+    }
+
+    /// The closures of cells this state ran that no acknowledged capture
+    /// installed: a cell's commit stages each its pages name.
+    pub(crate) fn carried_closures(&self) -> Vec<Closure> {
+        self.closures
+            .iter()
+            .filter(|(reference, _)| !self.installed_closures.contains(reference))
+            .map(|(_, closure)| closure.clone())
+            .collect()
+    }
+
+    /// Notes that a cell of this state runs under `closure`, its
+    /// document's execution closure: a capture that names it stages it.
+    pub(crate) fn runs_under(&mut self, closure: &Closure) {
+        if !self.installed_closures.contains(&closure.reference()) {
+            self.closures
+                .entry(closure.reference())
+                .or_insert_with(|| closure.clone());
+        }
+    }
+
+    /// Notes that this state's next cell is written under `packages`.
+    pub(crate) fn writes_under(&mut self, packages: lash_kernel_doc::PackageSetDigest) {
+        self.packages = Some(packages);
     }
 
     /// The session's descriptor as it stands, if it holds one.
@@ -805,21 +845,18 @@ impl CodeModeExecutionState {
     /// The candidate that publishes the pending capture's pages under
     /// `commit` (FIG-6418), when the capture is `root`'s and the turn's
     /// spool holds it: a candidate of the same capture built before is
-    /// withdrawn first. Every helper release the pages name that no
-    /// acknowledged capture installed is pinned in `tx`, after `reads` of
-    /// whether the store pins it already. None when the store holds
-    /// `root`'s pages.
+    /// withdrawn first. Every execution closure of a cell this state ran
+    /// that the pages name and no acknowledged capture installed is staged
+    /// in `tx`. None when the store holds `root`'s pages.
     ///
     /// # Errors
     ///
-    /// The spool's faults, or a release the pages name that this build
-    /// does not hold.
+    /// The spool's faults.
     pub(crate) async fn execution_candidate(
         &mut self,
         root: NodeId,
         commit: CommitId,
         tx: &mut lash_durable::ActorTx,
-        reads: &dyn lash_durable::DurableReads,
     ) -> Result<Option<lash_core::plugin::ExecutionCandidate>, SessionError> {
         let Some(mut spool) = self.pages.staged().cloned() else {
             return Ok(None);
@@ -835,36 +872,25 @@ impl CodeModeExecutionState {
         }
         let mut manifest = spool.candidate(root, None, commit).map_err(protocol)?;
         pending.commit = Some(commit);
-        let mut named = BTreeSet::new();
-        let mut after = None;
-        loop {
-            let entries = manifest.entries(after, MANIFEST_BATCH).map_err(protocol)?;
-            let Some(last) = entries.last() else {
-                break;
-            };
-            after = Some(match last {
-                ManifestEntry::External(id) => *id,
-                ManifestEntry::Fresh(node) => node.id,
-            });
-            named.extend(entries.into_iter().filter_map(|entry| match entry {
-                ManifestEntry::External(id) => Some(id),
-                ManifestEntry::Fresh(_) => None,
-            }));
-        }
-        let mut releases = BTreeSet::new();
-        if let Some(held) = held_releases() {
-            for release in named.difference(&self.releases) {
-                if held.pinned(*release).is_none() {
-                    continue;
-                }
-                held.pin(reads, tx, *release, true)
-                    .await
-                    .map_err(protocol)?;
-                releases.insert(*release);
-            }
+        let staged = lash_vm_broker::kernel::closure::stage_named(
+            manifest.as_mut(),
+            self.closures
+                .iter()
+                .filter(|(reference, _)| !self.installed_closures.contains(reference))
+                .map(|(_, closure)| closure),
+            tx,
+        )
+        .map_err(protocol)?;
+        // A parked cell pins the code it was written under; a session
+        // between cells relinks its next one and pins none.
+        let stamp = self.packages.filter(|_| self.active.is_some());
+        let changes = self.stamped != Some(stamp);
+        if changes {
+            tx.stamp_packages(stamp);
         }
         if let Some(pending) = self.pending.as_mut() {
-            pending.releases = releases;
+            pending.closures = staged;
+            pending.stamp = changes.then_some(stamp);
         }
         Ok(Some(lash_core::plugin::ExecutionCandidate { manifest }))
     }
@@ -884,7 +910,13 @@ impl CodeModeExecutionState {
             return;
         };
         self.installed = Some(pending.root);
-        self.releases.extend(pending.releases);
+        if let Some(stamp) = pending.stamp {
+            self.stamped = Some(stamp);
+        }
+        for closure in &pending.closures {
+            self.closures.remove(closure);
+        }
+        self.installed_closures.extend(pending.closures);
         self.pages.release_runs(pending.runs).await;
         if let (Some(commit), Some(spool)) = (pending.commit, self.pages.staged()) {
             let _ = spool.clone().settle(commit);
@@ -961,6 +993,8 @@ impl CodeModeExecutionState {
         };
         self.installed = Some(graph.root);
         self.final_owed = purpose == ExecutionGraphPurpose::Working;
+        // What the restored session's row is stamped with is not known here.
+        self.stamped = None;
         self.withdraw_pending();
         self.active = None;
         self.response_returned = false;
@@ -1180,13 +1214,4 @@ pub fn saved_function_pins(
     state: &HydratedExecutionGraph,
 ) -> Result<BTreeSet<FunctionId>, SessionOpenError> {
     Ok(stored_descriptor(state)?.pins)
-}
-
-/// The helper releases this build holds, read once: a build's releases
-/// never change while it runs.
-fn held_releases() -> Option<&'static lash_vm_broker::kernel::state::ReleaseGraph> {
-    static HELD: std::sync::OnceLock<Option<lash_vm_broker::kernel::state::ReleaseGraph>> =
-        std::sync::OnceLock::new();
-    HELD.get_or_init(|| lash_vm_broker::kernel::state::release_manifests().ok())
-        .as_ref()
 }

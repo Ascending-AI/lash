@@ -255,9 +255,11 @@ pub struct CheckpointRoot {
     pub limits: SavedLimits,
     pub kernel: u32,
     pub document: DocumentId,
-    /// The ReleaseManifest node the run pins; checked before executing,
-    /// never decoded by the parent beyond this header.
-    pub release: PageId,
+    /// The ExecutionClosure node the run pins: every library function its
+    /// document reaches, by identity. Derived from the document, so a
+    /// resume checks it names the run's own; the parent stages it and the
+    /// definitions it names beside the root.
+    pub closure: PageId,
     /// The OwnerBinding node of the execution.
     pub owner: PageId,
     pub target: CellTargetKind,
@@ -292,7 +294,7 @@ impl CheckpointRoot {
     /// The encoded host-name list's byte budget (S1, FIG-6499).
     ///
     /// The 4096-byte root reserves 797 token bytes for its fixed fields:
-    /// struct header (2), kernel (6), document (34), release/owner (66),
+    /// struct header (2), kernel (6), document (34), closure/owner (66),
     /// limits (24), target (3), nine full tree roots (9 * 58), heap (33), largest ended
     /// status (66), and meters (41). All integers use their maximum widths.
     /// Another 256 bytes cover the envelope: each of at most 13 distinct
@@ -321,7 +323,7 @@ impl CheckpointRoot {
 
     /// The root a checkpoint-root page holds, each page it names granted
     /// what the page's answer grants that child: how an embedder opens a
-    /// root it read through its page source. Its release and owner are
+    /// root it read through its page source. Its closure and owner are
     /// host nodes, named by identity and never read through the heap.
     ///
     /// # Errors
@@ -455,7 +457,7 @@ pub struct BindingRecord {
 
 /// A saved function a session holds (`K-SES-004`), in the session's
 /// functions tree under its declared name: its code and what its dialect
-/// wrote of it as the text `meta`, the release its code calls into, and
+/// wrote of it as the text `meta`, the execution closure its code calls into, and
 /// the frozen captures each call instantiates as a fresh family.
 #[derive(Clone, Debug)]
 pub struct FunctionRecord {
@@ -465,7 +467,10 @@ pub struct FunctionRecord {
     /// body that holds its document's token body, which its dialect reads
     /// back to declare it in a later cell's document.
     pub meta: PageValue,
-    pub release: PageRef,
+    /// The ExecutionClosure node of the cell that saved it: a per-root
+    /// closure, which lists every library function the saved document
+    /// reaches.
+    pub closure: PageRef,
     /// Each variable the function reads, by name.
     pub captures: std::collections::BTreeMap<lash_kernel_doc::Name, FrozenRef>,
     /// The token's frozen data before and after the function, when a token

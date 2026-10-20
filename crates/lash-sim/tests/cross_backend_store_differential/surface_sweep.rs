@@ -687,6 +687,7 @@ impl BackendRunner {
                         )),
                         decodes: Vec::new(),
                         serves: Vec::new(),
+                        held: Default::default(),
                         ttl_millis: 60_000,
                     })
                     .await

@@ -52,7 +52,7 @@ fn main(path: &[u32]) -> Site {
 
 fn program(case: &Case, registry: Arc<FunctionRegistry>) -> Program {
     Program {
-        release: crate::pages::RELEASE,
+        closure: crate::pages::CLOSURE,
         document: Arc::new(parse_document(&case.document).expect("case document")),
         library: PreparedLibrary::new(registry),
     }

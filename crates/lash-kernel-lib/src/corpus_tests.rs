@@ -352,7 +352,7 @@ fn k_lib_009_document_corpus_names_registered_definitions() {
             lash_kernel_doc::validate_document(&document, &registry).unwrap();
             let mut machine = testsupport::start(
                 lash_kernel_vm::Program {
-                    release: lash_kernel_doc::heap::PageId([8; 32]),
+                    closure: lash_kernel_doc::heap::PageId([8; 32]),
                     document: std::sync::Arc::new(document),
                     library: lash_kernel_vm::PreparedLibrary::new(std::sync::Arc::new(
                         registry.clone(),

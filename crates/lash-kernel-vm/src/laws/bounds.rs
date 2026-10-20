@@ -305,7 +305,7 @@ fn a_closure_a_native_backed_body_makes_is_charged_where_it_runs() {
          main {{ let count = probe.counter(200000) let n = apply count() return n }}\n"
     );
     let program = Program {
-        release: lash_kernel_doc::heap::PageId([8; 32]),
+        closure: lash_kernel_doc::heap::PageId([8; 32]),
         document: Arc::new(parse_document(&text).unwrap()),
         library: crate::PreparedLibrary::new(Arc::new(registry)),
     };

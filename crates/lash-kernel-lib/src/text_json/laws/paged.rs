@@ -66,7 +66,7 @@ fn program(operation: &str) -> Program {
     }
     text.push_str(&ENTRY.replace("text.utf16_slice", operation));
     Program {
-        release: PageId([8; 32]),
+        closure: PageId([8; 32]),
         document: Arc::new(parse_document(&text).unwrap()),
         library: lash_kernel_vm::PreparedLibrary::new(registry),
     }

@@ -8,7 +8,7 @@ repository.workspace = true
 homepage.workspace = true
 readme.workspace = true
 rust-version.workspace = true
-description = "lash's own packages and each built dialect's current helper release, as build-generated data."
+description = "lash's own packages, as build-generated data, and what a parent holds of them."
 
 [lib]
 name = "lash_vm_releases"
@@ -27,6 +27,12 @@ dialect-typescript = [
     "dep:lash-ext-ts-core",
 ]
 dialect-python = ["dep:lash-dialect-python", "dep:lash-ext-py-core"]
+# The synthetic successor's kernel version and helper change, made by a
+# worker and its parent alike.
+synthetic-next = [
+    "lash-kernel-doc/synthetic-next",
+    "lash-kernel-package/synthetic-next",
+]
 
 [lints]
 workspace = true
@@ -35,13 +41,13 @@ workspace = true
 # dialect or extension (FIG-5812). The build script defines the helpers.
 [dependencies]
 lash-kernel-doc = { workspace = true }
+lash-kernel-package = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [build-dependencies]
 lash-kernel-package = { workspace = true }
-lash-checkpoint-encoder = { workspace = true }
 thiserror = { workspace = true }
 lash-kernel-doc = { workspace = true }
 lash-kernel-dialect = { workspace = true }

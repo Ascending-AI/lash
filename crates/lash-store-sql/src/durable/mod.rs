@@ -29,6 +29,7 @@
 
 pub mod graph;
 pub mod model_calls;
+pub mod packages;
 pub mod pages;
 pub mod processes;
 pub mod prompts;
@@ -82,11 +83,6 @@ crate::statements! {
              WHERE node_id = ?1 AND boot_id = ?2
              RETURNING boot_id";
 
-        /// The decoded format sets, as JSON arrays, of every node whose lease
-        /// is live at `?1`.
-        live_decodes = "SELECT formats_json FROM nodes
-             WHERE heartbeat_expires_at_ms >= ?1
-             ORDER BY node_id";
     }
 }
 
@@ -120,13 +116,25 @@ crate::statements! {
              RETURNING actor_key, epoch";
 
         /// Every actor boot `?2` of node `?1` owns, with its epoch, format
-        /// set and claim requirements.
-        owned_by = "SELECT actor_key, epoch, formats, requires FROM actors
-             WHERE owner_node = ?1 AND owner_boot = ?2 AND state = 'owned'
-             ORDER BY actor_key";
+        /// set, claim requirements and whether the node holds the package
+        /// set its code was linked under (`packages`, CLAIM-HOLDS).
+        owned_by = "SELECT a.actor_key, a.epoch, a.formats, a.requires,
+                    (a.packages IS NULL OR (
+                        EXISTS (SELECT 1 FROM package_sets AS ps WHERE ps.digest = a.packages)
+                        AND NOT EXISTS (SELECT 1 FROM package_set_members AS pm
+                            WHERE pm.set_digest = a.packages
+                              AND NOT EXISTS (SELECT 1 FROM node_artifacts AS nh
+                                  WHERE nh.node_id = ?1 AND nh.artifact = pm.artifact))))
+             FROM actors AS a
+             WHERE a.owner_node = ?1 AND a.owner_boot = ?2 AND a.state = 'owned'
+             ORDER BY a.actor_key";
 
         /// Record that actor `?1`'s state is written in format set `?2`.
         stamp_formats = "UPDATE actors SET formats = ?2 WHERE actor_key = ?1";
+
+        /// Record that actor `?1`'s code was linked under package set `?2`,
+        /// or, for `NULL`, that its state pins none.
+        stamp_packages = "UPDATE actors SET packages = ?2 WHERE actor_key = ?1";
 
         /// Record actor `?1`'s claim requirements: the canonical JSON array
         /// `?2`, or `NULL` for none (FIG-6034 D3).

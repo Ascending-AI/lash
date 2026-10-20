@@ -1837,15 +1837,6 @@
     "peak_bytes": 11984896,
     "samples": 4
   },
-  "//crates/lash-vm-library:lash-vm-library__unit_test": {
-    "cpu_count": 1,
-    "mean_cores": 0.38,
-    "memory_kb": 262144,
-    "p95_cores": 0.45,
-    "p99_peak_bytes": 13705216,
-    "peak_bytes": 13705216,
-    "samples": 13
-  },
   "//crates/lash-vm-protocol:codec_bounds__test": {
     "cpu_count": 1,
     "memory_kb": 262144,

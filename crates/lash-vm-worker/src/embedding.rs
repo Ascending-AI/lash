@@ -19,10 +19,10 @@
 //! packages are made once, when `lash-vm-releases` is built; a worker
 //! opens its parent's merged image and binds its build's natives.
 //!
-//! The embedding also holds the helper releases its parent's dialects
-//! retain (FIG-5799, `lash-vm-releases`): names resolve against the
-//! embedding's own functions alone, or, for a writer the fleet holds to an
-//! earlier release, against that release's.
+//! Names resolve against one package set's functions: the set the parent's
+//! fleet gate chose for the cell (FIG-6918), the node's own or a retained
+//! one it wholly holds. Every held function stays reachable by identity, so
+//! a document written under another set reads as written.
 
 use std::collections::BTreeMap;
 #[cfg(test)]
@@ -30,11 +30,9 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, OnceLock};
 
 use lash_kernel_dialect::{Diagnostic, Dialect, Environment, Lowered, Mode, NamedLibrary};
-use lash_kernel_doc::{FunctionId, FunctionRegistry, NativeFunction};
+use lash_kernel_doc::{FunctionId, FunctionRegistry, NativeFunction, PackageSetDigest};
 use lash_kernel_package::{HeldPackages, PackageInstall, PackageRefusal};
 use lash_kernel_vm::PreparedLibrary;
-use lash_vm_client::graph::ReleaseGraph;
-use lash_vm_library::{HELPER_RELEASE, HelperReleaseIndex};
 
 /// Why a worker could not assemble what it runs. The worker refuses to
 /// start: it is a defect of the build or of the host's configuration,
@@ -58,10 +56,10 @@ pub enum EmbedError {
          `Embedder::new().dialect(typescript(tuning)?)?.finish(&packages)`"
     )]
     NoDialect,
-    /// A writer asked for the names of a helper release the embedding does
+    /// A writer asked for the names of a package set the embedding does
     /// not hold.
-    #[error("helper release {release} is not held by this embedding")]
-    HelperReleaseNotHeld { release: u32 },
+    #[error("package set {packages} is not held by this embedding")]
+    PackagesNotHeld { packages: PackageSetDigest },
 }
 
 fn cached<T>(
@@ -77,32 +75,25 @@ pub struct Embedding {
     /// the dialects lower to.
     written: Arc<FunctionRegistry>,
     prepared: OnceLock<PreparedLibrary>,
+    /// The names of the node's own set.
     pub(crate) library: NamedLibrary,
     pub(crate) dialects: BTreeMap<String, Dialect>,
-    /// The helper release the embedding's own names are.
-    writes: u32,
-    /// The released helper sets the embedding holds, each with the names a
-    /// writer of it resolves against, made when first asked for.
-    releases: Vec<(
-        HelperReleaseIndex,
-        OnceLock<Result<NamedLibrary, EmbedError>>,
-    )>,
-    /// The manifests of the helper releases the build holds, by graph
-    /// reference: what a parked run pins (FIG-5887 §3), staged when first
-    /// asked for.
-    manifests: OnceLock<Result<ReleaseGraph, EmbedError>>,
+    /// The packages the parent holds, as it registered them.
+    held: HeldPackages,
+    /// Each retained set's names, made when a writer first asks for them.
+    retained: BTreeMap<PackageSetDigest, OnceLock<Result<NamedLibrary, EmbedError>>>,
 }
 
 impl Embedding {
-    /// Every registered function, by name: what a document's manifest
-    /// resolves its names against.
+    /// The node's own set's functions by name, over every registered
+    /// function by identity: what a document's manifest resolves against.
     pub fn library(&self) -> &NamedLibrary {
         &self.library
     }
 
-    /// The helper release the embedding's own names are.
-    pub fn helper_release(&self) -> u32 {
-        self.writes
+    /// The packages the embedding was bound to.
+    pub fn packages(&self) -> &HeldPackages {
+        &self.held
     }
 
     /// The dialects the host installed, by name.
@@ -117,48 +108,25 @@ impl Embedding {
         self.dialects.contains_key(dialect)
     }
 
-    /// The manifests of the helper releases the build holds: a parked run
-    /// resumes only on the exact one it pins.
+    /// The names a writer of the cell's package set `packages` resolves
+    /// against: that set's functions, over every function the embedding
+    /// holds by identity.
     ///
     /// # Errors
     ///
-    /// [`EmbedError::Registry`] when the build's releases do not stage: a
-    /// defect of the build.
-    pub(crate) fn release_manifests(&self) -> Result<&ReleaseGraph, EmbedError> {
-        cached(&self.manifests, || {
-            lash_vm_client::graph::release_manifests()
-                .map_err(|error| EmbedError::Registry(error.to_string()))
-        })
-    }
-
-    /// The released helper sets the embedding holds besides its own
-    /// functions, oldest first: each release as every dialect of the build
-    /// holds it, together.
-    pub fn helper_releases(&self) -> impl Iterator<Item = &HelperReleaseIndex> {
-        self.releases.iter().map(|(release, _)| release)
-    }
-
-    /// The names a writer of helper release `release` resolves against:
-    /// the embedding's own for its own release, and a retained release's
-    /// as that release wrote them, over every function the embedding holds.
-    ///
-    /// # Errors
-    ///
-    /// [`EmbedError::HelperReleaseNotHeld`], and [`EmbedError::Registry`]
-    /// when a release's names cannot be assembled: a defect of the build.
-    pub fn library_for(&self, release: u32) -> Result<&NamedLibrary, EmbedError> {
-        if release == self.writes {
+    /// [`EmbedError::PackagesNotHeld`], and [`EmbedError::Registry`] when
+    /// the set's names cannot be assembled: a defect of the build.
+    pub fn library_of(&self, packages: &PackageSetDigest) -> Result<&NamedLibrary, EmbedError> {
+        if *packages == self.held.own() {
             return Ok(&self.library);
         }
-        let (index, library) = self
-            .releases
-            .iter()
-            .find(|(index, _)| index.ordinal == release)
-            .ok_or(EmbedError::HelperReleaseNotHeld { release })?;
-        cached(library, || {
-            NamedLibrary::resolving(&self.written, |function| index.writes.contains(function))
-                .map_err(|error| EmbedError::Registry(error.to_string()))
-        })
+        let library = self
+            .retained
+            .get(packages)
+            .ok_or(EmbedError::PackagesNotHeld {
+                packages: *packages,
+            })?;
+        cached(library, || set_library(&self.written, &self.held, packages))
     }
 
     /// The fixed registry a machine runs documents against, interpreted by
@@ -313,33 +281,45 @@ impl Embedder {
         registry
             .bind_frame_plans(packages.frame_positions()?, lash_ext_py_core::PLANS)
             .map_err(|error| EmbedError::Registry(error.to_string()))?;
-        let own: std::collections::BTreeSet<_> = packages
-            .view(&packages.own())
-            .map_err(|error| EmbedError::Registry(error.to_string()))?
-            .packages()
-            .flat_map(|package| package.code().ids().iter().copied())
-            .collect();
-        let library = NamedLibrary::resolving(&registry, |function| own.contains(function))
-            .map_err(|error| EmbedError::Registry(error.to_string()))?;
+        let library = set_library(&registry, packages, &packages.own())?;
         let registry = Arc::new(registry);
         let prepared =
             PreparedLibrary::over_frame(registry.clone(), lash_kernel_vm::Charge::Exact, index)
                 .map_err(|error| EmbedError::Registry(error.to_string()))?;
-        let releases = lash_vm_library::standard_helper_releases()
-            .map_err(|error| EmbedError::Registry(error.to_string()))?;
         Ok(Embedding {
             library,
             written: registry,
             prepared: OnceLock::from(prepared),
             dialects: self.dialects,
-            writes: HELPER_RELEASE,
-            releases: releases
-                .into_iter()
-                .map(|release| (release, OnceLock::new()))
+            retained: packages
+                .sets()
+                .keys()
+                .filter(|set| **set != packages.own())
+                .map(|set| (*set, OnceLock::new()))
                 .collect(),
-            manifests: OnceLock::new(),
+            held: packages.clone(),
         })
     }
+}
+
+/// The functions of the held set `packages` by name, over every function
+/// of `registry` by identity.
+fn set_library(
+    registry: &FunctionRegistry,
+    held: &HeldPackages,
+    packages: &PackageSetDigest,
+) -> Result<NamedLibrary, EmbedError> {
+    let view = held
+        .view(packages)
+        .map_err(|refusal| EmbedError::PackagesNotHeld {
+            packages: refusal.packages,
+        })?;
+    let functions: std::collections::BTreeSet<FunctionId> = view
+        .packages()
+        .flat_map(|package| package.code().ids().iter().copied())
+        .collect();
+    NamedLibrary::resolving(registry, |function| functions.contains(function))
+        .map_err(|error| EmbedError::Registry(error.to_string()))
 }
 
 /// The TypeScript dialect, its parser's stack sized by the parent's working
@@ -455,7 +435,7 @@ pub(crate) mod tests {
 
     /// lash's own packages, as the parent holds them.
     pub(crate) fn lash() -> Arc<HeldPackages> {
-        lash_vm_library::lash_packages().expect("lash's packages")
+        lash_vm_releases::lash_packages().expect("lash's packages")
     }
 
     /// A host that names TypeScript alone.
@@ -491,52 +471,6 @@ pub(crate) mod tests {
         ));
     }
 
-    /// V25: a fixed assembly failure is initialized once, just like a successful catalog.
-    #[test]
-    fn worker_catalog_initialization_retains_a_build_failure() {
-        let mut embedding =
-            typescript_only(&WorkerTuning::standard()).expect("a TypeScript embedding");
-        let mut writes = BTreeSet::new();
-        // An invalid released name table is a fixed build defect: resolving
-        // it must fail once and leave that failure in the release's slot.
-        for result in [1, 2] {
-            let definition = lash_kernel_doc::parse_definition(&format!(
-                "function helper() -> Int\nkernel 1\ncharge 1\nbody {{ return {result} }}\n"
-            ))
-            .expect("a helper");
-            writes.insert(
-                Arc::make_mut(&mut embedding.written)
-                    .register(definition, None)
-                    .expect("distinct identities"),
-            );
-        }
-        embedding.releases.push((
-            HelperReleaseIndex {
-                release: "invalid-names".into(),
-                ordinal: 99,
-                functions: writes.clone(),
-                writes,
-            },
-            OnceLock::new(),
-        ));
-        for _ in 0..2 {
-            assert!(matches!(
-                embedding.library_for(99),
-                Err(EmbedError::Registry(_))
-            ));
-            assert!(
-                embedding
-                    .releases
-                    .last()
-                    .expect("the release")
-                    .1
-                    .get()
-                    .is_some(),
-                "a fixed name-resolution failure is retained inside the slot"
-            );
-        }
-    }
-
     /// PKG-IDENTITY: moving lash's libraries into packages changes no
     /// definition bytes. Each package the build made holds exactly the
     /// definitions its crates define (the kernel library, the extensions,
@@ -549,7 +483,7 @@ pub(crate) mod tests {
         let typescript =
             Library::of(SourceDialect::TypeScript).expect("TypeScript source packages");
         let python = Library::of(SourceDialect::Python).expect("Python source packages");
-        let packages = lash_vm_library::built().expect("built packages");
+        let packages = lash_vm_releases::built().expect("built packages");
         let declared: BTreeSet<_> = typescript
             .packages
             .iter()
@@ -604,7 +538,7 @@ pub(crate) mod tests {
     /// body lists one.
     #[test]
     fn lash_packages_export_and_perform_no_operation() {
-        let packages = lash_vm_library::built().expect("lash's packages");
+        let packages = lash_vm_releases::built().expect("lash's packages");
         assert_eq!(packages.len(), lash_vm_releases::PACKAGES.len());
         for package in &packages {
             assert!(
@@ -631,16 +565,13 @@ pub(crate) mod tests {
 
     /// A parent holds exactly the functions a worker of every dialect the
     /// build holds does, without linking a dialect or an extension
-    /// (FIG-5812): the registry it reads from each built dialect's retained
-    /// helper releases is that embedding's, every
-    /// function under the same identity and definition, for every kernel
-    /// version the build interprets. It is the union of every retained
-    /// release, so a run parked on an earlier release's helpers resolves on
-    /// the parent too (FIG-5799). The parent assembles it once in a process:
+    /// (FIG-5812): the registry it reads from the packages it holds is that
+    /// embedding's, every function under the same identity and definition.
+    /// The parent assembles it once in a process:
     /// every session it opens links against the same one (FIG-5759).
     #[test]
     fn a_parent_holds_exactly_the_functions_a_worker_holds() {
-        let packages = lash_vm_library::lash_packages().expect("the parent's holdings");
+        let packages = lash_vm_releases::lash_packages().expect("the parent's holdings");
         let child = HeldPackages::from_frame(packages.frame()).expect("the child's frame");
         for (key, package) in packages.artifacts() {
             assert_eq!(
@@ -653,10 +584,10 @@ pub(crate) mod tests {
                 "POOL-FRAME carries display facts intact, including comparisons and reply receivers"
             );
         }
-        let parent = lash_vm_library::lash_packages()
+        let parent = lash_vm_releases::lash_packages()
             .map(|packages| std::sync::Arc::clone(packages.functions()))
             .expect("the parent's functions");
-        let again = lash_vm_library::lash_packages()
+        let again = lash_vm_releases::lash_packages()
             .map(|packages| std::sync::Arc::clone(packages.functions()))
             .expect("the parent's functions");
         assert!(Arc::ptr_eq(&parent, &again), "assembled once in a process");
@@ -682,15 +613,6 @@ pub(crate) mod tests {
             held == definitions(worker),
             "the parent's functions differ from the worker's"
         );
-        for release in lash_vm_library::standard_helper_releases().expect("the releases") {
-            for function in &release.functions {
-                assert!(
-                    held.contains_key(function),
-                    "the parent holds {function} of helper release {}",
-                    release.release
-                );
-            }
-        }
     }
 
     /// The host flow cells under `examples/typescript-host-flows/` lower as a
@@ -809,6 +731,3 @@ pub(crate) mod tests {
             .unwrap();
     }
 }
-
-#[cfg(test)]
-mod release_tests;

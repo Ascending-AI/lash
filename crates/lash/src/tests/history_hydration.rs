@@ -388,8 +388,20 @@ mod tool_call_reads {
             self.inner.mark_draining(node).await
         }
 
-        async fn live_decodes(&self) -> Result<Vec<Vec<lash_durable::FormatSet>>, DurableError> {
-            self.inner.live_decodes().await
+        async fn live_nodes(&self) -> Result<Vec<lash_durable::NodeCapability>, DurableError> {
+            self.inner.live_nodes().await
+        }
+
+        async fn install_packages(
+            &self,
+            artifacts: &[lash_durable::packages::ArtifactInstall],
+            sets: &[lash_durable::packages::SetInstall],
+        ) -> Result<(), DurableError> {
+            self.inner.install_packages(artifacts, sets).await
+        }
+
+        async fn package_catalog(&self) -> Result<lash_durable::PackageCatalog, DurableError> {
+            self.inner.package_catalog().await
         }
 
         async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {

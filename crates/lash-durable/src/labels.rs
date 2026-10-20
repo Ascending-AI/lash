@@ -152,6 +152,11 @@ impl CommitLabel {
     /// runner whose activation stopped without giving it up.
     pub const DRAIN_RELEASE: Self = Self::new("drain.release");
 
+    // Packages (FIG-6918).
+    /// `packages.install`: A node's package artifacts and sets, installed
+    /// before it registers ([`DurableStore::install_packages`](crate::DurableStore::install_packages)).
+    pub const PACKAGES_INSTALL: Self = Self::new("packages.install");
+
     /// The connection capacity a store serves this commit from (FIG-5240).
     ///
     /// The routing is the library's, never the host's: the node lease's
@@ -176,7 +181,7 @@ impl CommitLabel {
     }
 
     /// Every label in the catalog, L1's lease labels first.
-    pub const ALL: [Self; 48] = [
+    pub const ALL: [Self; 49] = [
         Self::CLAIM,
         Self::HEARTBEAT,
         Self::REAP,
@@ -225,6 +230,7 @@ impl CommitLabel {
         Self::MAIL_SESSION,
         Self::MAIL_PROCESS,
         Self::DRAIN_RELEASE,
+        Self::PACKAGES_INSTALL,
     ];
 }
 

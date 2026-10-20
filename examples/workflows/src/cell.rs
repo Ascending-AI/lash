@@ -91,7 +91,7 @@ fn machine(
     let pages = Pages::default();
     Ok(KernelMachine::start(
         Program {
-            release: PageId([7; 32]),
+            closure: PageId([7; 32]),
             document,
             library,
         },

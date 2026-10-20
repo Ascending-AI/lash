@@ -570,7 +570,7 @@ impl KernelMachine {
         units: u64,
     ) -> Result<(), Halt> {
         self.charge(units)
-            .map_err(|halt| halt.in_function(&exe.lib(lib).definition.name))
+            .map_err(|halt| halt.in_function(&exe.lib(lib).header.name))
     }
 
     /// Drop all guest holdings before retaining the activation's storage.

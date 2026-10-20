@@ -571,8 +571,9 @@ fn imperative(kind: CellFailureKind, cell_noun: &str) -> String {
         CellFailureKind::Host => format!(
             "Next: the host failed while handling this {cell_noun}. Retry it; if the failure persists, report the host problem."
         ),
-        CellFailureKind::HelperReleaseNotHeld { release } => format!(
-            "Next: ask the host to serve this {cell_noun} on a build that holds helper release {release}."
+        CellFailureKind::PackagesNotHeld { packages } => format!(
+            "Next: ask the host to serve this {cell_noun} on a node that holds package set {}.",
+            packages.short()
         ),
     }
 }
@@ -732,7 +733,7 @@ mod tests {
             };
             let mut machine = KernelMachine::start(
                 Program {
-                    release: PageId([8; 32]),
+                    closure: PageId([8; 32]),
                     document: Arc::new(document),
                     library: lash_kernel_vm::PreparedLibrary::new(Arc::new(registry)),
                 },

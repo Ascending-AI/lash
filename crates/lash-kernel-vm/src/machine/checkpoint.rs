@@ -290,9 +290,9 @@ impl KernelMachine {
                 supported: program.document.manifest.kernel,
             });
         }
-        if root.release != program.release {
+        if root.closure != program.closure {
             return Err(OpenError::Malformed {
-                problem: "helper release differs from the checkpoint".into(),
+                problem: "the document's execution closure differs from the checkpoint's".into(),
             });
         }
         if !matches!(root.status, RootStatus::Parked) {
@@ -328,7 +328,7 @@ impl KernelMachine {
             lash_kernel_state::arena::Arena::from_ordinal(heap.next_ordinal()),
         ));
         let mut machine = Self {
-            release: root.release,
+            closure: root.closure,
             owner: root.owner,
             document: Some(root.document),
             costs: crate::costs::Costs::of_document(&program.document),
@@ -496,7 +496,7 @@ impl KernelMachine {
             },
             kernel: self.program.document.manifest.kernel,
             document,
-            release: self.release,
+            closure: self.closure,
             owner: self.owner,
             target: if self.session_cell {
                 lash_kernel_state::paged::CellTargetKind::Main

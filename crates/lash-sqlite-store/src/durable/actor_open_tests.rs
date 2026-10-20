@@ -38,6 +38,7 @@ async fn admitted() -> World {
             node: NodeId::new("actor-open"),
             decodes: vec![formats.clone()],
             serves: Vec::new(),
+            held: Default::default(),
             ttl_millis: 15_000,
         })
         .await

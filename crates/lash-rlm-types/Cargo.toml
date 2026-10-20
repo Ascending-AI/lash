@@ -31,3 +31,4 @@ serde_json = { workspace = true }
 [dev-dependencies]
 lash-sansio = { workspace = true, features = ["testing"] }
 lash-protocol-types = { workspace = true, features = ["testing"] }
+lash-kernel-doc = { workspace = true }

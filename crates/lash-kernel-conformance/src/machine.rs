@@ -174,7 +174,7 @@ pub(crate) fn case_program(library: &PreparedLibrary, case: &Case) -> Option<Pro
         .unwrap_or_else(|| document.manifest.signatures());
     lash_kernel_check::admit(&document, &admission).ok()?;
     Some(Program {
-        release: crate::pages::RELEASE,
+        closure: crate::pages::CLOSURE,
         document: Arc::new(document),
         library: library.clone(),
     })

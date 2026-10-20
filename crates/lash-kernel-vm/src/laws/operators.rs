@@ -506,7 +506,7 @@ fn template_bearing_invokes_are_prepared_operator_sites() {
         })),
     }];
     let program = crate::Program {
-        release: lash_kernel_doc::heap::PageId([8; 32]),
+        closure: lash_kernel_doc::heap::PageId([8; 32]),
         document: Arc::new(document),
         library: crate::PreparedLibrary::new(Arc::new(registry)),
     };

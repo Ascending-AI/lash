@@ -311,7 +311,7 @@ impl PreparedLibrary {
                 && !self.0.layout.declines()
                 && let Err(problem) = self.0.checked_plan(index, false)
             {
-                unresolved.push(format!("{}: {problem}", lib.definition.name));
+                unresolved.push(format!("{}: {problem}", lib.header.name));
             }
         }
         (running, unresolved)

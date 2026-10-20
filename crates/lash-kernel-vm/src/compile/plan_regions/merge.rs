@@ -377,7 +377,7 @@ impl Recognise<'_, '_> {
             return None;
         };
         let function = (self.lib)(*lib)?;
-        (function.definition.name.as_str() == name
+        (function.header.name.as_str() == name
             && function.arity == 2
             && !function.operation()
             && function.limit.is_none()

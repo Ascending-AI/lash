@@ -747,8 +747,20 @@ impl DurableStore for Retiring {
         self.inner.mark_draining(node).await
     }
 
-    async fn live_decodes(&self) -> Result<Vec<Vec<FormatSet>>, DurableError> {
-        self.inner.live_decodes().await
+    async fn live_nodes(&self) -> Result<Vec<crate::NodeCapability>, DurableError> {
+        self.inner.live_nodes().await
+    }
+
+    async fn install_packages(
+        &self,
+        artifacts: &[crate::packages::ArtifactInstall],
+        sets: &[crate::packages::SetInstall],
+    ) -> Result<(), DurableError> {
+        self.inner.install_packages(artifacts, sets).await
+    }
+
+    async fn package_catalog(&self) -> Result<crate::PackageCatalog, DurableError> {
+        self.inner.package_catalog().await
     }
 
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {

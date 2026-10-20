@@ -66,7 +66,7 @@ pub(crate) fn start(
         lash_kernel_state::arena::Arena::from_ordinal(heap.next_ordinal()),
     ));
     let mut machine = KernelMachine {
-        release: program.release,
+        closure: program.closure,
         owner: start.owner,
         census_refinements: heap.certificate().refinements,
         costs: crate::costs::Costs::of_document(&program.document),
@@ -346,15 +346,15 @@ impl KernelMachine {
             }
         }
         let document = Arc::clone(&self.program.document);
-        let release = lash_kernel_doc::heap::PageRef {
-            id: self.release,
+        let closure = lash_kernel_doc::heap::PageRef {
+            id: self.closure,
             grant: lash_kernel_doc::heap::PageGrant::NONE,
         };
         let saved = save.save(
             &mut crate::CellSaveContext::new(&mut self.heap),
             crate::paged::SaveCell {
                 document: &document,
-                release,
+                closure,
                 bindings: &bindings,
                 dropped,
                 held: &held,

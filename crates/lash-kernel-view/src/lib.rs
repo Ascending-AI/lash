@@ -1395,6 +1395,6 @@ mod display_tests;
 #[cfg(test)]
 fn test_packages() -> PackageView<'static> {
     static HELD: std::sync::LazyLock<std::sync::Arc<lash_kernel_package::HeldPackages>> =
-        std::sync::LazyLock::new(|| lash_vm_library::lash_packages().unwrap());
+        std::sync::LazyLock::new(|| lash_vm_releases::lash_packages().unwrap());
     HELD.view(&HELD.own()).unwrap()
 }

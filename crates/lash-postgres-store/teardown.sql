@@ -112,6 +112,14 @@ DROP TABLE IF EXISTS lash_catalog_identity CASCADE;
 
 DROP TABLE IF EXISTS lash_nodes CASCADE;
 
+DROP TABLE IF EXISTS lash_package_artifacts CASCADE;
+
+DROP TABLE IF EXISTS lash_package_sets CASCADE;
+
+DROP TABLE IF EXISTS lash_package_set_members CASCADE;
+
+DROP TABLE IF EXISTS lash_node_artifacts CASCADE;
+
 DROP TABLE IF EXISTS lash_actors CASCADE;
 
 DROP TABLE IF EXISTS lash_actor_mail CASCADE;
@@ -147,8 +155,6 @@ DROP TABLE IF EXISTS lash_waits CASCADE;
 DROP TABLE IF EXISTS lash_blob_edges CASCADE;
 
 DROP TABLE IF EXISTS lash_effect_admissions CASCADE;
-
-DROP TABLE IF EXISTS lash_graph_release_pins CASCADE;
 
 DROP TABLE IF EXISTS lash_root_leases CASCADE;
 
