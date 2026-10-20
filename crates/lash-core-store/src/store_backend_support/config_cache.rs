@@ -4,6 +4,8 @@
 //! roots, never mutable session/head pointers. A miss must read and validate
 //! the graph in the caller's database snapshot. Write transactions do not
 //! admit entries: a rolled-back graph must never become reusable material.
+//! A write transaction may reuse a committed entry once it established the
+//! root is visible in its own snapshot ([`ConfigCache::validates`]).
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
@@ -13,6 +15,7 @@ use serde_json::Value;
 
 use crate::checkpoint_graph::NodeId;
 use crate::store::{FleetFormat, SESSION_HEAD_META_SCHEMA_VERSION, SessionHeadPayload, StoreError};
+use lash_protocol_types::SessionId;
 
 const BUDGET_BYTES: usize = 32 << 20;
 const MAX_ENTRIES: usize = 128;
@@ -56,6 +59,36 @@ impl ConfigCache {
         let payload = entry.payload.clone();
         entries.push_back(entry);
         Ok(Some(payload))
+    }
+
+    /// Whether a committed read validated `root` as session `session_id`'s
+    /// configuration, admitted under today's fleet: a commit keeps the root
+    /// as its validated identity without lending its payload (FIG-7049).
+    /// That the root is visible in the caller's snapshot stays the caller's
+    /// to establish; a miss validates the graph there.
+    pub fn validates(
+        &self,
+        root: NodeId,
+        session_id: &SessionId,
+        fleet: FleetFormat,
+    ) -> Result<bool, StoreError> {
+        let mut entries = self.entries.lock_recover();
+        let Some(index) = entries.iter().position(|entry| entry.root == root) else {
+            return Ok(false);
+        };
+        crate::store::ensure_supported_schema_version_for_fleet(
+            "SessionHeadMeta",
+            entries[index].payload.schema_version,
+            crate::surface_format!(SESSION_HEAD_META_SCHEMA_VERSION),
+            fleet,
+        )?;
+        if entries[index].payload.session_id != *session_id {
+            return Ok(false);
+        }
+        if let Some(entry) = entries.remove(index) {
+            entries.push_back(entry);
+        }
+        Ok(true)
     }
 
     /// Decode graph material directly, admitting only successful validations.

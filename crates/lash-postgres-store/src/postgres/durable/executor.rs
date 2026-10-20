@@ -450,14 +450,9 @@ impl Call {
                     let key = (tx.actor().as_str().to_owned(), tx.epoch().0);
                     let facts = hints.get(&key)?;
                     let planner = turns::prepared(write, fleet)?;
-                    let program = head_commit::program(
-                        &planner,
-                        &facts.head,
-                        Some(&facts.plugin_writers),
-                        None,
-                        0,
-                    )
-                    .ok()??;
+                    let program =
+                        head_commit::program(&planner, head_commit::Basis::Hinted(&facts), 0)
+                            .ok()??;
                     for (hash, body) in &program.checkpoint.supplied {
                         call.body_hashes.push(crate::keys::key(hash));
                         call.bodies.push(body.to_vec());

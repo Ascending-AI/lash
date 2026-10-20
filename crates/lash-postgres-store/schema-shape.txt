@@ -682,4 +682,6 @@ table lash_waits
   column wait_id text not-null
   primary-key (wait_id)
 function lash_artifact_end_local (p_kind text, p_id text, p_gate text, p_pattern text, p_now bigint, p_namespaces text[]) -> jsonb
+function lash_node_renew (p_node text, p_boot text, p_ttl bigint, p_fleet_low integer, p_fleet_high integer, p_lock_timeout text, p_statement_ms bigint, p_now bigint) -> TABLE(o_fleet integer, o_expires bigint)
 function lash_owner_commit (p_registry text, p_actor text, p_epoch bigint, p_session text, p_fleet_low integer, p_fleet_high integer, p_token text, p_lock_timeout text, p_statement_ms bigint, p_body_hashes bytea[], p_bodies bytea[], p_named bytea[], p_roots bytea[], p_digests bytea[], p_contents bytea[], p_parents bytea[], p_children bytea[], p_steps jsonb, p_formats text, p_ack bigint, p_release text, p_due bigint, p_now bigint) -> TABLE(o_revision bigint, o_now bigint, o_fleet integer, o_state text, o_installed bigint, o_cancel_turn text, o_cancel_request text, o_cancel_origin text, o_cancel_reason text, o_cancel_disposition text, o_cancel_mode text)
+function lash_prompt_held_texts (p_keys bytea[], p_seed bigint) -> SETOF bytea

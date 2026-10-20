@@ -2915,4 +2915,54 @@ BEGIN
     RETURN jsonb_build_object('checks', v_checks, 'plans', v_plans);
 END
 $lash_artifact_end_local$;
+CREATE OR REPLACE FUNCTION lash_node_renew(
+    p_node TEXT, p_boot TEXT, p_ttl BIGINT, p_fleet_low INTEGER, p_fleet_high INTEGER,
+    p_lock_timeout TEXT, p_statement_ms BIGINT, p_now BIGINT)
+RETURNS TABLE (o_fleet INTEGER, o_expires BIGINT)
+LANGUAGE plpgsql
+AS $lash_node_renew$
+DECLARE
+    v_fleet INTEGER;
+    v_clock BIGINT;
+    v_now BIGINT;
+    v_expires BIGINT;
+BEGIN
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'lash_node_renew: requires read committed' USING ERRCODE = '25000';
+    END IF;
+    IF p_lock_timeout IS NOT NULL THEN
+        PERFORM set_config('lock_timeout', p_lock_timeout, true);
+    END IF;
+    PERFORM pg_advisory_xact_lock_shared(715425, 0);
+    SELECT (SELECT format_version FROM lash_fleet_format WHERE singleton = TRUE),
+                    (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT
+    INTO v_fleet, v_clock;
+    IF v_fleet IS NULL OR v_fleet < p_fleet_low OR v_fleet > p_fleet_high THEN
+        RETURN QUERY SELECT v_fleet, NULL::BIGINT;
+        RETURN;
+    END IF;
+    v_now := COALESCE(p_now, v_clock);
+    UPDATE lash_nodes SET heartbeat_expires_at_ms = (GREATEST(LEAST(v_now::NUMERIC + p_ttl, 9223372036854775807), -9223372036854775808)::BIGINT)
+             WHERE node_id = (p_node) AND boot_id = (p_boot)
+             RETURNING heartbeat_expires_at_ms
+    INTO v_expires;
+    -- As in the owner routine, an imported pool's statement budget is
+    -- checked before success: raising rolls the renewal back as a whole.
+    IF p_statement_ms IS NOT NULL
+        AND clock_timestamp() - statement_timestamp() > p_statement_ms * INTERVAL '1 millisecond' THEN
+        RAISE EXCEPTION 'canceling statement due to statement timeout' USING ERRCODE = '57014';
+    END IF;
+    RETURN QUERY SELECT v_fleet, v_expires;
+END
+$lash_node_renew$;
+CREATE OR REPLACE FUNCTION lash_prompt_held_texts(p_keys BYTEA[], p_seed BIGINT)
+RETURNS SETOF BYTEA
+LANGUAGE plpgsql VOLATILE
+AS $lash_prompt_held_texts$
+BEGIN
+    PERFORM pg_advisory_xact_lock_shared(hashtextextended(encode(ordered.key, 'hex'), (p_seed)))
+             FROM (SELECT DISTINCT key FROM unnest((p_keys)::BYTEA[]) AS target(key) ORDER BY key) AS ordered;
+    RETURN QUERY SELECT hash FROM lash_prompt_texts WHERE hash = ANY((p_keys)::BYTEA[]);
+END
+$lash_prompt_held_texts$;
 -- END GENERATED lash_owner_commit

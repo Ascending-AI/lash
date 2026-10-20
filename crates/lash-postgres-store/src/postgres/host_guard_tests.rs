@@ -9,7 +9,7 @@
 
 use std::time::{Duration, Instant};
 
-use lash_durable::{CommitLabel, NodeSpec, NodeWakes as _};
+use lash_durable::{CommitLabel, FormatSet, NodeId, NodeSpec, NodeWakes as _};
 use sqlx::Connection as _;
 
 use super::*;
@@ -78,15 +78,36 @@ async fn first_lock_refused(store: &PostgresDurableStore, label: CommitLabel) {
 
 async fn every_role_refuses_its_first_lock(storage: &crate::PostgresStorage, url: &str) {
     let store = storage.durable_store();
+    let lease = store
+        .register_node(&NodeSpec {
+            node: NodeId::new("guarded-renewal"),
+            decodes: vec![FormatSet::new("law-formats")],
+            serves: Vec::new(),
+            held: Default::default(),
+            capabilities: Default::default(),
+            ttl_millis: 15_000,
+        })
+        .await
+        .expect("register the renewing node");
     let mut holder = hold_fence(url).await;
     for label in [
         CommitLabel::MAIL_SESSION,
         CommitLabel::PROCESS_TERMINAL,
         CommitLabel::CLAIM,
-        CommitLabel::HEARTBEAT,
     ] {
         first_lock_refused(&store, label).await;
     }
+    // A renewal is one server request: its fence lock is bounded by the
+    // renewal role's guard all the same (FIG-7049).
+    let started = Instant::now();
+    let renewed = tokio::time::timeout(Duration::from_secs(5), store.heartbeat(&lease))
+        .await
+        .expect("the renewal's first lock waited past every guard");
+    assert!(
+        matches!(&renewed, Err(DurableError::Store(failure)) if failure.kind == StoreFailureKind::Contended),
+        "a renewal passed a held fence: {renewed:?}"
+    );
+    assert!(started.elapsed() < Duration::from_secs(2));
     let started = Instant::now();
     let ordinary = tokio::time::timeout(
         Duration::from_secs(5),
@@ -108,11 +129,17 @@ async fn every_role_refuses_its_first_lock(storage: &crate::PostgresStorage, url
         CommitLabel::MAIL_SESSION,
         CommitLabel::PROCESS_TERMINAL,
         CommitLabel::CLAIM,
-        CommitLabel::HEARTBEAT,
     ] {
         let (tx, _) = store.open(label).await.expect("the role opens again");
         tx.rollback().await.expect("roll back");
     }
+    assert!(matches!(
+        store
+            .heartbeat(&lease)
+            .await
+            .expect("the renewal runs again"),
+        lash_durable::HeartbeatOutcome::Renewed { .. }
+    ));
 }
 
 /// The writer fence is the first lock every transaction takes. Each role's

@@ -676,6 +676,7 @@ pub(super) async fn apply_session_commit(
         writer,
         &commit.steps(),
         commit.checkpoint_ref_chunk,
+        commit.configs,
     )
     .await
     .map(drop)

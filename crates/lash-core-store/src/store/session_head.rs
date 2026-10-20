@@ -95,6 +95,25 @@ impl SessionHeadPayload {
         )?;
         serde_json::from_value(value).map_err(corrupt)
     }
+
+    /// Refuse a payload that names another session than `session_id`, the
+    /// row key it was read under: a mis-keyed or hand-edited config payload
+    /// is corrupt stored data, never adopted.
+    ///
+    /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
+    pub fn ensure_names(&self, session_id: &SessionId) -> Result<(), StoreError> {
+        if self.session_id == *session_id {
+            return Ok(());
+        }
+        Err(StoreError::StoredDataCorrupt {
+            record_kind: "SessionHeadMeta",
+            message: format!(
+                "config payload names session `{}` but the row is keyed on session `{}`",
+                self.session_id.as_str(),
+                session_id.as_str()
+            ),
+        })
+    }
 }
 
 /// Fully assembled session-head metadata returned by a store.
@@ -174,16 +193,7 @@ impl SessionHeadMeta {
         leaf_node_id: Option<crate::NodeId>,
         current_frame_node_id: Option<crate::FrameNodeId>,
     ) -> Result<Self, StoreError> {
-        if payload.session_id != *session_id {
-            return Err(StoreError::StoredDataCorrupt {
-                record_kind: "SessionHeadMeta",
-                message: format!(
-                    "config payload names session `{}` but the row is keyed on session `{}`",
-                    payload.session_id.as_str(),
-                    session_id.as_str()
-                ),
-            });
-        }
+        payload.ensure_names(session_id)?;
         Ok(Self {
             schema_version: payload.schema_version,
             session_id: session_id.clone(),

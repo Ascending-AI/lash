@@ -9,7 +9,9 @@
 //! and delegates each [`lash_durable::DurableReads`] read to it.
 //!
 //! Every write is one guarded transaction: the writer fence first, then the
-//! database clock read once, then the engine's statements. A claim locks its
+//! database clock read once, then the engine's statements. A node's lease
+//! renewal runs the same order inside one server request
+//! ([`renewal::FUNCTION`]). A claim locks its
 //! node row `FOR SHARE` and its actors `FOR UPDATE SKIP LOCKED`, so a
 //! concurrent reap waits for it and concurrent claimers never take one actor
 //! twice; an owner commit's fence is a conditional `UPDATE` of the actor row,
@@ -99,6 +101,7 @@ mod waits;
 
 #[path = "../node_wakes.rs"]
 mod node_wakes;
+mod renewal;
 
 pub use node_wakes::PostgresNodeWakes;
 
@@ -116,6 +119,9 @@ pub(crate) struct Committing<'a> {
     pub(crate) fleet: lash_core_store::store::FleetFormat,
     /// The roots its writes retired, held before it commits.
     pub(crate) retired: Retired,
+    /// The storage's validated configurations, which a head commit reuses
+    /// read-only.
+    pub(crate) configs: &'a lash_core_store::store_backend_support::ConfigCache,
 }
 
 impl Committing<'_> {
@@ -996,27 +1002,7 @@ impl DurableStore for PostgresDurableStore {
     }
 
     async fn heartbeat(&self, node: &NodeLease) -> Result<HeartbeatOutcome, DurableError> {
-        self.within(CommitCapacity::Renewal, async {
-            crate::observed_sql::measure(&self.observer, CommitLabel::HEARTBEAT, 0, async {
-                let (mut tx, now) = self.open(CommitLabel::HEARTBEAT).await?;
-                let outcome = crate::observed_sql::query_scalar::<_, i64>(SQL.node.renew.sql())
-                    .bind(node.owner.node.as_str())
-                    .bind(node.owner.boot.as_str())
-                    .bind(now.after_millis(node.ttl_millis).0)
-                    .fetch_optional(crate::observed_sql::executor(&mut **tx))
-                    .await
-                    .map_err(sqlx_failure)
-                    .map(|renewed| match renewed {
-                        Some(expires_at) => HeartbeatOutcome::Renewed {
-                            expires_at: DurableInstant(expires_at),
-                        },
-                        None => HeartbeatOutcome::Reaped,
-                    });
-                finish(tx, outcome).await
-            })
-            .await
-        })
-        .await
+        self.renew_node(node).await
     }
 
     async fn reap(&self, reaper: &NodeLease) -> Result<Vec<Reaped>, DurableError> {
@@ -1588,85 +1574,7 @@ mod host_guard_tests;
 mod retry_tests;
 
 #[cfg(test)]
-mod constraint_tests {
-    use sqlx::Connection as _;
-
-    #[tokio::test]
-    async fn durable_waits_and_actors_refuse_impossible_rows() {
-        let url = crate::testing::required_database_url();
-        let database = crate::testing::IsolatedDatabase::create(&url).await;
-        let mut conn = sqlx::PgConnection::connect(database.url())
-            .await
-            .expect("open constraint fixture");
-        sqlx::raw_sql(crate::PostgresStorage::schema_ddl())
-            .execute(crate::observed_sql::executor(&mut conn))
-            .await
-            .expect("create constraint fixture");
-        crate::observed_sql::query("INSERT INTO lash_waits (wait_id, owner_actor, owner_scope, kind, host_resolvable, state, created_epoch, key_name) VALUES ('wait', 's/session', 's/session', 'engine_key', true, 'pending', 1, 'key')").execute(crate::observed_sql::executor(&mut conn)).await.expect("pending engine key wait");
-        for (assignment, constraint) in [
-            (
-                "kind = 'timer', host_resolvable = false, key_name = NULL",
-                "ck_waits_timer_deadline",
-            ),
-            ("key_name = NULL", "ck_waits_key_name"),
-            ("call_id = 'call', tool_id = 'tool'", "ck_waits_call"),
-            ("resolved_at_ms = 1", "ck_waits_settled_at"),
-            ("state = 'revoked'", "ck_waits_settled_at"),
-            (
-                "state = 'resolved', resolution_digest = 'digest', resolved_at_ms = 1",
-                "ck_waits_resolution_ref",
-            ),
-            ("resolution_ref = 'payload'", "ck_waits_resolution_ref"),
-        ] {
-            let error = crate::observed_sql::query(&format!("UPDATE lash_waits SET {assignment}"))
-                .execute(crate::observed_sql::executor(&mut conn))
-                .await
-                .expect_err("impossible wait must be refused");
-            assert_eq!(
-                error
-                    .as_database_error()
-                    .and_then(sqlx::error::DatabaseError::constraint),
-                Some(constraint)
-            );
-        }
-        crate::observed_sql::query("UPDATE lash_waits SET kind = 'timer', host_resolvable = false, key_name = NULL, deadline_ms = 1, state = 'resolved', resolution_digest = 'timer', resolved_at_ms = 1").execute(crate::observed_sql::executor(&mut conn)).await.expect("resolved timer without value");
-        let error = crate::observed_sql::query("UPDATE lash_waits SET resolution_ref = 'payload'")
-            .execute(crate::observed_sql::executor(&mut conn))
-            .await
-            .expect_err("timer has no payload");
-        assert_eq!(
-            error
-                .as_database_error()
-                .and_then(sqlx::error::DatabaseError::constraint),
-            Some("ck_waits_resolution_ref")
-        );
-        for (key, kind) in [
-            ("s/session", "process"),
-            ("p/process", "session"),
-            ("x/unknown", "session"),
-        ] {
-            let error = crate::observed_sql::query(&format!("INSERT INTO lash_actors (actor_key, kind, state, epoch, formats, state_revision, mail_seq, acked_seq, created_at_ms) VALUES ('{key}', '{kind}', 'idle', 0, '[]', 0, 0, 0, 0)")).execute(crate::observed_sql::executor(&mut conn)).await.expect_err("key must agree with kind");
-            assert_eq!(
-                error
-                    .as_database_error()
-                    .and_then(sqlx::error::DatabaseError::constraint),
-                Some("ck_lash_actors_key_kind")
-            );
-        }
-        for (rev, commit_id, constraint) in [
-            (0_i64, vec![0_u8; 32], "ck_exec_snapshots_rev"),
-            (1, vec![0; 31], "ck_exec_snapshots_commit_id"),
-        ] {
-            let error = crate::observed_sql::query("INSERT INTO lash_exec_snapshots (exec_key, rev, root_ref, commit_id, written_epoch) VALUES ('p/process', $1, 'root', $2, 1)").bind(rev).bind(commit_id).execute(crate::observed_sql::executor(&mut conn)).await.expect_err("rev and commit id are checked");
-            assert_eq!(
-                error
-                    .as_database_error()
-                    .and_then(sqlx::error::DatabaseError::constraint),
-                Some(constraint)
-            );
-        }
-    }
-}
+mod constraint_tests;
 
 #[cfg(test)]
 #[path = "../durable_round_trip_tests.rs"]

@@ -654,6 +654,10 @@ pub(crate) struct RolePools {
     /// What each session owner's open read of its head, which its one-call
     /// head commit plans on.
     pub(crate) session_hints: crate::durable::SessionHints,
+    /// The configurations this storage's committed reads validated, by
+    /// immutable root: what its loads reuse and its head commits admit
+    /// read-only (FIG-6645, FIG-7049).
+    pub(crate) configs: lash_core_store::store_backend_support::ConfigCache,
 }
 
 impl RolePools {
@@ -685,6 +689,7 @@ impl RolePools {
             wait_retry: config.retry.wait_resolution,
             held_texts: crate::durable::HeldTexts::default(),
             session_hints: crate::durable::SessionHints::default(),
+            configs: lash_core_store::store_backend_support::ConfigCache::default(),
         }
     }
 

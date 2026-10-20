@@ -238,7 +238,7 @@ impl WriterFence {
 
     /// Admit the epoch a fence read, `recorded`: absent or not an epoch
     /// fails closed.
-    async fn admit(&self, recorded: Option<i32>) -> Result<FleetFormat, StoreError> {
+    pub(crate) async fn admit(&self, recorded: Option<i32>) -> Result<FleetFormat, StoreError> {
         let Some(recorded) = recorded else {
             return Err(missing_fence_row("the fleet-format row is absent"));
         };

@@ -175,3 +175,7 @@ DROP TABLE IF EXISTS lash_owner_commit_latches CASCADE;
 DROP FUNCTION IF EXISTS lash_owner_commit CASCADE;
 
 DROP FUNCTION IF EXISTS lash_artifact_end_local CASCADE;
+
+DROP FUNCTION IF EXISTS lash_node_renew CASCADE;
+
+DROP FUNCTION IF EXISTS lash_prompt_held_texts CASCADE;

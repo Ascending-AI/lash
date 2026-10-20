@@ -272,7 +272,7 @@ impl SessionCommitStore for PostgresStore {
             session_id,
             row,
             self.fence.fleet(),
-            Some(&self.configs),
+            Some(&self.pools.configs),
         )
         .await?;
         crate::observed_sql::control("COMMIT", tx.commit())
@@ -371,6 +371,7 @@ impl PostgresStore {
             planner,
             now,
             self.pools.maintenance.checkpoint_ref_chunk as usize,
+            &self.pools.configs,
         )
         .await?;
         tx.commit().await.map_err(store_sqlx_error)?;

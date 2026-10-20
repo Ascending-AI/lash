@@ -50,6 +50,11 @@ lash_store_sql::statements! {
         /// Every content address in `?1` already stored.
         held_texts = "SELECT hash FROM prompt_texts WHERE hash = ANY(?1::BYTEA[])";
 
+        /// Share-lock the texts `?1` under seed `?2`, then answer which of
+        /// them are stored, read once every lock is held
+        /// (`lash_prompt_held_texts`).
+        held_after_lock = "SELECT lash_prompt_held_texts(?1, ?2)";
+
         /// Store each text `?2[i]` at content address `?1[i]`, skipping every
         /// address a concurrent record stored first: the address names the
         /// bytes, so a conflict is the same text.
@@ -178,6 +183,17 @@ pub(super) fn closure() -> &'static lash_store_sql::Rendered {
 
 pub(super) fn read_children() -> &'static lash_store_sql::Rendered {
     &SQL.read_children
+}
+
+/// The server function that runs one level of a record's text frontier:
+/// its lock, then its held read (FIG-7049).
+#[cfg(test)]
+pub(super) const HELD_TEXTS_FUNCTION: &str = "lash_prompt_held_texts";
+
+/// The held read [`HELD_TEXTS_FUNCTION`] runs after its lock.
+#[cfg(test)]
+pub(super) fn held_texts() -> &'static lash_store_sql::Rendered {
+    &POSTGRES_SQL.held_texts
 }
 
 #[cfg(test)]
@@ -447,17 +463,14 @@ pub(super) async fn apply(
                 .collect();
             let mut unheld = BTreeMap::new();
             let mut protected = BTreeSet::new();
+            // Each level is one request: its texts share-locked, then the
+            // stored among them read after the locks are held.
             while !frontier.is_empty() {
                 let hashes: Vec<_> = frontier.iter().copied().collect();
-                crate::observed_sql::query(connection_sql().lock_xact_shared_by_keys_seeded.sql())
-                    .bind(crate::keys::keys(&hashes))
-                    .bind(TEXT_LOCK_SEED)
-                    .execute(crate::observed_sql::executor(&mut *tx))
-                    .await
-                    .map_err(sqlx_failure)?;
                 let held: BTreeSet<String> =
-                    crate::keys::query_scalar(POSTGRES_SQL.held_texts.sql())
+                    crate::keys::query_scalar(POSTGRES_SQL.held_after_lock.sql())
                         .bind(crate::keys::keys(&hashes))
+                        .bind(TEXT_LOCK_SEED)
                         .fetch_all(crate::observed_sql::executor(&mut *tx))
                         .await
                         .map_err(sqlx_failure)?

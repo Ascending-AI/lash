@@ -14,6 +14,8 @@
 //! release that writes nothing else keeps the claim's no-progress mark.
 
 use super::executor::{EXECUTOR_SQL, FUNCTION, LATCH_HORIZON_MS, REGISTRY, entries};
+use super::prompts::HELD_TEXTS_FUNCTION;
+use super::renewal::FUNCTION as RENEW_FUNCTION;
 use super::steps::{Collect, END_LOCAL_PARAMS, Entry, Shape, Ty};
 use super::{SQL, graph, pages, prompts};
 use crate::connection_sql::connection_sql;
@@ -569,6 +571,94 @@ END
 $lash_owner_commit$;
 "
     ) + &crate::artifact_store::local_end_function_ddl()
+        + &renewal_ddl()
+        + &held_texts_ddl()
+}
+
+/// The guarded renewal of a node's lease as one server request (FIG-7049):
+/// the writer fence's shared lock under the renewal role's lock limit, then
+/// the recorded epoch and the database clock, then the renewal of the node's
+/// boot. An epoch outside `[p_fleet_low, p_fleet_high]`, or none, renews
+/// nothing and answers the epoch it read, which the caller refuses; a boot
+/// that holds no lease any more renews nothing and answers no expiry.
+fn renewal_ddl() -> String {
+    let fleet_fence = perform(connection_sql().lock_xact_fleet_fence_shared.sql());
+    let fence_and_clock = SQL.postgres.fence_and_clock.sql();
+    let renew = inline(
+        SQL.node.renew.sql(),
+        &[
+            "p_node",
+            "p_boot",
+            "GREATEST(LEAST(v_now::NUMERIC + p_ttl, 9223372036854775807), \
+             -9223372036854775808)::BIGINT",
+        ],
+    );
+    format!(
+        "CREATE OR REPLACE FUNCTION {RENEW_FUNCTION}(
+    p_node TEXT, p_boot TEXT, p_ttl BIGINT, p_fleet_low INTEGER, p_fleet_high INTEGER,
+    p_lock_timeout TEXT, p_statement_ms BIGINT, p_now BIGINT)
+RETURNS TABLE (o_fleet INTEGER, o_expires BIGINT)
+LANGUAGE plpgsql
+AS ${RENEW_FUNCTION}$
+DECLARE
+    v_fleet INTEGER;
+    v_clock BIGINT;
+    v_now BIGINT;
+    v_expires BIGINT;
+BEGIN
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'lash_node_renew: requires read committed' USING ERRCODE = '25000';
+    END IF;
+    IF p_lock_timeout IS NOT NULL THEN
+        PERFORM set_config('lock_timeout', p_lock_timeout, true);
+    END IF;
+    {fleet_fence};
+    {fence_and_clock}
+    INTO v_fleet, v_clock;
+    IF v_fleet IS NULL OR v_fleet < p_fleet_low OR v_fleet > p_fleet_high THEN
+        RETURN QUERY SELECT v_fleet, NULL::BIGINT;
+        RETURN;
+    END IF;
+    v_now := COALESCE(p_now, v_clock);
+    {renew}
+    INTO v_expires;
+    -- As in the owner routine, an imported pool's statement budget is
+    -- checked before success: raising rolls the renewal back as a whole.
+    IF p_statement_ms IS NOT NULL
+        AND clock_timestamp() - statement_timestamp() > p_statement_ms * INTERVAL '1 millisecond' THEN
+        RAISE EXCEPTION 'canceling statement due to statement timeout' USING ERRCODE = '57014';
+    END IF;
+    RETURN QUERY SELECT v_fleet, v_expires;
+END
+${RENEW_FUNCTION}$;
+"
+    )
+}
+
+/// One level of a prompt record's text frontier as one server request
+/// (FIG-7049): the texts `p_keys` share-locked in key order, then which of
+/// them are stored, read by its own statement once every lock is held. A
+/// volatile function's statements each read a fresh snapshot under read
+/// committed, so a text a concurrent reclaim deleted before this lock is
+/// not answered held.
+fn held_texts_ddl() -> String {
+    let lock = perform(&inline(
+        connection_sql().lock_xact_shared_by_keys_seeded.sql(),
+        &["p_keys", "p_seed"],
+    ));
+    let held = inline(prompts::held_texts().sql(), &["p_keys"]);
+    format!(
+        "CREATE OR REPLACE FUNCTION {HELD_TEXTS_FUNCTION}(p_keys BYTEA[], p_seed BIGINT)
+RETURNS SETOF BYTEA
+LANGUAGE plpgsql VOLATILE
+AS ${HELD_TEXTS_FUNCTION}$
+BEGIN
+    {lock};
+    RETURN QUERY {held};
+END
+${HELD_TEXTS_FUNCTION}$;
+"
+    )
 }
 
 #[cfg(test)]

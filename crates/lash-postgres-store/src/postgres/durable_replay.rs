@@ -109,7 +109,7 @@ impl PostgresDurableStore {
                                     fence,
                                     now,
                                     self.fence.fleet(),
-                                    self.pools.maintenance.checkpoint_ref_chunk as usize,
+                                    &self.pools,
                                     publication.as_deref_mut(),
                                 ))
                                 .await;
@@ -300,7 +300,7 @@ pub(super) async fn apply_owner(
     fence: Option<FenceRead>,
     now: DurableInstant,
     fleet: lash_core_store::store::FleetFormat,
-    checkpoint_ref_chunk: usize,
+    pools: &crate::host::RolePools,
     candidate: Option<&mut CandidatePublication>,
 ) -> Result<ActorCommit, DurableError> {
     let actor = write.actor().as_str();
@@ -339,12 +339,13 @@ pub(super) async fn apply_owner(
         }
     }
     let committing = Committing {
-        checkpoint_ref_chunk,
+        checkpoint_ref_chunk: pools.maintenance.checkpoint_ref_chunk as usize,
         actor: write.actor(),
         epoch: write.epoch(),
         now,
         fleet,
         retired: Retired::default(),
+        configs: &pools.configs,
     };
     crate::obligation_ledger::lock_ending_executions_tx(tx, write.domain())
         .await

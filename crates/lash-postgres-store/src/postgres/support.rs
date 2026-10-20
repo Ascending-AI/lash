@@ -733,6 +733,59 @@ pub(crate) async fn load_config_tx(
     }
 }
 
+/// A validated configuration graph with its session-name verdict deferred
+/// until after the head's frame checks, preserving head-load refusal order.
+pub(crate) struct ConfigRoot {
+    root: String,
+    names: Result<(), StoreError>,
+}
+
+impl ConfigRoot {
+    pub(crate) fn into_named(self) -> Result<String, StoreError> {
+        self.names?;
+        Ok(self.root)
+    }
+}
+
+/// Admit session `session_id`'s stored config root `reference` as the
+/// validated identity a commit plans over (FIG-7049): the commit compares the
+/// root it publishes with this one and never decodes or stages the stored
+/// configuration to recover it. `root_held`: the caller's snapshot holds the
+/// root as a stored graph node. A root a committed read validated and the
+/// snapshot holds is
+/// admitted from `configs` without reading its closure: the root's edges
+/// keep its closure stored. Any other root is read and validated whole in
+/// the caller's snapshot, as a head load reads it, and admits nothing to
+/// `configs`.
+pub(crate) async fn validate_config_root_tx(
+    tx: &mut sqlx::PgConnection,
+    session_id: &SessionId,
+    reference: Option<&str>,
+    root_held: bool,
+    fleet: lash_core_store::store::FleetFormat,
+    configs: &lash_core_store::store_backend_support::ConfigCache,
+) -> Result<ConfigRoot, StoreError> {
+    use lash_core_store::checkpoint_graph::NodeId;
+    let root =
+        reference
+            .and_then(NodeId::from_hex)
+            .ok_or_else(|| StoreError::StoredDataCorrupt {
+                record_kind: "SessionHeadMeta",
+                message: "revision names a missing config reference".to_owned(),
+            })?;
+    if root_held && configs.validates(root, session_id, fleet)? {
+        return Ok(ConfigRoot {
+            root: root.to_hex(),
+            names: Ok(()),
+        });
+    }
+    let payload = load_config_tx(tx, reference, fleet, None).await?;
+    Ok(ConfigRoot {
+        root: root.to_hex(),
+        names: payload.ensure_names(session_id),
+    })
+}
+
 /// Configuration admission and reads preserve database failures as store failures.
 pub(crate) fn config_store_error(
     error: lash_core_store::checkpoint_graph::GraphRefusal,

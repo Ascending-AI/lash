@@ -1178,3 +1178,98 @@ async fn a_terminal_window_is_unchanged_by_later_commits() {
         serde_json::to_string(&again).expect("serialize")
     );
 }
+
+/// CONFIG-COMMIT-REUSE (FIG-7049): a head commit keeps a configuration a
+/// committed read validated as its config identity only for the session it
+/// was validated for, and only while the commit's own snapshot holds its
+/// root as a graph node: a cached root names no other session's head, and a
+/// root stored as anything else is read cold and refused.
+#[tokio::test]
+async fn a_commit_reuses_a_validated_configuration_only_where_its_snapshot_holds_it() {
+    use lash_core_store::store::SessionCommitStore as _;
+    let database_url = crate::testing::required_database_url();
+    let database = crate::testing::IsolatedDatabase::create(&database_url).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("connect");
+    let (owner, store) = persisted_record_decode_store(&storage, "config-owner").await;
+    let (foreign, _) = persisted_record_decode_store(&storage, "config-foreign").await;
+    let next = |session: SessionId| {
+        let store = store.clone();
+        async move {
+            let window = store
+                .load_session_window(&session, lash_core_store::store::WindowSelector::Current)
+                .await
+                .expect("window")
+                .expect("head");
+            let mut state = lash_core_store::store::window_state(
+                window,
+                lash_core_store::store::FleetFormat::current(),
+            )
+            .expect("stored state")
+            .state;
+            state.turn_index += 1;
+            lash_core_store::store::RuntimeCommit::persisted_state_for_test(&state)
+        }
+    };
+    let owner_commit = next(owner.clone()).await;
+    let foreign_commit = next(foreign.clone()).await;
+    // A committed head load validates the owner's root, as a send reads it.
+    store
+        .load_session_head_meta(&owner)
+        .await
+        .expect("validate and cache the owner's configuration")
+        .expect("head");
+    let mut raw = storage.pool().acquire().await.expect("raw connection");
+    let root: Vec<u8> = sqlx::query_scalar(
+        "SELECT config_ref FROM lash_session_revisions WHERE session_id = $1
+         ORDER BY head_revision DESC LIMIT 1",
+    )
+    .bind(owner.as_str())
+    .fetch_one(&mut *raw)
+    .await
+    .expect("owner root");
+    sqlx::query("UPDATE lash_session_revisions SET config_ref = $1 WHERE session_id = $2")
+        .bind(&root)
+        .bind(foreign.as_str())
+        .execute(&mut *raw)
+        .await
+        .expect("mis-key the cached root");
+    sqlx::query("UPDATE lash_session_revisions SET leaf_node_id = 'config-law-unframed' WHERE session_id = $1")
+        .bind(foreign.as_str()).execute(&mut *raw).await.expect("name a leaf without a frame");
+    let error = store
+        .commit_runtime_state(foreign_commit.clone())
+        .await
+        .expect_err("the existing frame refusal precedes a mis-keyed config");
+    assert!(
+        matches!(error, StoreError::MissingFrameOpenAncestor { .. }),
+        "{error:?}"
+    );
+    sqlx::query("UPDATE lash_session_revisions SET leaf_node_id = NULL WHERE session_id = $1")
+        .bind(foreign.as_str())
+        .execute(&mut *raw)
+        .await
+        .expect("restore the empty head");
+    let error = store
+        .commit_runtime_state(foreign_commit)
+        .await
+        .expect_err("a cached root names no other session's head");
+    assert!(
+        matches!(&error, StoreError::StoredDataCorrupt { record_kind: "SessionHeadMeta", message }
+            if message.contains(&format!("row is keyed on session `{foreign}`"))),
+        "{error:?}"
+    );
+    sqlx::query("UPDATE lash_blobs SET encoding = 0 WHERE hash = $1")
+        .bind(&root)
+        .execute(&mut *raw)
+        .await
+        .expect("store the cached root as an opaque blob");
+    let error = store
+        .commit_runtime_state(owner_commit)
+        .await
+        .expect_err("a root the snapshot does not hold as a graph node is refused");
+    assert!(
+        matches!(error, StoreError::StoredDataCorrupt { .. }),
+        "{error:?}"
+    );
+}

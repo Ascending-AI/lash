@@ -5,12 +5,18 @@
 //! The planner (`RuntimeCommitPlanner`, shared with SQLite) decides the
 //! commit from a few facts: the head revision it publishes over, the
 //! published leaf's ancestry seed, whether a requested ancestor is active
-//! and which of its nodes are taken. A one-call commit plans over the facts
-//! its owner's open read ([`SessionFacts`]); the explicit form plans over
-//! the same facts read in its transaction under the session's write lock.
-//! Either way the program guards every fact it was planned on, so a fact
-//! that moved refuses the program: the one call is declined and the
-//! explicit form plans again, and the explicit form names the refusal.
+//! and which of its nodes are taken. A one-call commit plans over the hints
+//! its owner's open read ([`SessionFacts`]), and its program guards every
+//! one of them: a hint that moved refuses the program, the one call is
+//! declined, and the explicit form plans again and names the refusal.
+//!
+//! The explicit form plans over the same facts read in its own transaction
+//! under the locks it keeps to its commit ([`Held`], FIG-7049): the
+//! session's write lock, which every head commit, receipt and deletion of
+//! the session takes, and the published leaf's row. Those locks discharge
+//! the guards of the facts they hold, so its program runs none of them. The
+//! nodes a commit's ids name are not the session's: another session's
+//! commit can take an id the lock does not hold, so both forms guard them.
 //!
 //! Every decision the store's rows make is the statements' own: whether
 //! the session's retention releases revisions at a commit, and whether the
@@ -61,6 +67,18 @@ lash_store_sql::statements! {
 
         /// Take attachment `?2`'s fence lock in class `?1`.
         lock_attachment = "SELECT pg_advisory_xact_lock(CAST(?1 AS INTEGER), hashtext(?2))";
+
+        /// Session `?1`'s head as the explicit form plans over it: its
+        /// revision's config root, revision, leaf and checkpoint, the frame
+        /// its leaf row names, and whether the store holds the config root
+        /// as a graph node.
+        head = "SELECT revision.config_ref, head.head_revision, revision.leaf_node_id,
+                    revision.checkpoint_ref, leaf.frame_node_id, root.encoding = 1 AS root_held
+             FROM session_head AS head LEFT JOIN session_revisions AS revision
+                 ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
+             LEFT JOIN graph_nodes AS leaf ON leaf.node_id = revision.leaf_node_id
+             LEFT JOIN blobs AS root ON root.hash = revision.config_ref
+             WHERE head.session_id = ?1";
     }
 }
 
@@ -426,7 +444,7 @@ struct EndedFrame {
 
 /// What the explicit form reads beyond the head's facts, under the locks
 /// the commit keeps.
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, Default)]
 pub(super) struct ReadFacts {
     requested_ancestor_is_active: bool,
     occupied: std::collections::HashSet<NodeId>,
@@ -434,6 +452,26 @@ pub(super) struct ReadFacts {
     ended: Vec<EndedFrame>,
     /// The `(namespace, artifact_ref)` pairs a frame transition carries.
     carries: Vec<(&'static str, String)>,
+}
+
+/// What a head commit's program is planned over, which decides the guards
+/// it runs.
+pub(super) enum Basis<'a> {
+    /// An owner's open read: hints, each guarded by a step.
+    Hinted(&'a SessionFacts),
+    /// What the explicit form read in its own transaction under the locks it
+    /// keeps.
+    Held(Box<Held>),
+}
+
+/// The facts the explicit form read in its transaction under the locks it
+/// keeps to its commit, and the checkpoint it put among them. Only
+/// [`read_facts`] makes one, in the transaction its program then runs in: it
+/// is never kept past that transaction, so a retry reads afresh.
+pub(super) struct Held {
+    head: HeadFacts,
+    read: ReadFacts,
+    checkpoint: crate::support::CheckpointParts,
 }
 
 /// A head commit's program: its steps with what each refusal means, the
@@ -495,14 +533,11 @@ fn receipt_values(
     ])
 }
 
-/// The program of the commit `planner` prepared, planned over `facts`
-/// (and, in the explicit form, `read`) by `writer`. `Ok(None)`: the commit
-/// needs a fact only the explicit form reads.
+/// The program of the commit `planner` prepared, planned over `basis`.
+/// `Ok(None)`: the commit needs a fact only the explicit form reads.
 pub(super) fn program(
     planner: &RuntimeCommitPlanner,
-    facts: &HeadFacts,
-    plugin_writers: Option<&[(String, i32, i32)]>,
-    read: Option<(&ReadFacts, crate::support::CheckpointParts)>,
+    basis: Basis<'_>,
     now: u64,
 ) -> Result<Option<Program>, StoreError> {
     let commit = planner.commit();
@@ -520,19 +555,28 @@ pub(super) fn program(
         .ingress
         .as_ref()
         .is_some_and(|ingress| !ingress.released.is_empty() || !ingress.dropped.is_empty());
-    let (read, put) = match read {
-        Some((read, put)) => (read, Some(put)),
+    let unread = ReadFacts {
+        requested_ancestor_is_active: true,
+        ..ReadFacts::default()
+    };
+    let held;
+    let (facts, read, put, hint) = match basis {
         // A one-call commit plans only what its open's facts decide.
-        None if ancestor.is_some() || released_any || commit.frame_transition.is_some() => {
+        Basis::Hinted(_)
+            if ancestor.is_some() || released_any || commit.frame_transition.is_some() =>
+        {
             return Ok(None);
         }
-        None => (
-            &ReadFacts {
-                requested_ancestor_is_active: true,
-                ..ReadFacts::default()
-            },
-            None,
-        ),
+        Basis::Hinted(hint) => (&hint.head, &unread, None, Some(hint)),
+        Basis::Held(acquired) => {
+            let Held {
+                head,
+                read,
+                checkpoint,
+            } = *acquired;
+            held = (head, read);
+            (&held.0, &held.1, Some(checkpoint), None)
+        }
     };
     let plan = planner.plan(lash_core_store::store::FreshRuntimeCommitFacts {
         actual_head_revision: facts.revision,
@@ -635,10 +679,11 @@ pub(super) fn program(
     };
 
     // The plugin namespaces the commit publishes are admitted against the
-    // writer ranges the plan read (FIG-4746).
+    // writer ranges the plan read (FIG-4746); the explicit form admitted
+    // them under the fence it holds.
     let publication = planner.plugin_publication();
     if !publication.is_empty()
-        && let Some(recorded) = plugin_writers
+        && let Some(recorded) = hint.map(|hint| &hint.plugin_writers)
     {
         let plugins = publication.plugins();
         let held: Vec<&(String, i32, i32)> = recorded
@@ -667,44 +712,8 @@ pub(super) fn program(
             Refusal::Backstop,
         );
     }
-    // The session's write lock is the authority every history commit and
-    // deletion shares; the committing actor's row is locked by its fence.
-    let actor = ActorKey::session(session)
-        .map_err(|error| StoreError::Backend(format!("session actor key: {error}")))?;
-    program.push(
-        Step::any(&LOCK_SESSION, vec![text(actor.as_str()), text(session)]),
-        Refusal::Backstop,
-    );
-    program.push(Step::none(&DELETED, vec![text(session)]), Refusal::Deleted);
-    // Only a session the catalog admitted commits.
-    program.push(
-        Step::one(&MATERIALIZED, vec![text(session)]),
-        Refusal::NotFound,
-    );
-    program.push(
-        Step::none(&RECEIPT, vec![text(session), text(planner.operation_key())]),
-        Refusal::Backstop,
-    );
-    // The head the plan publishes over, locked, and the leaf it extends.
-    program.push(
-        if !facts.exists {
-            Step::none(&HEAD_ABSENT, vec![text(session)])
-        } else {
-            Step::one(
-                &HEAD_AT,
-                vec![
-                    text(session),
-                    Value::int(sql_int("head revision", facts.revision)?),
-                ],
-            )
-        },
-        Refusal::HeadMoved,
-    );
-    if let PublishedLeafFacts::Live(parent) = &facts.leaf {
-        program.push(
-            Step::one(&LEAF, vec![text(parent.node_id.as_str())]),
-            Refusal::LeafRetired(parent.node_id.clone()),
-        );
+    if hint.is_some() {
+        guard_hints(&mut program, planner, facts)?;
     }
     let nodes = commit.graph.nodes();
     if !nodes.is_empty() {
@@ -823,6 +832,58 @@ pub(super) fn program(
         );
     }
     Ok(Some(program))
+}
+
+/// The guards of the hints a one-call commit was planned on: the session's
+/// write lock, then each fact the lock decides (no deletion, an admitted
+/// session, no receipt of the operation, the head at its revision), and
+/// the published leaf, row-locked.
+fn guard_hints(
+    program: &mut Program,
+    planner: &RuntimeCommitPlanner,
+    facts: &HeadFacts,
+) -> Result<(), StoreError> {
+    let session = planner.commit().session_id.as_str();
+    // The session's write lock is the authority every history commit and
+    // deletion shares; the committing actor's row is locked by its fence.
+    let actor = ActorKey::session(session)
+        .map_err(|error| StoreError::Backend(format!("session actor key: {error}")))?;
+    program.push(
+        Step::any(&LOCK_SESSION, vec![text(actor.as_str()), text(session)]),
+        Refusal::Backstop,
+    );
+    program.push(Step::none(&DELETED, vec![text(session)]), Refusal::Deleted);
+    // Only a session the catalog admitted commits.
+    program.push(
+        Step::one(&MATERIALIZED, vec![text(session)]),
+        Refusal::NotFound,
+    );
+    program.push(
+        Step::none(&RECEIPT, vec![text(session), text(planner.operation_key())]),
+        Refusal::Backstop,
+    );
+    // The head the plan publishes over, locked, and the leaf it extends.
+    program.push(
+        if !facts.exists {
+            Step::none(&HEAD_ABSENT, vec![text(session)])
+        } else {
+            Step::one(
+                &HEAD_AT,
+                vec![
+                    text(session),
+                    Value::int(sql_int("head revision", facts.revision)?),
+                ],
+            )
+        },
+        Refusal::HeadMoved,
+    );
+    if let PublishedLeafFacts::Live(parent) = &facts.leaf {
+        program.push(
+            Step::one(&LEAF, vec![text(parent.node_id.as_str())]),
+            Refusal::LeafRetired(parent.node_id.clone()),
+        );
+    }
+    Ok(())
 }
 
 /// The writes of the frames the commit leaves (ADR 0113 §3.1), decided
@@ -1111,20 +1172,20 @@ fn acquire_attachments(
 }
 
 /// The facts the explicit form reads in `tx`, under the session's write
-/// lock, which it takes first: the head and its leaf, the ownership of a
-/// store writer's head, an ancestor's reachability, the commit's taken
-/// nodes, the rows a cancel released and the cleanups of the frames the
-/// commit leaves, each under the lock the commit keeps. `Err(replay)`
-/// when the commit already committed.
+/// lock, which it takes first: the head, its config root admitted as the
+/// identity the commit compares (`configs` lends a root a committed read
+/// validated), and its leaf, row-locked; the ownership of a store writer's
+/// head, an ancestor's reachability, the commit's taken nodes, the rows a
+/// cancel released and the cleanups of the frames the commit leaves, each
+/// under the lock the commit keeps. `Err(replay)` when the commit already
+/// committed.
 pub(super) async fn read_facts(
     tx: &mut crate::guarded_tx::GuardedTx<'_>,
     planner: &RuntimeCommitPlanner,
     writer: HeadWriter,
     chunk_size: usize,
-) -> Result<
-    Result<(HeadFacts, ReadFacts, crate::support::CheckpointParts), RuntimeCommitReceipt>,
-    StoreError,
-> {
+    configs: &lash_core_store::store_backend_support::ConfigCache,
+) -> Result<Result<Box<Held>, RuntimeCommitReceipt>, StoreError> {
     let commit = planner.commit();
     let fleet = tx.fleet();
     tx.admit_plugin_writers(planner.plugin_publication())
@@ -1142,9 +1203,7 @@ pub(super) async fn read_facts(
             session_id: commit.session_id.clone(),
         });
     }
-    let existing =
-        crate::support::load_session_head_meta_tx(&mut *tx, &commit.session_id, false, fleet, None)
-            .await?;
+    let existing = held_head(tx, &commit.session_id, fleet, configs).await?;
     planner.validate_node_derivation()?;
     if let Some(prior) =
         crate::runtime_persistence::committed_receipt_tx(&mut *tx, planner, fleet).await?
@@ -1159,7 +1218,7 @@ pub(super) async fn read_facts(
     let ownership = if lash_core_store::store::head_write_needs_ownership(
         commit,
         writer,
-        existing.as_ref().is_some_and(|head| !head.is_created()),
+        existing.as_ref().is_some_and(|head| !head.created),
     ) {
         Some(crate::session_runs::head_ownership_facts_conn(&mut *tx, &commit.session_id).await?)
     } else {
@@ -1171,7 +1230,7 @@ pub(super) async fn read_facts(
     let checkpoint =
         crate::support::put_checkpoint_tx(&mut *tx, &commit.checkpoint, fleet, chunk_size).await?;
     let mut leaf_owner = None;
-    let leaf = match existing.as_ref().and_then(|head| head.leaf_node_id.clone()) {
+    let leaf = match existing.as_ref().and_then(|head| head.leaf.clone()) {
         None => PublishedLeafFacts::Absent,
         Some(node_id) => {
             let parent = crate::observed_sql::query_as::<_, (i64, String, String)>(
@@ -1201,29 +1260,11 @@ pub(super) async fn read_facts(
             }
         }
     };
-    let config_ref = existing
-        .as_ref()
-        .map(|head| {
-            let mut staging = lash_core_store::checkpoint_graph::GraphStaging::new(
-                lash_core_store::checkpoint_graph::EncodeBudget::new(
-                    lash_core_store::checkpoint_graph::ExplicitLimit::new(u64::MAX),
-                ),
-            );
-            lash_core_store::checkpoint_graph::config::stage(&mut staging, &head.payload())
-                .map(|node| node.to_hex())
-                .map_err(|message| StoreError::StoredDataCorrupt {
-                    record_kind: "SessionHeadMeta",
-                    message,
-                })
-        })
-        .transpose()?;
     let head = HeadFacts {
-        config_ref,
         exists: existing.is_some(),
-        revision: existing.as_ref().map_or(0, |head| head.head_revision),
-        frame: existing
-            .as_ref()
-            .and_then(|head| head.current_frame_node_id.clone()),
+        revision: existing.as_ref().map_or(0, |head| head.revision),
+        config_ref: existing.as_ref().map(|head| head.config_ref.clone()),
+        frame: existing.and_then(|head| head.frame),
         leaf,
     };
     let requested_ancestor_is_active = crate::runtime_persistence::requested_ancestor_is_active_tx(
@@ -1272,9 +1313,9 @@ pub(super) async fn read_facts(
     let released = crate::runtime_persistence::released_rows_tx(&mut *tx, commit).await?;
     let (ended, carries) =
         crate::runtime_persistence::frames_left_facts_tx(&mut *tx, commit, &left).await?;
-    Ok(Ok((
+    Ok(Ok(Box::new(Held {
         head,
-        ReadFacts {
+        read: ReadFacts {
             requested_ancestor_is_active,
             occupied,
             released: released
@@ -1292,7 +1333,77 @@ pub(super) async fn read_facts(
             carries,
         },
         checkpoint,
-    )))
+    })))
+}
+
+/// The head row of session `session_id` the explicit form plans over.
+struct StoredHead {
+    config_ref: String,
+    revision: u64,
+    leaf: Option<NodeId>,
+    frame: Option<FrameNodeId>,
+    /// Whether the head is the one a session's admission created, which
+    /// no commit published yet.
+    created: bool,
+}
+
+/// Session `session_id`'s head in `tx`, as a head load reads it under
+/// `fleet`, its config root admitted as the commit's validated config
+/// identity ([`crate::support::validate_config_root_tx`]).
+async fn held_head(
+    tx: &mut crate::guarded_tx::GuardedTx<'_>,
+    session_id: &lash_protocol_types::SessionId,
+    fleet: lash_core_store::store::FleetFormat,
+    configs: &lash_core_store::store_backend_support::ConfigCache,
+) -> Result<Option<StoredHead>, StoreError> {
+    let Some(row) = crate::observed_sql::query(SQL.head.sql())
+        .bind(session_id.as_str())
+        .fetch_optional(crate::observed_sql::executor(&mut ***tx))
+        .await
+        .map_err(crate::support::store_sqlx_error)?
+    else {
+        return Ok(None);
+    };
+    let get = crate::support::store_sqlx_error;
+    let revision = crate::support::u64_from_sql("SessionHeadMeta", "head_revision", row.get(1))?;
+    let config_ref: Option<String> = crate::keys::get(&row, 0).map_err(get)?;
+    let root_held: Option<bool> = row.try_get(5).map_err(get)?;
+    let config_ref = crate::support::validate_config_root_tx(
+        tx,
+        session_id,
+        config_ref.as_deref(),
+        root_held == Some(true),
+        fleet,
+        configs,
+    )
+    .await?;
+    let frame: Option<String> = row.try_get(4).map_err(get)?;
+    let leaf: Option<String> = row.try_get(2).map_err(get)?;
+    if let Some(leaf) = &leaf
+        && frame.is_none()
+    {
+        return Err(StoreError::MissingFrameOpenAncestor {
+            leaf_node_id: NodeId::parse(leaf.clone())?,
+        });
+    }
+    let frame =
+        frame
+            .map(FrameNodeId::new)
+            .transpose()
+            .map_err(|error| StoreError::StoredDataCorrupt {
+                record_kind: "SessionGraph",
+                message: error.to_string(),
+            })?;
+    let checkpoint: Option<String> = crate::keys::get(&row, 3).map_err(get)?;
+    let leaf = leaf.map(NodeId::parse).transpose()?;
+    let config_ref = config_ref.into_named()?;
+    Ok(Some(StoredHead {
+        config_ref,
+        revision,
+        created: revision == 0 && leaf.is_none() && checkpoint.is_none(),
+        leaf,
+        frame,
+    }))
 }
 
 /// Name the refusal of `program`'s step `index`, reading in `tx`.
@@ -1406,14 +1517,15 @@ pub(super) async fn apply(
     writer: HeadWriter,
     context: &super::steps::Context<'_>,
     chunk_size: usize,
+    configs: &lash_core_store::store_backend_support::ConfigCache,
 ) -> Result<RuntimeCommitReceipt, StoreError> {
     let commit = planner.commit();
-    let (facts, read, checkpoint) = match read_facts(tx, planner, writer, chunk_size).await? {
-        Ok(facts) => facts,
+    let held = match read_facts(tx, planner, writer, chunk_size, configs).await? {
+        Ok(held) => held,
         Err(replayed) => return Ok(replayed),
     };
     let now = u64::try_from(context.now.0).unwrap_or(0);
-    let Some(program) = program(planner, &facts, None, Some((&read, checkpoint)), now)? else {
+    let Some(program) = program(planner, Basis::Held(held), now)? else {
         return Err(StoreError::Backend(
             "the explicit head commit read every fact its plan needs".to_owned(),
         ));
@@ -1446,6 +1558,7 @@ pub(crate) async fn apply_store_commit(
     planner: &RuntimeCommitPlanner,
     now: u64,
     chunk_size: usize,
+    configs: &lash_core_store::store_backend_support::ConfigCache,
 ) -> Result<RuntimeCommitReceipt, StoreError> {
     let session = &planner.commit().session_id;
     let actor = ActorKey::session(session.as_str())
@@ -1457,7 +1570,15 @@ pub(crate) async fn apply_store_commit(
         actor: &actor,
         now,
     };
-    let result = apply(tx, planner, HeadWriter::Store, &context, chunk_size).await?;
+    let result = apply(
+        tx,
+        planner,
+        HeadWriter::Store,
+        &context,
+        chunk_size,
+        configs,
+    )
+    .await?;
     super::pages::hold_retired(tx, retired, now)
         .await
         .map_err(crate::support::store_sqlx_error)?;
