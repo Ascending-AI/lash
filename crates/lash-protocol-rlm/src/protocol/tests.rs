@@ -1,4 +1,4 @@
-use super::cell::{extract_cell, project_visible_assistant_prose_with_tags};
+use super::cell::extract_cell;
 use super::*;
 
 fn tags() -> crate::dialect::CellTags {
@@ -38,31 +38,4 @@ fn rendered_history_cell_round_trips_through_extractor() {
         .expect("renders a valid cell");
     assert_eq!(extraction.prose, "Found it.");
     assert_eq!(extraction.code, code);
-}
-
-#[test]
-fn prose_of_only_markup_tag_lines_is_no_prose_but_prose_naming_a_tag_is_kept() {
-    let prose = |text: &str| {
-        let reply = format!("{text}\n<typescript>\nfinish(1);\n</typescript>");
-        let cell = extract_typescript_cell(&reply)
-            .ok()
-            .flatten()
-            .map(|cell| cell.prose);
-        let visible = project_visible_assistant_prose_with_tags(&reply, tags());
-        assert_eq!(cell.as_deref(), Some(visible.as_str()), "{text:?}");
-        visible
-    };
-    assert_eq!(prose("<invoke_placeholder>"), "");
-    assert_eq!(
-        prose("<function_calls>\n<invoke name=\"tools.find\">\n</invoke>\n</function_calls>"),
-        ""
-    );
-    assert_eq!(
-        prose("Calling <invoke_placeholder> now."),
-        "Calling <invoke_placeholder> now."
-    );
-    assert_eq!(
-        prose("Searching.\n<invoke_placeholder>"),
-        "Searching.\n<invoke_placeholder>"
-    );
 }

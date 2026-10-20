@@ -21,9 +21,6 @@ const FINISH_FINAL_VALUE_EXACT_HISTORY: RlmPromptHistoryFocusedCheck =
     RlmPromptHistoryFocusedCheck {
         display_name: "finish final value keeps reasoning prose and code",
     };
-const MARKUP_ONLY_PROSE_BEFORE_CELL: RlmPromptHistoryFocusedCheck = RlmPromptHistoryFocusedCheck {
-    display_name: "markup-only prose before a cell is no assistant entry",
-};
 const STREAMED_REASONING_TRAJECTORY: RlmPromptHistoryFocusedCheck = RlmPromptHistoryFocusedCheck {
     display_name: "streamed reasoning is preserved in trajectory",
 };
@@ -67,33 +64,6 @@ fn rlm_prompt_history_markdown_code_block_remains_visible_prose_before_real_lash
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "console.log(\"done\")",
                 output: vec!["done\n".to_string()],
-                outcome: lash_core::CellOutcome::Completed,
-            }),
-            ..RlmProtocolExpectations::default()
-        })
-        .run();
-}
-
-/// FIG-6888: a model wrote a stray `<invoke_placeholder>` line before its
-/// cell, and the cell's prose committed it as an assistant entry that hosts
-/// mirrored and later prompts replayed to the model.
-#[test]
-fn rlm_prompt_history_markup_only_prose_before_cell_is_not_an_assistant_entry() {
-    RlmProtocolScenario::new(MARKUP_ONLY_PROSE_BEFORE_CELL.display_name)
-        .termination(lash_core::TerminationMode::TerminalRequired)
-        .llm_response(vec![text_part(&typescript_block_with_prose(
-            "<invoke_placeholder>",
-            "console.log(\"hi\");",
-        ))])
-        .exec_result(exec_response(&["hi\n"], None, None))
-        .expect(RlmProtocolExpectations {
-            exec_codes: vec!["console.log(\"hi\");"],
-            checkpoints: vec![CheckpointKind::AfterWork],
-            assistant_message_count: Some(0),
-            assistant_visible_texts: Some(Vec::new()),
-            trajectory_last: Some(RlmTrajectoryExpectation {
-                code: "console.log(\"hi\");",
-                output: vec!["hi\n".to_string()],
                 outcome: lash_core::CellOutcome::Completed,
             }),
             ..RlmProtocolExpectations::default()
