@@ -345,6 +345,23 @@ digests equal.
   boundary inside can reach the slice threshold. An island instead checks
   each event against the bound as it charges it, and the slice threshold at
   each step end, and exits before either is crossed.
+- **Island segments (FIG-6980).** An island frame admits its plan's sites
+  once, at its entry: the deepest depth check any of them makes
+  (`K-BND-002`) and the observer's helper bodies, as neither changes while
+  the frame runs; a frame that fails it checks each site as before. A
+  statement's charges from its unit, and those from each call's return, up
+  to the first node whose charge is not known ahead, form a segment: typed
+  two-operand operators, at their close plus their scalar table's most,
+  and the closes the statement makes. A charging frame with no tape
+  attached admits a segment whole when its most fits the bound at its
+  start, and then commits its charges unchecked, in the reference's order,
+  while each operator takes its typed path. An operator that leaves its
+  typed path, or a segment whose most does not fit, is checked event by
+  event from there, so a bound inside a statement still stops the island at
+  the reference's op with the reference's charge. A conditional's arms
+  start no segment that reaches past them.
+  `tests::regions::island_segments_stop_where_the_reference_stops` runs
+  every bound of fib's charge program untaped, under both plans.
 - **Exits.** On a crossing risk, a guard miss, an error or a barrier, the
   region exits at the last committed statement boundary. The reference then
   replays from there, event by event, through `enter_region`,

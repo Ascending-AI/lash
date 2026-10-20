@@ -236,6 +236,17 @@ struct Island<'a> {
     /// the call depth leaves fewer above the frames below it, hoisted from
     /// each call to the entry, as neither changes while it runs.
     frames: u32,
+    /// The running frame admits each of its plan's sites, as its depth
+    /// and the observer stand for the whole frame
+    /// ([`Compiled::admits`]): hoisted from each site to the frame's entry.
+    admitted: bool,
+    /// It charges and records no tape: a segment may be admitted whole.
+    plain: bool,
+    /// The running frame is admitted and plain.
+    swift: bool,
+    /// The running segment was admitted whole: its charges commit
+    /// unchecked while its operators take their typed paths.
+    covered: bool,
     scratch: &'a mut Scratch,
 }
 
@@ -364,9 +375,39 @@ impl<'a> Island<'a> {
         Ok(())
     }
 
+    /// Whether the segment that starts here, charging at most `most`, is
+    /// admitted whole.
+    #[inline(always)]
+    fn admit(&mut self, most: u64) -> bool {
+        self.covered = self.swift && self.fits(most);
+        self.covered
+    }
+
+    /// Closes `close`, unchecked where it is `covered` in an admitted
+    /// segment, as [`Self::close`] does otherwise.
+    #[inline(always)]
+    fn close_in(&mut self, close: &Close, covered: bool) -> bool {
+        if covered && self.covered {
+            self.charged += u64::from(close.total);
+            return true;
+        }
+        self.close(close)
+    }
+
+    /// Whether operator `site` may answer here rather than leave its call to
+    /// the reference: no observed helper body, and its depth check holds.
+    #[inline(always)]
+    fn admits(&self, site: &OperatorSite) -> bool {
+        self.admitted
+            || (!(site.body_when_observed && self.observed) && self.depth_fits(site.depth))
+    }
+
     /// Whether `extra` more frames than the running ones fit the depth.
     #[inline(always)]
     fn depth_fits(&self, depth: Depth) -> bool {
+        if self.admitted {
+            return true;
+        }
         let running = self.base + u64::from(self.depth);
         match depth {
             Depth::None => true,
@@ -390,23 +431,22 @@ impl<'a> Island<'a> {
         }
         // The prepared entry answers and declines as its charged guard
         // does, and on scalars the sizes the table indexes are the values'.
-        let charge =
-            if !(!site.body_when_observed || !self.observed) || !self.depth_fits(site.depth) {
-                None
-            } else if !self.charging {
-                site.entry.call(args).filter(held).map(|value| (value, 0))
-            } else if args.iter().all(scalar) {
-                match site.entry.call(args) {
-                    Some(result) if scalar(&result) => site
-                        .table
-                        .units(sizes(args, &result))
-                        .map(|units| (result, units)),
-                    Some(_) => self.measured(site, args),
-                    None => None,
-                }
-            } else {
-                self.measured(site, args)
-            };
+        let charge = if !self.admits(site) {
+            None
+        } else if !self.charging {
+            site.entry.call(args).filter(held).map(|value| (value, 0))
+        } else if args.iter().all(scalar) {
+            match site.entry.call(args) {
+                Some(result) if scalar(&result) => site
+                    .table
+                    .units(sizes(args, &result))
+                    .map(|units| (result, units)),
+                Some(_) => self.measured(site, args),
+                None => None,
+            }
+        } else {
+            self.measured(site, args)
+        };
         let Some((result, units)) = charge else {
             return Err(self.at_operands(site.pc, site.reg, args));
         };
@@ -435,12 +475,11 @@ impl<'a> Island<'a> {
         value: Value,
         units: Option<u64>,
     ) -> Option<Answer> {
-        if (site.body_when_observed && self.observed) || !self.depth_fits(site.depth) {
+        if !self.admits(site) {
             return None;
         }
         let units = if self.charging { units? } else { 0 };
-        let fixed = site.close.map_or(0, |close| u64::from(close.total));
-        if !self.fits(fixed.checked_add(units)?)
+        if !self.fits(site.fixed.checked_add(units)?)
             || site
                 .counted
                 .is_some_and(|occurrence| !self.counters.can_advance(&[occurrence]))
@@ -777,7 +816,12 @@ impl<'a> Island<'a> {
         };
         self.count(site.occurrence)?;
         match self.enter(target, args) {
-            Ok(value) => Ok(value),
+            Ok(value) => {
+                if site.after != 0 {
+                    self.admit(site.after);
+                }
+                Ok(value)
+            }
             Err(stop) => {
                 if self.scratch.exit.halt.is_none() {
                     self.scratch.exit.suspended = Some(site.act);
@@ -888,9 +932,17 @@ impl<'a> Island<'a> {
         if let Some(recorder) = self.recorder {
             recorder.entered();
         }
+        let outer = (self.admitted, self.swift);
         self.depth += 1;
+        self.admitted = compiled.admits(
+            self.base + u64::from(self.depth),
+            self.call_depth,
+            self.observed,
+        );
+        self.swift = self.admitted && self.plain;
         let ran = run_body(self, &compiled.body, &mut slots);
         self.depth -= 1;
+        (self.admitted, self.swift) = outer;
         match ran {
             Ok(Flow2::Returned(value)) => Ok(value),
             // The body ran its last statement: the frame returns null.
@@ -1036,8 +1088,11 @@ fn run_block(island: &mut Island<'_>, block: &CBlock, slots: &mut Slots) -> Resu
 #[inline(always)]
 fn run_body(island: &mut Island<'_>, block: &CBlock, slots: &mut Slots) -> Result<Flow2, Stop> {
     for (index, statement) in block.statements.iter().enumerate() {
-        // A step: the statement's unit first, as `advance` charges it.
-        if !island.unit() {
+        // A step: the statement's unit first, as `advance` charges it, in
+        // its first segment.
+        if island.admit(statement.ahead) {
+            island.charged += 1;
+        } else if !island.unit() {
             return Err(island.boundary(block.id, index));
         }
         match run_statement(island, statement, slots) {
@@ -1073,12 +1128,17 @@ fn run_statement(
 ) -> Result<Next, Stop> {
     let stmt = statement.id;
     match &statement.kind {
-        CKind::Return { value, close, reg } => {
+        CKind::Return {
+            value,
+            close,
+            covered,
+            reg,
+        } => {
             let value = value
                 .eval(island, slots)
                 .map_err(|stop| island.stand(stmt, stop))?;
             if let Some(close) = close
-                && !island.close(close)
+                && !island.close_in(close, *covered)
             {
                 let stop = island.at(close.head);
                 let stop = island.held(stop, *reg, value);
@@ -1089,6 +1149,7 @@ fn run_statement(
         CKind::Write {
             value,
             close,
+            covered,
             pc,
             reg,
             at,
@@ -1098,7 +1159,7 @@ fn run_statement(
                 .eval(island, slots)
                 .map_err(|stop| island.stand(stmt, stop))?;
             if let Some(close) = close
-                && !island.close(close)
+                && !island.close_in(close, *covered)
             {
                 let stop = island.at(close.head);
                 let stop = island.held(stop, *reg, value);
@@ -1119,6 +1180,7 @@ fn run_statement(
         CKind::If {
             cond,
             close,
+            covered,
             pc,
             reg,
             then_,
@@ -1128,7 +1190,7 @@ fn run_statement(
                 .eval(island, slots)
                 .map_err(|stop| island.stand(stmt, stop))?;
             if let Some(close) = close
-                && !island.close(close)
+                && !island.close_in(close, *covered)
             {
                 let stop = island.at(close.head);
                 let stop = island.held(stop, *reg, value);
@@ -1157,12 +1219,17 @@ fn run_statement(
                 Flow2::Fell(leaves) => Ok(Next::Done(leaves)),
             }
         }
-        CKind::Discard { value, close, reg } => {
+        CKind::Discard {
+            value,
+            close,
+            covered,
+            reg,
+        } => {
             let value = value
                 .eval(island, slots)
                 .map_err(|stop| island.stand(stmt, stop))?;
             if let Some(close) = close
-                && !island.close(close)
+                && !island.close_in(close, *covered)
             {
                 let stop = island.at(close.head);
                 let stop = island.held(stop, *reg, value);

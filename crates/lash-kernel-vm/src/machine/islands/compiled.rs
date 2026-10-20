@@ -2,6 +2,19 @@
 //! expression of its resolved tree as a closure over the island's virtual
 //! frame, which charges every event as it runs and records, at a stop, the
 //! registers the frame holds and the op the reference resumes at.
+//!
+//! A statement's charges from its unit, and those from each call's return,
+//! up to the first node whose charge is not known ahead, are one segment:
+//! typed operators over two operands, and the closes they and the
+//! statement make. A charging frame without a tape,
+//! whose sites all fit their depth checks, admits a segment whole with one
+//! check of its most against the bound at its start, and commits each of
+//! its charges unchecked while every operator in it takes its typed path.
+//! Where the segment's most does not fit, the frame is observed or taped,
+//! or an operator leaves its typed path, the segment's charges are checked
+//! one by one from there, as the reference charges them; either way each
+//! commits what the reference commits, in its order, so a bound stops the
+//! island at the reference's op with the reference's charge.
 
 use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::ArenaHandle;
@@ -49,6 +62,11 @@ impl Operand {
 pub(crate) struct Compiled {
     pub(super) layout: Layout,
     pub(super) body: CBlock,
+    /// The most frames past the running ones any of its sites' depth
+    /// checks (`K-BND-002`) needs.
+    room: u32,
+    /// A site is a helper whose observed run runs its body.
+    observes: bool,
 }
 
 /// A plan's frame layout, precomputed from its plan: how many arguments
@@ -136,18 +154,24 @@ pub(super) struct CBlock {
 pub(super) struct CStatement {
     pub(super) id: StmtId,
     pub(super) leaves: u32,
+    /// The most its first segment charges, its unit included.
+    pub(super) ahead: u64,
     pub(super) kind: CKind,
 }
 
+/// A statement's kind; `covered` where its close is in the segment that
+/// its value's last node charges in.
 pub(super) enum CKind {
     Return {
         value: Operand,
         close: Option<Close>,
+        covered: bool,
         reg: u32,
     },
     Write {
         value: Operand,
         close: Option<Close>,
+        covered: bool,
         pc: u32,
         reg: u32,
         at: u32,
@@ -156,6 +180,7 @@ pub(super) enum CKind {
     If {
         cond: Operand,
         close: Option<Close>,
+        covered: bool,
         pc: u32,
         reg: u32,
         then_: CBlock,
@@ -164,6 +189,7 @@ pub(super) enum CKind {
     Discard {
         value: Operand,
         close: Option<Close>,
+        covered: bool,
         reg: u32,
     },
     /// A statement no island runs: reaching it exits at its first op.
@@ -190,6 +216,8 @@ pub(super) struct OperatorSite {
     /// boolean.
     pub(super) floats: Option<u64>,
     pub(super) close: Option<Close>,
+    /// What its close charges.
+    pub(super) fixed: u64,
     pub(super) pc: u32,
     pub(super) reg: u32,
     pub(super) counted: Option<usize>,
@@ -232,34 +260,130 @@ pub(super) struct CallSite {
     pub(super) act: ActIx,
     pub(super) occurrence: usize,
     pub(super) site: u32,
+    /// The most the segment from its return charges; 0 where none follows.
+    pub(super) after: u64,
 }
 
 impl Compiled {
     pub(crate) fn of(plan: &IslandPlan, exe: &Executable) -> Option<Self> {
+        // The first compile measures each segment's most, which a node
+        // that starts a segment holds; the second, identical, builds them.
+        let mut measure = Build::new(exe, None);
+        block(&plan.body, &mut measure)?;
+        let mut cx = Build::new(exe, Some(measure.segments));
+        let body = block(&plan.body, &mut cx)?;
         Some(Self {
             layout: Layout::of(plan)?,
-            body: block(&plan.body, exe)?,
+            body,
+            room: cx.room,
+            observes: cx.observes,
         })
+    }
+
+    /// Whether a frame of it with `running` call frames up to its own, in
+    /// a run of call depth bound `call_depth`, admits each of its sites:
+    /// it is no observed helper body, and its depth check holds.
+    #[inline(always)]
+    pub(super) fn admits(&self, running: u64, call_depth: u64, observed: bool) -> bool {
+        !(observed && self.observes)
+            && running
+                .checked_add(u64::from(self.room))
+                .is_some_and(|end| end <= call_depth)
     }
 }
 
-fn block(block: &Block, exe: &Executable) -> Option<CBlock> {
+/// A plan's compilation: what its sites need, and its segments.
+pub(super) struct Build<'e> {
+    exe: &'e Executable,
+    room: u32,
+    observes: bool,
+    /// The most each segment charges, in the order they start.
+    segments: Vec<u64>,
+    /// What a first compile measured them as, which the nodes take.
+    measured: Option<Vec<u64>>,
+    /// The segment the next charge is in, if any.
+    open: Option<usize>,
+}
+
+impl<'e> Build<'e> {
+    pub(super) fn new(exe: &'e Executable, measured: Option<Vec<u64>>) -> Self {
+        Self {
+            exe,
+            room: 0,
+            observes: false,
+            segments: Vec::new(),
+            measured,
+            open: None,
+        }
+    }
+
+    /// Notes a site's depth check and whether it is an observed helper
+    /// body.
+    fn site(&mut self, depth: Depth, observes: bool) {
+        let room = match depth {
+            Depth::None | Depth::Operation(0 | 1) => 0,
+            Depth::Operation(extra) | Depth::Template(extra) => extra,
+        };
+        self.room = self.room.max(room);
+        self.observes |= observes;
+    }
+
+    fn operator(&mut self, site: &OperatorSite) {
+        self.site(site.depth, site.body_when_observed);
+    }
+
+    /// Starts a segment: the most it charges, as measured.
+    fn start(&mut self) -> u64 {
+        let at = self.segments.len();
+        self.segments.push(0);
+        self.open = Some(at);
+        self.measured
+            .as_ref()
+            .map_or(0, |measured| measured.get(at).copied().unwrap_or(0))
+    }
+
+    /// Ends the open segment: what follows is checked as it charges.
+    fn end(&mut self) {
+        self.open = None;
+    }
+
+    /// Adds a charge of at most `units` to the open segment: whether
+    /// there is one.
+    fn cover(&mut self, units: u64) -> bool {
+        let Some(at) = self.open else {
+            return false;
+        };
+        self.segments[at] = self.segments[at].saturating_add(units);
+        true
+    }
+
+    /// Adds `close` to the open segment.
+    fn close(&mut self, close: Option<Close>) -> bool {
+        close.is_some_and(|close| self.cover(u64::from(close.total)))
+    }
+}
+
+fn block(block: &Block, cx: &mut Build<'_>) -> Option<CBlock> {
     Some(CBlock {
         id: block.id,
         declares: block.declares.clone(),
         statements: block
             .statements
             .iter()
-            .map(|statement| self::statement(statement, exe))
+            .map(|statement| self::statement(statement, cx))
             .collect::<Option<_>>()?,
     })
 }
 
-fn statement(statement: &Statement, exe: &Executable) -> Option<CStatement> {
+fn statement(statement: &Statement, cx: &mut Build<'_>) -> Option<CStatement> {
+    // Its unit starts its first segment.
+    let ahead = cx.start();
+    cx.cover(1);
     let kind = match &statement.kind {
         StatementKind::Return { value, close, reg } => CKind::Return {
-            value: expr(value, exe)?,
+            value: expr(value, cx)?,
             close: *close,
+            covered: cx.close(*close),
             reg: *reg,
         },
         StatementKind::Write {
@@ -270,8 +394,9 @@ fn statement(statement: &Statement, exe: &Executable) -> Option<CStatement> {
             at,
             bind,
         } => CKind::Write {
-            value: expr(value, exe)?,
+            value: expr(value, cx)?,
             close: *close,
+            covered: cx.close(*close),
             pc: *pc,
             reg: *reg,
             at: *at,
@@ -284,36 +409,45 @@ fn statement(statement: &Statement, exe: &Executable) -> Option<CStatement> {
             reg,
             then_,
             else_,
-        } => CKind::If {
-            cond: expr(cond, exe)?,
-            close: *close,
-            pc: *pc,
-            reg: *reg,
-            then_: block(then_, exe)?,
-            else_: block(else_, exe)?,
-        },
+        } => {
+            let cond = expr(cond, cx)?;
+            let covered = cx.close(*close);
+            cx.end();
+            CKind::If {
+                cond,
+                close: *close,
+                covered,
+                pc: *pc,
+                reg: *reg,
+                then_: block(then_, cx)?,
+                else_: block(else_, cx)?,
+            }
+        }
         StatementKind::Discard { value, close, reg } => CKind::Discard {
-            value: expr(value, exe)?,
+            value: expr(value, cx)?,
             close: *close,
+            covered: cx.close(*close),
             reg: *reg,
         },
         StatementKind::Cold => CKind::Cold {
-            pc: exe.stmt(statement.id).ops.start,
+            pc: cx.exe.stmt(statement.id).ops.start,
         },
     };
+    cx.end();
     Some(CStatement {
         id: statement.id,
         leaves: statement.leaves,
+        ahead,
         kind,
     })
 }
 
-fn expr(expr: &Expr, exe: &Executable) -> Option<Operand> {
-    let operands = |args: &[Expr]| {
-        args.iter()
-            .map(|arg| self::expr(arg, exe))
-            .collect::<Option<Vec<_>>>()
-    };
+fn operands(args: &[Expr], cx: &mut Build<'_>) -> Option<Vec<Operand>> {
+    args.iter().map(|arg| expr(arg, cx)).collect()
+}
+
+fn expr(expr: &Expr, cx: &mut Build<'_>) -> Option<Operand> {
+    let exe = cx.exe;
     let (pc, reg) = (expr.pc, expr.reg);
     Some(Operand::Node(match &expr.kind {
         Kind::Local { local, miss, .. } => {
@@ -344,18 +478,21 @@ fn expr(expr: &Expr, exe: &Executable) -> Option<Operand> {
                 miss,
                 reg,
             };
-            let value = self::expr(value, exe)?;
+            let value = self::expr(value, cx)?;
+            cx.end();
             Box::new(move |island, slots| {
                 let x = value.eval(island, slots)?;
                 island.unit_test(&site, x)
             })
         }
-        Kind::Operator { lib, args, .. } if let Some(node) = kind_node(expr, exe, *lib, args) => {
+        Kind::Operator { lib, args, .. } if let Some(node) = kind_node(expr, cx, *lib, args) => {
             node
         }
         Kind::Operator { args, .. } => {
             let site = operator_site(expr, exe)?;
-            operator(site, operands(args)?)
+            cx.operator(&site);
+            let operands = operands(args, cx)?;
+            operator(site, operands, cx)
         }
         Kind::Native { lib, args, closes } => {
             let extra = exe
@@ -375,14 +512,17 @@ fn expr(expr: &Expr, exe: &Executable) -> Option<Operand> {
                 },
                 length: exe.lib(*lib).length_read(),
             };
-            native(site, operands(args)?)
+            cx.site(site.depth, false);
+            let operands = operands(args, cx)?;
+            cx.end();
+            native(site, operands)
         }
         Kind::Field {
             target,
             field,
             miss,
         } => {
-            let target = self::expr(target, exe)?;
+            let target = self::expr(target, cx)?;
             let (field, miss) = (field.ix(), *miss);
             Box::new(move |island, slots| {
                 let x = target.eval(island, slots)?;
@@ -398,8 +538,8 @@ fn expr(expr: &Expr, exe: &Executable) -> Option<Operand> {
             miss,
             ..
         } => {
-            let target = self::expr(target, exe)?;
-            let index = self::expr(index, exe)?;
+            let target = self::expr(target, cx)?;
+            let index = self::expr(index, cx)?;
             let miss = *miss;
             Box::new(move |island, slots| {
                 let x = target.eval(island, slots)?;
@@ -421,13 +561,17 @@ fn expr(expr: &Expr, exe: &Executable) -> Option<Operand> {
             site,
         } => {
             let (read, declared) = match callee {
-                Callee::Read(read) => (Some(self::expr(read, exe)?), None),
+                Callee::Read(read) => (Some(self::expr(read, cx)?), None),
                 Callee::Declared(code) => (None, Some(*code)),
             };
-            let operands = operands(args)?;
+            let operands = operands(args, cx)?;
             if operands.len() > MAX_ARGS {
                 return None;
             }
+            // The callee charges what no segment bounds: its return starts
+            // one.
+            cx.end();
+            let after = cx.start();
             let site = CallSite {
                 callee: declared,
                 close: closes.first().copied(),
@@ -436,6 +580,7 @@ fn expr(expr: &Expr, exe: &Executable) -> Option<Operand> {
                 act: invoke.act,
                 occurrence: invoke.occurrence,
                 site: *site,
+                after,
             };
             call(site, read, operands)
         }
@@ -445,10 +590,15 @@ fn expr(expr: &Expr, exe: &Executable) -> Option<Operand> {
             then,
             otherwise,
         } => {
-            let condition = self::expr(cond, exe)?;
+            let condition = self::expr(cond, cx)?;
             let close = closes.first().copied();
-            let then_ = arm(then, exe)?;
-            let else_ = arm(otherwise, exe)?;
+            // Each arm runs on its own path: neither is in a segment that
+            // starts before it or ends past it.
+            cx.end();
+            let then_ = arm(then, cx)?;
+            cx.end();
+            let else_ = arm(otherwise, cx)?;
+            cx.end();
             Box::new(move |island, slots| {
                 let value = condition.eval(island, slots)?;
                 if let Some(close) = &close
@@ -469,8 +619,8 @@ fn expr(expr: &Expr, exe: &Executable) -> Option<Operand> {
             body,
             miss,
         } => {
-            let value = self::expr(value, exe)?;
-            let body = self::expr(body, exe)?;
+            let value = self::expr(value, cx)?;
+            let body = self::expr(body, cx)?;
             let (at, miss) = (local.at as usize, *miss);
             Box::new(move |island, slots| {
                 let bound = value.eval(island, slots)?;
@@ -494,12 +644,12 @@ fn expr(expr: &Expr, exe: &Executable) -> Option<Operand> {
 
 /// A conditional's `arm`: its value, then the region its end closes; a
 /// cold arm exits at its first op.
-fn arm(arm: &Arm, exe: &Executable) -> Option<Operand> {
+fn arm(arm: &Arm, cx: &mut Build<'_>) -> Option<Operand> {
     let Some(value) = &arm.value else {
         let pc = arm.start;
         return Some(Operand::Node(Box::new(move |island, _| Err(island.at(pc)))));
     };
-    let value = expr(value, exe)?;
+    let value = expr(value, cx)?;
     Some(match arm.closes.first().copied() {
         None => value,
         Some(close) => Operand::Node(Box::new(move |island, slots| {
@@ -635,12 +785,14 @@ fn operator_site(expr: &Expr, exe: &Executable) -> Option<OperatorSite> {
         .filter(|invoke| invoke.call)
         .map(|invoke| invoke.occurrence);
     let table = fast.scalar()?.clone();
+    let close = closes.first().copied();
     let site = OperatorSite {
         lib: *lib,
         entry: entry.clone(),
         floats: table.units(0),
         table,
-        close: closes.first().copied(),
+        close,
+        fixed: close.map_or(0, |close| u64::from(close.total)),
         pc,
         reg,
         counted,
@@ -654,7 +806,8 @@ fn operator_site(expr: &Expr, exe: &Executable) -> Option<OperatorSite> {
 
 /// The fused node of `same(kind(x), literal)` `expr`, where its two calls
 /// count no occurrence; each close is replayed at its original call.
-fn kind_node(expr: &Expr, exe: &Executable, lib: LibId, args: &[Expr]) -> Option<Node> {
+fn kind_node(expr: &Expr, cx: &mut Build<'_>, lib: LibId, args: &[Expr]) -> Option<Node> {
+    let exe = cx.exe;
     let (inner, literal) = crate::compile::kind_test::test(exe, lib, args)?;
     let Kind::Operator {
         args: inner_args, ..
@@ -667,7 +820,10 @@ fn kind_node(expr: &Expr, exe: &Executable, lib: LibId, args: &[Expr]) -> Option
     if kind_site.counted.is_some() || same_site.counted.is_some() {
         return None;
     }
-    let value = self::expr(&inner_args[0], exe)?;
+    cx.operator(&kind_site);
+    cx.operator(&same_site);
+    let value = self::expr(&inner_args[0], cx)?;
+    cx.end();
     let site = KindTest {
         kind: kind_site,
         same: same_site,
@@ -688,11 +844,60 @@ pub(super) struct KindTest {
     pub(super) memo: crate::compile::kind_test::KindMemo,
 }
 
+/// The compiled typed operator `site` over `a` and `b` in a segment, which
+/// counts an occurrence where `COUNTED`: in an admitted segment its typed
+/// path commits unchecked, as [`Island::typed`] commits it, its close, its
+/// occurrence, then its formula; where it leaves the path, the segment is
+/// checked from there.
+fn covered_operator<const COUNTED: bool>(
+    site: OperatorSite,
+    pair: lash_kernel_doc::scalar::Pair,
+    a: Operand,
+    b: Operand,
+) -> Node {
+    Box::new(move |island, slots| {
+        let x = a.eval(island, slots)?;
+        let y = match b.eval(island, slots) {
+            Ok(y) => y,
+            Err(stop) => return Err(island.held(stop, site.reg, x)),
+        };
+        if let Some((value, units)) = typed(&site, &pair, x, y) {
+            if island.covered
+                && let Some(units) = units
+            {
+                island.charged += site.fixed;
+                if COUNTED && let Some(occurrence) = site.counted {
+                    island.count(occurrence)?;
+                }
+                island.charged += units;
+                return Ok(value);
+            }
+            if let Some(answer) = island.typed(&site, value, units) {
+                return answer;
+            }
+        }
+        island.covered = false;
+        island.operate(&site, &[x, y])
+    })
+}
+
 /// The compiled operator `site` over `operands`.
-fn operator(site: OperatorSite, operands: Vec<Operand>) -> Node {
+fn operator(site: OperatorSite, operands: Vec<Operand>, cx: &mut Build<'_>) -> Node {
     let mut operands = operands.into_iter();
     let pair = site.entry.pair();
+    // A typed path charges at most its close and its table's most: it is
+    // in the open segment.
+    let covered = pair.is_some()
+        && operands.len() == 2
+        && cx.cover(site.fixed.saturating_add(site.table.max()));
+    if !covered {
+        cx.end();
+    }
     match (operands.next(), operands.next(), operands.next()) {
+        (Some(a), Some(b), None) if covered && let Some(pair) = pair => match site.counted {
+            Some(_) => covered_operator::<true>(site, pair, a, b),
+            None => covered_operator::<false>(site, pair, a, b),
+        },
         // Two operands whose entry has typed paths: two floats or two
         // word integers take the path for their kind, committed in place
         // where it commits what the general path would.

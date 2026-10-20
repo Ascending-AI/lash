@@ -1253,6 +1253,34 @@ pub(crate) fn typed_block_programs() -> Vec<(runner::Case, Program)> {
     region_programs(&[("python", &python[..]), ("typescript", &typescript[..])])
 }
 
+/// FIG-6980: fib as TypeScript lowers it, over floats, and as Python
+/// lowers it, over word integers whose operators count their occurrences;
+/// declared at the top and nested as a closure that calls itself through
+/// its captured variable, as the warm ladder's body runs it.
+pub(crate) fn island_fib_programs() -> Vec<(runner::Case, Program)> {
+    let typescript = [
+        (
+            "declared fib",
+            "function fib(n) {\n  if (n < 2) { return n; }\n  return fib(n - 1) + fib(n - 2);\n}\nconst result = fib(7);\n",
+        ),
+        (
+            "nested fib",
+            "function run() {\n  function fib(n) {\n    if (n < 2) { return n; }\n    return fib(n - 1) + fib(n - 2);\n  }\n  return fib(7);\n}\nconst result = run();\n",
+        ),
+    ];
+    let python = [
+        (
+            "declared fib",
+            "def fib(n):\n    if n < 2:\n        return n\n    return fib(n - 1) + fib(n - 2)\nresult = fib(7)\n",
+        ),
+        (
+            "nested fib",
+            "def run():\n    def fib(n):\n        if n < 2:\n            return n\n        return fib(n - 1) + fib(n - 2)\n    return fib(7)\nresult = run()\n",
+        ),
+    ];
+    region_programs(&[("typescript", &typescript[..]), ("python", &python[..])])
+}
+
 /// FIG-6964: dialect programs whose loop regions allocate and append to
 /// lists, as `xs.append(v)`, `xs.push(v)` and comprehensions lower: in a
 /// `for` over a `range`, over a list, in an `if` arm, and to a list a

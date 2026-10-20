@@ -116,6 +116,10 @@ fn island_run(
         call_depth: 200,
         depth: 1,
         frames: ISLAND_DEPTH,
+        admitted: false,
+        plain: false,
+        swift: false,
+        covered: false,
         scratch: &mut scratch,
     };
     let mut slots = [Some(x); MAX_SLOTS];
@@ -150,7 +154,7 @@ fn kind_memo_replays_general_calls_for_every_kind_and_bound() {
     let (inner, literal) = crate::compile::kind_test::test(&exe, *lib, args).unwrap();
     let kind = operator_site(inner, &exe).unwrap();
     let same = operator_site(value, &exe).unwrap();
-    let compiled = expr(value, &exe).unwrap();
+    let compiled = expr(value, &mut Build::new(&exe, None)).unwrap();
     let general = |island: &mut Island<'_>, slots: &mut Slots| {
         let x = slots[0].unwrap();
         let name = island.operate(&kind, &[x])?;

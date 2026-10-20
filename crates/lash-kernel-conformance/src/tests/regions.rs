@@ -407,13 +407,26 @@ fn probe<'a, const L: u64>(
     charge: Option<u64>,
     imports: Option<&'a [Image]>,
 ) -> Result<Probe<'a>, HarnessError> {
+    probe_in::<L>(program, case, policy, charge, imports, true)
+}
+
+/// [`probe`], with a charge tape attached where `taped`; without one, its
+/// charge program and work are empty, as a run outside a law records none.
+fn probe_in<'a, const L: u64>(
+    program: &Program,
+    case: &Case,
+    policy: Charge,
+    charge: Option<u64>,
+    imports: Option<&'a [Image]>,
+    taped: bool,
+) -> Result<Probe<'a>, HarnessError> {
     let mut projector = Projector {
         imports,
         layout: Layout(L),
         library: Some(program.library.clone()),
         ..Projector::default()
     };
-    let (observations, tape, work) = taped_work(|| {
+    let mut run = || {
         let mut start =
             |program, mut bounds: lash_kernel_vm::Bounds, start, source: &crate::pages::Source| {
                 bounds.charge = policy;
@@ -431,7 +444,12 @@ fn probe<'a, const L: u64>(
             &mut |at| Ok(at.machine),
             Some(&mut projector),
         )
-    });
+    };
+    let (observations, tape, work) = if taped {
+        taped_work(run)
+    } else {
+        (run(), Vec::new(), RegionWork::default())
+    };
     Ok(Probe {
         observations: observations?,
         tape,
@@ -2209,6 +2227,87 @@ fn typed_blocks_stop_where_the_reference_stops() {
     );
     println!(
         "typed blocks: programs={} paired runs={}",
+        programs.len(),
+        counts.runs
+    );
+}
+
+/// FIG-6980 (`docs/design/kernel-regions.md` §3.1): an island frame admits
+/// its sites' depth checks once at its entry, and a segment of typed
+/// operators and closes whole against the bound, only where it charges with
+/// no tape attached. For every bound around every event of fib's charge
+/// program, as kernel text over word integers and as both dialects lower
+/// it, under a call depth its recursion fits and one it crosses, an untaped
+/// run with regions on stops where the untaped reference stops: at its op,
+/// with its charge and its images. Each program's natural run enters its
+/// islands, and some bounded runs stop inside them.
+#[test]
+fn island_segments_stop_where_the_reference_stops() {
+    let registry = Arc::new(super::corpus_registry());
+    let mut programs = Vec::new();
+    for (name, text, call_depth) in [ISLANDS[0], ISLANDS[3]] {
+        let on = prepare_with_layout(Arc::clone(&registry), Layout(ON));
+        let off = prepare_with_layout(Arc::clone(&registry), Layout(OFF));
+        programs.push((program_case(name, text, call_depth), on, off));
+    }
+    for (lowered, program) in crate::helper_plans::island_fib_programs() {
+        let registry = program.library.registry();
+        for call_depth in [64, 6] {
+            let on = prepare_with_layout(Arc::clone(registry), Layout(ON));
+            let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
+            let name = format!("{} at call depth {call_depth}", lowered.id);
+            let mut case = program_case(&name, "main { return null }", call_depth);
+            case.document = print_document(&program.document);
+            programs.push((case, on, off));
+        }
+    }
+    let mut counts = Counts::default();
+    let mut failures = Vec::new();
+    for (case, on, off) in &programs {
+        let on = case_program(on, case).expect("a fib program is admitted");
+        let off = Program {
+            library: off.clone(),
+            ..on.clone()
+        };
+        let natural = probe::<ON>(&on, case, Charge::Exact, None, None)
+            .unwrap_or_else(|error| panic!("{}: {error:?}", case.name));
+        assert!(
+            natural.work.calls > 0,
+            "{}: its natural run enters no island: {:?}",
+            case.name,
+            natural.work
+        );
+        let program = Weight::expand(natural.tape.iter().copied());
+        let mut stopped = 0;
+        for bound in super::charge::sweep(&program, case.environment.bounds.charge) {
+            let a = probe_in::<ON>(&on, case, Charge::Exact, Some(bound), None, false);
+            let b = probe_in::<OFF>(&off, case, Charge::Exact, Some(bound), None, false);
+            if let Ok(a) = &a
+                && matches!(&a.observations.end, ExpectedEnd::Bound { name, .. } if name == "charge")
+            {
+                stopped += 1;
+            }
+            compare(
+                case,
+                &format!("bound {bound}"),
+                a.as_ref(),
+                b.as_ref(),
+                &mut |_, _| None,
+                &mut counts,
+                &mut failures,
+            );
+        }
+        assert!(stopped > 0, "{}: no bounded run stopped", case.name);
+    }
+    assert!(
+        failures.is_empty(),
+        "{} of {} paired runs disagree:\n{}",
+        failures.len(),
+        counts.runs,
+        failures.join("\n")
+    );
+    println!(
+        "island segments: programs={} paired runs={}",
         programs.len(),
         counts.runs
     );

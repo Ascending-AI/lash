@@ -656,6 +656,10 @@ fn enter(
             .saturating_add(1)
             .saturating_sub(ground.base)
             .min(u64::from(ISLAND_DEPTH)) as u32,
+        admitted: false,
+        plain: ground.charging && ground.tape.is_none(),
+        swift: false,
+        covered: false,
         scratch,
     };
     let target = match target {
