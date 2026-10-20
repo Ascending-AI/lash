@@ -43,8 +43,8 @@ use super::ops::Flow;
 use super::{Control, Eval, Frame, Halt, KernelMachine, SlotState, fault};
 use crate::compile::{
     Accumulator, Arms, BARREN, Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Cx,
-    Event, Executable, GuestCall, Hook, Kept, LoopPlan, Made, Meter, NESTING, Node, RegionSlot,
-    Role, SessionSlot, Taken, UNPRODUCTIVE, scalar, store,
+    Event, Executable, GuestCall, Headroom, Hook, Kept, LoopPlan, Made, Meter, NESTING, Node, Ran,
+    RegionSlot, Role, SessionSlot, Slots, Taken, Typed, UNPRODUCTIVE, scalar, store,
 };
 use crate::observe::ChargeTape;
 
@@ -62,6 +62,13 @@ const REGION_ROOM: u64 = 16 * NURSERY;
 
 #[cfg(test)]
 mod admission_laws;
+
+/// The typed runs that may miss in one region entry before it leaves the
+/// rest of its statements to run one by one: a run whose guards or kernels
+/// keep missing costs its own work and the statements' both. Which code
+/// runs the statements changes, never what they do, and nothing of it
+/// outlives the entry.
+const TYPED_MISSES: u32 = 8;
 
 /// The session slots a region holds without allocating.
 const SESSIONS_INLINE: usize = 8;
@@ -131,6 +138,26 @@ struct Run<'a, 'c, const INVOKES: bool, const ALLOC: bool> {
     /// Each accumulator slot whose long text its own statement made while
     /// the region ran, which no older version observes (FIG-6795).
     texts: Vec<(u32, ArenaHandle)>,
+    /// The charge program a typed run holds until it completes.
+    pending: Vec<Weight>,
+    /// The typed runs that completed.
+    blocks: u64,
+    /// The typed runs that missed.
+    misses: u32,
+}
+
+/// A typed run reads its frame's variables and writes back what it
+/// assigned.
+impl Slots for Frame {
+    #[inline(always)]
+    fn slots(&self) -> &[SlotState] {
+        self.slot_states()
+    }
+
+    #[inline(always)]
+    fn assign(&mut self, at: u32, value: Value) {
+        self.set_slot(at, SlotState::Value(value));
+    }
 }
 
 impl KernelMachine {
@@ -370,6 +397,9 @@ impl KernelMachine {
             progressed: false,
             head_missed: false,
             texts: Vec::new(),
+            pending: Vec::new(),
+            blocks: 0,
+            misses: 0,
         };
         let batch = run.batch(plan, compiled, walk.as_mut(), bound, slice_end);
         // The region's charge is the machine's, however its batch ended.
@@ -384,6 +414,7 @@ impl KernelMachine {
             declined,
             progressed,
             head_missed,
+            blocks,
             ..
         } = run;
         let Cx { fault: refused, .. } = cx;
@@ -417,6 +448,7 @@ impl KernelMachine {
         }
         if let Some(recorder) = recorder {
             recorder.iterated(started - u64::from(stopped));
+            recorder.typed(blocks);
         }
         // The exit publishes the session writes before any boundary, in
         // the order the region made them, as the reference's writes left
@@ -553,6 +585,13 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
             call: None,
         };
         let mut started = 0_u64;
+        // A whole loop's typed run repeats the iterations it completes;
+        // the one it leaves runs on its own before it repeats again.
+        let whole = compiled
+            .iteration
+            .as_ref()
+            .filter(|iteration| iteration.whole);
+        let mut repeated = false;
         loop {
             // The charge headroom guard of a scalar plan: no event of the
             // iteration passes the bound, and no step boundary inside
@@ -564,20 +603,38 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
                     Some(end) if end <= bound && end < slice_end => {}
                     _ => break,
                 }
+                if let Some(whole) = whole
+                    && !std::mem::replace(&mut repeated, true)
+                {
+                    started += self.repeat(whole, plan, bound, slice_end);
+                    continue;
+                }
+                repeated = false;
             }
             self.cx.meter.reset();
+            // The body statement the iteration runs from.
+            let mut from = 0;
             match (&compiled.head, walk.as_deref_mut()) {
                 (CompiledHead::While { test, commit }, _) => {
-                    if !self.ahead(commit)
-                        || !matches!(
-                            test(self.frame.slot_states(), &mut self.cx),
-                            Some(Value::Bool(true))
-                        )
-                        || !self.fits(commit)
+                    // A test and a typed run that complete are the
+                    // iteration's first statements.
+                    if !ALLOC
+                        && let Some(iteration) = &compiled.iteration
+                        && self.typed(iteration)
                     {
-                        break;
+                        from = iteration.covers;
+                    } else {
+                        if !self.ahead(commit)
+                            || !matches!(
+                                test(self.frame.slot_states(), &mut self.cx),
+                                Some(Value::Bool(true))
+                            )
+                            || !self.fits(commit)
+                        {
+                            break;
+                        }
+                        self.commit(commit)?;
                     }
-                    self.commit(commit)?;
                 }
                 (
                     CompiledHead::For {
@@ -661,7 +718,7 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
             }
             self.ended();
             started += 1;
-            match self.iterate(&mut stack)? {
+            match self.iterate(&mut stack, from)? {
                 Went::Stopped => return Ok((started, true, None)),
                 Went::Called => {
                     let called = stack.call.take().zip(self.cx.called.take());
@@ -686,16 +743,16 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
         Ok((started, false, None))
     }
 
-    /// Runs one pass through the loop's body, `stack`'s first block,
-    /// entering the `if` arms it takes.
+    /// Runs one pass through the loop's body, `stack`'s first block, from
+    /// its statement `from`, entering the `if` arms it takes.
     #[inline(always)]
-    fn iterate(&mut self, stack: &mut Stack<'_>) -> Result<Went, Halt> {
+    fn iterate(&mut self, stack: &mut Stack<'_>, from: usize) -> Result<Went, Halt> {
         let Stack {
             bodies,
             nexts,
             call,
         } = stack;
-        nexts[0] = 0;
+        nexts[0] = from;
         let mut depth = 0;
         loop {
             let body = bodies[depth];
@@ -715,6 +772,19 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
                 continue;
             };
             nexts[depth] = index + 1;
+            // A typed run that completes runs its statements; one that
+            // misses leaves them to run one by one.
+            let step = match step {
+                CompiledStep::Typed(typed) if !ALLOC => {
+                    let (run, step) = &**typed;
+                    if self.typed(run) {
+                        nexts[depth] = index + run.covers;
+                        continue;
+                    }
+                    step
+                }
+                step => step,
+            };
             self.cx.meter.reset();
             let tried = !(ALLOC && (self.due || !self.room(step)));
             let ran = if !tried {
@@ -818,7 +888,7 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
                                 true
                             }
                     }
-                    CompiledStep::Leave => false,
+                    CompiledStep::Typed(_) | CompiledStep::Leave => false,
                 }
             };
             if !ran {
@@ -831,6 +901,69 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
             }
             self.ended();
         }
+    }
+
+    /// Runs typed run `run` over the frame's variables: whether it
+    /// completed, its charge committed and, with a charge tape attached,
+    /// its statements' programs recorded. A scalar plan admitted the
+    /// iteration whole, so nothing in the run passes the bound or the
+    /// slice's end.
+    #[inline(always)]
+    fn typed(&mut self, run: &Typed) -> bool {
+        if self.misses >= TYPED_MISSES {
+            return false;
+        }
+        let ran = match self.tape {
+            None => run.run::<false>(&mut *self.frame, &mut self.pending),
+            Some(_) => run.run::<true>(&mut *self.frame, &mut self.pending),
+        };
+        let units = match ran {
+            Ran::Done(units) => units,
+            Ran::Ended => return false,
+            Ran::Missed => {
+                self.misses += 1;
+                return false;
+            }
+        };
+        self.cx.charged += units;
+        if let Some(tape) = self.tape {
+            for weight in self.pending.drain(..) {
+                tape.push(weight);
+            }
+        }
+        self.blocks += 1;
+        true
+    }
+
+    /// Repeats whole loop `run`'s iterations while the bound and the
+    /// slice's end admit each, as the batch admits them: the iterations it
+    /// completed, their charge committed and, with a charge tape attached,
+    /// their programs recorded.
+    #[inline(always)]
+    fn repeat(&mut self, run: &Typed, plan: &LoopPlan, bound: u64, slice_end: u64) -> u64 {
+        if self.misses >= TYPED_MISSES {
+            return 0;
+        }
+        let headroom = Headroom {
+            charged: self.cx.charged,
+            bound,
+            slice_end,
+            iteration_max: plan.iteration_max,
+            loop_test: plan.loop_test,
+        };
+        let (iterations, units, ended) = match self.tape {
+            None => run.repeat::<false>(&mut *self.frame, &mut self.pending, headroom),
+            Some(_) => run.repeat::<true>(&mut *self.frame, &mut self.pending, headroom),
+        };
+        self.misses += u32::from(ended == Ran::Missed);
+        self.cx.charged += units;
+        if let Some(tape) = self.tape {
+            for weight in self.pending.drain(..) {
+                tape.push(weight);
+            }
+        }
+        self.blocks += iterations;
+        iterations
     }
 
     /// Assigns `value`, the statement's, to the slot at `at`, which the
@@ -1138,6 +1271,7 @@ fn commit_of(step: &CompiledStep) -> Option<&Commit> {
         | CompiledStep::Continue(commit)
         | CompiledStep::Store { commit, .. }
         | CompiledStep::Discard { commit, .. } => Some(commit),
+        CompiledStep::Typed(typed) => commit_of(&typed.1),
         CompiledStep::Leave => None,
     }
 }

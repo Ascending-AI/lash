@@ -131,6 +131,9 @@ pub(crate) type Check = Box<dyn Fn([Value; 4], &mut Cx<'_>) -> Option<Value> + S
 pub(crate) struct CompiledLoop {
     pub(crate) head: CompiledHead,
     pub(crate) body: CompiledBody,
+    /// A `while`'s test and its body's first typed run, as one run
+    /// (`docs/design/kernel-regions.md` §2.4).
+    pub(crate) iteration: Option<super::Typed>,
 }
 
 /// What a compiled statement commits: its fixed units and its static
@@ -222,6 +225,9 @@ pub(crate) enum CompiledStep {
         value: Node,
         commit: Commit,
     },
+    /// The first statement of a typed run (§2.4): the run, and the
+    /// statement as it runs alone where the run misses.
+    Typed(Box<(super::Typed, CompiledStep)>),
     Leave,
 }
 

@@ -32,15 +32,55 @@ pub struct Pair {
     pub ints: Option<ScalarOp>,
 }
 
+impl ScalarOp {
+    /// Whether it answers a truth rather than a number.
+    #[inline(always)]
+    pub fn compares(self) -> bool {
+        matches!(self, Self::Eq | Self::Lt | Self::Le | Self::Gt | Self::Ge)
+    }
+}
+
 /// `op` on two floats.
 #[inline(always)]
 pub fn floats(op: ScalarOp, a: Float, b: Float) -> Option<Value> {
-    let (a, b) = (a.get(), b.get());
-    Some(match op {
-        ScalarOp::Add => Value::Float(Float::new(a + b)),
-        ScalarOp::Sub => Value::Float(Float::new(a - b)),
-        ScalarOp::Mul => Value::Float(Float::new(a * b)),
-        ScalarOp::Div => Value::Float(Float::new(a / b)),
+    float_answer(
+        op,
+        a.get(),
+        b.get(),
+        |number| Some(Value::Float(Float::new(number))),
+        |truth| Some(Value::Bool(truth)),
+    )
+}
+
+/// Arithmetic `op` on two floats, its answer not yet made canonical: a
+/// NaN's payload is any NaN's, which no kernel tells apart, so a typed
+/// block makes canonical only what it writes. `None` for a comparison.
+#[inline(always)]
+pub fn float_number(op: ScalarOp, a: f64, b: f64) -> Option<f64> {
+    float_answer(op, a, b, Some, |_| None)
+}
+
+/// Comparison `op` on two floats; `None` for arithmetic.
+#[inline(always)]
+pub fn float_truth(op: ScalarOp, a: f64, b: f64) -> Option<bool> {
+    float_answer(op, a, b, |_| None, Some)
+}
+
+/// `op`'s answer on two floats, as `number` or `truth` takes it: the one
+/// match every float path answers by.
+#[inline(always)]
+fn float_answer<T>(
+    op: ScalarOp,
+    a: f64,
+    b: f64,
+    number: impl FnOnce(f64) -> Option<T>,
+    truth: impl FnOnce(bool) -> Option<T>,
+) -> Option<T> {
+    match op {
+        ScalarOp::Add => number(a + b),
+        ScalarOp::Sub => number(a - b),
+        ScalarOp::Mul => number(a * b),
+        ScalarOp::Div => number(a / b),
         // `fmod` of integral operands below 2^63 in magnitude with a
         // nonzero divisor is their integer remainder, a zero keeping the
         // dividend's sign; every other pair is the general path's.
@@ -49,31 +89,63 @@ pub fn floats(op: ScalarOp, a: Float, b: Float) -> Option<Value> {
             if !(x as f64 == a && y as f64 == b && x != i64::MAX && y != i64::MAX && y != 0) {
                 return None;
             }
-            Value::Float(Float::new(match x.wrapping_rem(y) {
+            number(match x.wrapping_rem(y) {
                 0 => 0.0_f64.copysign(a),
                 r => r as f64,
-            }))
+            })
         }
-        ScalarOp::RemFloor | ScalarOp::FloorDiv => return None,
-        ScalarOp::Eq => Value::Bool(a == b),
-        ScalarOp::Lt => Value::Bool(a < b),
-        ScalarOp::Le => Value::Bool(a <= b),
-        ScalarOp::Gt => Value::Bool(a > b),
-        ScalarOp::Ge => Value::Bool(a >= b),
-    })
+        ScalarOp::RemFloor | ScalarOp::FloorDiv => None,
+        ScalarOp::Eq => truth(a == b),
+        ScalarOp::Lt => truth(a < b),
+        ScalarOp::Le => truth(a <= b),
+        ScalarOp::Gt => truth(a > b),
+        ScalarOp::Ge => truth(a >= b),
+    }
 }
 
 /// `op` on two word integers, where the answer fits a word.
 #[inline(always)]
 pub fn ints(op: ScalarOp, a: i64, b: i64) -> Option<Value> {
-    Some(match op {
-        ScalarOp::Add => Value::Int(a.checked_add(b)?),
-        ScalarOp::Sub => Value::Int(a.checked_sub(b)?),
-        ScalarOp::Mul => Value::Int(a.checked_mul(b)?),
-        ScalarOp::RemTrunc => Value::Int(a.checked_rem(b)?),
+    int_answer(
+        op,
+        a,
+        b,
+        |number| Some(Value::Int(number)),
+        |truth| Some(Value::Bool(truth)),
+    )
+}
+
+/// Arithmetic `op` on two word integers, where the answer fits a word;
+/// `None` for a comparison and for division, whose answer is a float.
+#[inline(always)]
+pub fn int_number(op: ScalarOp, a: i64, b: i64) -> Option<i64> {
+    int_answer(op, a, b, Some, |_| None)
+}
+
+/// Comparison `op` on two word integers; `None` for arithmetic.
+#[inline(always)]
+pub fn int_truth(op: ScalarOp, a: i64, b: i64) -> Option<bool> {
+    int_answer(op, a, b, |_| None, Some)
+}
+
+/// `op`'s answer on two word integers, as `number` or `truth` takes it:
+/// the one match every word integer path answers by.
+#[inline(always)]
+fn int_answer<T>(
+    op: ScalarOp,
+    a: i64,
+    b: i64,
+    number: impl FnOnce(i64) -> Option<T>,
+    truth: impl FnOnce(bool) -> Option<T>,
+) -> Option<T> {
+    match op {
+        ScalarOp::Add => number(a.checked_add(b)?),
+        ScalarOp::Sub => number(a.checked_sub(b)?),
+        ScalarOp::Mul => number(a.checked_mul(b)?),
+        ScalarOp::RemTrunc => number(a.checked_rem(b)?),
         ScalarOp::RemFloor => {
             let r = a.checked_rem(b)?;
-            Value::Int(if r != 0 && (r < 0) != (b < 0) {
+            number(if r != 0 && (r < 0) != (b < 0) {
                 r.checked_add(b)?
             } else {
                 r
@@ -82,17 +154,17 @@ pub fn ints(op: ScalarOp, a: i64, b: i64) -> Option<Value> {
         ScalarOp::FloorDiv => {
             let q = a.checked_div(b)?;
             let r = a.checked_rem(b)?;
-            Value::Int(if r != 0 && (r < 0) != (b < 0) {
+            number(if r != 0 && (r < 0) != (b < 0) {
                 q.checked_sub(1)?
             } else {
                 q
             })
         }
-        ScalarOp::Div => return None,
-        ScalarOp::Eq => Value::Bool(a == b),
-        ScalarOp::Lt => Value::Bool(a < b),
-        ScalarOp::Le => Value::Bool(a <= b),
-        ScalarOp::Gt => Value::Bool(a > b),
-        ScalarOp::Ge => Value::Bool(a >= b),
-    })
+        ScalarOp::Div => None,
+        ScalarOp::Eq => truth(a == b),
+        ScalarOp::Lt => truth(a < b),
+        ScalarOp::Le => truth(a <= b),
+        ScalarOp::Gt => truth(a > b),
+        ScalarOp::Ge => truth(a >= b),
+    }
 }

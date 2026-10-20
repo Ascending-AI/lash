@@ -2114,6 +2114,106 @@ fn default_sorts_run_as_the_reference() {
     sorts_as_the_reference_sorts("comparator sorts: default sorts");
 }
 
+/// Kernel loops whose straight-line statements run as typed blocks over
+/// word integers: a whole loop with an `if`, whose product overflows a
+/// word on its 22nd iteration, so that its typed run misses from there and
+/// the reference makes the big integer; and a run a declaration and a
+/// float end.
+const TYPED: &[(&str, &str)] = &[
+    (
+        "a typed integer loop overflowing into a big integer",
+        "fn branch(n) { let i = 0 let s = 0 let x = 3 while num.lt(i, n) { if num.lt(num.rem_trunc(i, 3), 1) { set s = num.add(s, i) } else { set s = num.sub(s, i) } set x = num.mul(x, 7) set i = num.add(i, 1) } return (s, x) }\n\
+         main { let r = call branch(26) finish r }",
+    ),
+    (
+        "a typed integer run a declaration and a float end",
+        "fn mixed(n) { let i = 0 let s = 0 let f = 0.5 while num.lt(i, n) { set s = num.add(s, num.mul(i, 3)) let d = num.sub(s, i) set f = num.add(f, 0.25) set s = num.sub(d, 1) set i = num.add(i, 1) } return (s, f) }\n\
+         main { let r = call mixed(12) finish r }",
+    ),
+];
+
+/// FIG-6946 (`docs/design/kernel-regions.md` §2.4): a typed block runs
+/// whole or not at all. For every bound that tells a typed program's
+/// events apart, the least and the greatest each event passes, and so for
+/// bounds on each block's first and last op, a run with regions on stops
+/// where the reference stops: at its op, with its charge, its charge
+/// program and its images. Each program's natural run completes typed
+/// blocks, and some bounded runs stop after typed blocks completed.
+#[test]
+fn typed_blocks_stop_where_the_reference_stops() {
+    let registry = Arc::new(super::corpus_registry());
+    let mut programs = Vec::new();
+    for (name, text) in TYPED {
+        let on = prepare_with_layout(Arc::clone(&registry), Layout(ON));
+        let off = prepare_with_layout(Arc::clone(&registry), Layout(OFF));
+        programs.push((program_case(name, text, 16), on, off));
+    }
+    for (lowered, program) in crate::helper_plans::typed_block_programs() {
+        let registry = program.library.registry();
+        let on = prepare_with_layout(Arc::clone(registry), Layout(ON));
+        let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
+        let mut case = program_case(&lowered.id, "main { return null }", 16);
+        case.document = print_document(&program.document);
+        programs.push((case, on, off));
+    }
+    let mut counts = Counts::default();
+    let mut failures = Vec::new();
+    for (case, on, off) in &programs {
+        let on = case_program(on, case).expect("a typed program is admitted");
+        let off = Program {
+            library: off.clone(),
+            ..on.clone()
+        };
+        let natural = probe::<ON>(&on, case, Charge::Exact, None, None)
+            .unwrap_or_else(|error| panic!("{}: {error:?}", case.name));
+        assert!(
+            natural.work.blocks > 0,
+            "{}: its natural run completes no typed block: {:?}",
+            case.name,
+            natural.work
+        );
+        let program = Weight::expand(natural.tape.iter().copied());
+        let mut stopped = 0;
+        for bound in super::charge::sweep(&program, case.environment.bounds.charge) {
+            let a = probe::<ON>(&on, case, Charge::Exact, Some(bound), None);
+            let b = probe::<OFF>(&off, case, Charge::Exact, Some(bound), None);
+            if let Ok(a) = &a
+                && a.work.blocks > 0
+                && matches!(a.observations.end, ExpectedEnd::Bound { .. })
+            {
+                stopped += 1;
+            }
+            let what = format!("bound {bound}");
+            compare(
+                case,
+                &what,
+                a.as_ref(),
+                b.as_ref(),
+                &mut |_, _| None,
+                &mut counts,
+                &mut failures,
+            );
+        }
+        assert!(
+            stopped > 0,
+            "{}: no bounded run stopped after a typed block completed",
+            case.name
+        );
+    }
+    assert!(
+        failures.is_empty(),
+        "{} of {} paired runs disagree:\n{}",
+        failures.len(),
+        counts.runs,
+        failures.join("\n")
+    );
+    println!(
+        "typed blocks: programs={} paired runs={}",
+        programs.len(),
+        counts.runs
+    );
+}
+
 macro_rules! program_shards {
     (@parts $shard:literal, $parts:expr, $part:expr;) => {};
     (@parts $shard:literal, $parts:expr, $part:expr; $name:ident $(, $rest:ident)*) => {

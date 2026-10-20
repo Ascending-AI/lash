@@ -237,6 +237,58 @@ helper body, under the plan-against-body and helper differential laws, and
 never by hand. The same template gives `Op::Nested` calls of those helpers an
 opcode fast path outside regions too.
 
+### 2.4 Typed blocks (FIG-6946)
+
+A scalar plan's straight-line run of statements whose operands are all
+floats or all word integers at the run's entry compiles to one typed run
+(`compile/regions/typed.rs`) over unboxed registers, one per variable it
+touches. A run holds writes and declarations of frame variables whose
+values are two-operand operators with typed kernels
+(`lash_kernel_doc::scalar`, the kernels the prepared entries answer by)
+over variables and constants, and `if`s whose test is such a comparison
+and whose arms are such statements whole; a `while`'s test heads its
+body's first run. Each operator is a closure specialized to its operands'
+kinds. The unit is the run of statements, not the expression: a
+per-expression register program lost to the fused node (FIG-6936), and a
+run of one operator costs its entry and write-back more than the fused
+node saves, so a run holds at least two.
+
+- **Entry and exit.** The run loads each variable it reads before it
+  assigns it once, where each must hold the run's domain, checks that each
+  variable it writes holds a value, and writes back what it assigned once,
+  at its end, floats made canonical there. A NaN's payload is never read by
+  a kernel, so canonicalizing at the write is what canonicalizing each
+  result gives.
+- **Charge.** Batched: a float run charges a constant sum on each path
+  through its arms, its statements' fixed units and each operator's table
+  entry at mask 0; an integer run adds each operator's table entry at the
+  sizes its values have. These are the fused nodes' charges, statement by
+  statement. With a charge tape attached, a run records each statement's
+  static program with its formulas' units as it completes, as the
+  statement's commit records it.
+- **All or nothing.** A guard that misses, a kernel that leaves its
+  operands to the general path, or a `while` test that fails leaves the
+  run having written and charged nothing; the region runs the same
+  statements one by one from the run's entry. A region entry stops trying
+  typed runs after eight misses; nothing of that outlives the entry.
+- **Stop points.** A scalar plan admits whole iterations against the
+  bound and the slice's end (§3.1), so no bound or slice end falls inside
+  a run that completes: an iteration it would fall in is never entered,
+  and the reference runs it op by op, stopping at its op with its charge.
+  `tests::regions::typed_blocks_stop_where_the_reference_stops` runs every
+  bound that tells a typed program's events apart, the first and last op
+  of each block among them, under both plans.
+- **Whole loops.** Where a `while`'s test and its whole body, which
+  declares nothing, are one run, the run repeats iterations over the same
+  registers while each is admitted, adding the next test's unit after
+  each. It keeps the registers each iteration starts with, so an iteration
+  that misses or whose test fails leaves what the last completed one left;
+  the batch runs that iteration itself before the run repeats again.
+
+Warm paired `instructions:u` against main 18d4942d66: branch1m TS 837.0 →
+291.0 M per body (QuickJS 374.5), sum1m TS 517.0 → 160.0, sum1m Python
+495.0 → 231.0, every other row within 1%, charges and digests equal.
+
 ## 3. Contracts
 
 ### 3.1 Exact charge

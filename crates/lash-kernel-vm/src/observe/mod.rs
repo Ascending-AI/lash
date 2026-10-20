@@ -185,6 +185,9 @@ pub struct RegionWork {
     /// Of those, the passes a comparator sort's merge stepped natively
     /// (FIG-6948).
     pub merges: u64,
+    /// Typed runs a loop region ran whole (`docs/design/kernel-regions.md`
+    /// §2.4).
+    pub blocks: u64,
 }
 
 impl ChargeTape {
@@ -218,6 +221,11 @@ impl ChargeTape {
     /// Counts `iterations` a loop region ran to their end.
     pub(crate) fn iterated(&self, iterations: u64) {
         self.lock().work.iterations += iterations;
+    }
+
+    /// Counts `blocks` typed runs a loop region ran whole.
+    pub(crate) fn typed(&self, blocks: u64) {
+        self.lock().work.blocks += blocks;
     }
 
     /// Counts a pass a helper plan's loop region ran to its end, `merged`

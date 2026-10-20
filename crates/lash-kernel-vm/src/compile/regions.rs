@@ -54,6 +54,7 @@ use lash_kernel_exec::{ActIx, Op, OpRange, Reg, Weight};
 mod accumulators;
 mod cx;
 mod nodes;
+mod typed;
 mod verify;
 
 pub(crate) use cx::{Accumulator, Cx, Guests, Made, measured_formula};
@@ -61,6 +62,7 @@ pub(crate) use nodes::{
     Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Fresh, Hook, Meter, Node,
     Place, Role, SessionSlot, Taken, position, scalar, store,
 };
+pub(crate) use typed::{Headroom, Ran, Slots, Typed};
 
 use super::expr::{self, Expr, Kind};
 use super::{
@@ -1718,9 +1720,18 @@ impl LoopPlan {
                         binding: *binding,
                     },
                 };
+                // A scalar plan's `while` runs its test and its body's
+                // first typed run as one.
+                let iteration = match &self.head {
+                    Head::While(test) if !libs.general => {
+                        typed::compile(exe, libs.charging, Some(test), &self.body, 0)
+                    }
+                    _ => None,
+                };
                 Some(CompiledLoop {
                     head,
                     body: compile_body(stream, &libs, self, &self.body)?,
+                    iteration,
                 })
             })
             .as_ref()
@@ -1849,7 +1860,22 @@ fn compile_body(
                 Step::Leave => CompiledStep::Leave,
             })
         })
-        .collect::<Option<_>>()?;
+        .collect::<Option<Vec<_>>>()?;
+    // A scalar plan's straight-line runs of typed statements each run as
+    // one from their first statement (§2.4).
+    let mut steps = steps;
+    let mut at = 0;
+    while at < steps.len() && !libs.general {
+        let Some(run) = typed::compile(libs.exe, libs.charging, None, body, at) else {
+            at += 1;
+            continue;
+        };
+        let covers = run.covers;
+        let step = std::mem::replace(&mut steps[at], CompiledStep::Leave);
+        steps[at] = CompiledStep::Typed(Box::new((run, step)));
+        at += covers;
+    }
+    let steps = steps.into();
     Some(CompiledBody {
         block: body.block,
         declares: body.declares.clone(),

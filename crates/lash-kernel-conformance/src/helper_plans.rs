@@ -1203,6 +1203,39 @@ pub(crate) fn subscript_and_fstring_programs() -> Vec<(runner::Case, Program)> {
     region_programs(&[("python", &python[..])])
 }
 
+/// FIG-6946: loops whose straight-line statements run as typed blocks,
+/// in functions, so that their variables are a frame's: a `while` whose
+/// test and whole body are one typed run, one with an `if` and its arms
+/// in the run, one whose runs end at a declaration and at a comparison's
+/// write, and one whose remainder's divisor is integral on every other
+/// iteration only, where the kernel leaves the rest to the general path, so
+/// that its runs complete and miss by turns.
+pub(crate) fn typed_block_programs() -> Vec<(runner::Case, Program)> {
+    let python = [(
+        "typed sum",
+        "def total(n):\n    result = 0\n    i = 0\n    while i < n:\n        result = result + i\n        i = i + 1\n    return result\nresult = total(9)\n",
+    )];
+    let typescript = [
+        (
+            "typed sum",
+            "function total(n) {\n  let result = 0;\n  let i = 0;\n  while (i < n) { result = result + i; i = i + 1; }\n  return result;\n}\nconst result = total(9);\n",
+        ),
+        (
+            "typed branch",
+            "function branch(n) {\n  let result = 0;\n  let i = 0;\n  while (i < n) {\n    if (i % 2 === 0) { result = result + i; } else { result = result - i; }\n    i = i + 1;\n  }\n  return result;\n}\nconst result = branch(9);\n",
+        ),
+        (
+            "typed runs a declaration and a comparison end",
+            "function mixed(n) {\n  let x = 0.5;\n  let low = false;\n  let i = 0;\n  while (i < n) {\n    x = x * 2 - i;\n    let y = x + 1;\n    low = y < 3;\n    x = y / 4;\n    i = i + 1;\n  }\n  return [x, low];\n}\nconst result = mixed(7);\n",
+        ),
+        (
+            "typed remainders the general path answers",
+            "function rest(n) {\n  let r = 0;\n  let d = 2;\n  let i = 0;\n  while (i < n) {\n    r = r + (i % d);\n    if (i % 3 === 1) { r = r * 2; } else { r = r - 1; }\n    d = d + 0.5;\n    i = i + 1;\n  }\n  return r;\n}\nconst result = rest(10);\n",
+        ),
+    ];
+    region_programs(&[("python", &python[..]), ("typescript", &typescript[..])])
+}
+
 /// Each dialect's `(name, source)` programs, lowered.
 fn region_programs(groups: &[(&str, &[(&str, &str)])]) -> Vec<(runner::Case, Program)> {
     let mut programs = Vec::new();

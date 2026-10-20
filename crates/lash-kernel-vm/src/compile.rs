@@ -63,8 +63,9 @@ pub(crate) use reads::{Field, PropertySlot, ReadSite, find as find_property};
 pub(crate) use formula::{Charge, Fast, Plan, ScalarTable, Source};
 pub(crate) use regions::{
     Accumulator, Arms, BARREN, Commit, CompiledBody, CompiledHead, CompiledLoop, CompiledStep, Cx,
-    Event, Fresh, GuestCall, Guests, Hook, Kept, LoopPlan, Made, Meter, NESTING, Node, RegionSlot,
-    Role, SessionSlot, Taken, UNPRODUCTIVE, measured_formula, position, scalar, store,
+    Event, Fresh, GuestCall, Guests, Headroom, Hook, Kept, LoopPlan, Made, Meter, NESTING, Node,
+    Ran, RegionSlot, Role, SessionSlot, Slots, Taken, Typed, UNPRODUCTIVE, measured_formula,
+    position, scalar, store,
 };
 #[cfg(test)]
 pub(crate) use regions::{Head, Step, Summary};
