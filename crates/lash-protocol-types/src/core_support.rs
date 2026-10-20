@@ -67,6 +67,43 @@ pub fn blake3_domain_hash_hex(domain: &str, bytes: impl AsRef<[u8]>) -> String {
     hasher.finalize_hex()
 }
 
+/// Counts complete encoded output without retaining a byte buffer.
+/// Serializer and overflow errors belong to the caller's measurement policy.
+#[derive(Default)]
+pub struct EncodedLength(usize);
+
+impl EncodedLength {
+    pub fn len(&self) -> usize {
+        self.0
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0 == 0
+    }
+}
+
+impl std::io::Write for EncodedLength {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0 = self
+            .0
+            .checked_add(bytes.len())
+            .ok_or_else(|| std::io::Error::other("encoded length exceeds usize"))?;
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+pub fn json_encoded_len(
+    value: &(impl serde::Serialize + ?Sized),
+) -> Result<usize, serde_json::Error> {
+    let mut length = EncodedLength::default();
+    serde_json::to_writer(&mut length, value)?;
+    Ok(length.len())
+}
+
 pub trait AttachmentIdCoreSupport {
     fn as_str(&self) -> &str;
 }
@@ -326,5 +363,56 @@ mod retired_identity_tests {
             serde_json::json!({"id":"m.p0", "kind":"Text", "content":"text"}),
         )
         .expect("current shape decodes");
+    }
+}
+
+#[cfg(test)]
+mod encoded_length_laws {
+    use super::*;
+    use serde::{Serialize, Serializer};
+    use std::io::Write;
+
+    /// EncodedLengthMatchesSerializer: exact escaping and a complete traversal,
+    /// with overflow and serializer errors preserved rather than capped early.
+    #[test]
+    fn encoded_length_matches_serializer_and_preserves_errors() {
+        for value in [
+            serde_json::json!({"escaped":"\\\"\n\t\u{0000}é🦀", "array":[null,true,-1,1.25]}),
+            serde_json::json!(["", "x".repeat(65536), {"omitted":null}]),
+        ] {
+            assert_eq!(
+                json_encoded_len(&value).unwrap(),
+                serde_json::to_vec(&value).unwrap().len()
+            );
+        }
+        #[derive(Serialize)]
+        struct Omitted<'a> {
+            text: &'a str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            absent: Option<bool>,
+        }
+        let value = Omitted {
+            text: "é\n",
+            absent: None,
+        };
+        assert_eq!(
+            json_encoded_len(&value).unwrap(),
+            serde_json::to_vec(&value).unwrap().len()
+        );
+        struct Fails;
+        impl Serialize for Fails {
+            fn serialize<S: Serializer>(&self, _: S) -> Result<S::Ok, S::Error> {
+                Err(serde::ser::Error::custom("measurement failure"))
+            }
+        }
+        let failing = ("x".repeat(65536), Fails);
+        assert_eq!(
+            json_encoded_len(&failing).unwrap_err().to_string(),
+            serde_json::to_vec(&failing).unwrap_err().to_string()
+        );
+        let mut counter = EncodedLength(usize::MAX - 1);
+        counter.write_all(b"x").unwrap();
+        assert!(counter.write_all(b"y").is_err());
+        assert_eq!(counter.len(), usize::MAX);
     }
 }

@@ -3,6 +3,13 @@ use super::*;
 use crate::*;
 use serde_json::{Value, json};
 
+// Tests that consume owned JSON explicitly materialize the borrowed export view.
+fn attributes(event: &TraceEvent) -> Vec<(&'static str, Value)> {
+    super::attributes(event)
+        .map(|(key, value)| (key, serde_json::to_value(value).unwrap()))
+        .collect()
+}
+
 pub(crate) fn model_event() -> TraceEvent {
     serde_json::from_value(json!({
         "type":"llm_call_completed",
@@ -160,6 +167,44 @@ fn hook_rewrites_every_captured_field_and_discards_a_panicked_transaction() {
     assert!(!encoded.contains("secret"));
     assert!(encoded.contains("REDACTED"));
     assert_eq!(rewritten.content.references.len(), 1);
+    // ContentPolicyAndHookEquivalence: an invalid typed replacement defaults
+    // to omission; it must never recover the original attachment reference.
+    struct InvalidAttachment;
+    impl ContentHook for InvalidAttachment {
+        fn on_content(&self, _: &ContentView<'_>, content: &mut RecordContent<'_>) {
+            content.for_each(|field| {
+                if field.path() == "input_messages[0].parts[2]" {
+                    let ContentValue::Json(value) = field.value() else {
+                        panic!()
+                    };
+                    *value = json!(false);
+                }
+            });
+        }
+    }
+    let mut event = model_event();
+    if let TraceEvent::LlmCallCompleted { request, .. } = &mut event {
+        request.messages[0]
+            .blocks
+            .push(TraceContentBlock::Attachment {
+                reference: Box::new(TraceAttachment {
+                    id: "secret-reference".into(),
+                    ..Default::default()
+                }),
+            });
+    }
+    let mut invalid = record(event);
+    invalid.apply_content(&policy, Some(&InvalidAttachment));
+    let TraceEvent::LlmCallCompleted { request, .. } = &invalid.event else {
+        panic!()
+    };
+    assert_eq!(
+        request.messages[0].blocks[2],
+        TraceContentBlock::Attachment {
+            reference: Box::default(),
+        }
+    );
+
     let mut failed = record(model_event());
     assert!(failed.apply_content(&policy, Some(&Panic)).is_some());
     assert!(
@@ -177,6 +222,12 @@ fn hook_rewrites_every_captured_field_and_discards_a_panicked_transaction() {
 #[test]
 fn truncation_terminates_for_large_strings_numeric_arrays_messages_and_schemas() {
     let limits = ContentLimits::standard();
+    // Encoded limits include escaping; cuts retain complete UTF-8 characters.
+    let escaped = record(tool(json!({"large": "\\\"\n\u{0000}é🦀".repeat(50000)})))
+        .governed(ContentPolicy::captured());
+    for (_, value) in attributes(&escaped.event) {
+        assert!(serde_json::to_vec(&value).unwrap().len() as u64 <= limits.max_attribute_bytes());
+    }
     let max = limits.max_attribute_bytes() as usize;
     let mut string =
         record(tool(json!({"large":"é".repeat(1024*1024)}))).governed(ContentPolicy::captured());
@@ -572,6 +623,135 @@ fn turn_closer_output_obeys_capture_redaction_and_bounds() {
         assert!(
             serde_json::to_vec(&value).unwrap().len() as u64
                 <= policy.content_limits.max_attribute_bytes()
+        );
+    }
+}
+
+/// BorrowedSemanticShape: bounds and exports count exactly the established
+/// wrappers, nulls, escaping, omitted reasoning and parsed argument fallback.
+#[test]
+fn semantic_views_preserve_encoded_shapes() {
+    let attachment = TraceAttachment {
+        id: "attachment\"é".into(),
+        media_type: "image/png".into(),
+        byte_len: 7,
+        position: "message".into(),
+        delivery_form: None,
+    };
+    let messages = vec![TraceLlmMessage {
+        role: "user".into(),
+        blocks: vec![
+            TraceContentBlock::Attachment {
+                reference: Box::new(attachment.clone()),
+            },
+            TraceContentBlock::ToolCall {
+                call_id: None,
+                tool_name: "tool".into(),
+                input_json: json!({"escaped":"\n\"é"}),
+                item_id: None,
+                has_signature: false,
+            },
+            TraceContentBlock::ToolResult {
+                call_id: Some("call".into()),
+                tool_name: None,
+                content: vec![
+                    TraceToolResultBlock::Text {
+                        text: "result".into(),
+                    },
+                    TraceToolResultBlock::Attachment {
+                        reference: Box::new(attachment),
+                    },
+                ],
+            },
+            TraceContentBlock::Reasoning {
+                text: "private".into(),
+                item_id: None,
+                summary: vec![],
+                has_encrypted: true,
+                redacted: false,
+            },
+        ],
+    }];
+    let event = TraceEvent::TurnCompleted {
+        input: messages,
+        output: vec![],
+        inputs: 1,
+        inference_calls: None,
+        tool_calls: None,
+        outcome: TraceTurnOutcome::Completed {
+            done_reason: TraceTurnCompletionReason::AssistantMessage,
+        },
+    };
+    let a = json!({"type":"lash.attachment","mime_type":"image/png",
+        "lash.attachment.id":"attachment\"é","byte_len":7,"delivery_form":null});
+    let expected = json!([{"role":"user","parts":[a.clone(),
+        {"type":"tool_call","id":null,"name":"tool","arguments":{"escaped":"\n\"é"}},
+        {"type":"tool_call_response","id":"call","response":[{"type":"text","content":"result"},a]}]}]);
+    let attrs: Vec<_> = super::attributes(&event).collect();
+    assert_eq!(
+        serde_json::to_vec(&attrs[0].1).unwrap(),
+        serde_json::to_vec(&expected).unwrap()
+    );
+    assert_eq!(attrs[0].1.to_string(), expected.to_string());
+    for args in ["{\"z\":1,\"a\":null}", "invalid \"é"] {
+        let mut event = model_event();
+        if let TraceEvent::LlmCallCompleted { response, .. } = &mut event {
+            response.parts = Some(vec![
+                lash_protocol_types::llm::types::LlmOutputPart::ToolCall {
+                    call_id: "call".into(),
+                    tool_name: "tool".into(),
+                    input_json: args.into(),
+                    replay: None,
+                },
+            ]);
+        }
+        let attrs: Vec<_> = super::attributes(&event).collect();
+        let output = &attrs
+            .iter()
+            .find(|(key, _)| *key == "gen_ai.output.messages")
+            .unwrap()
+            .1;
+        let expected = json!([{"role":"assistant","finish_reason":"unknown","parts":[{
+            "type":"tool_call","id":"call","name":"tool",
+            "arguments":serde_json::from_str::<Value>(args).unwrap_or_else(|_| args.into())}]}]);
+        assert_eq!(
+            serde_json::to_vec(output).unwrap(),
+            serde_json::to_vec(&expected).unwrap()
+        );
+    }
+    for outcome in [
+        TraceToolCallOutcome::Failure(TraceToolFailure {
+            class: lash_protocol_types::ToolFailureClass::Io,
+            code: "io".into(),
+            source: lash_protocol_types::ToolFailureSource::Tool,
+            suggested_delay_ms: Some(10),
+            diagnostics: Some(json!({"message":"failed"})),
+        }),
+        TraceToolCallOutcome::Cancelled(TraceToolCancellation {
+            source: lash_protocol_types::ToolFailureSource::Runtime,
+            origin: Some(lash_protocol_types::CancelOrigin::OperatorRequested),
+            forced: true,
+            diagnostics: Some(json!({"message":"cancelled"})),
+        }),
+    ] {
+        let expected = match &outcome {
+            TraceToolCallOutcome::Failure(failure) => json!({"error":failure}),
+            TraceToolCallOutcome::Cancelled(cancellation) => json!({"error":cancellation}),
+            _ => unreachable!(),
+        };
+        let mut event = tool(Value::Null);
+        if let TraceEvent::ToolCallCompleted { output, .. } = &mut event {
+            output.outcome = outcome;
+        }
+        let attrs: Vec<_> = super::attributes(&event).collect();
+        let result = &attrs
+            .iter()
+            .find(|(key, _)| *key == "gen_ai.tool.call.result")
+            .unwrap()
+            .1;
+        assert_eq!(
+            serde_json::to_vec(result).unwrap(),
+            serde_json::to_vec(&expected).unwrap()
         );
     }
 }

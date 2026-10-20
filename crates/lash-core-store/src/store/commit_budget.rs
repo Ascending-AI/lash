@@ -1,3 +1,6 @@
+use lash_protocol_types::core_support::{EncodedLength, json_encoded_len};
+use serde::Serialize;
+
 use super::{HydratedCheckpointComponent, RuntimeCommit, StoreError};
 
 /// An explicit finite runtime-commit limit or an explicit opt-out.
@@ -340,29 +343,31 @@ impl RuntimeCommit {
     }
 
     pub fn measure_budget(&self) -> Result<RuntimeCommitBudgetMeasurement, StoreError> {
-        let measure_json = |result: Result<Vec<u8>, serde_json::Error>| {
-            result.map(|bytes| bytes.len()).map_err(|err| {
+        let measure_json = |result: Result<usize, serde_json::Error>| {
+            result.map_err(|err| {
                 StoreError::Backend(format!(
                     "failed to measure runtime commit transaction budget: {err}"
                 ))
             })
         };
-        let session_config_bytes = measure_json(serde_json::to_vec(&self.config))?;
+        let session_config_bytes = measure_json(json_encoded_len(&self.config))?;
         let graph_delta_bytes = self.graph.nodes().iter().try_fold(
             0usize,
             |total, node| -> Result<usize, StoreError> {
-                Ok(total.saturating_add(measure_json(serde_json::to_vec(node))?))
+                Ok(total.saturating_add(measure_json(json_encoded_len(node))?))
             },
         )?;
         let checkpoint_root = self
             .checkpoint
             .manifest(crate::store::FleetFormat::current())?;
-        let checkpoint_root_bytes = rmp_serde::to_vec_named(&checkpoint_root)
-            .map(|bytes| bytes.len())
+        let mut checkpoint_length = EncodedLength::default();
+        checkpoint_root
+            .serialize(&mut rmp_serde::Serializer::new(&mut checkpoint_length).with_struct_map())
             .map_err(|err| StoreError::RecordEncodingFailed {
                 record_kind: "checkpoint root budget measurement".to_string(),
                 message: err.to_string(),
             })?;
+        let checkpoint_root_bytes = checkpoint_length.len();
         let changed_component_bytes = self
             .checkpoint
             .components
@@ -389,9 +394,9 @@ impl RuntimeCommit {
         let command_outcome_bytes = if charged_outcomes.is_empty() {
             0
         } else {
-            measure_json(serde_json::to_vec(&charged_outcomes))?
+            measure_json(json_encoded_len(&charged_outcomes))?
         };
-        let turn_result_bytes = measure_json(serde_json::to_vec(&self.turn_commit))?
+        let turn_result_bytes = measure_json(json_encoded_len(&self.turn_commit))?
             .saturating_add(command_outcome_bytes);
         let total_bytes = session_config_bytes
             .saturating_add(graph_delta_bytes)
@@ -465,7 +470,8 @@ mod tests {
                 crate::NoProgressBudget::bounded(12),
             ))
         };
-        let budget = CommitBudget::new(CommitBudgetLimit::Unbounded, CommitBudgetLimit::bounded(2));
+        // BudgetRefusalPriority: both dimensions fail; rows refuse first.
+        let budget = CommitBudget::bounded(1, 2);
         let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, budget);
         commit.adopted_intent_rows = 3;
 

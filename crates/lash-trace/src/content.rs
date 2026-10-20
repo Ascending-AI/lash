@@ -12,7 +12,7 @@ mod truncate;
 mod visit;
 pub use selector::{CaptureSelector, SelectorView, TraceNarrowing};
 pub(crate) use semconv::attributes;
-use semconv::{semconv_input, semconv_tools};
+use semconv::{Input as semconv_input, Tools as semconv_tools};
 
 /// Whether the host consents to building a category of telemetry content.
 #[derive(
@@ -179,6 +179,8 @@ enum FieldValue<'a> {
 trait JsonField {
     fn value(&mut self) -> &mut serde_json::Value;
     fn omit(&mut self);
+    fn encoded_len(&mut self) -> u64;
+    fn truncate(&mut self, limit: usize, all_strings: bool, path: &str, marks: &mut ContentMarks);
 }
 /// JSON is the facade's declared JSON contract exception.
 pub enum ContentValue<'a> {

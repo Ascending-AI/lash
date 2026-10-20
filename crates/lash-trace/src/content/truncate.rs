@@ -1,12 +1,12 @@
-use super::{ContentCategory as C, ContentMarks, ContentValue};
+use super::{ContentCategory as C, ContentMarks};
 use crate::{ContentLimits, TraceEvent};
 use serde::Serialize;
 use serde_json::Value;
 
-fn size(value: &impl Serialize) -> u64 {
-    serde_json::to_vec(value).map_or(u64::MAX, |v| v.len() as u64)
+pub(super) fn size(value: &impl Serialize) -> u64 {
+    lash_protocol_types::core_support::json_encoded_len(value).map_or(u64::MAX, |v| v as u64)
 }
-fn cut(text: &mut String, limit: usize) -> bool {
+pub(super) fn cut(text: &mut String, limit: usize) -> bool {
     if text.len() <= limit {
         return false;
     }
@@ -17,7 +17,7 @@ fn cut(text: &mut String, limit: usize) -> bool {
     text.truncate(end);
     true
 }
-fn leaves(
+pub(super) fn leaves(
     value: &mut Value,
     limit: usize,
     all_strings: bool,
@@ -62,14 +62,13 @@ impl TraceEvent {
             ) {
                 return;
             }
-            match field.value() {
-                ContentValue::Text(text) => {
+            match &mut field.value {
+                super::FieldValue::Text(text) => {
                     if cut(text, part) {
                         marks.truncated.push(path);
                     }
                 }
-                ContentValue::Json(value) => leaves(
-                    value,
+                super::FieldValue::Json(value) => value.truncate(
                     part,
                     matches!(category, C::ToolArguments | C::ToolResults | C::Extension),
                     &path,
@@ -93,9 +92,9 @@ impl TraceEvent {
             }
         }
         self.visit_content(&mut |field| {
-            let bytes = match field.value() {
-                ContentValue::Text(value) => size(value),
-                ContentValue::Json(value) => size(value),
+            let bytes = match &mut field.value {
+                super::FieldValue::Text(value) => size(value),
+                super::FieldValue::Json(value) => value.encoded_len(),
             };
             if bytes > attribute {
                 marks.oversize.push(field.path().clone());
@@ -130,7 +129,6 @@ impl TraceEvent {
         // The actual semconv attribute includes wrappers. Clear the owning field
         // whenever that final representation is too large; never slice JSON text.
         let oversized: Vec<_> = super::attributes(self)
-            .into_iter()
             .filter(|(_, value)| size(value) > attribute)
             .map(|(key, _)| key)
             .collect();

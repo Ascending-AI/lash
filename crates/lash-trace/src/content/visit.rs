@@ -18,22 +18,128 @@ fn text(
         omitted: false,
     });
 }
+// Typed fields supply bounds operations without a JSON detour. New field
+// types must implement these operations; hooks alone request the lazy
+// mutable JSON adapter.
+trait NativeField: Serialize + DeserializeOwned + Default {
+    fn truncate_leaves(
+        &mut self,
+        limit: usize,
+        all_strings: bool,
+        path: &str,
+        marks: &mut ContentMarks,
+    );
+}
+impl NativeField for String {
+    fn truncate_leaves(
+        &mut self,
+        limit: usize,
+        all_strings: bool,
+        path: &str,
+        marks: &mut ContentMarks,
+    ) {
+        if all_strings && super::truncate::cut(self, limit) {
+            marks.truncated.push(path.into());
+        }
+    }
+}
+impl<T: NativeField> NativeField for Option<T> {
+    fn truncate_leaves(
+        &mut self,
+        limit: usize,
+        all_strings: bool,
+        path: &str,
+        marks: &mut ContentMarks,
+    ) {
+        if let Some(value) = self {
+            value.truncate_leaves(limit, all_strings, path, marks);
+        }
+    }
+}
+impl<T: NativeField> NativeField for Vec<T> {
+    fn truncate_leaves(
+        &mut self,
+        limit: usize,
+        all_strings: bool,
+        path: &str,
+        marks: &mut ContentMarks,
+    ) {
+        for (i, value) in self.iter_mut().enumerate() {
+            value.truncate_leaves(limit, all_strings, &format!("{path}[{i}]"), marks);
+        }
+    }
+}
+impl NativeField for Box<TraceAttachment> {
+    fn truncate_leaves(
+        &mut self,
+        limit: usize,
+        all_strings: bool,
+        path: &str,
+        marks: &mut ContentMarks,
+    ) {
+        if !all_strings {
+            return;
+        }
+        let TraceAttachment {
+            id,
+            media_type,
+            byte_len: _,
+            position,
+            delivery_form,
+        } = self.as_mut();
+        delivery_form.truncate_leaves(limit, true, &format!("{path}.delivery_form"), marks);
+        for (key, value) in [
+            ("id", id),
+            ("media_type", media_type),
+            ("position", position),
+        ] {
+            value.truncate_leaves(limit, true, &format!("{path}.{key}"), marks);
+        }
+    }
+}
+impl NativeField for std::collections::BTreeMap<String, Value> {
+    fn truncate_leaves(
+        &mut self,
+        limit: usize,
+        all_strings: bool,
+        path: &str,
+        marks: &mut ContentMarks,
+    ) {
+        for (key, value) in self {
+            super::truncate::leaves(
+                value,
+                limit,
+                all_strings || matches!(key.as_str(), "text" | "content" | "summary"),
+                &format!("{path}.{key}"),
+                marks,
+            );
+        }
+    }
+}
+
 struct DeferredJson<'a, T> {
     original: &'a mut T,
     encoded: Option<Value>,
     omitted: bool,
 }
-impl<T: Serialize + Default> JsonField for DeferredJson<'_, T> {
+impl<T: NativeField> JsonField for DeferredJson<'_, T> {
     fn value(&mut self) -> &mut Value {
         self.encoded
             .get_or_insert_with(|| serde_json::to_value(&*self.original).unwrap_or(Value::Null))
+    }
+    fn encoded_len(&mut self) -> u64 {
+        super::truncate::size(&self.original)
+    }
+    fn truncate(&mut self, limit: usize, all_strings: bool, path: &str, marks: &mut ContentMarks) {
+        self.original
+            .truncate_leaves(limit, all_strings, path, marks);
     }
     fn omit(&mut self) {
         self.omitted = true;
         self.encoded = None;
     }
 }
-fn json<T: Serialize + DeserializeOwned + Default>(
+fn json<T: NativeField>(
     category: C,
     path: impl Into<String>,
     value: &mut T,
@@ -58,6 +164,78 @@ fn json<T: Serialize + DeserializeOwned + Default>(
     }
 }
 
+// JSON already belongs to the record: hooks and bounds mutate it in place.
+impl JsonField for Value {
+    fn value(&mut self) -> &mut Value {
+        self
+    }
+    fn omit(&mut self) {
+        *self = Value::Null;
+    }
+    fn encoded_len(&mut self) -> u64 {
+        super::truncate::size(self)
+    }
+    fn truncate(&mut self, limit: usize, all_strings: bool, path: &str, marks: &mut ContentMarks) {
+        super::truncate::leaves(self, limit, all_strings, path, marks);
+    }
+}
+struct OptionalJson<'a> {
+    original: &'a mut Option<Value>,
+    touched: bool,
+}
+impl JsonField for OptionalJson<'_> {
+    fn value(&mut self) -> &mut Value {
+        self.touched = true;
+        self.original.get_or_insert(Value::Null)
+    }
+    fn omit(&mut self) {
+        *self.original = None;
+    }
+    fn encoded_len(&mut self) -> u64 {
+        self.touched = true;
+        super::truncate::size(self.original)
+    }
+    fn truncate(&mut self, limit: usize, all_strings: bool, path: &str, marks: &mut ContentMarks) {
+        self.touched = true;
+        if let Some(value) = self.original {
+            super::truncate::leaves(value, limit, all_strings, path, marks);
+        }
+    }
+}
+fn value(
+    category: C,
+    path: impl Into<String>,
+    value: &mut impl JsonField,
+    f: &mut dyn FnMut(&mut ContentField<'_>),
+) {
+    let mut field = ContentField {
+        category,
+        path: path.into(),
+        value: FieldValue::Json(value),
+        omitted: false,
+    };
+    f(&mut field);
+    if field.omitted {
+        field.omit();
+    }
+}
+fn optional_value(
+    category: C,
+    path: impl Into<String>,
+    original: &mut Option<Value>,
+    f: &mut dyn FnMut(&mut ContentField<'_>),
+) {
+    let mut field = OptionalJson {
+        original,
+        touched: false,
+    };
+    value(category, path, &mut field, f);
+    // Match the typed adapter's default-on-null behavior only when accessed.
+    if field.touched && field.original.as_ref().is_some_and(Value::is_null) {
+        *field.original = None;
+    }
+}
+
 fn request(req: &mut TraceLlmRequest, f: &mut dyn FnMut(&mut ContentField<'_>)) {
     if let Some(instructions) = &mut req.system_instructions {
         text(
@@ -73,14 +251,14 @@ fn request(req: &mut TraceLlmRequest, f: &mut dyn FnMut(&mut ContentField<'_>)) 
         && spec.get("type").and_then(Value::as_str) == Some("json_schema")
     {
         if let Some(schema) = spec.get_mut("schema") {
-            json(C::OutputSchema, "output_schema", schema, f);
+            value(C::OutputSchema, "output_schema", schema, f);
         }
     } else if req
         .output_spec
         .as_ref()
         .is_some_and(|spec| spec.get("type").and_then(Value::as_str) != Some("json_object"))
     {
-        json(C::OutputSchema, "output_schema", &mut req.output_spec, f);
+        optional_value(C::OutputSchema, "output_schema", &mut req.output_spec, f);
     }
 }
 fn messages(
@@ -96,7 +274,7 @@ fn messages(
                 TraceContentBlock::Text { text: value, .. } => text(category, path, value, f),
                 TraceContentBlock::Attachment { reference } => json(category, path, reference, f),
                 TraceContentBlock::ToolCall { input_json, .. } => {
-                    json(category, path, input_json, f)
+                    value(category, path, input_json, f)
                 }
                 TraceContentBlock::ToolResult { content, .. } => {
                     for (k, part) in content.iter_mut().enumerate() {
@@ -132,13 +310,13 @@ fn tools(tools: &mut [TraceToolSpec], f: &mut dyn FnMut(&mut ContentField<'_>)) 
             &mut tool.description,
             f,
         );
-        json(
+        value(
             C::ToolDefinitions,
             format!("tool_definitions[{i}].input_schema"),
             &mut tool.input_schema,
             f,
         );
-        json(
+        value(
             C::ToolDefinitions,
             format!("tool_definitions[{i}].output_schema"),
             &mut tool.output_schema,
@@ -233,10 +411,12 @@ impl TraceEvent {
                             input_json,
                             ..
                         } => {
-                            let mut value = serde_json::from_str::<Value>(input_json)
+                            // Canonicalize before callbacks, as typed output hooks
+                            // observe this text too. Parsing is semantic work.
+                            let mut parsed = serde_json::from_str::<Value>(input_json)
                                 .unwrap_or_else(|_| Value::String(input_json.clone()));
-                            json(C::OutputMessages, path, &mut value, f);
-                            *input_json = value.to_string();
+                            value(C::OutputMessages, path, &mut parsed, f);
+                            *input_json = parsed.to_string();
                         }
                     }
                 }
@@ -264,7 +444,7 @@ impl TraceEvent {
                 response_metadata,
                 f,
             ),
-            Self::ProviderEvent { event } => json(
+            Self::ProviderEvent { event } => optional_value(
                 C::ProviderPayloads,
                 "provider_payloads",
                 &mut event.raw_json,
@@ -275,7 +455,7 @@ impl TraceEvent {
                     if let TraceEffectEnvelopeDiffValue::Present { value_json, .. } =
                         &mut entry.recorded
                     {
-                        json(
+                        optional_value(
                             C::ProviderPayloads,
                             format!("diff[{i}].recorded"),
                             value_json,
@@ -285,7 +465,7 @@ impl TraceEvent {
                     if let TraceEffectEnvelopeDiffValue::Present { value_json, .. } =
                         &mut entry.reconstructed
                     {
-                        json(
+                        optional_value(
                             C::ProviderPayloads,
                             format!("diff[{i}].reconstructed"),
                             value_json,
@@ -323,7 +503,7 @@ impl TraceEvent {
                     text(C::Reasoning, "stream.reasoning", value, f)
                 }
                 TraceRuntimeStreamPayload::ToolCallPart { input_json, .. } => {
-                    json(C::OutputMessages, "stream.arguments", input_json, f)
+                    value(C::OutputMessages, "stream.arguments", input_json, f)
                 }
                 TraceRuntimeStreamPayload::Usage { .. } => {}
             },
@@ -333,7 +513,7 @@ impl TraceEvent {
                 provider_call_id: _,
                 name: _,
                 issuing_node_id: _,
-            } => json(C::ToolArguments, "tool_arguments", args, f),
+            } => value(C::ToolArguments, "tool_arguments", args, f),
             Self::ToolCallCompleted {
                 args,
                 output,
@@ -346,21 +526,21 @@ impl TraceEvent {
                 span_attributes: _,
             } => {
                 if let crate::TraceToolArgs::Value(args) = args {
-                    json(C::ToolArguments, "tool_arguments", args, f);
+                    value(C::ToolArguments, "tool_arguments", args, f);
                 }
                 match &mut output.outcome {
                     TraceToolCallOutcome::Success(value) => {
-                        json(C::ToolResults, "tool_results", value, f)
+                        self::value(C::ToolResults, "tool_results", value, f)
                     }
                     // Only the diagnostics are content: the classification
                     // beside them is structure no content operation reaches.
                     TraceToolCallOutcome::Failure(TraceToolFailure { diagnostics, .. })
                     | TraceToolCallOutcome::Cancelled(TraceToolCancellation {
                         diagnostics, ..
-                    }) => json(C::ToolResults, "tool_results", diagnostics, f),
+                    }) => optional_value(C::ToolResults, "tool_results", diagnostics, f),
                     TraceToolCallOutcome::Discarded => {}
                 }
-                json(
+                optional_value(
                     C::ToolResults,
                     "tool_results.control",
                     &mut output.control,
@@ -436,7 +616,7 @@ impl TraceEvent {
                         }
                     }
                 }
-                json(
+                optional_value(
                     C::CodeOutput,
                     "code_output.terminal_finish",
                     terminal_finish,
@@ -472,7 +652,7 @@ impl TraceEvent {
             Self::ProtocolStep {
                 payload,
                 plugin_id: _,
-            } => json(C::InputMessages, "protocol.payload", payload, f),
+            } => value(C::InputMessages, "protocol.payload", payload, f),
             Self::LanguageExecution { event, language: _ } => match &mut event.payload {
                 TraceLanguageExecutionPayload::ExecutionFinished { error, .. } => {
                     json(C::DiagnosticsText, "diagnostics.execution", error, f)
@@ -516,7 +696,7 @@ impl TraceEvent {
             }
             Self::ExtensionSpan(span) => {
                 for entry in &mut span.content {
-                    json(
+                    value(
                         C::Extension,
                         format!("extension.{}", entry.key),
                         &mut entry.value,
