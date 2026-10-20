@@ -1927,10 +1927,13 @@ async fn typescript_import_reports_missing_tools_as_admission_refusals() {
     let document = lash::workflow::document::parse_document(
         "kernel 1\nnumbers float\neffect missing.tool(input: Any) -> Any contract \"1\"\nentry job() -> Any\nfn job() { return null }\nmain { finish null }\n",
     ).expect("document parses");
-    let source = lash::typescript::print(&document, None, Default::default())
+    let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
+    let library = embedding.library();
+    let source = lash::typescript::print(&document, None, library, Default::default())
         .expect("the printer accepts the document");
-    let (decoded, _) = lash::typescript::read(&source.source, &document, Default::default())
-        .expect("exported source reads back before admission");
+    let (decoded, _) =
+        lash::typescript::read(&source.source, &document, library, Default::default())
+            .expect("exported source reads back before admission");
     assert_eq!(document.canonical_bytes(), decoded.canonical_bytes());
     let WorkflowImport::Admission(WorkflowAdmissionRefusal::Document(refusal)) = core
         .host_artifacts()

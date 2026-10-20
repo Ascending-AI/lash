@@ -503,7 +503,7 @@ fn readable_inline_depth_and_malformed_syntax_refuse() {
     check_map(&doc, &printed);
     let bad = printed.source.replace("return x", "return x.title");
     assert_eq!(
-        crate::read(&bad, &doc, Default::default())
+        crate::read_kernel(&bad, &doc, Default::default())
             .unwrap_err()
             .code,
         crate::GeneratedSourceCode::GeneratedSourceDepth.as_str()
@@ -523,7 +523,7 @@ fn readable_inline_depth_and_malformed_syntax_refuse() {
     ] {
         let source = format!("def main():\n    {body}");
         assert_eq!(
-            crate::read(&source, &base, Default::default())
+            crate::read_kernel(&source, &base, Default::default())
                 .unwrap_err()
                 .code,
             crate::GeneratedSourceCode::InvalidGeneratedSource.as_str(),
@@ -912,7 +912,7 @@ fn native_operators_require_unique_identity_and_exact_arity() {
         assert!(printed.source.contains(&expected), "{}", printed.source);
         check_map(&doc, &printed);
         let changed = printed.source.replace(&expected, "x");
-        let decoded = crate::read(&changed, &doc, Default::default()).unwrap();
+        let decoded = crate::read_kernel(&changed, &doc, Default::default()).unwrap();
         assert_ne!(doc.canonical_bytes(), decoded.0.canonical_bytes());
         // An arity mismatch cannot use the native operator inverse.
         doc.main = vec![finish(k::Expr::Call {
@@ -1012,7 +1012,7 @@ fn python_operators_print_minimal_parentheses_with_an_exact_inverse() {
     }
     for body in ["return x < 1 == 1", "return -7 ** 2", "return -7 .real"] {
         assert!(
-            crate::read(
+            crate::read_kernel(
                 &format!("def main():\n    {body}\n"),
                 &doc,
                 Default::default()
@@ -1133,7 +1133,7 @@ def main():
             start: None,
         },
     );
-    let decoded = crate::read(source, &doc, Default::default()).unwrap();
+    let decoded = crate::read_kernel(source, &doc, Default::default()).unwrap();
     assert_eq!(doc.canonical_bytes(), decoded.0.canonical_bytes());
     roundtrip(&doc, true);
 }

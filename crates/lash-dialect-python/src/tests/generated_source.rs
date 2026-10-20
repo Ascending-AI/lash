@@ -5,7 +5,7 @@ use lash_kernel_doc as k;
 use std::collections::BTreeSet;
 
 fn roundtrip(document: &k::Document, maps: bool) -> crate::PrintedSource {
-    let printed = crate::print(
+    let printed = crate::print_kernel(
         document,
         None,
         PrintOptions {
@@ -14,7 +14,7 @@ fn roundtrip(document: &k::Document, maps: bool) -> crate::PrintedSource {
         },
     )
     .expect("valid in-budget document prints");
-    let decoded = crate::read(&printed.source, document, Default::default())
+    let decoded = crate::read_kernel(&printed.source, document, Default::default())
         .expect("exported source reads back against its base without a library");
     assert_eq!(document.identity(), decoded.0.identity());
     assert_eq!(
@@ -78,7 +78,7 @@ fn hand_document() -> k::Document {
 #[test]
 fn independent_source_reads_its_environment_from_the_base_document() {
     let expected = hand_document();
-    let decoded = crate::read(HAND_WRITTEN, &expected, Default::default()).unwrap();
+    let decoded = crate::read_kernel(HAND_WRITTEN, &expected, Default::default()).unwrap();
     assert_eq!(decoded.0.canonical_bytes(), expected.canonical_bytes());
     roundtrip(&expected, false);
     let mut controls = vec![];
@@ -392,7 +392,7 @@ fn malformed_and_ambiguous_sources_refuse_with_typed_diagnostics() {
         "def worker():\n    pass\n".into(),
     ] {
         assert_eq!(
-            crate::read(&source, &base, Default::default())
+            crate::read_kernel(&source, &base, Default::default())
                 .unwrap_err()
                 .code,
             C::GeneratedSourceFormat.as_str(),
@@ -416,7 +416,7 @@ fn malformed_and_ambiguous_sources_refuse_with_typed_diagnostics() {
         HAND_WRITTEN.replace("kernel_name_1", "kernel_name_9"),
     ] {
         assert_eq!(
-            crate::read(&source, &base, Default::default())
+            crate::read_kernel(&source, &base, Default::default())
                 .unwrap_err()
                 .code,
             C::InvalidGeneratedSource.as_str(),
@@ -437,7 +437,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
             .max(serde_json::to_vec(&document).unwrap().len()),
         ..Default::default()
     };
-    let at_limit = crate::print(
+    let at_limit = crate::print_kernel(
         &document,
         None,
         PrintOptions {
@@ -447,7 +447,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
     )
     .unwrap();
     assert_eq!(
-        crate::read(&at_limit.source, &document, limits)
+        crate::read_kernel(&at_limit.source, &document, limits)
             .unwrap()
             .0
             .canonical_bytes(),
@@ -458,7 +458,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
         ..limits
     };
     assert!(matches!(
-        crate::print(
+        crate::print_kernel(
             &document,
             None,
             PrintOptions {
@@ -469,7 +469,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
         Err(crate::PrintError::Bytes { .. })
     ));
     assert_eq!(
-        crate::read(&printed.source, &document, short)
+        crate::read_kernel(&printed.source, &document, short)
             .unwrap_err()
             .code,
         crate::GeneratedSourceCode::GeneratedSourceBytes.as_str()
@@ -478,7 +478,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
         max_depth: 2,
         ..Default::default()
     };
-    let accepted = crate::print(
+    let accepted = crate::print_kernel(
         &document,
         None,
         PrintOptions {
@@ -488,7 +488,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
     )
     .unwrap();
     assert_eq!(
-        crate::read(&accepted.source, &document, exact_depth)
+        crate::read_kernel(&accepted.source, &document, exact_depth)
             .unwrap()
             .0
             .canonical_bytes(),
@@ -499,7 +499,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
         ..Default::default()
     };
     assert!(matches!(
-        crate::print(
+        crate::print_kernel(
             &document,
             None,
             PrintOptions {
@@ -510,14 +510,14 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
         Err(crate::PrintError::Depth { .. })
     ));
     assert_eq!(
-        crate::read(&printed.source, &document, shallow)
+        crate::read_kernel(&printed.source, &document, shallow)
             .unwrap_err()
             .code,
         crate::GeneratedSourceCode::GeneratedSourceDepth.as_str()
     );
     let deep = " ".repeat(300) + "with k.tuple():";
     assert_eq!(
-        crate::read(&deep, &document, Default::default())
+        crate::read_kernel(&deep, &document, Default::default())
             .unwrap_err()
             .code,
         crate::GeneratedSourceCode::GeneratedSourceDepth.as_str()
@@ -536,7 +536,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
         ),
     );
     assert_eq!(
-        crate::read(&source, &performing, Default::default())
+        crate::read_kernel(&source, &performing, Default::default())
             .unwrap_err()
             .code,
         crate::GeneratedSourceCode::GeneratedSourceDepth.as_str()
@@ -548,7 +548,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
         }],
     );
     assert!(matches!(
-        crate::print(
+        crate::print_kernel(
             &large_bytes,
             None,
             PrintOptions {
@@ -570,7 +570,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
         }],
     );
     assert!(matches!(
-        crate::print(
+        crate::print_kernel(
             &large_integer,
             None,
             PrintOptions {
@@ -604,7 +604,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
         }],
     );
     assert!(matches!(
-        crate::print(&beyond, None, Default::default()),
+        crate::print_kernel(&beyond, None, Default::default()),
         Err(crate::PrintError::Depth { .. })
     ));
     let mut expr = k::Expr::Literal(k::Literal::Null);
@@ -616,7 +616,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
         vec![k::Stmt::Finish { value: expr }],
     );
     assert!(matches!(
-        crate::print(&deep, None, Default::default()),
+        crate::print_kernel(&deep, None, Default::default()),
         Err(crate::PrintError::Depth { .. })
     ));
 }
@@ -645,7 +645,7 @@ fn a_place_first_assignment_does_not_print() {
         ],
     );
     assert!(matches!(
-        crate::print(&document, None, Default::default()),
+        crate::print_kernel(&document, None, Default::default()),
         Err(crate::PrintError::Invalid(_))
     ));
 }
@@ -1517,7 +1517,7 @@ fn alias_expansion_refuses_before_cloning_an_over_budget_document() {
         ..Default::default()
     };
     assert_eq!(
-        crate::read(&source, &base, limits).unwrap_err().code,
+        crate::read_kernel(&source, &base, limits).unwrap_err().code,
         crate::GeneratedSourceCode::GeneratedSourceBytes.as_str()
     );
 }
@@ -1587,7 +1587,7 @@ fn authored_call_arguments_charge_each_decoded_alias_once() {
         ..Default::default()
     };
     assert_eq!(
-        crate::read(&printed.source, &document, limits)
+        crate::read_kernel(&printed.source, &document, limits)
             .unwrap()
             .0
             .canonical_bytes(),
@@ -1655,7 +1655,7 @@ fn authored_import_of_printed_source_needs_its_base() {
         super::machine::lower("def digest(inbox):\n    return inbox\nprint(digest('hello'))\n")
             .unwrap()
             .document;
-    let printed = crate::print(&document, None, Default::default()).unwrap();
+    let printed = crate::print_kernel(&document, None, Default::default()).unwrap();
     let refusal = super::machine::lower(&printed.source).unwrap_err();
     assert_eq!(
         refusal.code,
@@ -1695,7 +1695,7 @@ fn authored_import_of_printed_source_needs_its_base() {
         super::machine::lower("missing\n").unwrap_err().code,
         crate::Code::UnknownName.as_str()
     );
-    let read = crate::read(&printed.source, &document, Default::default()).unwrap();
+    let read = crate::read_kernel(&printed.source, &document, Default::default()).unwrap();
     assert_eq!(read.0.identity(), document.identity());
 }
 

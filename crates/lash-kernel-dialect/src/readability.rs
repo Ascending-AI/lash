@@ -2,8 +2,26 @@
 //! This acceptance harness is separate from production printing. A dialect
 //! detector classifies mapped nodes; an allowlist must name the precise rule,
 //! node kind and documented reason, rather than exempting a whole program.
-use crate::{Diagnostic, PrintOptions, Printer};
+use crate::{Diagnostic, PrintOptions};
 use lash_kernel_doc as k;
+
+/// A dialect's printer of its kernel surface: every region in the
+/// dialect's spelling of kernel forms, with no library to verify a lift.
+pub trait SurfacePrinter {
+    fn print(
+        &self,
+        document: &k::Document,
+        captions: Option<&k::Captions>,
+        options: PrintOptions,
+    ) -> Result<crate::PrintedSource, crate::PrintError>;
+}
+
+/// The reader of a dialect's kernel surface against its base document.
+pub type SurfaceRead = fn(
+    &str,
+    &k::Document,
+    crate::GeneratedSourceLimits,
+) -> Result<(k::Document, k::Captions), Diagnostic>;
 
 pub struct Case {
     pub name: &'static str,
@@ -18,10 +36,9 @@ pub struct Unavoidable {
 
 pub struct Dialect<'a> {
     pub name: &'a str,
-    pub printer: &'a dyn Printer,
-    /// Read exported source against the base document it was printed from:
-    /// the dialect's [`crate::Dialect::read`].
-    pub decode: crate::ReadSource,
+    pub printer: &'a dyn SurfacePrinter,
+    /// Read the kernel surface against the base document it was printed from.
+    pub decode: SurfaceRead,
     /// Return a documented generic rule for this node's final source range.
     /// Do not scan quoted data or count child occurrences again in a parent.
     pub generic: fn(k::Node<'_>, &str) -> Option<&'static str>,
@@ -549,7 +566,7 @@ mod tests {
 
     struct Witness;
     struct Spelling(&'static str);
-    impl Printer for Spelling {
+    impl SurfacePrinter for Spelling {
         fn print(
             &self,
             document: &k::Document,
@@ -564,7 +581,7 @@ mod tests {
             Ok(printed)
         }
     }
-    impl Printer for Witness {
+    impl SurfacePrinter for Witness {
         fn print(
             &self,
             document: &k::Document,
@@ -662,7 +679,7 @@ mod tests {
     /// FIG-6272: the environment stays in the base document. A header,
     /// directive or table outside every node fails, however it is spelled.
     struct Header(&'static str);
-    impl Printer for Header {
+    impl SurfacePrinter for Header {
         fn print(
             &self,
             document: &k::Document,

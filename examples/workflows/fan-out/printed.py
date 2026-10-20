@@ -1,5 +1,6 @@
 #: Echo two values at once
 async def demo():
+    "use kernel"
     #: Describe how to echo one value
     async def work(value):
         return (await helper_py_reply((await corpus.echo(value, result="json"))))
@@ -29,4 +30,5 @@ async def demo():
                                                     return (await t4(t6))
                                     (await helper_py_gather(t7))
 def main():
+    "use kernel"
     demo = declared.demo

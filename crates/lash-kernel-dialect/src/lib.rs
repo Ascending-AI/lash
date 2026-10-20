@@ -24,6 +24,7 @@ mod names;
 mod namespaces;
 mod notes;
 pub mod readability;
+pub mod regions;
 mod saved;
 mod source;
 mod spelling;

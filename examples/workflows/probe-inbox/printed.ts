@@ -1,29 +1,16 @@
 /** Send a paced inbox digest */
 export async function digest(items) {
   /** Start counting at zero */
-  let sent = 0.0;
+  let sent = 0;
   /** Go through each item */
   for (const item of items) {
     /** Wait six seconds */
-    ((t2) => (undefined))((await await sleep(6000.0)));
-    let t3 = undefined;
-    if (helper_same(helper_kind(item), "record")) {
-      if (!(helper_record_contains(item, "__lash_brand"))) {
-        t3 = item.title;
-      } else {
-        t3 = await helper_ts_read(item, "title");
-      }
-    } else {
-      t3 = await helper_ts_read(item, "title");
-    }
+    await sleep(6000);
     /** Show the item's title */
-    await await display.showMessage((await helper_ts_boundary({text: t3})));
+    await display.showMessage({ text: item.title });
     /** Count the item as sent */
-    sent = sent + 1.0;
+    sent = sent + 1;
   }
   /** Report how many items were sent */
-  return k.returnVia({sent: sent}, helper_ts_promise_adopt);
-}
-async function main() {
-  let digest = declared.digest;
+  return { sent };
 }

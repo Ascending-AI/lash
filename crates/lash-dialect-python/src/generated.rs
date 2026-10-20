@@ -47,20 +47,138 @@ fn depth_error() -> Diagnostic {
 /// statement, a clause, a `def`, a parameter written on its own line or a
 /// field of a `TypedDict` its annotations name ([`crate::captions`]); any
 /// other comment is ignored.
-pub fn read(
+pub fn read_kernel(
     source: &str,
     base: &k::Document,
     limits: GeneratedSourceLimits,
 ) -> Result<(k::Document, k::Captions)> {
-    let (document, entries) = read_document(source, base, limits)?;
+    let (document, entries) = read_document(source, base, limits, false)?;
     let captions = k::Captions::new(&document, entries).map_err(|e| invalid(e.to_string()))?;
     Ok((document, captions))
+}
+
+/// The regions of a printed module written in kernel form, each opened by
+/// the kernel marker, read against `base` (`crate::readable`).
+pub(crate) struct Marked {
+    /// The kernel-form functions and `main`.
+    pub(crate) document: k::Document,
+    pub(crate) captions: Vec<k::CaptionEntry>,
+    /// Where each kernel-form region is in the source.
+    pub(crate) spans: Vec<std::ops::Range<usize>>,
+    /// Whether `main` is written in kernel form.
+    pub(crate) main: bool,
+    /// How many functions are not.
+    pub(crate) unmarked: usize,
+}
+
+/// A top-level item of a printed module.
+struct Item<'a> {
+    /// Where it is, from its first line to the end of its last.
+    span: std::ops::Range<usize>,
+    /// The function it declares.
+    def: Option<&'a str>,
+    marked: bool,
+}
+
+/// Reads the kernel-form regions of `source`. Every other function, and
+/// every import, is read as authored source by the caller; here they are
+/// blank, so offsets are kept.
+pub(crate) fn read_marked(
+    source: &str,
+    base: &k::Document,
+    limits: GeneratedSourceLimits,
+) -> Result<Marked> {
+    let marker = format!("    \"{}\"", crate::printer::KERNEL_MARKER);
+    let mut items: Vec<Item<'_>> = Vec::new();
+    // Where the comment lines right above the line read next begin: an
+    // item's captions are part of it.
+    let mut comments = None;
+    for (start, line) in captioned::lines(source) {
+        if line.trim().is_empty() {
+            comments = None;
+            continue;
+        }
+        if line.trim_start().starts_with('#') {
+            comments.get_or_insert(start);
+            continue;
+        }
+        let above = comments.take().unwrap_or(start);
+        let def = line
+            .strip_prefix("async def ")
+            .or_else(|| line.strip_prefix("def "));
+        let top = def.is_some()
+            || ["class ", "import ", "from "]
+                .iter()
+                .any(|prefix| line.starts_with(prefix));
+        match items.last_mut() {
+            Some(item) if !top => {
+                item.span.end = start + line.len();
+                item.marked |= line.trim_end() == marker;
+            }
+            _ => items.push(Item {
+                span: above..start + line.len(),
+                def: def.map(|rest| {
+                    rest.split(|c: char| !unicode_ident::is_xid_continue(c))
+                        .next()
+                        .unwrap_or_default()
+                }),
+                marked: false,
+            }),
+        }
+    }
+    let empty = || Marked {
+        document: base.clone(),
+        captions: Vec::new(),
+        spans: Vec::new(),
+        main: false,
+        unmarked: 0,
+    };
+    if !items.iter().any(|item| item.marked) {
+        return Ok(empty());
+    }
+    let mut kernel = source.as_bytes().to_vec();
+    let mut marked = Marked {
+        spans: Vec::new(),
+        main: false,
+        unmarked: 0,
+        ..empty()
+    };
+    for item in &items {
+        let blank = match item.def {
+            Some(name) if item.marked => {
+                marked.main |= name == "main";
+                marked.spans.push(item.span.clone());
+                false
+            }
+            Some(_) => {
+                marked.unmarked += 1;
+                true
+            }
+            // A class serves both; an import, only authored source.
+            None => !source[item.span.clone()].starts_with("class "),
+        };
+        if blank {
+            for byte in &mut kernel[item.span.clone()] {
+                if *byte != b'\n' {
+                    *byte = b' ';
+                }
+            }
+        }
+    }
+    let kernel = String::from_utf8(kernel).map_err(|_| invalid("a region splits a character"))?;
+    let (document, captions) = read_document(&kernel, base, limits, true)?;
+    Ok(Marked {
+        document,
+        captions,
+        ..marked
+    })
 }
 
 fn read_document(
     source: &str,
     base: &k::Document,
     limits: GeneratedSourceLimits,
+    marked: bool,
 ) -> Result<(k::Document, Vec<k::CaptionEntry>)> {
     if source.len() > limits.max_bytes {
         return Err(error(
@@ -75,7 +193,9 @@ fn read_document(
             .name("kernel-python-decode".into())
             .stack_size(8 * 1024 * 1024)
             .spawn_scoped(scope, || {
-                let (mut document, captions) = Reader::new(source, base, limits)?.document(base)?;
+                let mut reader = Reader::new(source, base, limits)?;
+                reader.marked = marked;
+                let (mut document, captions) = reader.document(base)?;
                 // Source spells no start adapter: the base keeps them.
                 k::carry_start_adapters(base, &mut document);
                 check_document_depth(&document, limits).map_err(|e| match e {
@@ -259,6 +379,8 @@ struct Reader<'a> {
     /// The caption above each line that has one, by the line's index.
     captions: BTreeMap<usize, k::Caption>,
     found: captioned::Found,
+    /// Whether each function opens with the kernel marker.
+    marked: bool,
 }
 impl<'a> Reader<'a> {
     fn new(source: &'a str, base: &k::Document, limits: GeneratedSourceLimits) -> Result<Self> {
@@ -319,7 +441,21 @@ impl<'a> Reader<'a> {
             operators: crate::generated_operators::Operators::new(&base.manifest.functions),
             captions,
             found: Default::default(),
+            marked: false,
         })
+    }
+    /// The kernel marker opening a function's body.
+    fn marker(&mut self) -> Result<()> {
+        let marker = format!("\"{}\"", crate::printer::KERNEL_MARKER);
+        match self.lines.get(self.next) {
+            Some(line) if line.indent == 1 && line.text == marker => {
+                self.next += 1;
+                Ok(())
+            }
+            _ => Err(format_error(
+                "a kernel-form region opens with the kernel marker",
+            )),
+        }
     }
     /// The caption above the line read next.
     fn caption(&self) -> Option<k::Caption> {
@@ -586,6 +722,9 @@ impl<'a> Reader<'a> {
                 }
                 self.main = name.is_none();
                 self.scope = BindingScope::new(&params);
+                if self.marked {
+                    self.marker()?;
+                }
                 let body = self.readable_block(1, 0)?;
                 if let Some(name) = name {
                     if document

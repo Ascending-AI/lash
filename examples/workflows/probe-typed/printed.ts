@@ -1,5 +1,6 @@
 /** Pace a digest of topics */
 export async function digest(topics) {
+  "use kernel";
   /** Start counting at zero */
   let seen = 0.0;
   /** Go through each topic */
@@ -33,5 +34,6 @@ export async function digest(topics) {
   return k.returnVia({seen: seen}, helper_ts_promise_adopt);
 }
 async function main() {
+  "use kernel";
   let digest = declared.digest;
 }

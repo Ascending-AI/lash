@@ -15,8 +15,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use lash_kernel_dialect::{CellEnvironment, Environment, Library, Lowered, Mode, workflow};
 use lash_kernel_doc::{
-    AssignOrder, Block, Callee, Catch, Closure, Document, EffectName, Expr, Float, FunctionCatalog,
-    FunctionId, FunctionName, Literal, Member, Name, NumberPolicy, Place, Rhs, Stmt, TryStmt,
+    AssignOrder, Block, Callee, Catch, Closure, Document, EffectName, Expr, Float, FunctionId,
+    FunctionName, Literal, Member, Name, NumberPolicy, Place, Rhs, Stmt, TryStmt,
 };
 
 use crate::adapter as ast;
@@ -481,6 +481,19 @@ pub(crate) fn lower(
     environment: &Environment<'_>,
     mode: Mode<'_>,
 ) -> Lowering<Lowered> {
+    lower_beside(program, source, environment, mode, &[])
+}
+
+/// [`lower`], where `beside` are the words of code written beside the
+/// source, in its module but read by another reader: no generated name
+/// takes one (`crate::readable`).
+pub(crate) fn lower_beside(
+    program: &ast::Program,
+    source: &str,
+    environment: &Environment<'_>,
+    mode: Mode<'_>,
+    beside: &[String],
+) -> Lowering<Lowered> {
     let (cell, module) = match mode {
         Mode::Cell(cell) => (cell, None),
         Mode::Module => (CellEnvironment::first(), Some(workflow::Module::new())),
@@ -501,6 +514,7 @@ pub(crate) fn lower(
         .map(str::to_string)
         .collect();
     taken.extend(cell.bindings.iter().map(|name| name.as_str().to_string()));
+    taken.extend(beside.iter().cloned());
     let mut lowerer = Lowerer {
         source,
         module,
@@ -585,7 +599,8 @@ pub(crate) fn lower(
             .assemble(&mut document, &mut lowerer.declared_notes)
             .map_err(Diagnostic::module)?;
     }
-    document.manifest.functions = reachable(lowerer.used, environment.library);
+    document.manifest.functions =
+        lash_kernel_dialect::regions::reachable(lowerer.used, environment.library);
     document.manifest.effects = lowerer.performed;
     lash_kernel_dialect::require_through_bodies(&mut document.manifest, environment.library);
     if !lowerer.saved_used.is_empty() {
@@ -606,7 +621,7 @@ pub(crate) fn lower(
                 None,
             )
         })?;
-        document.manifest.functions = reachable(
+        document.manifest.functions = lash_kernel_dialect::regions::reachable(
             std::mem::take(&mut document.manifest.functions),
             environment.library,
         );
@@ -642,40 +657,6 @@ pub(crate) fn lower(
         captions: layers.captions,
         validated: false,
     })
-}
-
-/// The functions a document lists: those it calls and those their bodies
-/// reach (`K-DOC-002`).
-fn reachable(
-    used: BTreeMap<FunctionId, FunctionName>,
-    library: &dyn Library,
-) -> BTreeMap<FunctionId, FunctionName> {
-    let mut listed = BTreeMap::new();
-    let mut pending: Vec<(FunctionId, FunctionName)> = used.into_iter().collect();
-    while let Some((function, name)) = pending.pop() {
-        let std::collections::btree_map::Entry::Vacant(entry) = listed.entry(function) else {
-            continue;
-        };
-        entry.insert(name);
-        let catalog: &dyn FunctionCatalog = library;
-        // A registered function lists its callees without being decoded.
-        if let Some(registered) = catalog.registered(&function) {
-            pending.extend(registered.listed());
-        } else if let Some(body) = catalog
-            .definition(&function)
-            .and_then(|definition| definition.body())
-        {
-            // An identity digests its function's name, so a function already
-            // listed is listed by the name any other body calls it by.
-            pending.extend(
-                body.functions
-                    .iter()
-                    .filter(|(function, _)| !listed.contains_key(*function))
-                    .map(|(function, name)| (*function, name.clone())),
-            );
-        }
-    }
-    listed
 }
 
 impl Lowerer<'_> {

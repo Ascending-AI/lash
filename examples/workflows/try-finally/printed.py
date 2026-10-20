@@ -5,19 +5,14 @@ async def demo():
     #: Try the echo
     try:
         #: Echo a test message and keep the reply
-        result = (await helper_py_reply((await corpus.echo("try", result="json"))))
+        result = await corpus.echo("try")
     #: If the echo fails
-    except BaseException as t1:
-        if (await helper_py_exc_is_exception(t1, ())):
-            #: Note that it failed
-            result = "caught"
-        else:
-            raise t1
+    except Exception:
+        #: Note that it failed
+        result = "caught"
     #: Whatever happened
     finally:
         #: Send a closing echo
-        await helper_py_reply((await corpus.echo("finally", result="json")))
+        await corpus.echo("finally")
     #: Give back the result
     return result
-def main():
-    demo = declared.demo

@@ -17,19 +17,38 @@ unused ones) and main. There is no alpha-equivalence or normalization.
 Source maps are outside the Document. Source is a generated language
 subset with kernel semantics; a stock language runtime is not promised to run it.
 
+## Readable print (FIG-6953)
+
+`print(document, captions, library, options)` prints the workflow module an
+author writes. Each declared function, and `main`, is a region. A region is
+written as authored source, and kept only when reading the print back lowers
+it to the identical region; a module whose every region lifts is a plain
+workflow module, and lowering it, with no base, gives the document's identity.
+Any other module keeps the kernel layout below: each region that did not
+verify, and `main`, is written in kernel form, its body opened by the
+`"use kernel"` directive, and the rest as authored source.
+`read(source, base, library, limits)` reads either back: the authored regions
+through the front end, against `library` and the operations `base` performs,
+and the kernel-form regions as `read_kernel` does. The printer never answers
+text that reads as another document; when no mixture verifies, every region
+is in kernel form. The shared machinery is `lash_kernel_dialect::regions`.
+
 ## Independent operations
 
-`print(document, PrintOptions { source_map, limits }) -> PrintedSource`
+The kernel surface is `print_kernel` and `read_kernel`, every region in
+kernel form; the readable pair's kernel-form regions use the same spelling.
+
+`print_kernel(document, PrintOptions { source_map, limits }) -> PrintedSource`
 performs naming and structural rendering only. It does not compile, compare,
 resolve libraries, admit, execute, or select a package set. `PrintedSource`
 holds `source`, `SourceFormat` and an optional `SourceMap`; maps default off.
 
-`read(source, base, GeneratedSourceLimits) -> Document` reads exported source
+`read_kernel(source, base, GeneratedSourceLimits) -> Document` reads exported source
 back against `base`, the Document it was printed from (the host holds it, as
 JSON or, per FIG-6258, as its bytes or id). The source supplies the code: the
 functions and main. The base supplies the rest: manifest, entries, private
 bindings, the full identity behind each helper spelling and each renamed
-identifier. `read` needs no library or name catalogue and does not admit.
+identifier. `read_kernel` needs no library or name catalogue and does not admit.
 `Document::canonical_bytes()` is the canonical token encoding the identity is
 the digest of (`K-ID-003`).
 
@@ -37,8 +56,8 @@ Tests compose all three on every successful print; hosts may too. There is no
 verifier service or verification flag:
 
 ```rust,ignore
-let printed = lash::typescript::print(&document, Default::default())?;
-let read = lash::typescript::read(&printed.source, &document, Default::default())?;
+let printed = lash::typescript::print(&document, None, library, Default::default())?;
+let (read, _) = lash::typescript::read(&printed.source, &document, library, Default::default())?;
 assert_eq!(document.canonical_bytes(), read.canonical_bytes());
 ```
 

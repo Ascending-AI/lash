@@ -97,6 +97,7 @@ impl CaptionDialect<'_> {
         printer.print(
             document,
             Some(captions),
+            self.environment.library,
             PrintOptions {
                 source_map,
                 ..Default::default()
@@ -187,9 +188,13 @@ impl CaptionDialect<'_> {
             let printed = self
                 .print(document, &captions, false)
                 .map_err(|error| fail(RULE, &case.name, error))?;
-            let (read, read_captions) =
-                (self.package.read)(&printed.source, document, Default::default())
-                    .map_err(|diagnostic| fail(RULE, &case.name, format!("{diagnostic:?}")))?;
+            let (read, read_captions) = (self.package.read)(
+                &printed.source,
+                document,
+                self.environment.library,
+                Default::default(),
+            )
+            .map_err(|diagnostic| fail(RULE, &case.name, format!("{diagnostic:?}")))?;
             if read.canonical_bytes() != document.canonical_bytes() {
                 return Err(fail(
                     RULE,

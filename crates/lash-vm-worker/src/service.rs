@@ -152,10 +152,13 @@ pub(crate) fn perform(
                 None => Response::UnknownDialect {
                     dialect: dialect.into(),
                 },
-                Some(printer) => match printer.print(&document, captions.as_ref(), options) {
-                    Ok(printed) => Response::Printed(printed),
-                    Err(error) => Response::DialectRefused(refusal(error.into())),
-                },
+                Some(printer) => {
+                    match printer.print(&document, captions.as_ref(), embedding.library(), options)
+                    {
+                        Ok(printed) => Response::Printed(printed),
+                        Err(error) => Response::DialectRefused(refusal(error.into())),
+                    }
+                }
             }
         }
         Request::Read {
@@ -167,7 +170,12 @@ pub(crate) fn perform(
             None => Response::UnknownDialect {
                 dialect: format.dialect().into(),
             },
-            Some(package) => match (package.read)(&source, &decoded_document(base)?, limits) {
+            Some(package) => match (package.read)(
+                &source,
+                &decoded_document(base)?,
+                embedding.library(),
+                limits,
+            ) {
                 Ok((document, captions)) => Response::Read {
                     document: document.canonical_bytes(),
                     captions,
@@ -477,6 +485,7 @@ mod tests {
     fn counted_reader(
         _: &str,
         _: &Document,
+        _: &dyn lash_kernel_dialect::Library,
         _: GeneratedSourceLimits,
     ) -> Result<(Document, lash_kernel_doc::Captions), Diagnostic> {
         READER_CALLS.set(READER_CALLS.get() + 1);
@@ -536,13 +545,17 @@ mod tests {
                     SourceFormat::TypeScriptV1 => lash_dialect_typescript::read(
                         &printed.source,
                         &document,
+                        embedding.library(),
                         Default::default(),
                     )
                     .expect("TS read"),
-                    SourceFormat::PythonV1 => {
-                        lash_dialect_python::read(&printed.source, &document, Default::default())
-                            .expect("Python read")
-                    }
+                    SourceFormat::PythonV1 => lash_dialect_python::read(
+                        &printed.source,
+                        &document,
+                        embedding.library(),
+                        Default::default(),
+                    )
+                    .expect("Python read"),
                 };
                 assert_eq!(document.canonical_bytes(), decoded.0.canonical_bytes());
                 assert_eq!(READER_CALLS.get(), 0);

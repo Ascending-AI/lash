@@ -246,5 +246,34 @@
     "rules": [
       "HELP-COMPARE"
     ]
+  },
+  {
+    "target": "//examples/workflows:corpus__test",
+    "selector": "every_print_reads_back_and_its_whole_prints_lower_to_their_documents",
+    "rules": [
+      "READABLE-FIXPOINT",
+      "READABLE-IDENTITY"
+    ]
+  },
+  {
+    "target": "//examples/workflows:corpus__test",
+    "selector": "a_canvas_edited_workflow_prints_without_kernel_scaffolding",
+    "rules": [
+      "READABLE-STYLE"
+    ]
+  },
+  {
+    "target": "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test",
+    "selector": "tests::readable_print::a_function_that_cannot_lift_prints_in_kernel_form_and_the_module_reads_back",
+    "rules": [
+      "READABLE-FALLBACK"
+    ]
+  },
+  {
+    "target": "//crates/lash-dialect-python:lash-dialect-python__unit_test",
+    "selector": "tests::readable_print::a_function_that_cannot_lift_prints_in_kernel_form_and_the_module_reads_back",
+    "rules": [
+      "READABLE-FALLBACK"
+    ]
   }
 ]

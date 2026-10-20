@@ -65,7 +65,7 @@ const STRICT_RESERVED_WORDS: [&str; 45] = [
     "public",
 ];
 
-fn is_strict_reserved_word(name: &str) -> bool {
+pub(crate) fn is_strict_reserved_word(name: &str) -> bool {
     STRICT_RESERVED_WORDS.contains(&name)
 }
 

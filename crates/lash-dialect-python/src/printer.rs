@@ -1,19 +1,23 @@
 //! Exported Python: plain source whose environment stays in the base
 //! document; paired inverses live in generated.rs.
-use crate::{Python, generated_scope::BindingScope};
+use crate::generated_scope::BindingScope;
+mod authored;
 mod names;
 mod readable;
 mod signature;
 use lash_kernel_dialect::{
-    NamePlan, PrintError, PrintOptions, PrintedSource, Printer, SourceFormat, SourceWriter,
+    NamePlan, PrintError, PrintOptions, PrintedSource, SourceFormat, SourceWriter,
     check_document_depth,
 };
 use lash_kernel_doc as k;
 pub(crate) use names::{attribute_identifier, identifier, legal_identifier};
+use std::collections::{BTreeMap, BTreeSet};
+use std::ops::Range;
 
-/// Render plain Python without compiling or resolving dependencies. The
+/// Render plain Python without compiling or resolving dependencies, every
+/// region in the kernel surface. The
 /// manifest, entries, private bindings, helper identities and name renames
-/// are not written: [`crate::read`] takes them from the base document.
+/// are not written: [`crate::read_kernel`] takes them from the base document.
 /// Each caption is spelled as `#:` lines directly above what it captions,
 /// an `else`, `except` or `finally` clause for an arm, the `def` for a
 /// function, a parameter written on its own line, and a field of a
@@ -24,11 +28,40 @@ pub(crate) use names::{attribute_identifier, identifier, legal_identifier};
 /// [`PrintedSource::dropped`] lists an entry's parameter and field captions
 /// when its function takes other parameters than its signature names, and a
 /// field's below a record with a field no class body can name.
-pub fn print(
+pub fn print_kernel(
     document: &k::Document,
     captions: Option<&k::Captions>,
     options: PrintOptions,
 ) -> Result<PrintedSource, PrintError> {
+    print_regions(document, captions, options, &Regions::default()).map(|(printed, _)| printed)
+}
+
+/// What a module prints of each region (`crate::readable`): the declared
+/// functions written as authored source, the rest in kernel form, opened by
+/// the kernel marker when `marked`. A module written as authored source
+/// throughout lists its entries in the order `main` binds them, and writes
+/// no `main`.
+#[derive(Default)]
+pub(crate) struct Regions {
+    pub(crate) authored: BTreeSet<k::Name>,
+    pub(crate) marked: bool,
+    pub(crate) whole: Option<Vec<k::Name>>,
+}
+
+/// The directive that opens a region printed in kernel form among authored
+/// ones. The kernel printer never writes a bare text statement: it spells a
+/// text evaluated for effect as a generic suite, so no kernel body opens
+/// with this.
+pub(crate) const KERNEL_MARKER: &str = "use kernel";
+
+/// [`print_kernel`], with the functions `regions` names written as authored
+/// source; also gives where each of those was written.
+pub(crate) fn print_regions(
+    document: &k::Document,
+    captions: Option<&k::Captions>,
+    options: PrintOptions,
+    regions: &Regions,
+) -> Result<(PrintedSource, BTreeMap<k::Name, Range<usize>>), PrintError> {
     check_document_depth(document, options.limits)?;
     if k::KernelVersion::of(document.manifest.kernel).is_none() {
         return Err(PrintError::Invalid("unsupported kernel version".into()));
@@ -44,17 +77,45 @@ pub fn print(
         main: false,
         operators: crate::generated_operators::Operators::new(&document.manifest.functions),
         captions: captions.is_some_and(|captions| !captions.is_empty()),
+        authored: false,
+        marker: false,
+        sync: BTreeSet::new(),
     };
-    let signatures = r.typed_dicts(document);
-    for (name, function) in &document.functions {
+    let sleeps = regions.authored.iter().any(|name| {
+        document
+            .functions
+            .get(name)
+            .is_some_and(|function| sleeps(k::Node::Block(&function.body)))
+    });
+    if sleeps {
+        r.out.write("import asyncio\n\n");
+    }
+    let signatures = r.typed_dicts(document, &regions.authored);
+    let order: Vec<&k::Name> = match &regions.whole {
+        Some(order) => order.iter().collect(),
+        None => document.functions.keys().collect(),
+    };
+    let mut written = BTreeMap::new();
+    for (index, name) in order.into_iter().enumerate() {
+        let Some(function) = document.functions.get(name) else {
+            continue;
+        };
+        r.authored = regions.authored.contains(name);
+        if index > 0 && regions.whole.is_some() {
+            r.out.write("\n");
+        }
+        let start = r.out.len();
         if r.captions {
             r.caption_of(k::Site::new(k::Unit::Function(name.clone()), Vec::new()));
         }
-        r.out.write(if awaits(&function.body) {
-            "async def "
+        let asynchronous = if r.authored {
+            // Every top-level `async def` is an entry, and only those are.
+            document.entries.contains_key(name)
         } else {
-            "def "
-        });
+            awaits(&function.body)
+        };
+        r.out
+            .write(if asynchronous { "async def " } else { "def " });
         r.name(name);
         r.signature(&signatures, name, function);
         r.out.write(":\n");
@@ -63,27 +124,36 @@ pub fn print(
             .tracks_sites()
             .then(|| k::Unit::Function(name.clone()));
         r.scope = BindingScope::new(&function.params);
+        r.marker = regions.marked && !r.authored;
         r.root_block(&function.body, unit.as_ref());
+        if r.authored {
+            written.insert(name.clone(), start..r.out.len());
+        }
     }
+    r.authored = false;
     r.scope = Default::default();
-    r.main = true;
-    r.out.write(if awaits(&document.main) {
-        "async def main():\n"
-    } else {
-        "def main():\n"
-    });
-    let tracks = r.out.tracks_sites();
-    r.root_block(&document.main, tracks.then_some(&k::Unit::Main));
-    r.out.finish(document, SourceFormat::PythonV1)
+    if regions.whole.is_none() {
+        r.main = true;
+        r.out.write(if awaits(&document.main) {
+            "async def main():\n"
+        } else {
+            "def main():\n"
+        });
+        let tracks = r.out.tracks_sites();
+        r.marker = regions.marked;
+        r.root_block(&document.main, tracks.then_some(&k::Unit::Main));
+    }
+    r.out
+        .finish(document, SourceFormat::PythonV1)
+        .map(|printed| (printed, written))
 }
-impl Printer for Python {
-    fn print(
-        &self,
-        document: &k::Document,
-        captions: Option<&k::Captions>,
-        options: PrintOptions,
-    ) -> Result<PrintedSource, PrintError> {
-        print(document, captions, options)
+
+/// Whether `node` sleeps, outside the functions it makes.
+fn sleeps(node: k::Node<'_>) -> bool {
+    match node {
+        k::Node::Expr(k::Expr::Act(act)) if matches!(act.kind, k::ActKind::Sleep { .. }) => true,
+        k::Node::Action(k::Action::Sleep { .. }) => true,
+        _ => node.children().into_iter().any(sleeps),
     }
 }
 
@@ -97,6 +167,13 @@ struct Renderer<'a> {
     operators: crate::generated_operators::Operators,
     /// Whether any caption waits to be spelled.
     captions: bool,
+    /// Whether the region being written is authored source.
+    authored: bool,
+    /// Whether the next root block opens with the kernel marker.
+    marker: bool,
+    /// The local functions an authored region writes as plain `def`s,
+    /// whose calls take no `await`.
+    sync: BTreeSet<k::Name>,
 }
 impl Renderer<'_> {
     /// The caption of the node the writer opens next, taken to be spelled.
@@ -140,6 +217,10 @@ impl Renderer<'_> {
     fn root_block(&mut self, block: &k::Block, root: Option<&k::Unit>) {
         self.out.begin_node(root);
         self.indent += 1;
+        if std::mem::take(&mut self.marker) {
+            self.padding();
+            self.out.write(&format!("\"{KERNEL_MARKER}\"\n"));
+        }
         if block.is_empty() {
             self.empty();
         }
@@ -153,7 +234,13 @@ impl Renderer<'_> {
         self.out.metadata(value, SourceFormat::PythonV1);
     }
     fn name(&mut self, n: &k::Name) {
-        self.out.write(&self.plan.names[n]);
+        // Authored source spells the document's names; only the kernel
+        // surface reserves some for its own syntax.
+        if self.authored && attribute_identifier(n.as_str()) {
+            self.out.write(n.as_str());
+        } else {
+            self.out.write(&self.plan.names[n]);
+        }
     }
     fn helper(&mut self, id: &k::FunctionId) {
         self.out.write(&self.plan.helpers[id]);
@@ -641,7 +728,11 @@ impl Renderer<'_> {
                 {
                     return;
                 }
-                self.out.write("await ");
+                let sync = self.authored
+                    && matches!(callee, k::Callee::Value(name) if self.sync.contains(name));
+                if !sync {
+                    self.out.write("await ");
+                }
                 match callee {
                     k::Callee::Library(id) => self.helper(id),
                     k::Callee::Declared(n) => {
@@ -663,8 +754,9 @@ impl Renderer<'_> {
                 self.operation_path(effect.as_str());
                 self.out.write("(");
                 self.call_atoms(args);
-                // Authored lowering performs as `any`; only another result is spelled.
-                if *result != k::Type::Any {
+                // Authored lowering performs as `any`, or as the operation
+                // declares; only another result is spelled.
+                if *result != k::Type::Any && !self.authored {
                     if !args.is_empty() {
                         self.out.write(", ");
                     }
@@ -674,7 +766,7 @@ impl Renderer<'_> {
                 // Python's `await` takes no turn of its own; a wait that
                 // takes one more once its outcome is in says so.
                 if *then_yield {
-                    if !args.is_empty() || *result != k::Type::Any {
+                    if !args.is_empty() || (*result != k::Type::Any && !self.authored) {
                         self.out.write(", ");
                     }
                     self.out.write("then_yield=True");

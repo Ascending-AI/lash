@@ -96,7 +96,11 @@ pub(crate) async fn import_source(
             },
         )
         .await;
-    Ok(Json(saved.view(&state.core, checked.functions()).await))
+    Ok(Json(
+        saved
+            .view(&state.core, &state.workers, checked.functions())
+            .await,
+    ))
 }
 
 /// Lowers authored source in `dialect` through lash's workflow import and
@@ -200,7 +204,9 @@ pub(crate) async fn preview(
         authored.source_map_id = None;
         authored.source_map = None;
     }
-    let mut view = current.view(&state.core, environment.functions()).await;
+    let mut view = current
+        .view(&state.core, &state.workers, environment.functions())
+        .await;
     view.definition = None;
     view.not_admitted = None;
     Ok(Json(PlanResponse {
@@ -240,7 +246,11 @@ pub(crate) async fn caption(
             Origin::Edited { captions, review },
         )
         .await;
-    Ok(Json(saved.view(&state.core, environment.functions()).await))
+    Ok(Json(
+        saved
+            .view(&state.core, &state.workers, environment.functions())
+            .await,
+    ))
 }
 
 fn check_version(sent: u64, current: u64) -> Result<(), ErrorResponse> {

@@ -53,6 +53,8 @@ pub struct AppState {
     /// of the version it supersedes, which a start must not race.
     publishing: Arc<tokio::sync::Mutex<()>>,
     core: lash::LashCore,
+    /// The worker the example prints and reads workflow source with.
+    workers: lash::vm::WorkerService,
     commands: runtime::CommandClient,
     host: Arc<display::HostTools>,
     catalog: Arc<catalog::Catalog>,
@@ -111,7 +113,12 @@ pub(crate) enum Origin {
 }
 
 impl SavedWorkflow {
-    async fn view(&self, core: &lash::LashCore, functions: &FunctionRegistry) -> WorkflowView {
+    async fn view(
+        &self,
+        core: &lash::LashCore,
+        workers: &lash::vm::WorkerService,
+        functions: &FunctionRegistry,
+    ) -> WorkflowView {
         let document = self.draft.document().clone();
         // Saved views link only the declarations retained by their publication.
         let derived = match &self.published {
@@ -167,24 +174,34 @@ impl SavedWorkflow {
                     ..Default::default()
                 };
                 let captions = Some(&self.captions);
-                let (printed, source_unavailable, cause) = match match source_dialect {
-                    Dialect::TypeScript => {
-                        lash::typescript::print(derived.document(), captions, options)
-                    }
-                    Dialect::Python => lash::python::print(derived.document(), captions, options),
-                } {
+                let format = match source_dialect {
+                    Dialect::TypeScript => lash::dialect::SourceFormat::TypeScriptV1,
+                    Dialect::Python => lash::dialect::SourceFormat::PythonV1,
+                };
+                // The worker prints with the library it reads exports back with.
+                let (printed, source_unavailable, cause) = match workers
+                    .print(derived.document(), captions, format, options)
+                    .await
+                {
                     Ok(printed) => (Some(printed), None, None),
                     Err(error) => {
                         use lash::dialect::PrintError;
+                        use lash::vm::SourceServiceError;
                         use lash::workflow::view::ReadableRefusal;
                         let cause = match &error {
-                            PrintError::Bytes { limit } => ReadableRefusal::Bytes { limit: *limit },
-                            PrintError::Depth { limit } => ReadableRefusal::Depth { limit: *limit },
-                            PrintError::Encode(error) => ReadableRefusal::Encoding {
-                                message: error.to_string(),
-                            },
-                            PrintError::Invalid(message) => ReadableRefusal::Invalid {
-                                message: message.clone(),
+                            SourceServiceError::Print(PrintError::Bytes { limit }) => {
+                                ReadableRefusal::Bytes { limit: *limit }
+                            }
+                            SourceServiceError::Print(PrintError::Depth { limit }) => {
+                                ReadableRefusal::Depth { limit: *limit }
+                            }
+                            SourceServiceError::Print(PrintError::Encode(error)) => {
+                                ReadableRefusal::Encoding {
+                                    message: error.to_string(),
+                                }
+                            }
+                            other => ReadableRefusal::Invalid {
+                                message: other.to_string(),
                             },
                         };
                         (None, Some(error.to_string()), Some(cause))
@@ -315,6 +332,7 @@ impl AppState {
             store: Arc::new(Mutex::new(None)),
             publishing: Arc::new(tokio::sync::Mutex::new(())),
             host: runtime.tools,
+            workers: runtime.workers,
             commands: runtime::CommandClient::new(core.clone()),
             core,
             catalog: Arc::new(catalog),
@@ -497,7 +515,7 @@ async fn get_workflow(State(state): State<AppState>) -> Result<Json<WorkflowView
     Ok(Json(
         state
             .current()
-            .view(&state.core, environment.functions())
+            .view(&state.core, &state.workers, environment.functions())
             .await,
     ))
 }
@@ -523,7 +541,11 @@ async fn select_workflow(
         .map_err(|error| ErrorResponse::invalid("document", format!("{error:?}")))?;
     let _publishing = state.publishing.lock().await;
     let (saved, _) = state.install(draft, entry, example.origin()).await;
-    Ok(Json(saved.view(&state.core, environment.functions()).await))
+    Ok(Json(
+        saved
+            .view(&state.core, &state.workers, environment.functions())
+            .await,
+    ))
 }
 
 /// Opens a workflow given as a kernel document, with the manifest this
@@ -539,7 +561,11 @@ async fn open_workflow(
         .map_err(|error| ErrorResponse::invalid("document", format!("{error:?}")))?;
     let _publishing = state.publishing.lock().await;
     let (saved, _) = state.install(draft, request.entry, Origin::Document).await;
-    Ok(Json(saved.view(&state.core, environment.functions()).await))
+    Ok(Json(
+        saved
+            .view(&state.core, &state.workers, environment.functions())
+            .await,
+    ))
 }
 
 /// Applies kernel edits to the saved draft as one transaction and
@@ -596,7 +622,9 @@ async fn edit_workflow(
         .install(draft, current.entry, Origin::Edited { captions, review })
         .await;
     Ok(Json(EditWorkflowResponse {
-        workflow: saved.view(&state.core, environment.functions()).await,
+        workflow: saved
+            .view(&state.core, &state.workers, environment.functions())
+            .await,
         // The published document is the draft's, so the transaction's
         // correspondence is also where each node is in the definition.
         correspondence: applied.correspondence,

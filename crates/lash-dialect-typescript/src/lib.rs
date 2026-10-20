@@ -16,6 +16,7 @@ mod intrinsics;
 mod lower;
 mod package;
 mod printer;
+mod readable;
 mod regex;
 mod types;
 
@@ -25,12 +26,13 @@ mod tests;
 pub use adapter::{MAX_SOURCE_BYTES, MAX_SOURCE_NESTING_DEPTH, ParserStack, SourceLimits};
 pub use builtins::{Receiver, Row};
 pub use diagnostics::{CodeClassification, Diagnostic, DiagnosticCode, DiagnosticKind};
-pub use intrinsics::read;
+pub use intrinsics::read_kernel;
 pub use lash_kernel_dialect::{
     CaptionSupport, GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat,
 };
 pub use package::{builtin_names, define_helpers};
-pub use printer::print;
+pub use printer::print_kernel;
+pub use readable::{print, read};
 
 /// The captions the dialect spells: every kind, as a JSDoc block before the
 /// statement, function, `else`/`catch`/`finally` keyword, parameter or

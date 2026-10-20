@@ -1,4 +1,5 @@
 async def main():
+    "use kernel"
     limit = 3
     shared = [1]
     async def add(x):

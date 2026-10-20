@@ -38,6 +38,95 @@ fn design_8_corpus_pins_readable_per_dialect_outputs() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// FIG-6953 READABLE-FIXPOINT and READABLE-IDENTITY over every TypeScript
+/// corpus document and its canvas edit: each print reads back to its
+/// document and prints again to itself, and a print with every region
+/// lifted lowers, as a plain module with no base, to that document.
+#[test]
+fn every_print_reads_back_and_its_whole_prints_lower_to_their_documents() -> anyhow::Result<()> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let report = workflow_corpus::readable_prints(root)?;
+    for language in [
+        lash_kernel_doc::SourceLanguage::TypeScript,
+        lash_kernel_doc::SourceLanguage::Python,
+    ] {
+        let report: Vec<_> = report
+            .iter()
+            .filter(|printed| printed.language == language)
+            .collect();
+        let regions: usize = report.iter().map(|printed| printed.regions).sum();
+        let lifted: usize = report.iter().map(|printed| printed.lifted).sum();
+        let whole = report.iter().filter(|printed| printed.whole()).count();
+        eprintln!(
+            "readable {language:?} print: documents={} whole={whole} regions={regions} lifted={lifted}",
+            report.len()
+        );
+        for printed in report.iter().filter(|printed| !printed.whole()) {
+            eprintln!(
+                "  kernel form: {}{} ({} of {} regions lifted)",
+                printed.case,
+                if printed.edited { " (canvas edit)" } else { "" },
+                printed.lifted,
+                printed.regions
+            );
+        }
+        anyhow::ensure!(whole > 0, "no {language:?} corpus document lifted");
+    }
+    Ok(())
+}
+
+/// FIG-6953 READABLE-STYLE: a workflow edited through the canvas API prints
+/// as the source the authoring guide teaches, with none of the kernel
+/// surface's scaffolding.
+#[test]
+fn a_canvas_edited_workflow_prints_without_kernel_scaffolding() -> anyhow::Result<()> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let report = workflow_corpus::readable_prints(root)?;
+    for language in [
+        lash_kernel_doc::SourceLanguage::TypeScript,
+        lash_kernel_doc::SourceLanguage::Python,
+    ] {
+        let mut edited = 0;
+        for printed in report
+            .iter()
+            .filter(|printed| printed.edited && printed.language == language)
+        {
+            let unedited = report
+                .iter()
+                .find(|other| {
+                    other.case == printed.case && other.language == language && !other.edited
+                })
+                .ok_or_else(|| anyhow::anyhow!("{} has no unedited print", printed.case))?;
+            if !unedited.whole() {
+                continue;
+            }
+            anyhow::ensure!(
+                printed.whole(),
+                "{}: the canvas edit made a region unliftable\n{}",
+                printed.case,
+                printed.source
+            );
+            for scaffolding in workflow_corpus::SCAFFOLDING {
+                anyhow::ensure!(
+                    !printed.source.contains(scaffolding),
+                    "{}: the canvas-edited print spells `{scaffolding}`\n{}",
+                    printed.case,
+                    printed.source
+                );
+            }
+            anyhow::ensure!(
+                printed.source.contains("edited λ"),
+                "{}: the print shows the edit\n{}",
+                printed.case,
+                printed.source
+            );
+            edited += 1;
+        }
+        anyhow::ensure!(edited > 0, "no canvas-edited {language:?} workflow lifted");
+    }
+    Ok(())
+}
+
 /// FIG-6402 rev2 §15 SHAPE over every admitted L5 Python input.
 /// Author structure counts statements and except clauses. Each comprehension
 /// adds one loop per for clause, one statement per if clause, and one collect /

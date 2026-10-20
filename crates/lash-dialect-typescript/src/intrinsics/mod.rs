@@ -88,7 +88,8 @@ fn syntax_depth(source: &str) -> usize {
     deepest
 }
 
-/// Read exported TypeScript back into the document it was printed from, or
+/// Read TypeScript printed in the reserved kernel surface
+/// ([`crate::print_kernel`]) back into the document it was printed from, or
 /// into that document as edited, without library lookup or admission.
 ///
 /// The source carries only code. The manifest, entries, private bindings,
@@ -99,12 +100,12 @@ fn syntax_depth(source: &str) -> usize {
 /// The captions are those the source spells, as the printer writes them: a
 /// JSDoc block before a statement, a declared function or an `else`,
 /// `catch` or `finally` keyword. Any other comment is trivia.
-pub fn read(
+pub fn read_kernel(
     source: &str,
     base: &k::Document,
     limits: GeneratedSourceLimits,
 ) -> Result<(k::Document, k::Captions), Diagnostic> {
-    let (document, entries) = read_document(source, base, limits)?;
+    let (document, entries, _) = read_document(source, base, limits, Items::All)?;
     let captions = if entries.is_empty() {
         k::Captions::empty(document.identity())
     } else {
@@ -114,11 +115,59 @@ pub fn read(
     Ok((document, captions))
 }
 
+/// Which top-level functions a read takes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Items {
+    /// Every one: the module is all kernel surface.
+    All,
+    /// Those opened by [`crate::printer::KERNEL_MARKER`]; the rest are lifted
+    /// source another reader takes.
+    Marked,
+}
+
+/// The regions of a mixed module written in the kernel surface, read
+/// against the base: the declared functions among them, `main` and the
+/// captions they spell, and where each was written.
+pub(crate) struct Marked {
+    pub(crate) document: k::Document,
+    pub(crate) captions: Vec<k::CaptionEntry>,
+    pub(crate) spans: Vec<std::ops::Range<usize>>,
+    /// Whether `main` is among them.
+    pub(crate) main: bool,
+    /// How many top-level items are not.
+    pub(crate) unmarked: usize,
+}
+
+/// Reads the regions of `source` opened by the kernel marker.
+pub(crate) fn read_marked(
+    source: &str,
+    base: &k::Document,
+    limits: GeneratedSourceLimits,
+) -> Result<Marked, Diagnostic> {
+    let (document, captions, read) = read_document(source, base, limits, Items::Marked)?;
+    Ok(Marked {
+        document,
+        captions,
+        spans: read.spans,
+        main: read.main,
+        unmarked: read.unmarked,
+    })
+}
+
+/// What a read of marked regions found.
+#[derive(Default)]
+struct Read {
+    spans: Vec<std::ops::Range<usize>>,
+    main: bool,
+    unmarked: usize,
+}
+
 fn read_document(
     source: &str,
     base: &k::Document,
     limits: GeneratedSourceLimits,
-) -> Result<(k::Document, Vec<k::CaptionEntry>), Diagnostic> {
+    items: Items,
+) -> Result<(k::Document, Vec<k::CaptionEntry>, Read), Diagnostic> {
     if source.len() > limits.max_bytes {
         return Err(Diagnostic::new(
             DiagnosticCode::GeneratedSourceBytes,
@@ -180,8 +229,8 @@ fn read_document(
             .name("kernel-typescript-parse".into())
             .stack_size(stack_size)
             .spawn_scoped(scope, || {
-                let (mut document, captions) = parse_module(source)
-                    .and_then(|(module, comments)| read_module(module, comments, base))?;
+                let (mut document, captions, read) = parse_module(source)
+                    .and_then(|(module, comments)| read_module(module, comments, base, items))?;
                 // Source spells no start adapter: the base keeps them.
                 k::carry_start_adapters(base, &mut document);
                 check_document_depth(&document, limits).map_err(|error| {
@@ -196,7 +245,7 @@ fn read_document(
                         None,
                     )
                 })?;
-                Ok((document, captions))
+                Ok((document, captions, read))
             })
             .map_err(|error| {
                 Diagnostic::new(
@@ -232,11 +281,31 @@ fn parse_module(source: &str) -> Result<(s::Module, SourceComments), Diagnostic>
     Ok((module, SourceComments::collect(source, comments)))
 }
 
+/// `function` without its opening kernel marker, if it opens with one.
+fn unmarked(function: &s::Function) -> Option<s::Function> {
+    let body = function.body.as_ref()?;
+    let [s::Stmt::Expr(first), ..] = body.stmts.as_slice() else {
+        return None;
+    };
+    let s::Expr::Lit(s::Lit::Str(text)) = first.expr.as_ref() else {
+        return None;
+    };
+    if text.value.as_str() != Some(crate::printer::KERNEL_MARKER) {
+        return None;
+    }
+    let mut function = function.clone();
+    if let Some(body) = function.body.as_mut() {
+        body.stmts.remove(0);
+    }
+    Some(function)
+}
+
 fn read_module(
     module: s::Module,
     comments: SourceComments,
     base: &k::Document,
-) -> Result<(k::Document, Vec<k::CaptionEntry>), Diagnostic> {
+    items: Items,
+) -> Result<(k::Document, Vec<k::CaptionEntry>, Read), Diagnostic> {
     let plan = lash_kernel_dialect::NamePlan::new(base, crate::printer::legal_identifier);
     let mut reader = Reader {
         comments,
@@ -267,16 +336,31 @@ fn read_module(
     document.manifest = base.manifest.clone();
     document.entries = base.entries.clone();
     document.private_bindings = base.private_bindings.clone();
-    let items = module.body.iter();
+    let mut read = Read::default();
     let mut main_seen = false;
-    for item in items {
-        let (declaration, exported) = match item {
-            s::ModuleItem::Stmt(s::Stmt::Decl(s::Decl::Fn(declaration))) => (declaration, false),
+    for item in &module.body {
+        let declared = match item {
+            s::ModuleItem::Stmt(s::Stmt::Decl(s::Decl::Fn(declaration))) => {
+                Some((declaration, false))
+            }
             s::ModuleItem::ModuleDecl(s::ModuleDecl::ExportDecl(s::ExportDecl {
                 decl: s::Decl::Fn(declaration),
                 ..
-            })) => (declaration, true),
-            _ => {
+            })) => Some((declaration, true)),
+            _ => None,
+        };
+        let marked = declared.and_then(|(declaration, _)| unmarked(&declaration.function));
+        let (declaration, exported) = match (items, declared) {
+            (Items::Marked, None) => {
+                read.unmarked += 1;
+                continue;
+            }
+            (Items::Marked, Some(_)) if marked.is_none() => {
+                read.unmarked += 1;
+                continue;
+            }
+            (_, Some(declared)) => declared,
+            (Items::All, None) => {
                 return Err(format_error(
                     "expected native function declarations and main",
                 ));
@@ -287,7 +371,12 @@ fn read_module(
                 "expected one main after declarations; trailing text is forbidden",
             ));
         }
-        let function = reader.read_function(&declaration.function, true)?;
+        if items == Items::Marked {
+            read.spans
+                .push(item.span().lo.0 as usize..item.span().hi.0 as usize);
+        }
+        let function =
+            reader.read_function(marked.as_ref().unwrap_or(&declaration.function), true)?;
         let caption = reader.comments.before(item.span().lo.0 as usize).cloned();
         let signature = reader.comments.signature(
             &declaration.function.params,
@@ -306,6 +395,7 @@ fn read_module(
             }
             document.main = function.body;
             main_seen = true;
+            read.main = true;
         } else {
             let name = reader.name(&declaration.ident)?;
             // Entries and their signatures are the base document's; the
@@ -330,11 +420,11 @@ fn read_module(
             }
         }
     }
-    if !main_seen {
+    if !main_seen && items == Items::All {
         return Err(format_error("missing main"));
     }
     let captions = reader.located(&document);
-    Ok((document, captions))
+    Ok((document, captions, read))
 }
 
 /// The captions of one statement of a block read: its own, and those of its

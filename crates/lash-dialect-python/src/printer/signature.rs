@@ -44,7 +44,14 @@ struct Classes {
 impl Renderer<'_> {
     /// Writes the `TypedDict`s of every annotation a signature takes, and
     /// answers the signatures.
-    pub(super) fn typed_dicts(&mut self, document: &k::Document) -> Signatures {
+    ///
+    /// An authored entry is annotated with every type its signature gives
+    /// a parameter or its result, as its author wrote them.
+    pub(super) fn typed_dicts(
+        &mut self,
+        document: &k::Document,
+        authored: &BTreeSet<k::Name>,
+    ) -> Signatures {
         let mut signatures = Signatures::default();
         let mut classes = Classes {
             taken: self
@@ -79,15 +86,15 @@ impl Renderer<'_> {
                     .map(|param| &param.name)
                     .eq(function.params.iter())
             });
-            if !spelled
-                || !self
+            let captioned = spelled
+                && self
                     .out
-                    .holds_caption(|target| target.function() == Some(name))
-            {
-                continue;
+                    .holds_caption(|target| target.function() == Some(name));
+            let annotated = authored.contains(name) && spelled;
+            if captioned {
+                signatures.signed.insert(name.clone());
             }
-            signatures.signed.insert(name.clone());
-            let Some(entry) = entry else {
+            let Some(entry) = entry.filter(|_| captioned || annotated) else {
                 continue;
             };
             let roots = entry
@@ -100,10 +107,11 @@ impl Renderer<'_> {
                     &entry.signature.result,
                 )));
             for (root, ty) in roots {
-                let annotated = self.out.holds_caption(|target| {
-                    matches!(target, CaptionTarget::Field(field)
-                        if field.function == *name && field.path.root == root)
-                });
+                let annotated = (annotated && *ty != Type::Any)
+                    || self.out.holds_caption(|target| {
+                        matches!(target, CaptionTarget::Field(field)
+                            if field.function == *name && field.path.root == root)
+                    });
                 if annotated {
                     let annotation = classes.annotation(ty, name, &root, &mut Vec::new());
                     signatures
@@ -160,7 +168,22 @@ impl Renderer<'_> {
         function: &k::Function,
     ) {
         if !signatures.signed.contains(name) {
-            self.parameters(&function.params);
+            self.out.write("(");
+            for (i, param) in function.params.iter().enumerate() {
+                if i > 0 {
+                    self.out.write(", ");
+                }
+                self.name(param);
+                if let Some(annotation) = signatures
+                    .annotations
+                    .get(&(name.clone(), FieldRoot::Param(param.clone())))
+                {
+                    self.out.write(": ");
+                    self.out.write(annotation);
+                }
+            }
+            self.out.write(")");
+            self.result_annotation(signatures, name);
             return;
         }
         self.out.write("(\n");
@@ -185,6 +208,10 @@ impl Renderer<'_> {
         }
         self.indent -= 1;
         self.out.write(")");
+        self.result_annotation(signatures, name);
+    }
+
+    fn result_annotation(&mut self, signatures: &Signatures, name: &k::Name) {
         if let Some(annotation) = signatures
             .annotations
             .get(&(name.clone(), FieldRoot::Result))

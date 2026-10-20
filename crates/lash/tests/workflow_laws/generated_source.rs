@@ -3,27 +3,39 @@ use lash::dialect::{GeneratedSourceLimits, PrintOptions, PrintedSource, SourceFo
 use lash::workflow::document::{self as k, Document, Node, Site, Unit};
 use lash::workflow::{WorkflowAdmissionRefusal, WorkflowDocument, WorkflowDocumentEntry};
 
-fn local(document: &WorkflowDocument, format: SourceFormat, maps: bool) -> PrintedSource {
+fn local(
+    document: &WorkflowDocument,
+    format: SourceFormat,
+    maps: bool,
+    library: &dyn lash::dialect::Library,
+) -> PrintedSource {
     let options = PrintOptions {
         source_map: maps,
         ..Default::default()
     };
     match format {
-        SourceFormat::TypeScriptV1 => lash::typescript::print(document.document(), None, options),
-        SourceFormat::PythonV1 => lash::python::print(document.document(), None, options),
+        SourceFormat::TypeScriptV1 => {
+            lash::typescript::print(document.document(), None, library, options)
+        }
+        SourceFormat::PythonV1 => lash::python::print(document.document(), None, library, options),
     }
     .expect("local print succeeds")
 }
 
-fn decode(source: &str, base: &Document, format: SourceFormat) -> Document {
+fn decode(
+    source: &str,
+    base: &Document,
+    format: SourceFormat,
+    library: &dyn lash::dialect::Library,
+) -> Document {
     match format {
         SourceFormat::TypeScriptV1 => {
-            lash::typescript::read(source, base, Default::default())
-                .expect("TypeScript reads against its base without a library")
+            lash::typescript::read(source, base, library, Default::default())
+                .expect("TypeScript reads against its base")
                 .0
         }
         SourceFormat::PythonV1 => {
-            lash::python::read(source, base, Default::default())
+            lash::python::read(source, base, library, Default::default())
                 .expect("Python reads against its base without a library")
                 .0
         }
@@ -109,8 +121,11 @@ async fn both_dialects_and_transports_preserve_exact_documents_and_optional_maps
         for format in [SourceFormat::TypeScriptV1, SourceFormat::PythonV1] {
             let mut without_map = None;
             for maps in [false, true] {
-                let printed = local(&view, format, maps);
-                exact(&document, &decode(&printed.source, &document, format));
+                let printed = local(&view, format, maps, embedding.library());
+                exact(
+                    &document,
+                    &decode(&printed.source, &document, format, embedding.library()),
+                );
                 let remote = service
                     .print(
                         &document,
@@ -195,7 +210,10 @@ async fn exported_reading_preserves_dependency_identities_for_admission() {
                 .print(&document, None, format, Default::default())
                 .await
                 .expect("print needs no helpers");
-            exact(&document, &decode(&printed.source, &document, format));
+            exact(
+                &document,
+                &decode(&printed.source, &document, format, embedding.library()),
+            );
             let decoded = service
                 .read_exported(
                     &printed.source,
@@ -280,10 +298,17 @@ async fn exact_host_import_does_not_resolve_ambiguous_library_labels() {
         .expect("core");
     let document =
         k::parse_document("kernel 1\nnumbers float\nmain { finish null }\n").expect("document");
-    let printed = lash::typescript::print(&document, None, Default::default()).expect("print");
+    let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
+    let printed = lash::typescript::print(&document, None, embedding.library(), Default::default())
+        .expect("print");
     exact(
         &document,
-        &decode(&printed.source, &document, SourceFormat::TypeScriptV1),
+        &decode(
+            &printed.source,
+            &document,
+            SourceFormat::TypeScriptV1,
+            embedding.library(),
+        ),
     );
     let env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(1))
         .build()

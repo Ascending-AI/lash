@@ -6,9 +6,9 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
+use lash_kernel_dialect::readability::SurfacePrinter as _;
 use lash_kernel_dialect::{
-    CellEnvironment, Environment, Mode, NamedLibrary, Namespaces, Offered, Printer,
-    QualifiedOperation,
+    CellEnvironment, Environment, Mode, NamedLibrary, Namespaces, Offered, QualifiedOperation,
 };
 use lash_kernel_doc::{
     ContractId, Datum, EffectName, ErrorDatum, FunctionId, FunctionRegistry, Handle, Integer, Name,
@@ -569,7 +569,7 @@ fn a_package_program_prints_and_reads_back_byte_exact() {
         .print(document, None, Default::default())
         .unwrap_or_else(|error| panic!("{error}"))
         .source;
-    let (read, _) = crate::read(&source, document, Default::default())
+    let (read, _) = crate::read_kernel(&source, document, Default::default())
         .unwrap_or_else(|error| panic!("{error}\n{source}"));
     assert_eq!(
         read.canonical_bytes(),

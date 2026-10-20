@@ -89,14 +89,24 @@ fn generic(node: k::Node<'_>, source: &str) -> Option<&'static str> {
     }
     None
 }
-static PRINTER: crate::Python = crate::Python {
-    limits: crate::SourceLimits::standard(),
-};
+/// Python's kernel-surface printer.
+struct Surface;
+impl lash_kernel_dialect::readability::SurfacePrinter for Surface {
+    fn print(
+        &self,
+        document: &k::Document,
+        captions: Option<&k::Captions>,
+        options: lash_kernel_dialect::PrintOptions,
+    ) -> Result<lash_kernel_dialect::PrintedSource, lash_kernel_dialect::PrintError> {
+        crate::print_kernel(document, captions, options)
+    }
+}
+static PRINTER: Surface = Surface;
 fn dialect(unavoidable: &[Unavoidable]) -> Dialect<'_> {
     Dialect {
         name: "python",
         printer: &PRINTER,
-        decode: crate::read,
+        decode: crate::read_kernel,
         generic,
         unavoidable,
     }

@@ -1,4 +1,5 @@
 async function main() {
+  "use kernel";
   let limit = 3.0;
   let shared = [1.0];
   let add = ["ts.function", "", "add", 1.0, async function(this2, args2) {

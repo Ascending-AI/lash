@@ -710,10 +710,10 @@ except dataframe.ExecutionError as error:
 fn a_package_program_prints_and_reads_back_byte_exact() {
     let lowered = lower_in(WORDCOUNT, Mode::Module).expect("lowers");
     let document = lowered.document.document();
-    let source = crate::print(document, None, Default::default())
+    let source = crate::print_kernel(document, None, Default::default())
         .unwrap_or_else(|error| panic!("{error}"))
         .source;
-    let (read, _) = crate::read(&source, document, Default::default())
+    let (read, _) = crate::read_kernel(&source, document, Default::default())
         .unwrap_or_else(|error| panic!("{error}\n{source}"));
     assert_eq!(
         read.canonical_bytes(),

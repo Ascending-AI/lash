@@ -861,10 +861,14 @@ prompt rather than hard-coding a syntax. Both dialects spell every kind.
 ## TypeScript is a lens
 
 None of the above prints or parses a source language. With the `typescript`
-feature, `lash::typescript::print(document.document(), captions, options)` answers
-equivalent TypeScript for a document, keeping every temporary and statement
-boundary. It is a read-only view. `dialect-typescript` and `dialect-python`
-select dialect support and never link a parser into the host's own process:
+feature, `lash::typescript::print(document.document(), captions, library, options)`
+answers the TypeScript module an author writes for a document: each function
+and `main` that reads back as itself is authored source, and any other is in
+kernel form, opened by `"use kernel";`. `lash::typescript::read(source, &base,
+library, limits)` reads it back, edited or not. `print_kernel` writes every
+region in kernel form, keeping every temporary and statement boundary.
+`dialect-typescript` and `dialect-python` select dialect support and never
+link a parser into the host's own process:
 name `typescript` or `python` to print or lower in-process.
 
 A document can have no TypeScript spelling. The printer then answers a

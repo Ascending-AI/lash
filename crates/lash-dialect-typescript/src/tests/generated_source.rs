@@ -5,7 +5,7 @@ use lash_kernel_doc as k;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) fn roundtrip(document: &k::Document, maps: bool) -> crate::PrintedSource {
-    let printed = crate::print(
+    let printed = crate::print_kernel(
         document,
         None,
         PrintOptions {
@@ -14,7 +14,7 @@ pub(super) fn roundtrip(document: &k::Document, maps: bool) -> crate::PrintedSou
         },
     )
     .expect("valid in-budget document prints");
-    let decoded = crate::read(&printed.source, document, Default::default())
+    let decoded = crate::read_kernel(&printed.source, document, Default::default())
         .expect("exported source reads back against its base without a library");
     assert_eq!(document.identity(), decoded.0.identity());
     assert_eq!(
@@ -71,7 +71,7 @@ fn hand_document() -> k::Document {
 #[test]
 fn independent_source_reads_its_environment_from_the_base_document() {
     let expected = hand_document();
-    let decoded = crate::read(HAND_WRITTEN, &expected, Default::default()).unwrap();
+    let decoded = crate::read_kernel(HAND_WRITTEN, &expected, Default::default()).unwrap();
     assert_eq!(decoded.0.canonical_bytes(), expected.canonical_bytes());
     roundtrip(&expected, false);
     let mut controls = vec![];
@@ -396,7 +396,7 @@ fn malformed_exported_modules_refuse_with_typed_diagnostics() {
             "expected native function declarations and main",
         ),
     ] {
-        let error = crate::read(&source, &base, Default::default()).unwrap_err();
+        let error = crate::read_kernel(&source, &base, Default::default()).unwrap_err();
         assert!(
             matches!(
                 error.code,
@@ -410,7 +410,7 @@ fn malformed_exported_modules_refuse_with_typed_diagnostics() {
     // The base still supplies the entry signature; body binding annotations
     // above remain outside the generated-source subset.
     let annotated = HAND_WRITTEN.replace("function worker()", "function worker(): any");
-    let (read, _) = crate::read(&annotated, &base, Default::default()).unwrap();
+    let (read, _) = crate::read_kernel(&annotated, &base, Default::default()).unwrap();
     assert_eq!(read.canonical_bytes(), base.canonical_bytes());
     let mut extra_entry = base.clone();
     extra_entry.functions.insert(
@@ -426,7 +426,7 @@ fn malformed_exported_modules_refuse_with_typed_diagnostics() {
         .source
         .replace("async function helper", "export async function helper");
     assert!(
-        crate::read(&exported, &extra_entry, Default::default())
+        crate::read_kernel(&exported, &extra_entry, Default::default())
             .unwrap_err()
             .message
             .contains("is not an entry in the base document")
@@ -440,7 +440,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
         max_bytes: printed.source.len().max(document.to_json().unwrap().len()),
         ..Default::default()
     };
-    let at_limit = crate::print(
+    let at_limit = crate::print_kernel(
         &document,
         None,
         PrintOptions {
@@ -450,7 +450,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
     )
     .unwrap();
     assert_eq!(
-        crate::read(&at_limit.source, &document, limits)
+        crate::read_kernel(&at_limit.source, &document, limits)
             .unwrap()
             .0
             .canonical_bytes(),
@@ -461,7 +461,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
         ..limits
     };
     assert!(matches!(
-        crate::print(
+        crate::print_kernel(
             &document,
             None,
             PrintOptions {
@@ -472,7 +472,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
         Err(crate::PrintError::Bytes { .. })
     ));
     assert_eq!(
-        crate::read(&printed.source, &document, short)
+        crate::read_kernel(&printed.source, &document, short)
             .unwrap_err()
             .code,
         crate::DiagnosticCode::GeneratedSourceBytes
@@ -481,7 +481,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
         max_depth: 2,
         ..Default::default()
     };
-    let accepted = crate::print(
+    let accepted = crate::print_kernel(
         &document,
         None,
         PrintOptions {
@@ -491,7 +491,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
     )
     .unwrap();
     assert_eq!(
-        crate::read(&accepted.source, &document, exact_depth)
+        crate::read_kernel(&accepted.source, &document, exact_depth)
             .unwrap()
             .0
             .canonical_bytes(),
@@ -502,7 +502,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
         ..Default::default()
     };
     assert!(matches!(
-        crate::print(
+        crate::print_kernel(
             &document,
             None,
             PrintOptions {
@@ -513,14 +513,14 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
         Err(crate::PrintError::Depth { .. })
     ));
     assert_eq!(
-        crate::read(&printed.source, &document, shallow)
+        crate::read_kernel(&printed.source, &document, shallow)
             .unwrap_err()
             .code,
         crate::DiagnosticCode::GeneratedSourceDepth
     );
     let deep = "async function main() {".to_owned() + &"(".repeat(300);
     assert_eq!(
-        crate::read(&deep, &document, Default::default())
+        crate::read_kernel(&deep, &document, Default::default())
             .unwrap_err()
             .code,
         crate::DiagnosticCode::GeneratedSourceDepth
@@ -529,7 +529,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
     let source =
         format!("async function main() {{ await tools.deep() as KernelType<{nested_type}>; }}");
     assert_eq!(
-        crate::read(&source, &document, Default::default())
+        crate::read_kernel(&source, &document, Default::default())
             .unwrap_err()
             .code,
         crate::DiagnosticCode::GeneratedSourceDepth
@@ -541,7 +541,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
         }],
     );
     assert!(matches!(
-        crate::print(
+        crate::print_kernel(
             &large_bytes,
             None,
             PrintOptions {
@@ -563,7 +563,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
         }],
     );
     assert!(matches!(
-        crate::print(
+        crate::print_kernel(
             &large_integer,
             None,
             PrintOptions {
@@ -585,7 +585,7 @@ fn byte_and_depth_budgets_refuse_before_recursive_work() {
         vec![k::Stmt::Finish { value: expr }],
     );
     assert!(matches!(
-        crate::print(&deep, None, Default::default()),
+        crate::print_kernel(&deep, None, Default::default()),
         Err(crate::PrintError::Depth { .. })
     ));
 }
@@ -1497,7 +1497,7 @@ fn authored_import_of_printed_source_needs_its_base() {
     )
     .unwrap()
     .document;
-    let printed = crate::print(&document, None, Default::default()).unwrap();
+    let printed = crate::print_kernel(&document, None, Default::default()).unwrap();
     let refusal = crate::lower(&printed.source, &environment, module).unwrap_err();
     assert_eq!(
         refusal.code,
@@ -1577,7 +1577,7 @@ fn authored_import_of_printed_source_needs_its_base() {
             .code,
         crate::DiagnosticCode::UnknownBinding
     );
-    let read = crate::read(&printed.source, &document, Default::default()).unwrap();
+    let read = crate::read_kernel(&printed.source, &document, Default::default()).unwrap();
     assert_eq!(read.0.identity(), document.identity());
 }
 

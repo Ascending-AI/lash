@@ -576,11 +576,15 @@ pub(crate) fn printing_relowers(relative: &str) -> bool {
     ) else {
         return false;
     };
-    let printed = lash_dialect_typescript::print(&original.document, None, Default::default())
-        .expect("an admitted document prints");
-    let re_lowered =
-        lash_dialect_typescript::read(&printed.source, &original.document, Default::default())
-            .unwrap_or_else(|error| panic!("{relative}: {error}\n{printed:?}"));
+    let printed =
+        lash_dialect_typescript::print_kernel(&original.document, None, Default::default())
+            .expect("an admitted document prints");
+    let re_lowered = lash_dialect_typescript::read_kernel(
+        &printed.source,
+        &original.document,
+        Default::default(),
+    )
+    .unwrap_or_else(|error| panic!("{relative}: {error}\n{printed:?}"));
     assert_eq!(
         original.document.canonical_bytes(),
         re_lowered.0.canonical_bytes(),

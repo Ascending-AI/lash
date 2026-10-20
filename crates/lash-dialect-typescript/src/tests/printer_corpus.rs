@@ -58,10 +58,10 @@ fn every_admitted_conformance_document_preserves_observations_when_printed_and_l
             let result = (|| -> Result<(), String> {
                 let original = check_case(&mut runner, case).map_err(|e| e.to_string())?;
                 let document = parse_document(&case.document).map_err(|e| e.to_string())?;
-                let source = crate::print(&document, None, Default::default())
+                let source = crate::print_kernel(&document, None, Default::default())
                     .map_err(|e| e.to_string())?
                     .source;
-                let (lowered, _) = crate::read(&source, &document, Default::default())
+                let (lowered, _) = crate::read_kernel(&source, &document, Default::default())
                     .map_err(|e| e.to_string())?;
                 assert_eq!(document.canonical_bytes(), lowered.canonical_bytes());
                 let mut clone = case.clone();

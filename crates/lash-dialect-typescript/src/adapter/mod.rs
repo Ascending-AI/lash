@@ -10,6 +10,7 @@ mod assignments;
 mod captions;
 mod declarations;
 mod early_errors;
+pub(crate) use early_errors::is_strict_reserved_word;
 mod enums;
 mod functions;
 mod goal;

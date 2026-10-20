@@ -2,7 +2,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use lash_kernel_dialect::{Environment, NamedLibrary, Printer};
+use lash_kernel_dialect::readability::SurfacePrinter as _;
+use lash_kernel_dialect::{Environment, NamedLibrary};
 use lash_kernel_doc as k;
 use lash_kernel_edit::authoring::{DataValue, Operation, ValueTarget};
 use lash_kernel_edit::{Draft, Transaction};
@@ -124,7 +125,7 @@ fn roundtrip(document: &k::Document, registry: &Arc<k::FunctionRegistry>, librar
     )
     .expect("the test's effects are operations");
     let environment = Environment::new(library, &environment_namespaces);
-    let (lowered, _) = crate::read(&source, document, Default::default())
+    let (lowered, _) = crate::read_kernel(&source, document, Default::default())
         .unwrap_or_else(|error| panic!("{error}\n{source}"));
     // Retaining the tree also retains sites, task interleaving and errors at
     // bounds. The law's oracle remains a run on the production machine.
@@ -376,10 +377,10 @@ fn generated_decoding_does_not_require_installed_dependencies() {
             args: vec![],
         },
     });
-    let source = crate::print(&document, None, Default::default())
+    let source = crate::print_kernel(&document, None, Default::default())
         .unwrap()
         .source;
-    let decoded = crate::read(&source, &document, Default::default())
+    let decoded = crate::read_kernel(&source, &document, Default::default())
         .expect("decoding is independent of admission");
     assert_eq!(document.canonical_bytes(), decoded.0.canonical_bytes());
 }

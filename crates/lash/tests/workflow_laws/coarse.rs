@@ -436,9 +436,11 @@ fn coarse_spans() {
     assert_ne!(shadowed[0].id, shadowed[1].id);
     assert!(view.nodes[0].bindings.contains(&shadowed[0].id));
     assert!(view.nodes[0].bindings.contains(&shadowed[1].id));
+    let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
     let printed = lash::typescript::print(
         document.document(),
         None,
+        embedding.library(),
         lash::dialect::PrintOptions {
             source_map: true,
             ..Default::default()

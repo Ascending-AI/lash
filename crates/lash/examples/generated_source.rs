@@ -62,17 +62,27 @@ fn print_local(
     view: &WorkflowDocument,
     format: SourceFormat,
     options: PrintOptions,
+    library: &dyn lash::dialect::Library,
 ) -> Result<PrintedSource> {
     Ok(match format {
-        SourceFormat::TypeScriptV1 => lash::typescript::print(view.document(), None, options)?,
-        SourceFormat::PythonV1 => lash::python::print(view.document(), None, options)?,
+        SourceFormat::TypeScriptV1 => {
+            lash::typescript::print(view.document(), None, library, options)?
+        }
+        SourceFormat::PythonV1 => lash::python::print(view.document(), None, library, options)?,
     })
 }
 
-fn read_local(source: &str, base: &Document, format: SourceFormat) -> Result<Document> {
+fn read_local(
+    source: &str,
+    base: &Document,
+    format: SourceFormat,
+    library: &dyn lash::dialect::Library,
+) -> Result<Document> {
     Ok(match format {
-        SourceFormat::TypeScriptV1 => lash::typescript::read(source, base, Default::default())?.0,
-        SourceFormat::PythonV1 => lash::python::read(source, base, Default::default())?.0,
+        SourceFormat::TypeScriptV1 => {
+            lash::typescript::read(source, base, library, Default::default())?.0
+        }
+        SourceFormat::PythonV1 => lash::python::read(source, base, library, Default::default())?.0,
     })
 }
 
@@ -89,6 +99,9 @@ async fn measure(iterations: u32) -> Result<()> {
         lash::vm::WorkerEntry::reexec()?,
     ));
     service.pool()?; // Bootstrap is outside the measured source operations.
+    // Local source operations name the library the worker embeds.
+    let embedding = lash::vm::built_worker_embedding(&Default::default())?;
+    let library = embedding.library();
     println!(
         "case,path,dialect,maps,nodes,document_bytes,source_bytes,map_bytes,print_us,print_compile_compare_us,iterations"
     );
@@ -121,7 +134,7 @@ async fn measure(iterations: u32) -> Result<()> {
                         let printed = if worker {
                             service.print(&document, None, format, options).await?
                         } else {
-                            print_local(&view, format, options)?
+                            print_local(&view, format, options, library)?
                         };
                         print_time += start.elapsed();
                         // Verify the print-only sample outside its timed region.
@@ -131,7 +144,7 @@ async fn measure(iterations: u32) -> Result<()> {
                                 .await?
                                 .0
                         } else {
-                            read_local(&printed.source, &document, format)?
+                            read_local(&printed.source, &document, format, library)?
                         };
                         compare(&document, &decoded)?;
                         sizes = (
@@ -148,7 +161,7 @@ async fn measure(iterations: u32) -> Result<()> {
                         let printed = if worker {
                             service.print(&document, None, format, options).await?
                         } else {
-                            print_local(&view, format, options)?
+                            print_local(&view, format, options, library)?
                         };
                         let decoded = if worker {
                             service
@@ -156,7 +169,7 @@ async fn measure(iterations: u32) -> Result<()> {
                                 .await?
                                 .0
                         } else {
-                            read_local(&printed.source, &document, format)?
+                            read_local(&printed.source, &document, format, library)?
                         };
                         compare(&document, &decoded)?;
                         composed_time += start.elapsed();

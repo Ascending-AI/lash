@@ -1,18 +1,15 @@
 /** Add up the numbers */
 export async function demo(
   /** The numbers to add */
-  items,
+  items: number[],
 ) {
   /** Start the total at zero */
-  let total = 0.0;
+  let total = 0;
   /** Go through each number */
   for (const item of items) {
     /** Add it to the total */
-    total = helper_num_add(total, helper_num_to_float(item));
+    total = total + item;
   }
   /** Give back the total */
-  return k.returnVia(total, helper_ts_promise_adopt);
-}
-async function main() {
-  let demo = declared.demo;
+  return total;
 }

@@ -12,6 +12,7 @@ mod naming;
 mod package_members;
 mod pages;
 mod protocol_loops;
+mod readable_print;
 mod refusals;
 mod replies;
 mod session;

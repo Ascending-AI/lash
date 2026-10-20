@@ -1,18 +1,19 @@
 //! Native expression and statement rendering; exact generic suites live in the parent.
+use super::authored::{authored_awaits, seconds};
 use super::{BindingScope, PrintError, Renderer, attribute_identifier, awaits, k};
 
 /// The binding strength of atoms, calls and members.
 const PRIMARY: u8 = 10;
 impl Renderer<'_> {
-    fn inline_rhs(&self, rhs: &k::Rhs) -> bool {
+    pub(super) fn inline_rhs(&self, rhs: &k::Rhs) -> bool {
         match rhs {
             k::Rhs::Expr(e) => self.inline.contains(e),
             k::Rhs::Action(_) => true,
         }
     }
-    fn write_inline_rhs(&mut self, rhs: &k::Rhs) {
+    pub(super) fn write_inline_rhs(&mut self, rhs: &k::Rhs) {
         match rhs {
-            k::Rhs::Expr(e) => self.inline_expr(e),
+            k::Rhs::Expr(e) => self.statement_value(e),
             k::Rhs::Action(a) => {
                 self.out.begin_node(None);
                 self.action(a);
@@ -93,6 +94,23 @@ impl Renderer<'_> {
     fn operand(&mut self, expr: &k::Expr, minimum: u8) {
         let grouped = self.precedence(expr) < minimum;
         self.grouped(expr, grouped);
+    }
+    /// A statement's value: authored source writes an action there without
+    /// grouping it.
+    fn statement_value(&mut self, expr: &k::Expr) {
+        match expr {
+            k::Expr::Act(act) if self.authored => {
+                self.out.begin_node(None);
+                self.nested_action(act, false);
+                self.out.end_node();
+            }
+            expr => self.inline_expr(expr),
+        }
+    }
+    /// A node the authored source spells by what holds it.
+    pub(super) fn implicit(&mut self) {
+        self.out.begin_node(None);
+        self.out.end_node();
     }
     pub(super) fn inline_expr(&mut self, expr: &k::Expr) {
         self.out.begin_node(None);
@@ -282,6 +300,9 @@ impl Renderer<'_> {
         }
     }
     fn nested_action(&mut self, act: &k::ActExpr, grouped: bool) {
+        if self.authored && self.authored_action(act, grouped) {
+            return;
+        }
         if grouped {
             self.out.write("(");
         }
@@ -296,7 +317,15 @@ impl Renderer<'_> {
         match &act.kind {
             k::ActKind::Call(callee) | k::ActKind::Spawn(callee) => {
                 let spawn = matches!(act.kind, k::ActKind::Spawn(_));
-                self.out.write(if spawn { "spawn(" } else { "await " });
+                let sync = self.authored
+                    && matches!(callee, k::Callee::Value(name) if self.sync.contains(name));
+                self.out.write(if spawn {
+                    "spawn("
+                } else if sync {
+                    ""
+                } else {
+                    "await "
+                });
                 match callee {
                     k::Callee::Declared(name) => {
                         self.out.write("declared.");
@@ -328,7 +357,8 @@ impl Renderer<'_> {
                     }
                     self.inline_expr(arg);
                 }
-                if *result != k::Type::Any {
+                // Authored source takes the result its operation declares.
+                if *result != k::Type::Any && !self.authored {
                     if !act.args.is_empty() {
                         self.out.write(", ");
                     }
@@ -336,7 +366,7 @@ impl Renderer<'_> {
                     self.metadata(result);
                 }
                 if *then_yield {
-                    if !act.args.is_empty() || *result != k::Type::Any {
+                    if !act.args.is_empty() || (*result != k::Type::Any && !self.authored) {
                         self.out.write(", ");
                     }
                     self.out.write("then_yield=True");
@@ -382,9 +412,52 @@ impl Renderer<'_> {
             self.out.write(")");
         }
     }
+    /// An action as its author wrote it, when that differs from its
+    /// kernel spelling: an operation's reply, `await op(...)`, and a pause,
+    /// `await asyncio.sleep(seconds)`.
+    fn authored_action(&mut self, act: &k::ActExpr, grouped: bool) -> bool {
+        let reply = matches!(&act.kind, k::ActKind::Call(k::Callee::Library(id))
+            if self.operators.unique("py.reply") == Some(*id));
+        let seconds = match (&act.kind, act.args.as_slice()) {
+            (k::ActKind::Sleep { then_yield: false }, [k::Expr::Literal(milliseconds)]) => {
+                seconds(milliseconds)
+            }
+            _ => None,
+        };
+        match act.args.as_slice() {
+            [k::Expr::Act(performed)]
+                if reply && matches!(performed.kind, k::ActKind::Perform { .. }) =>
+            {
+                if grouped {
+                    self.out.write("(");
+                }
+                self.out.begin_node(None);
+                self.nested_action(performed, false);
+                self.out.end_node();
+                if grouped {
+                    self.out.write(")");
+                }
+                true
+            }
+            _ => match seconds {
+                Some(seconds) => {
+                    self.out.write(if grouped {
+                        "(await asyncio.sleep("
+                    } else {
+                        "await asyncio.sleep("
+                    });
+                    self.implicit();
+                    self.out.write(&seconds);
+                    self.out.write(if grouped { "))" } else { ")" });
+                    true
+                }
+                None => false,
+            },
+        }
+    }
     // The caller owns the block's indentation and any clause label. Empty
     // suites spell pass, so every real block has a nonempty final-text range.
-    fn readable_block(&mut self, block: &k::Block) {
+    pub(super) fn readable_block(&mut self, block: &k::Block) {
         self.out.begin_node(None);
         self.indent += 1;
         if block.is_empty() {
@@ -429,6 +502,8 @@ impl Renderer<'_> {
             self.readable_if(condition, then_block, else_block, "elif");
             self.out.end_node();
             self.out.end_node();
+        } else if self.authored && else_block.is_empty() && otherwise.is_none() {
+            self.implicit();
         } else {
             if let Some(caption) = otherwise {
                 self.spell(&caption);
@@ -448,6 +523,9 @@ impl Renderer<'_> {
         }
     }
     pub(super) fn readable_statement(&mut self, stmt: &k::Stmt) -> bool {
+        if self.authored && self.authored_statement(stmt) {
+            return true;
+        }
         match stmt {
             k::Stmt::Let {
                 name,
@@ -458,14 +536,22 @@ impl Renderer<'_> {
                 value: k::Rhs::Expr(k::Expr::Closure(c)),
                 ..
             } => {
-                self.out.write(if awaits(&c.body) {
-                    "async def "
+                let asynchronous = if self.authored {
+                    authored_awaits(&c.body, &self.sync)
                 } else {
-                    "def "
-                });
+                    awaits(&c.body)
+                };
+                if self.authored && !asynchronous {
+                    self.sync.insert(name.clone());
+                }
+                self.out
+                    .write(if asynchronous { "async def " } else { "def " });
                 self.name(name);
                 self.out.begin_node(None); // Closure expression
-                self.parameters(&c.params);
+                match &c.start {
+                    Some(start) if self.authored => self.annotated(&c.params, start),
+                    _ => self.parameters(&c.params),
+                }
                 let (_, annotation) = self
                     .scope
                     .bind(name, Some(matches!(stmt, k::Stmt::Let { .. })));
@@ -540,7 +626,11 @@ impl Renderer<'_> {
                 self.write_member(member);
                 self.out.write("\n");
             }
-            k::Stmt::Do { value } if self.inline.contains(value) => {
+            // A text alone would read as a docstring, or as the kernel marker.
+            k::Stmt::Do { value }
+                if self.inline.contains(value)
+                    && !matches!(value, k::Expr::Literal(k::Literal::Text(_))) =>
+            {
                 self.out.begin_node(None);
                 match value {
                     k::Expr::Act(act) => self.nested_action(act, false),
@@ -638,9 +728,11 @@ impl Renderer<'_> {
                     k::Stmt::Finish { .. } => "return finish(",
                     _ => "raise failure(",
                 });
-                self.inline_expr(value);
                 if call {
+                    self.inline_expr(value);
                     self.out.write(")");
+                } else {
+                    self.statement_value(value);
                 }
                 self.out.write("\n");
             }

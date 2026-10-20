@@ -1,12 +1,13 @@
 /** Give back the number it is given */
-export async function arrow(value) {
-  return k.returnVia(value, helper_ts_promise_adopt);
+export async function arrow(value: number) {
+  return value;
 }
 /** Answer from the top level */
-export async function kernel_name_1() {
-  return k.returnVia("top", helper_ts_promise_adopt);
+export async function declared() {
+  return "top";
 }
 async function main() {
+  "use kernel";
   let arrow = declared.arrow;
   let kernel_name_1 = declared.kernel_name_1;
   if (true) {

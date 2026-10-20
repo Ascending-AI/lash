@@ -240,9 +240,9 @@ fn a_while_test_keeps_its_actions_in_the_condition() {
         "SHAPE: {statements} statements for 7 author statements\n{text}"
     );
     // It prints, and its printed source reads back to it (`K-DIALECT-001`).
-    let printed =
-        crate::print(&lowered.document, None, Default::default()).expect("the lowered loop prints");
-    let read = crate::read(&printed.source, &lowered.document, Default::default())
+    let printed = crate::print_kernel(&lowered.document, None, Default::default())
+        .expect("the lowered loop prints");
+    let read = crate::read_kernel(&printed.source, &lowered.document, Default::default())
         .expect("its source reads back");
     assert_eq!(
         read.0.canonical_bytes(),

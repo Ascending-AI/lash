@@ -1,20 +1,19 @@
 //! Exported TypeScript: plain source whose environment stays in the base
 //! document. Paired rules: generated_rules.md.
-use crate::{
-    TypeScript,
-    generated_operators::{self, Operator},
-};
+use crate::generated_operators::{self, Operator};
 use lash_kernel_dialect::{
-    NamePlan, PrintError, PrintOptions, PrintedSource, Printer, SourceFormat, SourceWriter,
+    NamePlan, PrintError, PrintOptions, PrintedSource, SourceFormat, SourceWriter,
     check_document_depth,
 };
 use lash_kernel_doc as k;
 
 mod signature;
 
-/// Print without compilation, library lookup or admission. The manifest,
+/// Print without compilation, library lookup or admission, every region in
+/// the reserved kernel surface. The manifest,
 /// entries' result types, private bindings, helper identities and name
-/// renames are not written: [`crate::read`] takes them from the base document.
+/// renames are not written: [`crate::read_kernel`] takes them from the base
+/// document.
 /// Each caption is a JSDoc block before what it names; an `else` arm with a
 /// caption is written even when it is empty. A function whose parameters or
 /// whose types' fields carry captions takes one parameter a line, and each
@@ -23,11 +22,42 @@ mod signature;
 /// [`PrintedSource::dropped`] lists only an entry's parameter and field
 /// captions when its function takes other parameters than its signature
 /// names.
-pub fn print(
+pub fn print_kernel(
     document: &k::Document,
     captions: Option<&k::Captions>,
     options: PrintOptions,
 ) -> Result<PrintedSource, PrintError> {
+    print_regions(document, captions, options, &Regions::default()).map(|(printed, _)| printed)
+}
+
+/// What a module printed in kernel layout writes of each declared function:
+/// its lifted source, written as it is, or its kernel form, opened by the
+/// kernel marker when the module mixes the two (`crate::readable`).
+#[derive(Default)]
+pub(crate) struct Regions {
+    pub(crate) lifted: std::collections::BTreeMap<k::Name, String>,
+    pub(crate) marked: bool,
+}
+
+/// The directive that opens a region printed in kernel form among lifted
+/// ones. The kernel printer never writes a bare text statement: it groups
+/// a text it evaluates for effect, so no kernel body opens with this.
+pub(crate) const KERNEL_MARKER: &str = "use kernel";
+
+/// [`print_kernel`], with the lifted functions of `regions` written in place
+/// of their kernel form; also gives where each lifted function was written.
+pub(crate) fn print_regions(
+    document: &k::Document,
+    captions: Option<&k::Captions>,
+    options: PrintOptions,
+    regions: &Regions,
+) -> Result<
+    (
+        PrintedSource,
+        std::collections::BTreeMap<k::Name, std::ops::Range<usize>>,
+    ),
+    PrintError,
+> {
     check_document_depth(document, options.limits)?;
     if k::KernelVersion::of(document.manifest.kernel).is_none() {
         return Err(PrintError::Invalid("unsupported kernel version".into()));
@@ -39,8 +69,30 @@ pub fn print(
         indent: 0,
         operators: generated_operators::bindings(&document.manifest),
         types: Default::default(),
+        marker: false,
     };
+    let mut written = std::collections::BTreeMap::new();
     for (name, function) in &document.functions {
+        if let Some(lifted) = regions.lifted.get(name) {
+            // The lifted source spells this function's captions itself.
+            for entry in captions.map(k::Captions::entries).unwrap_or_default() {
+                let function = match &entry.target {
+                    k::CaptionTarget::Site(k::Site {
+                        unit: k::Unit::Function(function),
+                        ..
+                    }) => Some(function),
+                    other => other.function(),
+                };
+                if function == Some(name) {
+                    renderer.out.take_caption(entry.target.clone());
+                }
+            }
+            let start = renderer.out.len();
+            renderer.out.write(lifted);
+            written.insert(name.clone(), start..renderer.out.len());
+            renderer.out.write("\n");
+            continue;
+        }
         let root = k::Site::new(k::Unit::Function(name.clone()), Vec::new());
         if let Some(caption) = renderer.out.take_caption(root) {
             renderer.caption(&caption);
@@ -57,28 +109,23 @@ pub fn print(
             .then(|| k::Unit::Function(name.clone()));
         renderer.signature(document, name, function);
         renderer.types = Default::default();
+        renderer.marker = regions.marked;
         renderer.node(k::Node::Block(&function.body), unit.as_ref());
         renderer.out.write("\n");
     }
     renderer.types = Default::default();
     renderer.out.write("async function main() ");
     let tracks = renderer.out.tracks_sites();
+    renderer.marker = regions.marked;
     renderer.node(
         k::Node::Block(&document.main),
         tracks.then_some(&k::Unit::Main),
     );
     renderer.out.write("\n");
-    renderer.out.finish(document, SourceFormat::TypeScriptV1)
-}
-impl Printer for TypeScript {
-    fn print(
-        &self,
-        document: &k::Document,
-        captions: Option<&k::Captions>,
-        options: PrintOptions,
-    ) -> Result<PrintedSource, PrintError> {
-        print(document, captions, options)
-    }
+    renderer
+        .out
+        .finish(document, SourceFormat::TypeScriptV1)
+        .map(|printed| (printed, written))
 }
 
 /// The dotted path an effect prints as: a canonical operation in the
@@ -192,6 +239,8 @@ struct Renderer<'a> {
     indent: usize,
     operators: generated_operators::Operators,
     types: lash_kernel_dialect::source_types::Types,
+    /// Whether the next block opens with the kernel marker.
+    marker: bool,
 }
 impl Renderer<'_> {
     fn metadata(&mut self, value: &impl serde::Serialize) {
@@ -227,6 +276,10 @@ impl Renderer<'_> {
             k::Node::Block(body) => {
                 self.out.write("{\n");
                 self.indent += 1;
+                if std::mem::take(&mut self.marker) {
+                    self.indentation();
+                    self.out.write(&format!("\"{KERNEL_MARKER}\";\n"));
+                }
                 for stmt in body {
                     self.indentation();
                     if let Some(caption) = self.next_caption() {
@@ -337,7 +390,13 @@ impl Renderer<'_> {
                 self.out.write(";");
             }
             k::Stmt::Do { value } => {
-                let grouped = matches!(value, k::Expr::Record(_) | k::Expr::Closure(_));
+                // A text alone would read as a directive.
+                let grouped = matches!(
+                    value,
+                    k::Expr::Record(_)
+                        | k::Expr::Closure(_)
+                        | k::Expr::Literal(k::Literal::Text(_))
+                );
                 if grouped {
                     self.out.write("(");
                 }

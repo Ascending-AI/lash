@@ -126,6 +126,7 @@ fn binding_captions(
 /// variable the lowering declares is named.
 #[test]
 fn a_binding_caption_round_trips_through_print_and_read_in_typescript_and_python() {
+    let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
     let expected = [
         ("reply".to_owned(), "The filed request".to_owned()),
         ("marked".to_owned(), "The marked priority".to_owned()),
@@ -145,21 +146,29 @@ fn a_binding_caption_round_trips_through_print_and_read_in_typescript_and_python
         let options = Default::default();
         let printed = match format {
             SourceFormat::TypeScriptV1 => {
-                lash::typescript::print(&document, Some(&captions), options)
+                lash::typescript::print(&document, Some(&captions), embedding.library(), options)
             }
-            SourceFormat::PythonV1 => lash::python::print(&document, Some(&captions), options),
+            SourceFormat::PythonV1 => {
+                lash::python::print(&document, Some(&captions), embedding.library(), options)
+            }
         }
         .expect("print with captions");
         assert!(printed.dropped.is_empty(), "{format:?} drops no caption");
         let (read, read_captions) = match format {
-            SourceFormat::TypeScriptV1 => {
-                lash::typescript::read(&printed.source, &document, Default::default())
-                    .expect("read TypeScript back")
-            }
-            SourceFormat::PythonV1 => {
-                lash::python::read(&printed.source, &document, Default::default())
-                    .expect("read Python back")
-            }
+            SourceFormat::TypeScriptV1 => lash::typescript::read(
+                &printed.source,
+                &document,
+                embedding.library(),
+                Default::default(),
+            )
+            .expect("read TypeScript back"),
+            SourceFormat::PythonV1 => lash::python::read(
+                &printed.source,
+                &document,
+                embedding.library(),
+                Default::default(),
+            )
+            .expect("read Python back"),
         };
         assert_eq!(
             read.canonical_bytes(),

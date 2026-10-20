@@ -16,7 +16,10 @@ use lash_kernel_edit::{Draft, Transaction};
 use serde::{Deserialize, Serialize};
 
 mod cell;
+mod printed;
 mod readable;
+
+pub use printed::{Lifted, SCAFFOLDING, readable_prints};
 
 /// A corpus case: dialect-specific source, with a shared entry/refusal contract.
 #[derive(Debug, Deserialize)]
@@ -76,20 +79,36 @@ fn lower(
     }
 }
 
+/// What printing a corpus document checks itself against: the library its
+/// dialect helpers resolve in and the environment it was imported under.
+pub(crate) struct Printing<'a> {
+    pub(crate) environment: &'a Environment<'a>,
+    pub(crate) mode: Mode<'a>,
+}
+
 fn printed(
     document: &Document,
     captions: &Captions,
     lang: SourceLanguage,
+    printing: &Printing<'_>,
 ) -> Result<lash_kernel_dialect::PrintedSource> {
     let options = PrintOptions {
         source_map: true,
         ..Default::default()
     };
     let output = match lang {
-        SourceLanguage::TypeScript => {
-            lash_dialect_typescript::print(document, Some(captions), options)?
-        }
-        SourceLanguage::Python => lash_dialect_python::print(document, Some(captions), options)?,
+        SourceLanguage::TypeScript => lash_dialect_typescript::print(
+            document,
+            Some(captions),
+            printing.environment.library,
+            options,
+        )?,
+        SourceLanguage::Python => lash_dialect_python::print(
+            document,
+            Some(captions),
+            printing.environment.library,
+            options,
+        )?,
     };
     // Both dialects spell every captionable kind (K-CAP-006).
     ensure!(
@@ -100,15 +119,26 @@ fn printed(
     Ok(output)
 }
 
-fn roundtrip(document: &Document, captions: &Captions, lang: SourceLanguage) -> Result<String> {
-    let output = printed(document, captions, lang)?;
+fn roundtrip(
+    document: &Document,
+    captions: &Captions,
+    lang: SourceLanguage,
+    printing: &Printing<'_>,
+) -> Result<String> {
+    let output = printed(document, captions, lang, printing)?;
     let (decoded, read) = match lang {
-        SourceLanguage::TypeScript => {
-            lash_dialect_typescript::read(&output.source, document, Default::default())?
-        }
-        SourceLanguage::Python => {
-            lash_dialect_python::read(&output.source, document, Default::default())?
-        }
+        SourceLanguage::TypeScript => lash_dialect_typescript::read(
+            &output.source,
+            document,
+            printing.environment.library,
+            Default::default(),
+        )?,
+        SourceLanguage::Python => lash_dialect_python::read(
+            &output.source,
+            document,
+            printing.environment.library,
+            Default::default(),
+        )?,
     };
     ensure!(
         decoded.canonical_bytes() == document.canonical_bytes(),
@@ -118,6 +148,7 @@ fn roundtrip(document: &Document, captions: &Captions, lang: SourceLanguage) -> 
         read == *captions,
         "print -> read changed the captions (K-CAP-002)"
     );
+    printed::laws(document, captions, &output.source, lang, printing)?;
     output
         .source_map
         .context("SM-ORDER: printer returns a requested map")?
@@ -212,11 +243,17 @@ pub fn tools() -> Result<Vec<lash::tools::ToolDefinition>> {
 /// Generate review artifacts, checking reproducible import, exact source
 /// reading, SM-ORDER/SM-COVER, closed edit replay and cell crossing structure.
 /// Only entry names and refusal codes are compared between dialects.
+pub fn render(root: &Path) -> Result<BTreeMap<String, String>> {
+    render_with(root).map(|(outputs, _)| outputs)
+}
+
+/// [`render`], and how each document and its canvas edit printed.
 #[expect(
     clippy::disallowed_methods,
     reason = "corpus tooling reads explicitly supplied fixture paths"
 )]
-pub fn render(root: &Path) -> Result<BTreeMap<String, String>> {
+pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<Lifted>)> {
+    let mut report = Vec::new();
     let packages = lash::package::lash_packages()?;
     let package_view = packages.view(&packages.own())?;
     let embedding = lash_vm_worker::built_embedding(&Default::default())?;
@@ -381,12 +418,33 @@ pub fn render(root: &Path) -> Result<BTreeMap<String, String>> {
             }
             outputs.insert(format!("{prefix}kernel.{extension}.txt"), kernel);
             outputs.insert(format!("{prefix}view.{extension}.txt"), views);
-            outputs.insert(
-                format!("{prefix}printed.{extension}"),
-                roundtrip(document, &lowered.captions, lang)?,
-            );
+            let printing = Printing {
+                environment: &env,
+                mode,
+            };
+            let source = roundtrip(document, &lowered.captions, lang, &printing)?;
+            report.push(Lifted::of(&case.name, lang, false, document, &source));
+            if case.mode == CaseMode::Module
+                && let Some(transaction) = canvas_edit(document)
+            {
+                let mut draft = Draft::open(document.clone())?;
+                let applied = draft.apply(&transaction, &checker)?;
+                let rekeyed = lowered
+                    .captions
+                    .rekey(&applied.correspondence, draft.document())
+                    .context("captions rekey through the canvas edit")?;
+                let edited = roundtrip(draft.document(), &rekeyed.captions, lang, &printing)?;
+                report.push(Lifted::of(
+                    &case.name,
+                    lang,
+                    true,
+                    draft.document(),
+                    &edited,
+                ));
+            }
+            outputs.insert(format!("{prefix}printed.{extension}"), source);
             if case.edit {
-                let (json, text) = edit(document, &lowered.captions, lang, &checker)?;
+                let (json, text) = edit(document, &lowered.captions, lang, &checker, &printing)?;
                 outputs.insert(format!("{prefix}edits/1.{extension}.json"), json);
                 outputs.insert(format!("{prefix}edits/1.{extension}.txt"), text);
             }
@@ -396,7 +454,71 @@ pub fn render(root: &Path) -> Result<BTreeMap<String, String>> {
             }
         }
     }
-    Ok(outputs)
+    Ok((outputs, report))
+}
+
+/// The canvas edit the corpus records: the first tool argument of the first
+/// step that performs a tool, set to a text; or, in a workflow with no such
+/// argument, the first text a statement holds.
+pub(crate) fn canvas_edit(document: &Document) -> Option<Transaction> {
+    use lash_kernel_edit::authoring::{DataValue, Operation, ValueTarget};
+    let sites = code_sites(document);
+    let argument = sites.iter().find(|site| match document.node(site) {
+        Some(Node::Expr(Expr::Act(action))) => {
+            matches!(&action.kind, k::ActKind::Perform { .. })
+                && action
+                    .args
+                    .first()
+                    .is_some_and(|value| plain(Node::Expr(value)))
+        }
+        _ => false,
+    });
+    let target = match argument {
+        Some(action) => ValueTarget::ToolArgument {
+            action: action.clone(),
+            index: 0,
+            path: vec![],
+        },
+        None => ValueTarget::Literal {
+            expression: sites
+                .iter()
+                .find(|site| {
+                    matches!(
+                        document.node(site),
+                        Some(Node::Stmt(
+                            k::Stmt::Let {
+                                value: k::Rhs::Expr(Expr::Literal(k::Literal::Text(_))),
+                                ..
+                            } | k::Stmt::Return {
+                                value: Expr::Literal(k::Literal::Text(_))
+                            } | k::Stmt::ReturnVia {
+                                value: Expr::Literal(k::Literal::Text(_)),
+                                ..
+                            }
+                        ))
+                    )
+                })?
+                .child(0),
+        },
+    };
+    let base = document.identity();
+    Some(Transaction {
+        base,
+        edits: vec![Operation::SetValue {
+            base,
+            target,
+            value: DataValue::Literal(k::Literal::Text("edited λ".into())),
+        }],
+    })
+}
+
+/// Whether the canvas may replace `node`: a value with no action or
+/// closure in it.
+fn plain(node: Node<'_>) -> bool {
+    !matches!(
+        node,
+        Node::Expr(Expr::Act(_) | Expr::Closure(_)) | Node::Action(_)
+    ) && node.children().into_iter().all(plain)
 }
 
 fn edit(
@@ -404,31 +526,9 @@ fn edit(
     captions: &Captions,
     lang: SourceLanguage,
     checker: &Checker<'_>,
+    printing: &Printing<'_>,
 ) -> Result<(String, String)> {
-    use lash_kernel_edit::authoring::{DataValue, Operation, ValueTarget};
-    let action = code_sites(document)
-        .into_iter()
-        .find(|site| match document.node(site) {
-            Some(Node::Action(k::Action::Perform { .. })) => true,
-            Some(Node::Expr(Expr::Act(action))) => {
-                matches!(&action.kind, k::ActKind::Perform { .. })
-            }
-            _ => false,
-        })
-        .context("edit fixture needs a perform")?;
-    let base = document.identity();
-    let transaction = Transaction {
-        base,
-        edits: vec![Operation::SetValue {
-            base,
-            target: ValueTarget::ToolArgument {
-                action,
-                index: 0,
-                path: vec![],
-            },
-            value: DataValue::Literal(k::Literal::Text("edited λ".into())),
-        }],
-    };
+    let transaction = canvas_edit(document).context("edit fixture needs a perform")?;
     #[derive(Serialize, Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Replay {
@@ -483,7 +583,7 @@ fn edit(
     write!(
         text,
         "\nReprinted source:\n{}",
-        roundtrip(draft.document(), &rekeyed.captions, lang)?
+        roundtrip(draft.document(), &rekeyed.captions, lang, printing)?
     )?;
     Ok((json, text))
 }

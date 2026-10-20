@@ -264,9 +264,9 @@ fn promise_instanceof_preserves_its_operand_through_printing() {
     let source = "const f = async () => {}; const p = f(); \
                   console.log(p instanceof Promise, 1 instanceof Promise);";
     let original = lower(source).expect("promise predicates lower");
-    let printed =
-        crate::print(&original.document, None, Default::default()).expect("the document prints");
-    let re_lowered = crate::read(&printed.source, &original.document, Default::default())
+    let printed = crate::print_kernel(&original.document, None, Default::default())
+        .expect("the document prints");
+    let re_lowered = crate::read_kernel(&printed.source, &original.document, Default::default())
         .expect("printed promise predicates lower");
     // The same document runs the same.
     assert_eq!(

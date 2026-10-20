@@ -5,7 +5,7 @@ export async function demo() {
   /** Try the echo */
   try {
     /** Echo a test message and keep the reply */
-    result = await await corpus.echo("try") as KernelType<"json">;
+    result = await corpus.echo("try");
   }
   /** If the echo fails */
   catch (error) {
@@ -15,11 +15,8 @@ export async function demo() {
   /** Whatever happened */
   finally {
     /** Send a closing echo */
-    await await corpus.echo("finally") as KernelType<"json">;
+    await corpus.echo("finally");
   }
   /** Give back the result */
-  return k.returnVia(result, helper_ts_promise_adopt);
-}
-async function main() {
-  let demo = declared.demo;
+  return result;
 }

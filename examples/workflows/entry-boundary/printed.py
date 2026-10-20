@@ -1,10 +1,11 @@
 #: Give back the number it is given
-def arrow(value):
+async def arrow(value: int):
     return value
 #: Answer from the top level
-def kernel_name_1():
+async def declared():
     return "top"
 def main():
+    "use kernel"
     local = k.absent
     arrow = declared.arrow
     kernel_name_1 = declared.kernel_name_1

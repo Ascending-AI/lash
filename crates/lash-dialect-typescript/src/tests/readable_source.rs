@@ -380,7 +380,7 @@ fn native_base() -> k::Document {
 #[test]
 fn independent_native_source_has_exact_numeric_collection_and_member_inverse() {
     let source = "async function main() { finish([7, 7.0, -0.0, [1, 2], {λ: true}, page.λ, page[\"λ\"]] as const); }";
-    let decoded = crate::read(source, &native_base(), Default::default()).unwrap();
+    let decoded = crate::read_kernel(source, &native_base(), Default::default()).unwrap();
     let expected = k::Document::new(
         k::NumberPolicy::Float,
         vec![k::Stmt::Finish {
@@ -437,7 +437,7 @@ fn native_near_misses_refuse_without_authored_lowering() {
     ] {
         let source = format!("async function main() {{ finish({expression}); }}");
         assert!(
-            crate::read(&source, &native_base(), Default::default()).is_err(),
+            crate::read_kernel(&source, &native_base(), Default::default()).is_err(),
             "{source}"
         );
     }
@@ -485,7 +485,7 @@ main {
     let source = roundtrip(&document, true).source;
     assert_eq!(source, ORDINARY_WORKFLOW);
     assert_eq!(
-        crate::read(ORDINARY_WORKFLOW, &document, Default::default())
+        crate::read_kernel(ORDINARY_WORKFLOW, &document, Default::default())
             .unwrap()
             .0
             .canonical_bytes(),
@@ -550,7 +550,7 @@ fn generated_decoder(
     base: &k::Document,
     limits: lash_kernel_dialect::GeneratedSourceLimits,
 ) -> Result<(k::Document, k::Captions), lash_kernel_dialect::Diagnostic> {
-    crate::read(source, base, limits).map_err(Into::into)
+    crate::read_kernel(source, base, limits).map_err(Into::into)
 }
 fn generic_form(node: k::Node<'_>, source: &str) -> Option<&'static str> {
     let source = source.trim_start();
@@ -787,7 +787,7 @@ fn native_operator_aliases_preserve_helper_identity_precedence_and_ambiguity() {
         .functions
         .remove(&k::FunctionId::from_bytes([44; 32]));
     assert_eq!(
-        crate::read(independent, &document, Default::default())
+        crate::read_kernel(independent, &document, Default::default())
             .unwrap()
             .0
             .canonical_bytes(),
@@ -874,7 +874,7 @@ fn effect_calls_keep_arities_result_annotations_and_atomic_boundaries() {
     ] {
         let source = format!("async function main() {{ let first = {expression}; }}");
         assert!(
-            crate::read(&source, &document, Default::default()).is_err(),
+            crate::read_kernel(&source, &document, Default::default()).is_err(),
             "{source}"
         );
     }

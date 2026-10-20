@@ -159,16 +159,22 @@
 //! unsupported reasons. Import writes no artifact and runs no effect.
 //!
 //! With the matching `typescript` or `python` feature,
-//! `lash::typescript::print(document, captions, options)` or
+//! `lash::typescript::print(document, captions, library, options)` or
 //! `lash::python::print` returns plain source, only the
 //! code an agent could have written, an optional disposable map, and the
 //! captions the dialect could not spell (`PrintedSource::dropped`). The
+//! print is the workflow module an author writes: each declared function
+//! and `main` prints as authored source when reading that region back
+//! lowers to the identical region, and otherwise in kernel form, opened by
+//! a `"use kernel"` directive (`lash::dialect::regions`). The
 //! environment (effect manifest, number mode, entry signatures, private
 //! bindings, helper identities and name renames) stays in the document and
 //! is never printed. Printing does not compile or admit it. Hosts read the
 //! source back, edited or not, against the document it was printed from:
-//! `lash::typescript::read(source, &base, limits)` or `lash::python::read`,
-//! and compare `Document::canonical_bytes()` to check reconstruction.
+//! `lash::typescript::read(source, &base, library, limits)` or
+//! `lash::python::read`, and compare `Document::canonical_bytes()` to check
+//! reconstruction. Each dialect's `print_kernel` and `read_kernel` are its
+//! kernel-surface pair, every region in kernel form.
 //! [`HostArtifacts::import_exported_workflow`](crate::process::HostArtifacts::import_exported_workflow)
 //! reads and admits in one step. `vm::WorkerService` exposes separate `print`
 //! and `read_exported` operations in a worker. Read documents still require

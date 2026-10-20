@@ -24,7 +24,17 @@ kiln test //examples/workflows:corpus__test --test_arg=design_8_corpus_pins_read
 counts. `source-map.<lang>.txt` joins mapped sites to byte ranges and source
 text and names every unmapped synthetic site. `view.<lang>.txt` gives statements,
 scopes and callees with ids, names and labels, derived from shipped declarations.
-`printed.<lang>` is exact printer output. `edits/1.<lang>.json` records an
+`printed.<lang>` is the readable print (FIG-6953): each declared function and
+`main` is written as authored source when reading the print back lowers to that
+same region, and otherwise in kernel form, opened by a `"use kernel"`
+directive. A module whose every region lifts is a plain workflow module.
+Regeneration checks READABLE-FIXPOINT (print, read and print again gives the
+same text) and READABLE-IDENTITY (a print with no kernel-form region lowers,
+with no base, to the document's identity and captions) for every case and for
+each module's canvas edit, its first plain tool argument, or else its first
+statement text, set to `"edited λ"`. READABLE-STYLE checks that a canvas edit of
+a lifted workflow prints as authored source, with no kernel scaffolding.
+`edits/1.<lang>.json` records an
 expanded Transaction, its base and effect context; its `.txt` shows the kernel
 diff, Correspondence and reprinted source. Refused cases pin stable codes.
 

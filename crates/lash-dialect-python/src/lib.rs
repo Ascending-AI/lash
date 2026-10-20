@@ -19,18 +19,20 @@ mod generated_operators;
 mod lower;
 mod package;
 mod printer;
+mod readable;
 mod scope;
 
 #[cfg(test)]
 mod tests;
 
 pub use diagnostics::{Code, GeneratedSourceCode};
-pub use generated::read;
+pub use generated::read_kernel;
 pub use lash_kernel_dialect::{
     CaptionSupport, GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat,
 };
 pub use package::define_helpers;
-pub use printer::print;
+pub use printer::print_kernel;
+pub use readable::{print, read};
 
 /// The captions the dialect spells: every kind, as `#:` comment lines
 /// directly above what they caption. A workflow module's front end, the
@@ -110,7 +112,7 @@ pub fn lower_with_limits(
     mode: Mode<'_>,
     limits: SourceLimits,
 ) -> Result<Lowered, Diagnostic> {
-    lower_with_calls(source, environment, mode, limits, None)
+    lower_with_calls(source, environment, mode, limits, None, &[])
 }
 
 fn lower_with_calls(
@@ -119,6 +121,7 @@ fn lower_with_calls(
     mode: Mode<'_>,
     limits: SourceLimits,
     calls: Option<&mut std::collections::BTreeSet<String>>,
+    beside: &[String],
 ) -> Result<Lowered, Diagnostic> {
     if let Mode::Cell(cell) = mode {
         lower::check_binding_names(cell.bindings.iter().map(lash_kernel_doc::Name::as_str))?;
@@ -156,6 +159,7 @@ fn lower_with_calls(
         limits.max_nesting,
         calls,
         spelled,
+        beside,
     )
 }
 
@@ -179,6 +183,7 @@ impl FrontEnd for Python {
             Mode::Cell(cell),
             self.limits,
             Some(&mut calls),
+            &[],
         )?;
         Ok(calls)
     }

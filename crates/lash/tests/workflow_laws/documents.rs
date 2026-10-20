@@ -347,9 +347,11 @@ async fn a_publication_holds_its_checked_source_map_and_refuses_one_that_does_no
         import("export async function digest(items: string[]) { const out = items.map((item) => item); return out; }").await;
     let other = import("export async function digest(items: string[]) { return items; }").await;
     let entry = Name::new("digest");
+    let embedding = lash_vm_worker::built_embedding(&Default::default()).expect("embedding");
     let printed = lash::typescript::print(
         &document,
         None,
+        embedding.library(),
         lash::dialect::PrintOptions {
             source_map: true,
             ..Default::default()

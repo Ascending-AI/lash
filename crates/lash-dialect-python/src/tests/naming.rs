@@ -136,11 +136,11 @@ main {{
 }}"#
     ))
     .expect("a document");
-    let printed = crate::print(&document, None, Default::default())
+    let printed = crate::print_kernel(&document, None, Default::default())
         .expect("the document prints")
         .source;
     assert!(printed.contains("await dataframe.run("), "{printed}");
-    let (read, _) = crate::read(&printed, &document, Default::default())
+    let (read, _) = crate::read_kernel(&printed, &document, Default::default())
         .unwrap_or_else(|error| panic!("{error}\n{printed}"));
     assert_eq!(
         read.canonical_bytes(),

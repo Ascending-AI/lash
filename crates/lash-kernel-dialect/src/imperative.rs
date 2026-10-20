@@ -368,6 +368,15 @@ impl SourceWriter {
     pub fn holds_caption(&self, wanted: impl Fn(&CaptionTarget) -> bool) -> bool {
         self.captions.keys().any(wanted)
     }
+    /// The bytes written so far.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.source.len()
+    }
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.source.is_empty()
+    }
     pub fn write(&mut self, text: &str) {
         if self.error.is_some() {
             return;

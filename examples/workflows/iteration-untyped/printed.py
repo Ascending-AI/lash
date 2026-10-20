@@ -5,8 +5,6 @@ async def demo(items):
     #: Go through each item
     for item in items:
         #: Echo the item and keep the reply
-        out[helper_list_len(out)] = (await helper_py_reply((await corpus.echo(item, result="json"))))
+        out.append(await corpus.echo(item))
     #: Give back the replies
     return out
-def main():
-    demo = declared.demo

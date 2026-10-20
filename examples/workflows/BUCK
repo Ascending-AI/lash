@@ -97,6 +97,7 @@ lash_rust_unit_test(
     srcs_patterns = [
         "src/cell.rs",
         "src/lib.rs",
+        "src/printed.rs",
         "src/readable.rs",
     ],
     data_patterns = [

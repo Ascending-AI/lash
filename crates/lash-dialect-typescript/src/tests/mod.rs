@@ -30,12 +30,25 @@ mod printer;
 mod printer_corpus;
 mod process;
 mod protocol_loops;
+mod readable_print;
 mod readable_source;
 mod remaining_builtins;
 mod source_map;
 mod text_building;
 mod trim;
 mod typed;
+
+/// The kernel surface alone, as the shared readability harness prints it.
+impl lash_kernel_dialect::readability::SurfacePrinter for crate::TypeScript {
+    fn print(
+        &self,
+        document: &lash_kernel_doc::Document,
+        captions: Option<&lash_kernel_doc::Captions>,
+        options: lash_kernel_dialect::PrintOptions,
+    ) -> Result<lash_kernel_dialect::PrintedSource, lash_kernel_dialect::PrintError> {
+        crate::print_kernel(document, captions, options)
+    }
+}
 
 /// Dependencies and the building-artifact function for independent helper definitions.
 pub(crate) fn kernel_registry() -> lash_kernel_doc::FunctionRegistry {

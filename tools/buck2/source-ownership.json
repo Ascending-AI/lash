@@ -722,6 +722,7 @@
     "unit_test_sources": [
       "src/cell.rs",
       "src/lib.rs",
+      "src/printed.rs",
       "src/readable.rs"
     ],
     "unit_test_includes": [

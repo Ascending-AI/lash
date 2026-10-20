@@ -27,9 +27,8 @@ use lash_kernel_dialect::{
     CellEnvironment, Diagnostic, Environment, Library, Lowered, Mode, workflow,
 };
 use lash_kernel_doc::{
-    ActExpr, ActKind, AssignOrder, Callee, Catch, Closure, Document, EffectName, Expr,
-    FunctionCatalog, FunctionId, FunctionName, Literal, Name, NumberPolicy, Place, Rhs, Stmt,
-    TryStmt, validate_document,
+    ActExpr, ActKind, AssignOrder, Callee, Catch, Closure, Document, EffectName, Expr, FunctionId,
+    FunctionName, Literal, Name, NumberPolicy, Place, Rhs, Stmt, TryStmt, validate_document,
 };
 use ruff_python_ast::{self as ast};
 use ruff_text_size::{Ranged, TextRange};
@@ -241,7 +240,12 @@ pub(crate) fn check_binding_names<'a>(names: impl IntoIterator<Item = &'a str>) 
     Ok(())
 }
 
-/// Lowers a parsed module against `environment`.
+/// Lowers a parsed module against `environment`, its fresh names clear
+/// of `beside` as well as of the module's own words.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each is an independent input of one lowering"
+)]
 pub(crate) fn lower_with_calls(
     module: &ast::ModModule,
     source: &str,
@@ -250,6 +254,7 @@ pub(crate) fn lower_with_calls(
     max_nesting: usize,
     calls: Option<&mut BTreeSet<String>>,
     spelled: crate::captions::Spelled,
+    beside: &[String],
 ) -> Lowering<Lowered> {
     let (cell, workflow) = match mode {
         Mode::Cell(cell) => (cell, None),
@@ -276,6 +281,9 @@ pub(crate) fn lower_with_calls(
         .map(str::to_string)
         .collect();
     taken.extend(cell.bindings.iter().map(|name| name.as_str().to_string()));
+    // Words of source read beside this one, which the document's other
+    // regions were lowered with (`crate::readable`).
+    taken.extend(beside.iter().cloned());
     let (globals, nonlocals) = scope::rebound(&module.body);
     let rebound: BTreeSet<String> = globals.union(&nonlocals).cloned().collect();
     let mut bindings = scope::bindings(&module.body, None, &rebound, &BTreeSet::new());
@@ -383,7 +391,8 @@ pub(crate) fn lower_with_calls(
             .assemble(&mut document, &mut lowerer.declared_notes)
             .map_err(workflow::ModuleError::into_diagnostic)?;
     }
-    document.manifest.functions = reachable(lowerer.used, environment.library);
+    document.manifest.functions =
+        lash_kernel_dialect::regions::reachable(lowerer.used, environment.library);
     document.manifest.effects = lowerer.performed;
     lash_kernel_dialect::require_through_bodies(&mut document.manifest, environment.library);
     if !lowerer.saved_used.is_empty() {
@@ -399,7 +408,7 @@ pub(crate) fn lower_with_calls(
             error.repairs.push("provide the saved function's required tools and library functions, or define a function using this session's tools".to_owned());
             error
         })?;
-        document.manifest.functions = reachable(
+        document.manifest.functions = lash_kernel_dialect::regions::reachable(
             std::mem::take(&mut document.manifest.functions),
             environment.library,
         );
@@ -445,40 +454,6 @@ pub(crate) fn lower_with_calls(
         captions,
         validated: true,
     })
-}
-
-/// The functions a document lists: those it calls and those their bodies
-/// reach (`K-DOC-002`).
-fn reachable(
-    used: BTreeMap<FunctionId, FunctionName>,
-    library: &dyn Library,
-) -> BTreeMap<FunctionId, FunctionName> {
-    let mut listed = BTreeMap::new();
-    let mut pending: Vec<(FunctionId, FunctionName)> = used.into_iter().collect();
-    while let Some((function, name)) = pending.pop() {
-        let std::collections::btree_map::Entry::Vacant(entry) = listed.entry(function) else {
-            continue;
-        };
-        entry.insert(name);
-        let catalog: &dyn FunctionCatalog = library;
-        // A registered function lists its callees without being decoded.
-        if let Some(registered) = catalog.registered(&function) {
-            pending.extend(registered.listed());
-        } else if let Some(body) = catalog
-            .definition(&function)
-            .and_then(|definition| definition.body())
-        {
-            // An identity digests its function's name, so a function already
-            // listed is listed by the name any other body calls it by.
-            pending.extend(
-                body.functions
-                    .iter()
-                    .filter(|(function, _)| !listed.contains_key(*function))
-                    .map(|(function, name)| (*function, name.clone())),
-            );
-        }
-    }
-    listed
 }
 
 impl Lowerer<'_> {

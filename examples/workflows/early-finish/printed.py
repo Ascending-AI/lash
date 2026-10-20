@@ -1,4 +1,5 @@
 async def main():
+    "use kernel"
     with k.finish():
         with k.bind("t1"):
             (await control.finish("done"))

@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use lash_kernel_dialect::Printer as _;
+use lash_kernel_dialect::readability::SurfacePrinter as _;
 use lash_kernel_doc::{self as k, EffectName, Name, Param, Signature, Type};
 
 use super::{lower_against, print_document};
@@ -136,7 +136,7 @@ main {{
         .expect("the document prints")
         .source;
     assert!(printed.contains("await dataframe.run("), "{printed}");
-    let (read, _) = crate::read(&printed, &document, Default::default())
+    let (read, _) = crate::read_kernel(&printed, &document, Default::default())
         .unwrap_or_else(|error| panic!("{error}\n{printed}"));
     assert_eq!(
         read.canonical_bytes(),

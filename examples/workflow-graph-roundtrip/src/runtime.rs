@@ -940,6 +940,7 @@ impl Overlay {
 #[derive(Clone)]
 pub struct WorkflowHost {
     pub(crate) core: LashCore,
+    pub(crate) workers: lash::vm::WorkerService,
     pub(crate) tools: Arc<crate::display::HostTools>,
 }
 
@@ -970,7 +971,7 @@ pub fn core(backend: lash::Backend) -> lash::Result<WorkflowHost> {
     };
     let core = LashCore::standard_builder(backend)
         .plugin(Arc::new(lash::vm::KernelProcessPluginFactory::new(
-            workers,
+            workers.clone(),
             lash::vm::TYPESCRIPT_DIALECT,
             bounds,
         )))
@@ -985,7 +986,11 @@ pub fn core(backend: lash::Backend) -> lash::Result<WorkflowHost> {
             lash::persistence::LeaseOwnerId::new("workflow-graph"),
             lash::persistence::LeaseIncarnationId::new(uuid::Uuid::new_v4().to_string()),
         ))?;
-    Ok(WorkflowHost { core, tools })
+    Ok(WorkflowHost {
+        core,
+        workers,
+        tools,
+    })
 }
 
 /// Starts runs through the engine's process admission API.

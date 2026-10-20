@@ -144,13 +144,15 @@ pub trait FrontEnd {
     }
 }
 
-/// Writes a document as plain source in the dialect, without compiling or
-/// admitting it: only code an agent could have written. The environment (the
-/// manifest, entries' signatures, private bindings, helper identities and
-/// name renames) stays in the document; [`Dialect::read`] takes it from the
-/// document the source was printed from and reconstructs identical canonical
-/// bytes. Optional maps describe final UTF-8 offsets and never change the
-/// source.
+/// Writes a document as plain source in the dialect, without admitting it:
+/// only code an agent could have written, read back by [`Dialect::read`]
+/// against the document it was printed from to identical canonical bytes.
+/// `library` is the one the document's dialect functions resolve in: a
+/// printer may check the source it proposes by lowering it there. What the
+/// source cannot spell (the manifest, entries' signatures, private
+/// bindings, helper identities and name renames of a region in the
+/// dialect's kernel surface) stays in the document. Optional maps describe
+/// final UTF-8 offsets and never change the source.
 ///
 /// `captions`, of `document`, are spelled in the dialect's caption syntax;
 /// the source then reads back with them (`K-CAP-002`). Each caption the
@@ -162,6 +164,7 @@ pub trait Printer {
         &self,
         document: &Document,
         captions: Option<&Captions>,
+        library: &dyn crate::Library,
         options: crate::PrintOptions,
     ) -> Result<crate::PrintedSource, crate::PrintError>;
 }
@@ -192,10 +195,15 @@ impl CaptionSupport {
 }
 
 /// A dialect's reader of exported source ([`Dialect::read`]): the source,
-/// the base document it was printed from and the limits it is read under,
-/// to the document and the captions the source spells.
-pub type ReadSource =
-    fn(&str, &Document, crate::GeneratedSourceLimits) -> Result<(Document, Captions), Diagnostic>;
+/// the base document it was printed from, the library its printer lowered
+/// against and the limits it is read under, to the document and the
+/// captions the source spells.
+pub type ReadSource = fn(
+    &str,
+    &Document,
+    &dyn crate::Library,
+    crate::GeneratedSourceLimits,
+) -> Result<(Document, Captions), Diagnostic>;
 
 /// A dialect, as an embedder installs it: its front end, reader and
 /// printer. The library functions it lowers to are lash's packages.
@@ -204,10 +212,10 @@ pub struct Dialect {
     pub name: String,
     pub front_end: Box<dyn FrontEnd>,
     /// Read exported source back against `base`, the document it was printed
-    /// from, without a library, admission or execution: the environment is
-    /// the base document's, the code is the source's. This is separate from
-    /// authored cell lowering and from printing. The captions are those the
-    /// source spells, of the document read.
+    /// from, without admission or execution: what the source spells is the
+    /// source's, the rest of the environment the base document's. This is
+    /// separate from authored cell lowering and from printing. The captions
+    /// are those the source spells, of the document read.
     pub read: ReadSource,
     /// Absent until the dialect ships its printer.
     pub printer: Option<Box<dyn Printer>>,
