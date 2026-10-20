@@ -54,16 +54,18 @@ fn run_rule(rule: &str, text: &str) {
 }
 
 pub(super) fn corpus_registry() -> lash_kernel_doc::FunctionRegistry {
-    let mut registry = lash_kernel_doc::FunctionRegistry::new();
+    let mut registry = lash_kernel_doc::FunctionRegistry::declarations();
     lash_kernel_vm::register_machine_functions(&mut registry).expect("register kernel functions");
     lash_kernel_lib::register_numbers(&mut registry).expect("register numeric natives");
     lash_kernel_lib::register_text_json(&mut registry).expect("register text and JSON natives");
     lash_kernel_lib::register_collections(&mut registry).expect("register collection functions");
-    lash_ext_regex_ecma::register(
+    lash_ext_regex_ecma::register(&mut registry).expect("register regex natives");
+    lash_ext_regex_ecma::implement(
         &mut registry,
         &std::sync::Arc::new(lash_ext_regex_ecma::Engine::new(4)),
+        lash_kernel_doc::ArtifactDigest::from_bytes([0x5a; 32]),
     )
-    .expect("register regex natives");
+    .expect("fixture regex natives");
     registry
 }
 
@@ -96,7 +98,7 @@ fn embedder_fan_out_parks_and_resumes() {
         .collect();
     let report = kernel_embedder::embed::<lash_kernel_vm::KernelMachine>(
         kernel_embedder::FAN_OUT,
-        std::sync::Arc::new(lash_kernel_doc::FunctionRegistry::new()),
+        std::sync::Arc::new(lash_kernel_doc::FunctionRegistry::declarations()),
         answers,
     )
     .expect("real kernel machine parks, exports, rebuilds, and resumes");

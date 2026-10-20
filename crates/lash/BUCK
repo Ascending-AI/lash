@@ -7104,14 +7104,14 @@ lash_rust_feature_test(
     data_patterns = [],
     extra_compile_data = [],
     extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin__fv_51398dbb",
+        "//crates/lash-vm-worker:lash-vm-worker__bin__fv_f7409c03",
     ],
     library = "//crates/lash:lash__fv_608f5196",
     library_crate_name = "lash",
     manifest_dir = "crates/lash",
     package_name = "lash-runtime",
     srcs_patterns = ["tests/kernel_two_build_claim.rs"],
-    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin__fv_51398dbb)"},
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin__fv_f7409c03)"},
     tags = [
         "feature-lane",
         "manual",

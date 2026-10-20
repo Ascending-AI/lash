@@ -1,6 +1,6 @@
 unit Function(Name("demo"))
 statement fn demo/0 ordinal=3 depth=0 block=fn demo Let { name: Name("größe"), value: Expr(Literal(Text("日本 🦀"))) }
-statement fn demo/1 ordinal=4 depth=0 block=fn demo ReturnVia { value: Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Any, then_yield: true }, args: [Act(ActExpr { kind: Call(Library(FunctionId(ac89e50257ae69e06fe10e8faa4c6567d50315aca6fcecee2a967bdc8b4af23b))), args: [Call { function: FunctionId(ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb), args: [Variable(Name("größe")), Variable(Name("name"))] }] })] }), policy: FunctionId(798354cd470dc9b995a7c513f744cb66cdae9adcc51f7ba32b37b9b36a2c76fd) }
+statement fn demo/1 ordinal=4 depth=0 block=fn demo ReturnVia { value: Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Any, then_yield: true }, args: [Act(ActExpr { kind: Call(Library(FunctionId(ac89e50257ae69e06fe10e8faa4c6567d50315aca6fcecee2a967bdc8b4af23b))), args: [Call { function: FunctionId(ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb), args: [Variable(Name("größe")), Variable(Name("name"))] }] })] }), policy: FunctionId(ec07dd4e314068cde58b9c1223c9fc11094029f4f5fe6f8d325a12e10b32a475) }
 scope fn demo ordinal=2 depth=0 Entry
 action fn demo/1/0 Some(Effect(QualifiedName("corpus.echo")))
 action fn demo/1/0/0 library id=ac89e50257ae69e06fe10e8faa4c6567d50315aca6fcecee2a967bdc8b4af23b name=ts.boundary label="TypeScript boundary"

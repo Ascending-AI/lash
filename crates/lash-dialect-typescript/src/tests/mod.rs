@@ -35,22 +35,18 @@ mod text_building;
 mod trim;
 mod typed;
 
-/// The real library and extension definitions, before the dialect helpers.
+/// Dependencies and the building-artifact function for independent helper definitions.
 pub(crate) fn kernel_registry() -> lash_kernel_doc::FunctionRegistry {
-    let mut registry = lash_kernel_doc::FunctionRegistry::new();
-    lash_kernel_lib::register_numbers(&mut registry).expect("numeric library registration");
-    lash_kernel_lib::register_text_json(&mut registry).expect("text library registration");
-    lash_kernel_vm::register_machine_functions(&mut registry)
-        .expect("machine library registration");
-    lash_kernel_lib::register_collections(&mut registry).expect("collection library registration");
-    lash_ext_regex_ecma::register(
-        &mut registry,
-        &std::sync::Arc::new(lash_ext_regex_ecma::Engine::new(32)),
-    )
-    .expect("regex extension registration");
-    lash_ext_date_ecma::register(&mut registry).expect("date extension registration");
-    lash_ext_url_whatwg::register(&mut registry).expect("URL extension registration");
-    registry
+    static BASE: OnceLock<lash_kernel_doc::FunctionRegistry> = OnceLock::new();
+    BASE.get_or_init(|| {
+        lash_ext_helper_compiler::library::Library::of(
+            lash_ext_helper_compiler::library::Dialect::TypeScript,
+        )
+        .expect("source packages")
+        .base_registry()
+        .expect("package dependencies")
+    })
+    .clone()
 }
 
 /// The exact library definitions the unit machine executes.

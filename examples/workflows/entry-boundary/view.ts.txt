@@ -1,8 +1,8 @@
 unit Function(Name("arrow"))
-statement fn arrow/0 ordinal=17 depth=0 block=fn arrow ReturnVia { value: Variable(Name("value")), policy: FunctionId(798354cd470dc9b995a7c513f744cb66cdae9adcc51f7ba32b37b9b36a2c76fd) }
+statement fn arrow/0 ordinal=17 depth=0 block=fn arrow ReturnVia { value: Variable(Name("value")), policy: FunctionId(ec07dd4e314068cde58b9c1223c9fc11094029f4f5fe6f8d325a12e10b32a475) }
 scope fn arrow ordinal=16 depth=0 Entry
 caption callable 0 block=fn arrow "Give back the number it is given"
 unit Function(Name("declared"))
-statement fn declared/0 ordinal=19 depth=0 block=fn declared ReturnVia { value: Literal(Text("top")), policy: FunctionId(798354cd470dc9b995a7c513f744cb66cdae9adcc51f7ba32b37b9b36a2c76fd) }
+statement fn declared/0 ordinal=19 depth=0 block=fn declared ReturnVia { value: Literal(Text("top")), policy: FunctionId(ec07dd4e314068cde58b9c1223c9fc11094029f4f5fe6f8d325a12e10b32a475) }
 scope fn declared ordinal=18 depth=0 Entry
 caption callable 0 block=fn declared "Answer from the top level"

@@ -394,11 +394,10 @@ impl Lowerer<'_> {
             }
             _ => return Ok(None),
         }
-        let brand = Expr::Member(Box::new(Member::Field {
-            target: object.expr(),
-            field: "__ts_brand".to_string(),
-        }));
-        let branded = self.same(brand, Expr::Tuple(Vec::new()))?;
+        let branded = self.native(
+            "record.contains",
+            vec![object.expr(), Operand::text("__lash_brand").expr()],
+        )?;
         tests.push(self.native("bool.not", vec![branded])?);
         Ok(Some(tests))
     }

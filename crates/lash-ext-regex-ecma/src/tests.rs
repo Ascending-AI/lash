@@ -15,6 +15,44 @@ use crate::{
 
 use super::testsupport::{Bench, Fixture, fresh};
 
+/// BRAND-ONE: package values carry one canonical (package, type) brand.
+#[test]
+fn brand_one_regex_constructor_uses_the_canonical_package_type() {
+    let result = run(
+        &Arc::new(Engine::new(1)),
+        Operation::CompileCheck,
+        Limit::Stated,
+        &|heap| vec![heap.text("a"), heap.text("")],
+    );
+    let Datum::Record(fields) = result.outcome.unwrap() else {
+        panic!("compile_check must return a regex record");
+    };
+    assert_eq!(
+        fields
+            .iter()
+            .find(|(name, _)| name == "__lash_brand")
+            .map(|(_, value)| value),
+        Some(&Datum::Tuple(vec![
+            Datum::Text("regex.ecma".into()),
+            Datum::Text("reg_exp".into()),
+        ])),
+    );
+    assert_eq!(
+        fields
+            .iter()
+            .find(|(name, _)| name == "__lash_built")
+            .map(|(_, value)| value),
+        Some(&Datum::Bytes(lash_kernel_doc::Bytes::new(
+            super::testsupport::BUILT.as_bytes().to_vec()
+        ))),
+    );
+    assert_eq!(
+        fields.len(),
+        5,
+        "one brand, its artifact and the three matching fields"
+    );
+}
+
 #[derive(Debug, PartialEq)]
 enum Failure {
     Raised(lash_kernel_doc::ErrorDatum),
@@ -81,8 +119,9 @@ fn run(
     limit: Limit,
     arguments: &dyn Fn(&mut Bench) -> Vec<Value>,
 ) -> Run {
-    let mut registry = FunctionRegistry::new();
-    let functions = register(&mut registry, engine).unwrap();
+    let mut registry = FunctionRegistry::declarations();
+    let functions = register(&mut registry).unwrap();
+    crate::implement(&mut registry, engine, super::testsupport::BUILT).unwrap();
     let registered = registry.get(&functions.get(operation)).unwrap();
     let definition = registered.definition().as_ref();
 
@@ -504,7 +543,16 @@ fn compile_check_returns_the_regex_record_or_a_syntax_error() {
     assert_eq!(
         check("a+", "yg").unwrap(),
         fields(&[
-            ("brand", text(BRAND)),
+            (
+                "__lash_brand",
+                Datum::Tuple(vec![text(BRAND), text("reg_exp")])
+            ),
+            (
+                "__lash_built",
+                Datum::Bytes(lash_kernel_doc::Bytes::new(
+                    super::testsupport::BUILT.as_bytes().to_vec()
+                ))
+            ),
             ("pattern", text("a+")),
             ("flags", text("gy")),
             ("lastIndex", integer(0)),
@@ -539,7 +587,7 @@ fn operands_of_the_wrong_shape_are_typed_errors() {
     assert_eq!(
         kind(&|heap| {
             let fields = [
-                ("brand", heap.text("regex.python")),
+                ("__lash_brand", heap.text("regex.python")),
                 ("pattern", heap.text("a")),
                 ("flags", heap.text("")),
                 ("lastIndex", int(0)),
@@ -551,8 +599,23 @@ fn operands_of_the_wrong_shape_are_typed_errors() {
     );
     assert_eq!(
         kind(&|heap| {
+            let brand = heap
+                .run(&[], u64::MAX, |_, new| {
+                    let package = new.text(BRAND);
+                    let ty = new.text("reg_exp");
+                    new.allocate(lash_kernel_doc::NewObject::Tuple(vec![package, ty]))
+                })
+                .unwrap()
+                .0;
+            let built = heap
+                .run(&[], u64::MAX, |_, new| {
+                    new.bytes(super::testsupport::BUILT.as_bytes())
+                })
+                .unwrap()
+                .0;
             let fields = [
-                ("brand", heap.text(BRAND)),
+                ("__lash_brand", brand),
+                ("__lash_built", built),
                 ("pattern", heap.text("a")),
                 ("flags", heap.text("")),
                 ("lastIndex", int(0)),

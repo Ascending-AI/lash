@@ -53,6 +53,11 @@ fn ident(name: &str, taken: &mut BTreeSet<String>) -> String {
             }
         })
         .collect();
+    ident = ident
+        .split('_')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("_");
     if ident.starts_with(|c: char| c.is_ascii_digit()) {
         ident.insert(0, '_');
     }
@@ -290,7 +295,15 @@ pub fn body_perform_plans(source: &str) -> Result<String, String> {
                 .map_err(|error| error.to_string())?,
         );
     }
-    Ok(generate_library(&Library { registry, helpers }, Dialect::Python)?.rust)
+    Ok(generate_library(
+        &Library {
+            packages: vec![],
+            registry,
+            helpers,
+        },
+        Dialect::Python,
+    )?
+    .rust)
 }
 
 /// Where the plan of the `dataframe` fixture's `collect_rows` is checked
@@ -331,6 +344,7 @@ pub fn dataframe_plans() -> Result<String, String> {
         .function("dataframe.data_quanta.collect_rows")
         .ok_or("the fixture defines no `collect_rows`")?;
     let library = Library {
+        packages: vec![kernel, dataframe],
         registry,
         helpers: vec![collect_rows],
     };
@@ -360,7 +374,15 @@ mod tests {
             let definition = parse_definition(definition).unwrap();
             helpers.push(registry.register(definition, None).unwrap());
         }
-        let generated = generate_library(&Library { registry, helpers }, Dialect::Python).unwrap();
+        let generated = generate_library(
+            &Library {
+                packages: vec![],
+                registry,
+                helpers,
+            },
+            Dialect::Python,
+        )
+        .unwrap();
         assert_eq!(generated.planned, 2, "{}", generated.manifest);
         let facts: Vec<(&str, &str, &str)> = generated
             .manifest

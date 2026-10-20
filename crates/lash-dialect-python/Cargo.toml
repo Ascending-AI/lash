@@ -32,6 +32,7 @@ serde_json = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
+lash-ext-helper-compiler = { workspace = true }
 lash-ext-py-core = { workspace = true }
 lash-ext-date-ecma = { workspace = true }
 lash-ext-url-whatwg = { workspace = true }

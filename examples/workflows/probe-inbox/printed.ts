@@ -8,7 +8,7 @@ export async function digest(items) {
     ((t2) => (undefined))((await await sleep(6000.0)));
     let t3 = undefined;
     if (helper_same(helper_kind(item), "record")) {
-      if (!(helper_same(item.__ts_brand, [] as const))) {
+      if (!(helper_record_contains(item, "__lash_brand"))) {
         t3 = item.title;
       } else {
         t3 = await helper_ts_read(item, "title");

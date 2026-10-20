@@ -18,26 +18,13 @@ use lash_kernel_vm::{
 };
 use serde::Deserialize;
 
-use crate::define_helpers;
-
 /// The real kernel registry, with every dialect helper defined against it.
 pub(super) fn registry() -> &'static Arc<FunctionRegistry> {
     static REGISTRY: OnceLock<Arc<FunctionRegistry>> = OnceLock::new();
     REGISTRY.get_or_init(|| {
-        let mut registry = super::kernel_registry();
-        let mut library = lash_kernel_dialect::NamedLibrary::from_registry(&registry)
-            .expect("unique kernel names");
-        let mut helpers = Vec::new();
-        for definition in define_helpers(&mut library).unwrap_or_else(|error| panic!("{error}")) {
-            helpers.push(
-                registry
-                    .register(definition, None)
-                    .unwrap_or_else(|error| panic!("{error}")),
-            );
-        }
-        // The operations' natives, as a worker installs them.
-        lash_ext_ts_core::implement(&mut registry, helpers).expect("operation natives");
-        Arc::new(registry)
+        let embedding =
+            lash_vm_worker::built_embedding(&Default::default()).expect("built packages");
+        Arc::clone(embedding.registry().expect("installed package natives"))
     })
 }
 
@@ -517,7 +504,7 @@ pub(super) fn plain_record_resume(source: &str, slice: u64, restore: bool) -> (D
 fn plain_record_mid_path_park_resumes_the_guarded_heap() {
     let source = "const r = { next: { leaf: 0 } }; r.next.leaf = await echo(7); await finish(r);";
     let text = super::main_text_with_effects(source);
-    assert!(text.contains("__ts_brand"), "{text}");
+    assert!(text.contains("__lash_brand"), "{text}");
     let plain = plain_record_resume(source, u64::MAX, false);
     let restored = plain_record_resume(source, u64::MAX, true);
     assert_eq!((&plain.0, plain.1), (&restored.0, restored.1));
@@ -534,7 +521,7 @@ fn plain_record_mid_path_park_resumes_the_guarded_heap() {
 fn plain_record_paths_account_charge_across_slice_resume() {
     let source = "const r = { next: { leaf: 0 } }; for (let n = 0; n < 3; n++) { r.next.leaf = n; } await finish(r);";
     let text = super::main_text_with_effects(source);
-    assert!(!text.contains("__ts_brand"), "{text}");
+    assert!(!text.contains("__lash_brand"), "{text}");
     let plain = plain_record_resume(source, u64::MAX, false);
     let sliced = plain_record_resume(source, 1, true);
     assert_eq!((&plain.0, plain.1), (&sliced.0, sliced.1));

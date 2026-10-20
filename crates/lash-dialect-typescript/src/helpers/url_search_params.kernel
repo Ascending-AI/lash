@@ -1,3 +1,4 @@
+use url.whatwg.__built
 # JavaScript url_search_params behavior, expressed in kernel code.
 use ts.callable
 use eq
@@ -58,7 +59,7 @@ body {
   let pairs = []
   if same(kind(input), "absent") {} else {
     if same(kind(input), "record") {
-      if same((input.__ts_brand, input.__ts_type), ((), "brand:url.search_params")) {
+      if same(input.__lash_brand, ("url.whatwg", "url_search_params")) {
         for pair in input.pairs { set pairs[list.len(pairs)] = [pair[0], pair[1]] }
       } else {
         for key in record.keys(input) { let builtin_arg_0 = input[key]
@@ -81,7 +82,8 @@ let value = invoke ts.to_string(builtin_arg_2)
       }
     }
   }
-  return {__ts_brand: (), __ts_type: "brand:url.search_params", pairs: pairs, owner: absent}
+  let built = invoke url.whatwg.__built()
+  return {__lash_brand: ("url.whatwg", "url_search_params"), __lash_built: built, pairs: pairs, owner: absent}
 }
 
 function ts.url_search_params.is(value: Any) -> Bool
@@ -89,7 +91,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
-  if same(kind(value), "record") { return same((value.__ts_brand, value.__ts_type), ((), "brand:url.search_params")) }
+  if same(kind(value), "record") { return same(value.__lash_brand, ("url.whatwg", "url_search_params")) }
   return false
 }
 

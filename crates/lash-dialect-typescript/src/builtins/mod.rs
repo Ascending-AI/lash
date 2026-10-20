@@ -311,7 +311,7 @@ impl<'a> IntoIterator for &'a Rows {
 /// writing one leaves the record plain.
 pub(crate) fn ordinary_prefix(prefix: &str) -> bool {
     let table = table();
-    !"__ts_brand".starts_with(prefix)
+    !"__lash_brand".starts_with(prefix)
         && !table
             .properties
             .from(prefix)

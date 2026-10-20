@@ -1,3 +1,4 @@
+use typescript.__built
 # JavaScript Array semantics on kernel collections.
 # Empty tuple slots are holes; JS values never use tuples.
 
@@ -124,7 +125,7 @@ charge 4
 body {
   let receiver = invoke ts.receiver(target)
   if same(receiver, "list") {} else {
-    if same(receiver, "brand:regex.match") {
+    if same(receiver, "brand:typescript.regex_match") {
       throw error.new("TS_ARRAY_LIKE_MATCH_UNSUPPORTED", "match arrays do not take writes", null)
     }
     # A boolean or number receiver stands for the wrapper object ToObject
@@ -143,7 +144,7 @@ charge 4
 body {
   let receiver = invoke ts.receiver(target)
   if same(receiver, "list") {} else {
-    if same(receiver, "brand:regex.match") {
+    if same(receiver, "brand:typescript.regex_match") {
       throw error.new("TS_ARRAY_LIKE_MATCH_UNSUPPORTED", "match arrays do not take writes", null)
     }
     # As for a write, a deletion lands on the call's wrapper object.
@@ -202,7 +203,7 @@ errors "type_error", "RangeError"
 charge 8
 body {
   if same(kind(value), "list") { return true }
-  if same(kind(value), "record") { return same((value.__ts_brand, value.__ts_type), ((), "brand:regex.match")) }
+  if same(kind(value), "record") { return same(value.__lash_brand, ("typescript", "regex_match")) }
   return false
 }
 
@@ -1300,7 +1301,7 @@ body {
   do invoke ts.require_object_coercible(this)
   let receiver = invoke ts.receiver(this)
   let array = same(receiver, "list")
-  if same(receiver, "brand:regex.match") { set array = true }
+  if same(receiver, "brand:typescript.regex_match") { set array = true }
   let arguments = []
   if array {
     let output = invoke ts.array.join(this, arguments)
@@ -1320,7 +1321,7 @@ body {
   if same(receiver, "map") { return "[object Map]" }
   if same(receiver, "set") { return "[object Set]" }
   if same(receiver, "timestamp") { return "[object Date]" }
-  if same(receiver, "brand:regex.ecma") { return "[object RegExp]" }
+  if same(receiver, "brand:regex.ecma.reg_exp") { return "[object RegExp]" }
   return "[object Object]"
 }
 
@@ -1719,7 +1720,8 @@ body {
     let value = num.to_float(position)
     return {value: value, done: false}
   }
-  return {__ts_brand: (), __ts_type: "brand:ts.iterator", next: ("ts.function", "", "next", 0.0, next, {})}
+  let built = invoke typescript.__built()
+  return {__lash_brand: ("typescript", "iterator"), __lash_built: built, next: ("ts.function", "", "next", 0.0, next, {})}
 }
 
 function ts.array.values(this: Any, args: List(Any)) -> Any
@@ -1742,7 +1744,8 @@ body {
     let value = invoke ts.get(this, position)
     return {value: value, done: false}
   }
-  return {__ts_brand: (), __ts_type: "brand:ts.iterator", next: ("ts.function", "", "next", 0.0, next, {})}
+  let built = invoke typescript.__built()
+  return {__lash_brand: ("typescript", "iterator"), __lash_built: built, next: ("ts.function", "", "next", 0.0, next, {})}
 }
 
 function ts.array.entries(this: Any, args: List(Any)) -> Any
@@ -1766,7 +1769,8 @@ body {
     set value = [num.to_float(position), value]
     return {value: value, done: false}
   }
-  return {__ts_brand: (), __ts_type: "brand:ts.iterator", next: ("ts.function", "", "next", 0.0, next, {})}
+  let built = invoke typescript.__built()
+  return {__lash_brand: ("typescript", "iterator"), __lash_built: built, next: ("ts.function", "", "next", 0.0, next, {})}
 }
 
 # Array iteration retains its receiver and reads length anew on each step.
@@ -1778,11 +1782,11 @@ errors "type_error"
 charge 8
 body {
   if same(kind(this), "record") {
-    if same((this.__ts_brand, this.__ts_type), ((), "brand:ts.iterator")) { return this }
+    if same(this.__lash_brand, ("typescript", "iterator")) { return this }
   }
   let k = invoke ts.receiver(this)
   let array = invoke ts.array.is(this)
-  if same(k, "brand:ts.arguments") { set array = true }
+  if same(k, "brand:typescript.arguments") { set array = true }
   if array { let array_arg_11 = []
   let iterator = invoke ts.array.values(this, array_arg_11) return iterator }
   let items = invoke ts.iterate(this)
@@ -1804,7 +1808,7 @@ body {
   for walked in ["list", "map", "set", "text"] {
     if same(k, walked) { return subject }
   }
-  if same(k, "brand:regex.match") { return subject.items }
+  if same(k, "brand:typescript.regex_match") { return subject.items }
   let iterator = invoke ts.array.iterator(subject)
   let method = iterator.next
   let next = invoke ts.callable(method)
@@ -1872,7 +1876,7 @@ body {
   let output = []
   let k = invoke ts.receiver(source)
   let iterable = same(k, "list")
-  for other in ["text", "map", "set", "brand:regex.match", "brand:ts.iterator"] {
+  for other in ["text", "map", "set", "brand:typescript.regex_match", "brand:typescript.iterator"] {
     if same(k, other) { set iterable = true }
   }
   let index = 0.0

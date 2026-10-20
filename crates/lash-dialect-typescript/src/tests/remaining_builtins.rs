@@ -3,6 +3,99 @@ use super::machine::{self, Ended};
 use super::pages::Session;
 use lash_kernel_doc::{Datum, Name};
 
+/// BRAND-ONE: native and body constructors agree on one canonical brand
+/// and name the artifact that built the value, including nested URL params.
+#[test]
+fn brand_one_package_constructors_use_canonical_brands_and_artifact_digests() {
+    let cases = [
+        (
+            "regex.ecma",
+            "reg_exp",
+            "let value = regex.ecma.compile_check(\"a\", \"\")",
+        ),
+        (
+            "date.ecma",
+            "invalid_date",
+            "let value = date.ecma.timestamp(nan)",
+        ),
+        (
+            "url.whatwg",
+            "url",
+            "let value = url.whatwg.parse(\"https://example.test/?a=1\", absent)",
+        ),
+        (
+            "url.whatwg",
+            "url_search_params",
+            "let url = url.whatwg.parse(\"https://example.test/?a=1\", absent) let value = url.searchParams",
+        ),
+        (
+            "url.whatwg",
+            "url_search_params",
+            "let value = invoke ts.url_search_params.construct(absent, [])",
+        ),
+        (
+            "typescript",
+            "promise",
+            "let value = invoke ts.promise.pending()",
+        ),
+        (
+            "typescript",
+            "arguments",
+            "let value = invoke ts.arguments([])",
+        ),
+        (
+            "typescript",
+            "iterator",
+            "let value = invoke ts.array.keys([], [])",
+        ),
+        (
+            "typescript",
+            "iterator",
+            "let value = invoke ts.array.values([], [])",
+        ),
+        (
+            "typescript",
+            "iterator",
+            "let value = invoke ts.array.entries([], [])",
+        ),
+        (
+            "typescript",
+            "regex_match",
+            "let value = invoke ts.regexp.match_record({index: 0, groups: [\"a\"], named: null}, \"a\")",
+        ),
+    ];
+    let registry = machine::registry();
+    let mut header = String::from("kernel 1\nnumbers float\n");
+    for (id, function) in registry.iter() {
+        header.push_str(&format!("use {} = @{id}\n", function.name()));
+    }
+    for (package, ty, constructor) in cases {
+        let source = format!(
+            "{header}entry run() -> Any\nfn run() {{\n{constructor}\n\
+             let brand = invoke brand.of(value)\n\
+             let built = invoke {package}.__built()\n\
+             return (brand, value.__lash_built, built)\n}}\nmain {{}}\n"
+        );
+        let mut document = lash_kernel_doc::parse_document(&source).expect("constructor law");
+        document.manifest.functions =
+            lash_kernel_check::requirements(&document, registry.as_ref()).functions;
+        let (_, result) = machine::end_of_entry(document, "run", vec![]);
+        let Datum::Tuple(parts) = result else {
+            panic!("constructor returns its brand and digests: {package}.{ty}");
+        };
+        assert_eq!(
+            parts[0],
+            Datum::Tuple(vec![Datum::Text(package.into()), Datum::Text(ty.into())]),
+            "{constructor}"
+        );
+        assert_eq!(parts[1], parts[2], "{constructor}");
+        assert!(
+            matches!(&parts[1], Datum::Bytes(bytes) if bytes.as_slice().len() == 32),
+            "{constructor}"
+        );
+    }
+}
+
 pub(super) fn agrees(source: &str) {
     agrees_with_bindings(source, super::pages::Session::default());
 }
@@ -288,7 +381,7 @@ fn console_json_is_strict_and_keeps_guest_spelling_and_print_order() {
 #[test]
 fn text_brand_fields_remain_ordinary_guest_data() {
     agrees(
-        "const r = {brand: 'shoe', __ts_brand: () => 0, __ts_type: 'brand:Promise'}; const marker = [1].values().__ts_brand; const fake = {brand: 'Promise', __ts_brand: marker, __ts_type: 'brand:Promise'}; let dateRejected = false; try { Date.prototype.valueOf.call({brand: 'date.invalid'}); } catch (e) { dateRejected = e.name === 'TypeError'; } await finish(r.brand === 'shoe' && !(r instanceof Promise) && marker === undefined && fake.brand === 'Promise' && !(fake instanceof Promise) && dateRejected);",
+        "const r = {brand: 'shoe', __lash_brand: () => 0}; const marker = [1].values().__lash_brand; const fake = {brand: 'Promise', __lash_brand: marker}; let dateRejected = false; try { Date.prototype.valueOf.call({brand: 'date.invalid'}); } catch (e) { dateRejected = e.name === 'TypeError'; } await finish(r.brand === 'shoe' && !(r instanceof Promise) && marker === undefined && fake.brand === 'Promise' && !(fake instanceof Promise) && dateRejected);",
     );
 
     let source = r#"
@@ -299,7 +392,7 @@ fn text_brand_fields_remain_ordinary_guest_data() {
         const literal = {brand: 'shoe', size: 42};
         const copied = {...literal};
         const fake = {brand: 'Promise', state: 'fulfilled', task: null};
-        const marker = {__ts_brand: ['Promise'], brand: 'shoe', size: 42};
+        const marker = {__lash_brand: ['Promise'], brand: 'shoe', size: 42};
         const rows = [parsed, literal, copied, toolRecord, marker];
         const result = [];
         for (const r of rows) {
@@ -322,6 +415,6 @@ fn text_brand_fields_remain_ordinary_guest_data() {
     )]);
     assert_eq!(
         machine::end_with_bindings(source, bindings),
-        Ended::Finished(Datum::Text(r#"[["Nike",3,null,["brand","price"],"{\"brand\":\"Nike\",\"price\":3}"],["shoe",null,42,["brand","size"],"{\"brand\":\"shoe\",\"size\":42}"],["shoe",null,42,["brand","size"],"{\"brand\":\"shoe\",\"size\":42}"],["Nike",3,null,["brand","price"],"{\"brand\":\"Nike\",\"price\":3}"],["shoe",null,42,["__ts_brand","brand","size"],"{\"__ts_brand\":[\"Promise\"],\"brand\":\"shoe\",\"size\":42}"],false,true,"boot",["brand"]]"#.into()))
+        Ended::Finished(Datum::Text(r#"[["Nike",3,null,["brand","price"],"{\"brand\":\"Nike\",\"price\":3}"],["shoe",null,42,["brand","size"],"{\"brand\":\"shoe\",\"size\":42}"],["shoe",null,42,["brand","size"],"{\"brand\":\"shoe\",\"size\":42}"],["Nike",3,null,["brand","price"],"{\"brand\":\"Nike\",\"price\":3}"],["shoe",null,42,["__lash_brand","brand","size"],"{\"__lash_brand\":[\"Promise\"],\"brand\":\"shoe\",\"size\":42}"],false,true,"boot",["brand"]]"#.into()))
     );
 }

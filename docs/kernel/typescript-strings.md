@@ -14,14 +14,16 @@ Unicode case conversion uses the library's pinned Unicode 17.0.0 definitions.
 Trimming and numeric parsing use ECMAScript WhiteSpace and LineTerminator
 code units: BOM is included and NEL is excluded.
 
-An internal receiver carries `__ts_brand: ()` and a text `__ts_type` tag.
-The empty kernel tuple cannot be produced by guest source or JSON; arrays
-are lists and function tokens are nonempty tuples. Guest properties named
-`brand`, `__ts_brand` or `__ts_type` therefore remain ordinary data. Internal
-slots are hidden by dialect readers, including iterator readers.
+Every package value carries one canonical brand, `__lash_brand: (package,
+type)`, and `__lash_built: Bytes`, the digest of its building artifact.
+`brand.of` reads the tuple; `ts.receiver` derives a dispatch tag from it.
+A brand selects members and is not a capability: a typed decode can create
+one, so package functions still check their arguments. Dialect readers hide
+internal fields. Guest data named `brand` remains ordinary data.
 
-A guest RegExp has `__ts_type: "brand:regex.ecma"`, pattern, flags and lastIndex.
-The extension snapshot remains `{brand: "regex.ecma", pattern, flags, lastIndex}`. Its visible
+A guest RegExp and the extension snapshot both carry
+`__lash_brand: ("regex.ecma", "reg_exp")`. Their state is pattern, flags
+and lastIndex; neither carries a second dialect brand. The visible
 `lastIndex` may hold any JavaScript value; a helper coerces it with ToLength and
 constructs an integer-index snapshot for the extension. The extension never
 mutates the receiver. Global and sticky exec/test write the returned index to
@@ -29,8 +31,9 @@ the original record, so aliases observe the same update. Non-stateful matching
 preserves the visible value. `RegExp(r)` preserves identity when flags are
 omitted; `new RegExp(r)` constructs a fresh record.
 
-A match array is an internal record with `__ts_type: "brand:regex.match"`,
-items, index, input and groups. Numeric reads, length and iteration expose its items. Captures that
+A match array is an internal record with
+`__lash_brand: ("typescript", "regex_match")`, its building digest, items,
+index, input and groups. Numeric reads, length and iteration expose its items. Captures that
 did not participate are `absent`, including named captures. The extension's
 `regex.lone_surrogate` cause remains available in the typed dialect refusal's
 data. Native charge and guard formulas remain those of the extension.

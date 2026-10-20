@@ -1,3 +1,4 @@
+use typescript.__built
 # RegExp is an extension record. Only these helpers update lastIndex; the native matcher never mutates guest data.
 
 use ts.callable
@@ -81,7 +82,7 @@ kernel 1
 errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, deep(result))
 body {
-  if same(kind(value), "record") { return same((value.__ts_brand, value.__ts_type), ((), "brand:regex.ecma")) }
+  if same(kind(value), "record") { return same(value.__lash_brand, ("regex.ecma", "reg_exp")) }
   return false
 }
 
@@ -119,8 +120,6 @@ body {
   try {
     let compiled = regex.ecma.compile_check(source, flags)
     set compiled.lastIndex = 0.0
-    set compiled.__ts_brand = ()
-    set compiled.__ts_type = "brand:regex.ecma"
     return compiled
   } catch syntax {
     if same(syntax.kind, "regex.syntax") { throw error.new("SyntaxError", syntax.message, null) }
@@ -149,7 +148,7 @@ body {
   do invoke ts.regexp.require(this)
   let arg_5 = this.lastIndex
   let index = invoke ts.string.length_value(arg_5)
-  return {brand: "regex.ecma", pattern: this.pattern, flags: this.flags, lastIndex: index}
+  return {__lash_brand: ("regex.ecma", "reg_exp"), __lash_built: this.__lash_built, pattern: this.pattern, flags: this.flags, lastIndex: index}
 }
 
 function ts.regexp.match_record(match: Any, input: Text) -> Any
@@ -168,7 +167,8 @@ body {
       if same(named[key], null) { set named[key] = absent }
     }
   }
-  return {__ts_brand: (), __ts_type: "brand:regex.match", items: items, index: num.to_float(match.index), input: input, groups: named}
+  let built = invoke typescript.__built()
+  return {__lash_brand: ("typescript", "regex_match"), __lash_built: built, items: items, index: num.to_float(match.index), input: input, groups: named}
 }
 
 function ts.regexp.native_exec(regex: Any, input: Text) -> Any
@@ -402,7 +402,7 @@ body {
   let padded = invoke ts.pad(args, 1)
   let arg_2 = padded[0]
   let regex = invoke ts.regexp.argument(arg_2)
-  let snapshot = {brand: "regex.ecma", pattern: regex.pattern, flags: regex.flags, lastIndex: 0}
+  let snapshot = {__lash_brand: ("regex.ecma", "reg_exp"), __lash_built: regex.__lash_built, pattern: regex.pattern, flags: regex.flags, lastIndex: 0}
   let outcome = invoke ts.regexp.native_exec(snapshot, text)
   if same(outcome.match, null) { return -1.0 }
   return num.to_float(outcome.match.index)
@@ -451,7 +451,7 @@ body {
   let regex = invoke ts.regexp.is(arg_5)
   if regex {
     let value = padded[0]
-    let snapshot = {brand: "regex.ecma", pattern: value.pattern, flags: value.flags, lastIndex: 0}
+    let snapshot = {__lash_brand: ("regex.ecma", "reg_exp"), __lash_built: value.__lash_built, pattern: value.pattern, flags: value.flags, lastIndex: 0}
     let split = invoke ts.regexp.native_split(snapshot, text, limit)
     let output_value = []
     for part in split {

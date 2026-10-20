@@ -52,7 +52,7 @@ fn program() -> &'static Program {
   if eq(mode, 1) { set v = {toString: fn(holder, passed) { print "receiver" return "a😀beta" }} }
   if eq(mode, 2) { set args[0] = {toString: fn(holder, passed) { print "needle" return "beta" }} }
   if eq(mode, 3) { set args[1] = {valueOf: fn(holder, passed) { print "position" return 2.9 }} }
-  if eq(mode, 4) { set args[0] = {brand: "regex.ecma", __ts_brand: (), __ts_type: "brand:regex.ecma", pattern: "a", flags: "", lastIndex: 0} }
+  if eq(mode, 4) { set args[0] = {__lash_brand: ("regex.ecma", "reg_exp"), __lash_built: b"", pattern: "a", flags: "", lastIndex: 0} }
   if eq(mode, 6) { set v = [[1], (), 3] }
   if eq(mode, 5) {
     set v = {toString: fn(holder, passed) { print "receiver" throw error.new("type_error", "receiver first", null) }}

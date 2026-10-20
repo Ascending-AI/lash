@@ -134,7 +134,7 @@ fn package(
         library::RELEASE,
         roots,
         requires,
-        false,
+        path != "kernel",
         registered,
     )?)
 }
@@ -155,7 +155,7 @@ fn helpers(
         library::RELEASE,
         [Root::new(root)],
         requires,
-        false,
+        path == "typescript",
         |registry| {
             let mut library = lash_kernel_dialect::NamedLibrary::from_registry(registry)
                 .map_err(|error| error.to_string())?;
@@ -235,10 +235,8 @@ fn dialect(
     let write =
         |file: &str, bytes: &[u8]| std::fs::write(out.join(format!("{dialect}_{file}")), bytes);
     let registry = registry_of(packages)?;
-    let helper_names: Vec<_> = (0..helpers.code().len())
-        .map(|at| lash_kernel_doc::FunctionName::new(helpers.code().name(at)))
-        .collect::<Result<_, _>>()?;
-    sets::validate(&registry, &helper_names, dialect == "typescript")?;
+    let _ = helpers;
+    sets::validate(&registry, packages)?;
     let held = releases::HeldReleases {
         retained: vec![release::current(&registry)],
     };

@@ -1,6 +1,7 @@
+use typescript.__built
 # Promises over kernel tasks.
 #
-# A promise is a record `{__ts_brand: (), __ts_type: "brand:Promise", state, task}`: `task` is the
+# A promise is a record `{__lash_brand: ("typescript", "promise"), state, task}`: `task` is the
 # handle of the one task whose end settles the promise, and `state` is
 # "pending", "fulfilled" or "rejected". The task itself writes `state` in
 # the stretch it ends in (`ts.promise.run`), so a reader learns whether the
@@ -45,7 +46,7 @@ function ts.promise.is(value: Any) -> Bool
 kernel 1
 charge 6
 body {
-  if same(kind(value), "record") { return same((value.__ts_brand, value.__ts_type), ((), "brand:Promise")) }
+  if same(kind(value), "record") { return same(value.__lash_brand, ("typescript", "promise")) }
   return false
 }
 
@@ -55,7 +56,8 @@ function ts.promise.pending() -> Any
 kernel 1
 charge 5
 body {
-  return {__ts_brand: (), __ts_type: "brand:Promise", state: "pending", task: absent}
+  let built = invoke typescript.__built()
+  return {__lash_brand: ("typescript", "promise"), __lash_built: built, state: "pending", task: absent}
 }
 
 # `await value`: the value a promise fulfils with, or a raise of what it

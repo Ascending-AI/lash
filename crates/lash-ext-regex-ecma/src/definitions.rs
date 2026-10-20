@@ -8,7 +8,7 @@ use lash_kernel_doc::{
     Operand, Param, RecordType, RecordTypeField, Signature, Type,
 };
 
-/// The `brand` field of every regex record.
+/// The package path in every regex record's canonical brand.
 pub const BRAND: &str = "regex.ecma";
 
 /// The kind of the error raised for a pattern or flags that are refused.
@@ -203,10 +203,17 @@ fn text_or_null() -> Type {
     Type::Union(vec![Type::Text, Type::Null])
 }
 
-/// A regex: `{brand, pattern, flags, lastIndex}`.
+/// A regex with its canonical package/type brand and matching state.
 fn regex_type() -> Type {
     record([
-        ("brand", Type::Enum(vec![BRAND.to_string()])),
+        (
+            "__lash_brand",
+            Type::Tuple(vec![
+                Type::Enum(vec![BRAND.to_string()]),
+                Type::Enum(vec!["reg_exp".to_owned()]),
+            ]),
+        ),
+        ("__lash_built", Type::Bytes),
         ("pattern", Type::Text),
         ("flags", Type::Text),
         ("lastIndex", Type::Int),

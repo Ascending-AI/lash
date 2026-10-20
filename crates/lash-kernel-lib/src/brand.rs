@@ -2,7 +2,10 @@
 //! of a brand calls. A brand selects a package type's members; it is not a
 //! capability, so a member still checks its arguments.
 
-use lash_kernel_doc::{FunctionId, FunctionRegistry, parse_definition};
+use lash_kernel_doc::{
+    FunctionId, FunctionRegistry, NativeCall, NativeError, NativeFunction, Value, parse_definition,
+};
+use std::sync::Arc;
 
 use crate::CollectionError;
 
@@ -11,6 +14,7 @@ use crate::CollectionError;
 const BRAND_OF: &str = r#"function brand.of(value: Any) -> Union(Tuple(Text, Text), Absent)
 kernel 1
 charge 8
+native
 body {
   if same(kind(value), "record") {
     if record.contains(value, "__lash_brand") {
@@ -46,6 +50,48 @@ pub fn register_brands(registry: &mut FunctionRegistry) -> Result<FunctionId, Co
     }
     let definition = parse_definition(&text).map_err(CollectionError::Parse)?;
     registry
-        .register(definition, None)
+        .register(definition, Some(Arc::new(BrandOf)))
         .map_err(CollectionError::Registry)
+}
+
+/// Installs the optional native beside the held `brand.of` definition.
+///
+/// # Errors
+///
+/// The registry refusal when `brand.of` was not declared.
+pub fn implement_brands(registry: &mut FunctionRegistry) -> Result<(), CollectionError> {
+    registry
+        .implement_named("brand.of", Arc::new(BrandOf))
+        .map(|_| ())
+        .map_err(CollectionError::Registry)
+}
+
+struct BrandOf;
+impl NativeFunction for BrandOf {
+    fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+        let Some(value @ Value::Record(_)) = call.args.get(0) else {
+            return Ok(Value::Absent);
+        };
+        let Some(fields) = call.args.table(value)? else {
+            return Ok(Value::Absent);
+        };
+        let key = Value::Text(
+            lash_kernel_doc::arena::ShortText::new("__lash_brand")
+                .unwrap_or_else(|| unreachable!("the brand field is inline")),
+        );
+        let Some(brand @ Value::Tuple(_)) = call.args.lookup(fields, &key)? else {
+            return Ok(Value::Absent);
+        };
+        let Some(parts) = call.args.sequence(brand)? else {
+            return Ok(Value::Absent);
+        };
+        if parts.len() == 2
+            && matches!(parts.get(0)?, Some(Value::Text(_) | Value::LongText(_)))
+            && matches!(parts.get(1)?, Some(Value::Text(_) | Value::LongText(_)))
+        {
+            Ok(*brand)
+        } else {
+            Ok(Value::Absent)
+        }
+    }
 }

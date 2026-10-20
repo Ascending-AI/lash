@@ -17,10 +17,10 @@ use record.copy_deep = @a6d4171fd163b1a7519a83d38916149be44c801ebe223d1d7a7db311
 use record.values = @5d1db382f1280cf8e9ce7f0356c7117b1fe0f0d7f6f3acf2874fec1807f5facf
 use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
 use set.copy_deep = @3bca75c884c39293ac043da1ab4ca91be4d9585702aa3304f394b9812215c6d7
-use ts.await = @fcbd74712debde9fcdc88f1d085fceb067549ecab375e4fd9dec0ddc520d098d
+use ts.await = @18a30299db399e09c5772b4431f1c4baf6e139a164f476b6fe173b1447d54a6f
 use ts.boundary = @ac89e50257ae69e06fe10e8faa4c6567d50315aca6fcecee2a967bdc8b4af23b
-use ts.promise.adopt = @798354cd470dc9b995a7c513f744cb66cdae9adcc51f7ba32b37b9b36a2c76fd
-use ts.promise.is = @d02e694e1bebcd4812dd67ef2e305a8ca42cd812708d54d2c336174e2e94849c
+use ts.promise.adopt = @ec07dd4e314068cde58b9c1223c9fc11094029f4f5fe6f8d325a12e10b32a475
+use ts.promise.is = @0f99cae1fc6ad1ff6812fb50d4070182ec247c6fe07f1a7b049a4fa7aa9c82a5
 entry demo() -> Any ts_direct(ts.await)
 
 fn demo() {

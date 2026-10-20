@@ -11,7 +11,7 @@
 //! by identity. The library of this crate holds data alone, and does not
 //! compile this file.
 
-use lash_kernel_doc::{FunctionId, FunctionRegistry};
+use lash_kernel_doc::{ArtifactDigest, FunctionId, FunctionRegistry};
 
 /// The release label of every lash package this tree builds.
 #[allow(
@@ -46,12 +46,9 @@ pub(crate) fn define_kernel(registry: &mut FunctionRegistry) -> Result<(), Strin
     reason = "the build defines the packages; a worker only implements them"
 )]
 pub(crate) fn define_regex(registry: &mut FunctionRegistry) -> Result<(), String> {
-    lash_ext_regex_ecma::register(
-        registry,
-        &std::sync::Arc::new(lash_ext_regex_ecma::Engine::new(CACHED_PATTERNS)),
-    )
-    .map(|_| ())
-    .map_err(|error| error.to_string())
+    lash_ext_regex_ecma::register(registry)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 /// Registers the `date.ecma` package's definitions.
@@ -89,29 +86,32 @@ pub(crate) fn implement(
     path: &str,
     registry: &mut FunctionRegistry,
     functions: &[FunctionId],
+    built: ArtifactDigest,
 ) -> Result<(), String> {
     #[cfg(not(feature = "dialect-typescript"))]
-    let _ = functions;
+    let _ = (functions, built);
     match path {
         "kernel" => {
             lash_kernel_lib::implement_numbers(registry).map_err(|error| error.to_string())?;
             lash_kernel_lib::implement_text_json(registry).map_err(|error| error.to_string())?;
             lash_kernel_vm::implement_machine_functions(registry)
                 .map_err(|error| error.to_string())?;
+            lash_kernel_lib::implement_brands(registry).map_err(|error| error.to_string())?;
             lash_kernel_lib::implement_collections(registry).map_err(|error| error.to_string())
         }
         #[cfg(feature = "dialect-typescript")]
         "regex.ecma" => lash_ext_regex_ecma::implement(
             registry,
             &std::sync::Arc::new(lash_ext_regex_ecma::Engine::new(CACHED_PATTERNS)),
+            built,
         )
         .map(|_| ())
         .map_err(|error| error.to_string()),
         #[cfg(feature = "dialect-typescript")]
-        "date.ecma" => lash_ext_date_ecma::implement(registry, functions.iter().copied())
+        "date.ecma" => lash_ext_date_ecma::implement(registry, functions.iter().copied(), built)
             .map_err(|error| error.to_string()),
         #[cfg(feature = "dialect-typescript")]
-        "url.whatwg" => lash_ext_url_whatwg::implement(registry, functions.iter().copied())
+        "url.whatwg" => lash_ext_url_whatwg::implement(registry, functions.iter().copied(), built)
             .map_err(|error| error.to_string()),
         #[cfg(feature = "dialect-typescript")]
         "typescript" => lash_ext_ts_core::implement(registry, functions.iter().copied())

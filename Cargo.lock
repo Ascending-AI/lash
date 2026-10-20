@@ -2079,6 +2079,7 @@ dependencies = [
  "arbitrary",
  "lash-dialect-typescript",
  "lash-ext-date-ecma",
+ "lash-ext-helper-compiler",
  "lash-ext-py-core",
  "lash-ext-regex-ecma",
  "lash-ext-url-whatwg",
@@ -2105,6 +2106,7 @@ dependencies = [
  "arbitrary",
  "lash-dialect-python",
  "lash-ext-date-ecma",
+ "lash-ext-helper-compiler",
  "lash-ext-py-core",
  "lash-ext-regex-ecma",
  "lash-ext-ts-core",
@@ -2152,6 +2154,7 @@ name = "lash-ext-date-ecma"
 version = "0.0.0-dev"
 dependencies = [
  "lash-kernel-doc",
+ "lash-kernel-state",
  "num-traits",
 ]
 
@@ -2205,6 +2208,7 @@ name = "lash-ext-url-whatwg"
 version = "0.0.0-dev"
 dependencies = [
  "lash-kernel-doc",
+ "lash-kernel-state",
  "url",
 ]
 
@@ -3183,6 +3187,7 @@ dependencies = [
  "lash-dialect-python",
  "lash-dialect-typescript",
  "lash-ext-date-ecma",
+ "lash-ext-helper-compiler",
  "lash-ext-py-core",
  "lash-ext-regex-ecma",
  "lash-ext-ts-core",
@@ -3242,6 +3247,7 @@ dependencies = [
  "lash-dialect-python",
  "lash-dialect-typescript",
  "lash-ext-date-ecma",
+ "lash-ext-helper-compiler",
  "lash-ext-py-core",
  "lash-ext-regex-ecma",
  "lash-ext-ts-core",

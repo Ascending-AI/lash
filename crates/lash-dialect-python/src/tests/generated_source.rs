@@ -165,20 +165,11 @@ fn smith_and_dialect_batches_reconstruct_without_installed_helpers() {
         roundtrip(&lowered.document, false);
         count += 1;
     }
-    let mut registry = k::FunctionRegistry::new();
-    lash_kernel_vm::register_machine_functions(&mut registry).unwrap();
-    lash_kernel_lib::register_numbers(&mut registry).unwrap();
-    lash_kernel_lib::register_text_json(&mut registry).unwrap();
-    lash_kernel_lib::register_collections(&mut registry).unwrap();
-    lash_ext_date_ecma::register(&mut registry).unwrap();
-    lash_ext_url_whatwg::register(&mut registry).unwrap();
-    lash_ext_regex_ecma::register(
-        &mut registry,
-        &std::sync::Arc::new(lash_ext_regex_ecma::Engine::new(32)),
+    let built = lash_ext_helper_compiler::library::Library::of(
+        lash_ext_helper_compiler::library::Dialect::TypeScript,
     )
     .unwrap();
-    let mut library = lash_kernel_dialect::NamedLibrary::from_registry(&registry).unwrap();
-    lash_dialect_typescript::define_helpers(&mut library).unwrap();
+    let library = lash_kernel_dialect::NamedLibrary::from_registry(&built.registry).unwrap();
     let env = lash_kernel_dialect::Environment {
         library: &library,
         effects: &BTreeMap::new(),

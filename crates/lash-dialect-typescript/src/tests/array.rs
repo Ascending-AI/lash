@@ -810,10 +810,9 @@ impl Host for ArrayPathHost {
 }
 
 fn observe_array_path(method: &str, setup: &str, generic: bool) -> (String, Vec<String>, u64) {
-    let registry = super::machine::registry();
     let mut source = String::from("kernel 1\nnumbers by_spelling\neffect echo(x: Any) -> Any\n");
-    for (id, function) in registry.iter() {
-        source.push_str(&format!("use {} = @{id}\n", function.definition().name));
+    for (name, id) in kernel().library.iter() {
+        source.push_str(&format!("use {name} = @{id}\n"));
     }
     let prefix = if generic { "generic_" } else { "" };
     source.push_str(&format!(

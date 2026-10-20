@@ -1,7 +1,7 @@
 unit Function(Name("demo"))
-statement fn demo/0 ordinal=3 depth=0 block=fn demo If { condition: Variable(Name("flag")), then_block: [ReturnVia { value: Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Any, then_yield: true }, args: [Literal(Text("yes"))] }), policy: FunctionId(798354cd470dc9b995a7c513f744cb66cdae9adcc51f7ba32b37b9b36a2c76fd) }], else_block: [] }
-statement fn demo/0/1/0 ordinal=5 depth=1 block=fn demo/0/1 ReturnVia { value: Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Any, then_yield: true }, args: [Literal(Text("yes"))] }), policy: FunctionId(798354cd470dc9b995a7c513f744cb66cdae9adcc51f7ba32b37b9b36a2c76fd) }
-statement fn demo/1 ordinal=7 depth=0 block=fn demo ReturnVia { value: Literal(Text("no")), policy: FunctionId(798354cd470dc9b995a7c513f744cb66cdae9adcc51f7ba32b37b9b36a2c76fd) }
+statement fn demo/0 ordinal=3 depth=0 block=fn demo If { condition: Variable(Name("flag")), then_block: [ReturnVia { value: Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Any, then_yield: true }, args: [Literal(Text("yes"))] }), policy: FunctionId(ec07dd4e314068cde58b9c1223c9fc11094029f4f5fe6f8d325a12e10b32a475) }], else_block: [] }
+statement fn demo/0/1/0 ordinal=5 depth=1 block=fn demo/0/1 ReturnVia { value: Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Any, then_yield: true }, args: [Literal(Text("yes"))] }), policy: FunctionId(ec07dd4e314068cde58b9c1223c9fc11094029f4f5fe6f8d325a12e10b32a475) }
+statement fn demo/1 ordinal=7 depth=0 block=fn demo ReturnVia { value: Literal(Text("no")), policy: FunctionId(ec07dd4e314068cde58b9c1223c9fc11094029f4f5fe6f8d325a12e10b32a475) }
 scope fn demo ordinal=2 depth=0 Entry
 scope fn demo/0/1 ordinal=4 depth=1 Then
 scope fn demo/0/2 ordinal=6 depth=1 Else

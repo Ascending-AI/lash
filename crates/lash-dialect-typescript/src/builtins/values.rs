@@ -27,17 +27,17 @@ const ERROR_CLASSES: &[&str] = &[
 /// `value.constructor`.
 const CONSTRUCTORS: &[(&str, &str)] = &[
     ("list", "Array"),
-    ("brand:regex.match", "Array"),
+    ("brand:typescript.regex_match", "Array"),
     ("text", "String"),
     ("number", "Number"),
     ("bool", "Boolean"),
     ("map", "Map"),
     ("set", "Set"),
     ("timestamp", "Date"),
-    ("brand:date.invalid", "Date"),
-    ("brand:regex.ecma", "RegExp"),
-    ("brand:url.whatwg", "URL"),
-    ("brand:url.search_params", "URLSearchParams"),
+    ("brand:date.ecma.invalid_date", "Date"),
+    ("brand:regex.ecma.reg_exp", "RegExp"),
+    ("brand:url.whatwg.url", "URL"),
+    ("brand:url.whatwg.url_search_params", "URLSearchParams"),
     ("closure", "Function"),
 ];
 
@@ -84,7 +84,7 @@ fn called(table: &Table, path: &str) -> Option<String> {
 /// `prototype`; no built-in's token has an element; anything else of one is
 /// not a member the dialect has. A function the program made, whose token's
 /// path is empty, is read as `ts.get` reads it.
-const READ: &str = "use same\nuse kind\nuse bool.not\nuse num.le\nuse text.concat\nuse error.new\nuse ts.receiver\nuse ts.get\nuse ts.list_index\nuse ts.to_property_key\n\
+const READ: &str = "use record.contains\nuse same\nuse kind\nuse bool.not\nuse num.le\nuse text.concat\nuse error.new\nuse ts.receiver\nuse ts.get\nuse ts.list_index\nuse ts.to_property_key\n\
 function ts.read(target: Any, key: Any) -> Any
 kernel 1
 errors \"type_error\", \"TS_METHOD_UNSUPPORTED\", \"TS_REFLECTION_UNSUPPORTED\"
@@ -95,7 +95,7 @@ body {
   # index for one that is no record or a key that is no text: each takes
   # the generic read below.
   try {
-    if bool.not(same(target.__ts_brand, ())) { return target[key] }
+    if bool.not(record.contains(target, \"__lash_brand\")) { return target[key] }
   } catch generic {}
   let receiver = invoke ts.receiver(target)
   if same(receiver, \"record\") {
@@ -202,7 +202,7 @@ pub(crate) fn member_reader(table: &Table, name: &str) -> String {
         ));
         if *receiver == Receiver::List {
             kinds.push_str(&format!(
-                "  if same(receiver, \"brand:regex.match\") {{\n    {child}\n  }}\n"
+                "  if same(receiver, \"brand:typescript.regex_match\") {{\n    {child}\n  }}\n"
             ));
         }
     }
@@ -224,7 +224,7 @@ pub(crate) fn member_reader(table: &Table, name: &str) -> String {
          \x20 if same(kind(this), \"record\") {{\n\
          \x20   let own = this[\"{name}\"]\n\
          \x20   if same(own, absent) {{}} else {{\n\
-         \x20     if bool.not(same(this.__ts_brand, ())) {{ return own }}\n\
+         \x20     if bool.not(record.contains(this, \"__lash_brand\")) {{ return own }}\n\
          \x20   }}\n\
          \x20 }}\n\
          \x20 let receiver = invoke ts.receiver(this)\n\
@@ -354,7 +354,9 @@ fn in_operator(table: &Table) -> String {
     }
     let error = inherited.entry("error".to_string()).or_default();
     error.extend(["name", "message"]);
-    let regex = inherited.entry("brand:regex.ecma".to_string()).or_default();
+    let regex = inherited
+        .entry("brand:regex.ecma.reg_exp".to_string())
+        .or_default();
     regex.extend([
         "source",
         "flags",

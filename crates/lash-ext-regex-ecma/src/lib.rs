@@ -12,8 +12,9 @@
 //! | `regex.ecma.replace` | `regex`, `input`, `replacement` | `{text, lastIndex}` |
 //! | `regex.ecma.split` | `regex`, `input`, `limit`? | a list of texts and nulls |
 //!
-//! **A regex is data.** It is the record `{brand, pattern, flags,
-//! lastIndex}` with a brand of [`BRAND`]. No function changes its
+//! **A regex is data.** Its canonical `__lash_brand` is
+//! `("regex.ecma", "reg_exp")`; `__lash_built` names its building artifact.
+//! Its matching state is `pattern`, `flags` and `lastIndex`. No function changes its
 //! arguments: one that ECMAScript defines to write `lastIndex` returns the
 //! new value instead, and the caller's dialect writes it to the record.
 //! Indexes count UTF-16 code units and are kernel integers.
@@ -48,7 +49,7 @@ mod testsupport;
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{FunctionId, FunctionRegistry, RegistryError};
+use lash_kernel_doc::{ArtifactDigest, FunctionId, FunctionRegistry, RegistryError};
 
 pub use definitions::{
     BRAND, CHARGE_BASE, CHARGE_PER_PATTERN_UNIT, GUARD_BASE, GUARD_PER_INPUT_UNIT, GUARD_UNIT,
@@ -92,6 +93,7 @@ impl Functions {
 pub fn implement(
     registry: &mut FunctionRegistry,
     engine: &Arc<Engine>,
+    built: ArtifactDigest,
 ) -> Result<Functions, RegistryError> {
     let mut implement = |operation: Operation| {
         registry.implement_named(
@@ -99,6 +101,7 @@ pub fn implement(
             Arc::new(functions::Function {
                 engine: Arc::clone(engine),
                 operation,
+                built,
             }),
         )
     };
@@ -112,21 +115,10 @@ pub fn implement(
     })
 }
 
-/// Registers the six functions with their native implementations, which
-/// compile through `engine`.
-pub fn register(
-    registry: &mut FunctionRegistry,
-    engine: &Arc<Engine>,
-) -> Result<Functions, RegistryError> {
-    let mut register = |operation: Operation| {
-        registry.register(
-            operation.definition(),
-            Some(Arc::new(functions::Function {
-                engine: Arc::clone(engine),
-                operation,
-            })),
-        )
-    };
+/// Declares the six functions. Install natives after building the package,
+/// passing its digest to [`implement`]. Use [`FunctionRegistry::declarations`].
+pub fn register(registry: &mut FunctionRegistry) -> Result<Functions, RegistryError> {
+    let mut register = |operation: Operation| registry.register(operation.definition(), None);
     Ok(Functions {
         compile_check: register(Operation::CompileCheck)?,
         exec: register(Operation::Exec)?,

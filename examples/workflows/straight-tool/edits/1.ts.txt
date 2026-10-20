@@ -4,9 +4,9 @@
 -effect corpus.echo(input?: Any) -> Any
 -use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 -use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
--use ts.await = @fcbd74712debde9fcdc88f1d085fceb067549ecab375e4fd9dec0ddc520d098d
--use ts.promise.adopt = @798354cd470dc9b995a7c513f744cb66cdae9adcc51f7ba32b37b9b36a2c76fd
--use ts.promise.is = @d02e694e1bebcd4812dd67ef2e305a8ca42cd812708d54d2c336174e2e94849c
+-use ts.await = @18a30299db399e09c5772b4431f1c4baf6e139a164f476b6fe173b1447d54a6f
+-use ts.promise.adopt = @ec07dd4e314068cde58b9c1223c9fc11094029f4f5fe6f8d325a12e10b32a475
+-use ts.promise.is = @0f99cae1fc6ad1ff6812fb50d4070182ec247c6fe07f1a7b049a4fa7aa9c82a5
 -entry demo() -> Any ts_direct(ts.await)
 -
 -fn demo() {
@@ -22,9 +22,9 @@
 +effect corpus.echo(input?: Any) -> Any
 +use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 +use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
-+use ts.await = @fcbd74712debde9fcdc88f1d085fceb067549ecab375e4fd9dec0ddc520d098d
-+use ts.promise.adopt = @798354cd470dc9b995a7c513f744cb66cdae9adcc51f7ba32b37b9b36a2c76fd
-+use ts.promise.is = @d02e694e1bebcd4812dd67ef2e305a8ca42cd812708d54d2c336174e2e94849c
++use ts.await = @18a30299db399e09c5772b4431f1c4baf6e139a164f476b6fe173b1447d54a6f
++use ts.promise.adopt = @ec07dd4e314068cde58b9c1223c9fc11094029f4f5fe6f8d325a12e10b32a475
++use ts.promise.is = @0f99cae1fc6ad1ff6812fb50d4070182ec247c6fe07f1a7b049a4fa7aa9c82a5
 +entry demo() -> Any ts_direct(ts.await)
 +
 +fn demo() {
@@ -37,8 +37,8 @@
 
 Correspondence:
 {
-  "base": "65a0b835144926504418e8bd96ea6fd15d825dab882e59404cf9cdd878ef3045",
-  "result": "c9a0334fc04c319e2978717a3d00b955783685e0705094b29d6a414a99a74808",
+  "base": "96d4e1dbce6c21f93f0df5c55fd0c0887e4166faf3b1c84ca85bbf833567da4f",
+  "result": "f7d18458cd1edfb70769767ffaf113f42a64464856c818b28abab54298050fe8",
   "entries": [
     {
       "from": {

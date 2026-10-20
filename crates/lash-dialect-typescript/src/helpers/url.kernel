@@ -22,10 +22,6 @@ let input = invoke ts.to_string(builtin_arg_0)
   let base = args[1]
   if same(kind(base), "absent") {} else { set base = invoke ts.to_string(base) }
   let parsed = url.whatwg.parse(input, base)
-  set parsed.__ts_brand = ()
-  set parsed.__ts_type = "brand:url.whatwg"
-  set parsed.searchParams.__ts_brand = ()
-  set parsed.searchParams.__ts_type = "brand:url.search_params"
   return parsed
 }
 
@@ -34,7 +30,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
-  if same(kind(value), "record") { return same((value.__ts_brand, value.__ts_type), ((), "brand:url.whatwg")) }
+  if same(kind(value), "record") { return same(value.__lash_brand, ("url.whatwg", "url")) }
   return false
 }
 

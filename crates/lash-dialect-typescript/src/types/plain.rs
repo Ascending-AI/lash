@@ -175,9 +175,9 @@ impl Facts {
                     let ObjectProperty::KeyValue(PropertyKey::Static(key), value) = property else {
                         return None;
                     };
-                    // Opaque/restored kernel data can contain the empty
-                    // tuple marker even though guest literals cannot.
-                    if key == "__ts_brand" {
+                    // Opaque/restored kernel data can contain a package
+                    // brand, so a field write may seal this record.
+                    if key == "__lash_brand" {
                         return None;
                     }
                     // Duplicate keys use the last definition, including an
@@ -313,7 +313,7 @@ impl<'a> Collector<'a> {
             // The internal brand can change representation, not just a
             // nested value, through any alias.
             (Some(name), _) => {
-                self.representation_written |= name == "__ts_brand";
+                self.representation_written |= name == "__lash_brand";
                 self.mutated.insert(name);
             }
             (None, MemberProperty::Index(key)) => self.keys.push(key),

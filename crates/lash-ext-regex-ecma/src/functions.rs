@@ -16,7 +16,8 @@ use std::sync::Arc;
 
 use lash_kernel_doc::arena::ShortText;
 use lash_kernel_doc::{
-    Args, Integer, NativeCall, NativeError, NativeFunction, NewObject, Nursery, Value, WorkCounter,
+    Args, ArtifactDigest, Integer, NativeCall, NativeError, NativeFunction, NewObject, Nursery,
+    Value, WorkCounter,
 };
 use num_traits::ToPrimitive;
 
@@ -28,6 +29,7 @@ use crate::pattern::{Engine, Flags, SyntaxError, text_from_units};
 pub(crate) struct Function {
     pub(crate) engine: Arc<Engine>,
     pub(crate) operation: Operation,
+    pub(crate) built: ArtifactDigest,
 }
 
 impl NativeFunction for Function {
@@ -42,7 +44,7 @@ impl NativeFunction for Function {
             let pattern = text_arg(&args, heap, arg(0), "pattern")?;
             let flags = text_arg(&args, heap, arg(1), "flags")?;
             let flags = self.engine.check(&pattern, &flags).map_err(syntax_error)?;
-            return Ok(regex_value(heap, &pattern, flags));
+            return Ok(regex_value(heap, &pattern, flags, self.built));
         }
         let regex = Regex::read(&args, heap, arg(0))?;
         let input = text_arg(&args, heap, arg(1), "input")?;
@@ -153,9 +155,8 @@ fn name(name: &'static str) -> Value {
 }
 
 impl Regex {
-    /// Reads `{brand, pattern, flags, lastIndex}`: exactly those fields, a
-    /// brand of [`BRAND`], and a `lastIndex` that is an integer of zero or
-    /// more.
+    /// Reads the canonical regex brand and matching state. The index is a
+    /// nonnegative integer counting UTF-16 units.
     fn read<'call>(
         args: &Args<'call>,
         new: &mut Nursery<'_>,
@@ -169,7 +170,7 @@ impl Regex {
             value.filter(|value| matches!(value, Value::Text(_) | Value::LongText(_)))
         }
         let (Some(brand), Some(pattern), Some(flags)) = (
-            text(field("brand")?),
+            field("__lash_brand")?,
             text(field("pattern")?),
             text(field("flags")?),
         ) else {
@@ -178,7 +179,16 @@ impl Regex {
         let Some(last_index @ (Value::Int(_) | Value::BigInt(_))) = field("lastIndex")? else {
             return Err(not_a_regex());
         };
-        if !args.equal(brand, &name(BRAND))? || fields.len() != 4 {
+        let Some(brand) = args.sequence(brand)? else {
+            return Err(not_a_regex());
+        };
+        if !matches!(field("__lash_brand")?, Some(Value::Tuple(_)))
+            || brand.len() != 2
+            || !args.equal(brand.get(0)?.ok_or_else(not_a_regex)?, &name(BRAND))?
+            || !args.equal(brand.get(1)?.ok_or_else(not_a_regex)?, &name("reg_exp"))?
+            || !matches!(field("__lash_built")?, Some(Value::Bytes(_)))
+            || fields.len() != 5
+        {
             return Err(not_a_regex());
         }
         let Some(last_index) = args.integer(last_index)? else {
@@ -580,14 +590,21 @@ impl Output<'_, '_> {
 
 /// The record `compile_check` returns: the pattern, the flags in canonical
 /// order and a `lastIndex` of zero.
-fn regex_value(heap: &mut Nursery<'_>, pattern: &str, flags: Flags) -> Value {
-    let brand = heap.text(BRAND);
+fn regex_value(
+    heap: &mut Nursery<'_>,
+    pattern: &str,
+    flags: Flags,
+    built: ArtifactDigest,
+) -> Value {
+    let brand = heap.allocate(NewObject::Tuple(vec![name(BRAND), name("reg_exp")]));
+    let built = heap.bytes(built.as_bytes());
     let pattern = heap.text(pattern);
     let flags = heap.text(&flags.canonical());
     record(
         heap,
         [
-            ("brand", brand),
+            ("__lash_brand", brand),
+            ("__lash_built", built),
             ("pattern", pattern),
             ("flags", flags),
             ("lastIndex", Value::Int(0)),
@@ -635,7 +652,7 @@ fn not_a_regex() -> NativeError {
     raised(
         "type_error",
         format!(
-            "`regex` must be a regex record: exactly the fields `brand` (\"{BRAND}\"), `pattern`, `flags` and an integer `lastIndex`"
+            "`regex` must be a regex record: exactly the fields `__lash_brand` ((\"{BRAND}\", \"reg_exp\")), `__lash_built` (bytes), `pattern`, `flags` and an integer `lastIndex`"
         ),
     )
 }

@@ -385,6 +385,7 @@ fn lash_install(packages: &HeldPackages) -> Result<PackageInstall, EmbedError> {
                 &package.path().to_string(),
                 &mut registry,
                 package.code().ids(),
+                package.digest(),
             )
             .map_err(EmbedError::Registry)?;
             functions.extend_from_slice(package.code().ids());
@@ -501,7 +502,7 @@ mod typescript {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use lash_kernel_doc::{FunctionDefinition, ReleasedFunctions};
+    use lash_kernel_doc::FunctionDefinition;
     use lash_vm_client::WorkerTuning;
 
     /// lash's own packages, as the parent holds them.
@@ -596,62 +597,58 @@ pub(crate) mod tests {
     /// have defined itself, and defines none when it starts (FIG-5796).
     #[test]
     fn lash_packages_hold_exactly_what_their_crates_define() {
-        let defined_since = |registry: &FunctionRegistry, before: &BTreeSet<FunctionId>| {
-            registry
-                .iter()
-                .filter(|(function, _)| !before.contains(function))
-                .map(|(function, registered)| {
-                    (
-                        *function,
-                        FunctionDefinition::clone(registered.definition()),
-                    )
-                })
-                .collect::<Vec<_>>()
-        };
-        let mut registry = FunctionRegistry::declarations();
-        let mut defined = BTreeMap::new();
-        let mut step =
-            |path: &str,
-             registry: &mut FunctionRegistry,
-             define: &dyn Fn(&mut FunctionRegistry) -> Result<(), String>| {
-                let before: BTreeSet<FunctionId> =
-                    registry.iter().map(|(function, _)| *function).collect();
-                define(registry).expect("the package's definitions");
-                defined.insert(path.to_owned(), defined_since(registry, &before));
-            };
-        step("kernel", &mut registry, &crate::library::define_kernel);
-        let kernel = registry.clone();
-        step("regex.ecma", &mut registry, &crate::library::define_regex);
-        step("date.ecma", &mut registry, &crate::library::define_date);
-        step("url.whatwg", &mut registry, &crate::library::define_url);
-        let mut library = NamedLibrary::from_registry(&registry).expect("the library");
+        use lash_ext_helper_compiler::library::{Dialect as SourceDialect, Library};
         let typescript =
-            lash_dialect_typescript::define_helpers(&mut library).expect("TypeScript's helpers");
-        let mut library = NamedLibrary::from_registry(&kernel).expect("the library");
-        let python = lash_dialect_python::define_helpers(&mut library).expect("Python's helpers");
-        for (path, helpers) in [("typescript", typescript), ("python", python)] {
-            defined.insert(
-                path.to_owned(),
-                helpers
-                    .into_iter()
-                    .map(|definition| (definition.identity(), definition))
-                    .collect(),
+            Library::of(SourceDialect::TypeScript).expect("TypeScript source packages");
+        let python = Library::of(SourceDialect::Python).expect("Python source packages");
+        let packages = lash_vm_library::built().expect("built packages");
+        let declared: BTreeSet<_> = typescript
+            .packages
+            .iter()
+            .chain(&python.packages)
+            .map(|package| package.path().to_string())
+            .collect();
+        let built: BTreeSet<_> = packages
+            .iter()
+            .map(|package| package.path().to_string())
+            .collect();
+        assert_eq!(
+            packages.len(),
+            declared.len(),
+            "each source package is shipped once"
+        );
+        assert_eq!(built, declared, "exactly the source packages are shipped");
+        for package in packages {
+            let source = if package.path().to_string() == "python" {
+                &python
+            } else {
+                &typescript
+            };
+            let declared = source
+                .packages
+                .iter()
+                .find(|declared| declared.path() == package.path())
+                .expect("source package");
+            assert_eq!(
+                package.code().len(),
+                declared.code().len(),
+                "{}: every source definition is shipped",
+                package.path()
             );
-        }
-        assert_eq!(defined.len(), lash_vm_releases::PACKAGES.len());
-        for (path, mut defined) in defined {
-            // The image holds its functions in identity order.
-            defined.sort_by_key(|(function, _)| *function);
-            let built = lash_vm_releases::package(&path).expect("the built package");
-            let built = ReleasedFunctions::read(built.image).expect("the built image");
-            let built: Vec<_> = (0..built.len())
-                .map(|at| {
-                    let definition = built.definition(at).expect("a built definition decodes");
-                    (built.id(at), definition)
-                })
-                .collect();
-            assert_eq!(built.len(), defined.len(), "{path}: as many definitions");
-            assert!(built == defined, "{path}: the built definitions differ");
+            for at in 0..package.code().len() {
+                let id = package.code().ids()[at];
+                let built = package.code().definition(at).expect("built definition");
+                let defined = source.registry.get(&id).unwrap_or_else(|| {
+                    panic!("{}: {} is defined by its crate", package.path(), built.name)
+                });
+                assert_eq!(
+                    built.as_ref(),
+                    defined.definition().as_ref(),
+                    "{}: {}",
+                    package.path(),
+                    built.name
+                );
+            }
         }
     }
 

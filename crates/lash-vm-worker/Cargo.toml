@@ -99,6 +99,7 @@ tokio = { workspace = true, optional = true, features = ["rt", "sync"] }
 libc = { workspace = true }
 
 [dev-dependencies]
+lash-ext-helper-compiler = { workspace = true }
 blake3 = { workspace = true }
 tokio-util = { workspace = true }
 lash-protocol-types = { workspace = true }

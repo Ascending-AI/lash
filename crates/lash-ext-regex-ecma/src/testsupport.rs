@@ -3,6 +3,9 @@ use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::{Datum, NewObject, Value};
 pub(super) use lash_kernel_state::arena::Bench;
 
+pub(super) const BUILT: lash_kernel_doc::ArtifactDigest =
+    lash_kernel_doc::ArtifactDigest::from_bytes([0x5a; 32]);
+
 pub(super) fn fresh() -> Bench {
     Bench::new()
 }
@@ -33,7 +36,22 @@ impl Fixture for Bench {
     }
     fn regex(&mut self, pattern: &str, flags: &str, last_index: i64) -> Value {
         let fields = [
-            ("brand", self.text(crate::BRAND)),
+            (
+                "__lash_brand",
+                self.run(&[], u64::MAX, |_, new| {
+                    let package = new.text(crate::BRAND);
+                    let ty = new.text("reg_exp");
+                    new.allocate(NewObject::Tuple(vec![package, ty]))
+                })
+                .unwrap()
+                .0,
+            ),
+            (
+                "__lash_built",
+                self.run(&[], u64::MAX, |_, new| new.bytes(BUILT.as_bytes()))
+                    .unwrap()
+                    .0,
+            ),
             ("pattern", self.text(pattern)),
             ("flags", self.text(flags)),
             ("lastIndex", Value::Int(last_index)),
@@ -55,14 +73,17 @@ impl Fixture for Bench {
                     .div_ceil(64)
             }
             Value::Text(_) | Value::LongText(_) => 1 + semantics.text(value).unwrap().len() as u64,
-            Value::List(id) | Value::Record(id) => 1 + self.arena().len(*id).unwrap(),
+            Value::Bytes(id) => 1 + semantics.bytes(*id).unwrap().len() as u64,
+            Value::Tuple(id) | Value::List(id) | Value::Record(id) => {
+                1 + self.arena().len(*id).unwrap()
+            }
             _ => 1,
         }
     }
     fn deep_size(&self, value: &Value, seen: &mut Vec<ArenaHandle>) -> u64 {
         let semantics = self.arena().semantics();
         let held = match value {
-            Value::List(id) => semantics.sequence(*id).unwrap().to_vec(),
+            Value::Tuple(id) | Value::List(id) => semantics.sequence(*id).unwrap().to_vec(),
             Value::Record(id) => semantics
                 .entries(*id)
                 .unwrap()

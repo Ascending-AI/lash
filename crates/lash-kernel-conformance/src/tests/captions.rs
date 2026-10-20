@@ -49,13 +49,13 @@ fn each_dialect(law: impl Fn(&CaptionDialect<'_>) -> Result<(), crate::HarnessEr
     let dialects: [(Dialect, NamedLibrary, SourceFormat, &str); 2] = [
         (
             typescript(),
-            library(lash_dialect_typescript::define_helpers),
+            library(lash_ext_helper_compiler::library::Dialect::TypeScript),
             SourceFormat::TypeScriptV1,
             TYPESCRIPT,
         ),
         (
             lash_dialect_python::dialect(),
-            library(lash_dialect_python::define_helpers),
+            library(lash_ext_helper_compiler::library::Dialect::Python),
             SourceFormat::PythonV1,
             PYTHON,
         ),
@@ -90,20 +90,9 @@ fn typescript() -> Dialect {
     }
 }
 
-fn library(
-    define: fn(
-        &mut NamedLibrary,
-    ) -> Result<
-        Vec<lash_kernel_doc::FunctionDefinition>,
-        lash_kernel_dialect::SourceError,
-    >,
-) -> NamedLibrary {
-    let mut registry = super::corpus_registry();
-    lash_ext_date_ecma::register(&mut registry).expect("date extension");
-    lash_ext_url_whatwg::register(&mut registry).expect("URL extension");
-    let mut library = NamedLibrary::from_registry(&registry).expect("unique library names");
-    define(&mut library).expect("dialect helpers");
-    library
+fn library(dialect: lash_ext_helper_compiler::library::Dialect) -> NamedLibrary {
+    let built = lash_ext_helper_compiler::library::Library::of(dialect).expect("built packages");
+    NamedLibrary::from_registry(&built.registry).expect("unique package names")
 }
 
 fn effects() -> BTreeMap<EffectName, Signature> {

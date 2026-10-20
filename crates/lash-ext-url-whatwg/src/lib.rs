@@ -3,13 +3,14 @@
 //! Native calls allocate new data and never mutate their inputs. The dialect
 //! owns setters and the stable live URLSearchParams alias.
 use lash_kernel_doc::{
-    FunctionId, FunctionRegistry, NativeCall, NativeError, NativeFunction, NewObject,
-    RegistryError, Value, parse_definition,
+    ArtifactDigest, FunctionId, FunctionRegistry, NativeCall, NativeError, NativeFunction,
+    NewObject, RecordType, RecordTypeField, RegistryError, Type, Value, parse_definition,
 };
 use std::{borrow::Cow, collections::BTreeMap, sync::Arc};
 use url::{Url, form_urlencoded};
 
-/// Registers parsing, component replacement and form-query codecs.
+/// Declares parsing, component replacement and form-query codecs in a declarations registry.
+/// Install natives with the owning package digest through [`implement`].
 #[expect(
     clippy::expect_used,
     reason = "literal definitions are valid kernel text"
@@ -41,14 +42,14 @@ pub fn register(
         ),
     ] {
         let name = op.name();
-        let definition = parse_definition(&format!(
+        let mut definition = parse_definition(&format!(
             "function {name}{signature}\nkernel 1\nerrors \"type_error\"\ncharge {charge}\nnative\n"
         ))
         .expect("URL definition");
-        result.insert(
-            name.to_owned(),
-            registry.register(definition, Some(Arc::new(op)))?,
-        );
+        if matches!(op, Operation::Parse | Operation::Update) {
+            definition.signature.result = url_type();
+        }
+        result.insert(name.to_owned(), registry.register(definition, None)?);
     }
     Ok(result)
 }
@@ -74,6 +75,49 @@ impl Operation {
             Self::QueryStringify => "url.whatwg.query_stringify",
         }
     }
+}
+
+fn record_type<const N: usize>(fields: [(&str, Type); N]) -> Type {
+    Type::Record(RecordType {
+        fields: fields
+            .into_iter()
+            .map(|(name, ty)| RecordTypeField {
+                name: name.into(),
+                ty,
+                optional: false,
+            })
+            .collect(),
+        rest: None,
+    })
+}
+
+fn brand_type(ty: &str) -> Type {
+    Type::Tuple(vec![
+        Type::Enum(vec!["url.whatwg".into()]),
+        Type::Enum(vec![ty.into()]),
+    ])
+}
+
+fn url_type() -> Type {
+    let state = Type::Record(RecordType {
+        fields: vec![],
+        rest: Some(Box::new(Type::Text)),
+    });
+    let params = record_type([
+        ("__lash_brand", brand_type("url_search_params")),
+        ("__lash_built", Type::Bytes),
+        (
+            "pairs",
+            Type::List(Box::new(Type::List(Box::new(Type::Text)))),
+        ),
+        ("owner", state.clone()),
+    ]);
+    record_type([
+        ("__lash_brand", brand_type("url")),
+        ("__lash_built", Type::Bytes),
+        ("state", state),
+        ("searchParams", params),
+    ])
 }
 
 fn raise(message: &'static str) -> NativeError {
@@ -104,7 +148,7 @@ fn pairs(call: &mut NativeCall<'_, '_>, input: &str) -> Value {
     }
     call.new.allocate(NewObject::List(result))
 }
-fn record(call: &mut NativeCall<'_, '_>, url: &Url) -> Value {
+fn record(call: &mut NativeCall<'_, '_>, url: &Url, built: ArtifactDigest) -> Value {
     let fields = [
         ("href", url.as_str().to_owned()),
         ("origin", url.origin().ascii_serialization()),
@@ -148,23 +192,36 @@ fn record(call: &mut NativeCall<'_, '_>, url: &Url) -> Value {
     let state = call.new.allocate(NewObject::Record(fields));
     let decoded = pairs(call, url.query().unwrap_or(""));
     let new = &mut *call.new;
+    let built = new.bytes(built.as_bytes());
+    let package = new.text("url.whatwg");
+    let params_type = new.text("url_search_params");
+    let params_brand = new.allocate(NewObject::Tuple(vec![package, params_type]));
     let params = vec![
-        (new.text("brand"), new.text("url.search_params")),
+        (new.text("__lash_brand"), params_brand),
+        (new.text("__lash_built"), built),
         (new.text("pairs"), decoded),
         (new.text("owner"), state),
     ];
     let params = new.allocate(NewObject::Record(params));
+    let url_type = new.text("url");
+    let url_brand = new.allocate(NewObject::Tuple(vec![package, url_type]));
     let fields = vec![
-        (new.text("brand"), new.text("url.whatwg")),
+        (new.text("__lash_brand"), url_brand),
+        (new.text("__lash_built"), built),
         (new.text("state"), state),
         (new.text("searchParams"), params),
     ];
     new.allocate(NewObject::Record(fields))
 }
-impl NativeFunction for Operation {
+struct Function {
+    operation: Operation,
+    built: ArtifactDigest,
+}
+
+impl NativeFunction for Function {
     fn call(&self, mut call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
-        match self {
-            Self::Parse => {
+        match self.operation {
+            Operation::Parse => {
                 let input = text(&mut call, 0)?;
                 let url = match call.args.get(1) {
                     Some(Value::Absent) => Url::parse(&input),
@@ -175,9 +232,9 @@ impl NativeFunction for Operation {
                     _ => return Err(raise("Expected text or absent base")),
                 }
                 .map_err(|_| raise("Invalid URL"))?;
-                Ok(record(&mut call, &url))
+                Ok(record(&mut call, &url, self.built))
             }
-            Self::Update => {
+            Operation::Update => {
                 let mut url = Url::parse(&text(&mut call, 0)?).map_err(|_| raise("Invalid URL"))?;
                 let field = text(&mut call, 1)?;
                 let value = text(&mut call, 2)?;
@@ -222,13 +279,13 @@ impl NativeFunction for Operation {
                     }),
                     _ => return Err(raise("Unsupported URL field")),
                 }
-                Ok(record(&mut call, &url))
+                Ok(record(&mut call, &url, self.built))
             }
-            Self::QueryParse => {
+            Operation::QueryParse => {
                 let input = text(&mut call, 0)?;
                 Ok(pairs(&mut call, &input))
             }
-            Self::QueryStringify => {
+            Operation::QueryStringify => {
                 let args = call.args;
                 let list = args.get(0).unwrap_or(&Value::Absent);
                 let (Value::List(_), Some(list)) = (list, args.sequence(list)?) else {
@@ -262,6 +319,7 @@ impl NativeFunction for Operation {
 pub fn implement(
     registry: &mut FunctionRegistry,
     functions: impl IntoIterator<Item = FunctionId>,
+    built: ArtifactDigest,
 ) -> Result<(), RegistryError> {
     for function in functions {
         let registered = registry
@@ -271,8 +329,57 @@ pub fn implement(
             .into_iter()
             .find(|operation| operation.name() == registered.name())
         {
-            registry.implement(function, Arc::new(operation))?;
+            registry.implement(function, Arc::new(Function { operation, built }))?;
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lash_kernel_doc::{Datum, WorkCounter};
+    use lash_kernel_state::arena::Bench;
+
+    /// BRAND-ONE: a native constructor returns its canonical package/type
+    /// tuple and the artifact digest supplied at installation.
+    #[test]
+    fn brand_one_native_constructor_stamps_its_package_and_artifact() {
+        let built = ArtifactDigest::from_bytes([0x5a; 32]);
+        let mut heap = Bench::new();
+        let source = heap.arena_mut().text("https://example.test/?a=1");
+        let arguments = [source, Value::Absent];
+        let native = Function {
+            operation: Operation::Parse,
+            built,
+        };
+        let value = heap
+            .call(&native, &arguments, u64::MAX, &mut WorkCounter::new(None))
+            .answer
+            .expect("native constructor");
+        let Datum::Record(fields) = heap.datum(&value).expect("record data") else {
+            panic!("branded record");
+        };
+        let brand = fields
+            .iter()
+            .find(|(name, _)| name == "__lash_brand")
+            .map(|(_, value)| value);
+        assert_eq!(
+            brand,
+            Some(&Datum::Tuple(vec![
+                Datum::Text("url.whatwg".into()),
+                Datum::Text("url".into())
+            ]))
+        );
+        let bytes = fields
+            .iter()
+            .find(|(name, _)| name == "__lash_built")
+            .map(|(_, value)| value);
+        assert_eq!(
+            bytes,
+            Some(&Datum::Bytes(lash_kernel_doc::Bytes::new(
+                built.as_bytes().to_vec()
+            )))
+        );
+    }
 }

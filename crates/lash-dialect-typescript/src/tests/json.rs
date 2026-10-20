@@ -201,7 +201,7 @@ struct Case {
 
 /// What `ts.json.plain` should say, written independently of it: the value
 /// `build` makes holds only lists, records, null, bools, text and finite
-/// numbers; no record has a `toJSON` or `__ts_brand` field or a key that begins
+/// numbers; no record has a `toJSON` or `__lash_brand` field or a key that begins
 /// with a digit; no container is more than eight deep. The number of values
 /// is unbounded, counting each place a shared value is held.
 fn plain(case: &Case) -> bool {
@@ -213,7 +213,7 @@ fn plain(case: &Case) -> bool {
             Datum::Record(fields) => {
                 if fields.iter().any(|(key, _)| {
                     key == "toJSON"
-                        || key == "__ts_brand"
+                        || key == "__lash_brand"
                         || key.starts_with(|c: char| c.is_ascii_digit())
                 }) {
                     return false;
@@ -319,8 +319,8 @@ fn trap(bits: &mut Bits) -> Datum {
             f64::NEG_INFINITY
         }),
         4 => Datum::Record(vec![("toJSON".to_owned(), text("not callable"))]),
-        5 => Datum::Record(vec![("__ts_brand".to_owned(), text("date.invalid"))]),
-        6 => Datum::Record(vec![("__ts_brand".to_owned(), float(1.0))]),
+        5 => Datum::Record(vec![("__lash_brand".to_owned(), text("date.invalid"))]),
+        6 => Datum::Record(vec![("__lash_brand".to_owned(), float(1.0))]),
         7 => Datum::Record(vec![
             ("b".to_owned(), float(1.0)),
             ("10".to_owned(), float(2.0)),

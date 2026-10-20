@@ -1,19 +1,21 @@
 //! Deterministic ECMAScript ISO date parsing and UTC formatting.
 //!
 //! A valid date is a kernel timestamp. Invalid dates are the branded record
-//! `{brand: "date.invalid"}`. Natives never mutate their arguments; calendar
+//! `{__lash_brand: ("date.ecma", "invalid_date")}`. Natives never mutate their arguments; calendar
 //! arithmetic and JavaScript coercion live in the dialect's kernel helpers.
 mod calendar;
 
 use lash_kernel_doc::arena::ShortText;
 use lash_kernel_doc::{
-    Args, Float, FunctionId, FunctionRegistry, Integer, NativeCall, NativeError, NativeFunction,
-    NewObject, RegistryError, Value, parse_definition,
+    Args, ArtifactDigest, Float, FunctionId, FunctionRegistry, Integer, NativeCall, NativeError,
+    NativeFunction, NewObject, RecordType, RecordTypeField, RegistryError, Type, Value,
+    parse_definition,
 };
 use num_traits::ToPrimitive;
 use std::{collections::BTreeMap, sync::Arc};
 
-/// Registers deterministic date conversion, ISO parsing and formatting functions.
+/// Declares deterministic date conversion, ISO parsing and formatting functions in a declarations registry.
+/// Install natives with the owning package digest through [`implement`].
 #[expect(
     clippy::expect_used,
     reason = "constant library definitions are valid kernel text"
@@ -43,11 +45,15 @@ pub fn register(
             "sum(32, deep(milliseconds), deep(date), size(source), size(format), size(result))",
             charge,
         );
-        let definition = parse_definition(&text).expect("date extension definition");
-        result.insert(
-            name.to_owned(),
-            registry.register(definition, Some(Arc::new(op)))?,
-        );
+        let mut definition = parse_definition(&text).expect("date extension definition");
+        match op {
+            Operation::Timestamp => definition.signature.result = date_type(),
+            Operation::Milliseconds | Operation::Format => {
+                definition.signature.params[0].ty = date_type()
+            }
+            Operation::Parse => {}
+        }
+        result.insert(name.to_owned(), registry.register(definition, None)?);
     }
     Ok(result)
 }
@@ -75,6 +81,30 @@ impl Operation {
     }
 }
 
+fn date_type() -> Type {
+    Type::Union(vec![
+        Type::Timestamp,
+        Type::Record(RecordType {
+            fields: vec![
+                RecordTypeField {
+                    name: "__lash_brand".into(),
+                    ty: Type::Tuple(vec![
+                        Type::Enum(vec!["date.ecma".into()]),
+                        Type::Enum(vec!["invalid_date".into()]),
+                    ]),
+                    optional: false,
+                },
+                RecordTypeField {
+                    name: "__lash_built".into(),
+                    ty: Type::Bytes,
+                    optional: false,
+                },
+            ],
+            rest: None,
+        }),
+    ])
+}
+
 fn raise(kind: &'static str, message: &'static str) -> NativeError {
     NativeError::refused(kind, message)
 }
@@ -92,9 +122,27 @@ fn milliseconds(value: &Value, args: &Args<'_>) -> Result<f64, NativeError> {
             let Some(fields) = args.table(value)? else {
                 return Err(NativeError::Malformed("a record names another body"));
             };
-            let brand = args.lookup(fields, &short("brand"))?;
-            if let Some(brand) = brand
-                && args.equal(brand, &short("date.invalid"))?
+            let brand = args.lookup(fields, &short("__lash_brand"))?;
+            if let Some(brand @ Value::Tuple(_)) = brand
+                && let Some(parts) = args.sequence(brand)?
+                && parts.len() == 2
+                && fields.len() == 2
+                && matches!(
+                    args.lookup(fields, &short("__lash_built"))?,
+                    Some(Value::Bytes(_))
+                )
+                && args.equal(
+                    parts
+                        .get(0)?
+                        .ok_or_else(|| raise("type_error", "Date receiver required"))?,
+                    &short("date.ecma"),
+                )?
+                && args.equal(
+                    parts
+                        .get(1)?
+                        .ok_or_else(|| raise("type_error", "Date receiver required"))?,
+                    &short("invalid_date"),
+                )?
             {
                 Ok(f64::NAN)
             } else {
@@ -104,23 +152,33 @@ fn milliseconds(value: &Value, args: &Args<'_>) -> Result<f64, NativeError> {
         _ => Err(raise("type_error", "Date receiver required")),
     }
 }
-impl NativeFunction for Operation {
+struct Function {
+    operation: Operation,
+    built: ArtifactDigest,
+}
+
+impl NativeFunction for Function {
     fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         let args = call.args;
         let first = args
             .get(0)
             .ok_or_else(|| raise("type_error", "Missing argument"))?;
-        match self {
-            Self::Timestamp => {
+        match self.operation {
+            Operation::Timestamp => {
                 let Value::Float(time) = first else {
                     return Err(raise("type_error", "Expected float"));
                 };
                 let clipped = calendar::time_clip(time.get());
                 if clipped.is_nan() {
-                    return Ok(call.new.allocate(NewObject::Record(vec![(
-                        short("brand"),
-                        short("date.invalid"),
-                    )])));
+                    let brand = call.new.allocate(NewObject::Tuple(vec![
+                        short("date.ecma"),
+                        short("invalid_date"),
+                    ]));
+                    let built = call.new.bytes(self.built.as_bytes());
+                    return Ok(call.new.allocate(NewObject::Record(vec![
+                        (short("__lash_brand"), brand),
+                        (short("__lash_built"), built),
+                    ])));
                 }
                 let integer = Integer::parse(&format!("{clipped:.0}"))
                     .map_err(|_| raise("RangeError", "Invalid time"))?;
@@ -128,8 +186,8 @@ impl NativeFunction for Operation {
                     .new
                     .timestamp(Integer::new(&*integer.as_bigint() * 1_000_000)))
             }
-            Self::Milliseconds => Ok(Value::Float(Float::new(milliseconds(first, &args)?))),
-            Self::Parse => {
+            Operation::Milliseconds => Ok(Value::Float(Float::new(milliseconds(first, &args)?))),
+            Operation::Parse => {
                 let Some(source) = args.text(first)? else {
                     return Err(raise("type_error", "Expected text"));
                 };
@@ -144,7 +202,7 @@ impl NativeFunction for Operation {
                     )),
                 }
             }
-            Self::Format => {
+            Operation::Format => {
                 let time = milliseconds(first, &args)?;
                 let format = match args.get(1) {
                     Some(format) => args.text(format)?,
@@ -179,6 +237,7 @@ fn short(name: &'static str) -> Value {
 pub fn implement(
     registry: &mut FunctionRegistry,
     functions: impl IntoIterator<Item = FunctionId>,
+    built: ArtifactDigest,
 ) -> Result<(), RegistryError> {
     for function in functions {
         let registered = registry
@@ -188,8 +247,56 @@ pub fn implement(
             .into_iter()
             .find(|operation| operation.name() == registered.name())
         {
-            registry.implement(function, Arc::new(operation))?;
+            registry.implement(function, Arc::new(Function { operation, built }))?;
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lash_kernel_doc::{Datum, WorkCounter};
+    use lash_kernel_state::arena::Bench;
+
+    /// BRAND-ONE: a native constructor returns its canonical package/type
+    /// tuple and the artifact digest supplied at installation.
+    #[test]
+    fn brand_one_native_constructor_stamps_its_package_and_artifact() {
+        let built = ArtifactDigest::from_bytes([0x5a; 32]);
+        let mut heap = Bench::new();
+        let arguments = [Value::Float(Float::new(f64::NAN))];
+        let native = Function {
+            operation: Operation::Timestamp,
+            built,
+        };
+        let value = heap
+            .call(&native, &arguments, u64::MAX, &mut WorkCounter::new(None))
+            .answer
+            .expect("native constructor");
+        let Datum::Record(fields) = heap.datum(&value).expect("record data") else {
+            panic!("branded record");
+        };
+        let brand = fields
+            .iter()
+            .find(|(name, _)| name == "__lash_brand")
+            .map(|(_, value)| value);
+        assert_eq!(
+            brand,
+            Some(&Datum::Tuple(vec![
+                Datum::Text("date.ecma".into()),
+                Datum::Text("invalid_date".into())
+            ]))
+        );
+        let bytes = fields
+            .iter()
+            .find(|(name, _)| name == "__lash_built")
+            .map(|(_, value)| value);
+        assert_eq!(
+            bytes,
+            Some(&Datum::Bytes(lash_kernel_doc::Bytes::new(
+                built.as_bytes().to_vec()
+            )))
+        );
+    }
 }

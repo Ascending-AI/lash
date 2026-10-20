@@ -31,6 +31,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 lash-kernel-package.workspace = true
+lash-ext-helper-compiler = { workspace = true }
 kernel-embedder = { path = "../../examples/kernel-embedder" }
 lash-kernel-edit.workspace = true
 lash-kernel-exec.workspace = true

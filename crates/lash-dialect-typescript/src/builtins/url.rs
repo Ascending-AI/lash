@@ -18,17 +18,17 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "URL.prototype.toString",
-                receivers: &[Receiver::Brand("url.whatwg")],
+                receivers: &[Receiver::Brand("url.whatwg.url")],
                 function: "ts.url.toString",
             },
             Row::Method {
                 path: "URL.prototype.toJSON",
-                receivers: &[Receiver::Brand("url.whatwg")],
+                receivers: &[Receiver::Brand("url.whatwg.url")],
                 function: "ts.url.toJSON",
             },
             Row::Method {
                 path: "URL.prototype.valueOf",
-                receivers: &[Receiver::Brand("url.whatwg")],
+                receivers: &[Receiver::Brand("url.whatwg.url")],
                 function: "ts.url.valueOf",
             },
         ],

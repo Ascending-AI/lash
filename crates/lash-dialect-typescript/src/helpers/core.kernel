@@ -1,3 +1,5 @@
+use typescript.__built
+use brand.of
 # The TypeScript dialect's own operations (tier 2): what JavaScript means by
 # an operator, a coercion, a member access and a call, written in kernel
 # code. The lowerer emits a call to one of these wherever it does not know
@@ -100,16 +102,11 @@ use ts.set
 use ts.delete
 use ts.hole_value
 
-# What a value is to a dispatcher: "absent", "null", "bool", "number",
-# "text", "list", "record", "closure", "error", "map", "set", "timestamp",
-# or "brand:<b>" for an internal record marked by `__ts_brand: ()` and
-# `__ts_type: "brand:<b>"`. Guest arrays are lists and guest functions have
-# nonempty tuple tokens: neither source nor JSON can produce this marker. A
-# built-in function's token is a "closure" and a built-in namespace's or
-# prototype's token is a "builtin" (`builtins/mod.rs`).
+# A package receiver is identified by its canonical (package, type) brand.
+# The tag is derived for dialect dispatch; the brand is not a capability.
 function ts.receiver(value: Any) -> Text
 kernel 1
-charge 3
+charge sum(3, size(result))
 native
 body {
   let k = kind(value)
@@ -122,7 +119,8 @@ body {
     return k
   }
   if same(k, "record") {
-    if same(value.__ts_brand, ()) { return value.__ts_type }
+    let brand = invoke brand.of(value)
+    if same(brand, absent) {} else { return text.concat("brand:", text.concat(brand[0], text.concat(".", brand[1]))) }
     return k
   }
   if same(k, "float") {
@@ -402,7 +400,7 @@ body {
         return value
       }
     }
-    if same(k, "brand:ts.arguments") { return "[object Arguments]" }
+    if same(k, "brand:typescript.arguments") { return "[object Arguments]" }
     if same(k, "list") {
       let pieces = []
       for item in value {
@@ -1077,7 +1075,7 @@ errors "type_error"
 charge sum(4, size(target))
 body {
   let k = invoke ts.receiver(target)
-  if same(k, "brand:ts.arguments") {
+  if same(k, "brand:typescript.arguments") {
     let items = []
     let index = 0.0
     while true metered 2 {
@@ -1092,7 +1090,7 @@ body {
     }
     return items
   }
-  if same(k, "brand:regex.match") { return target.items }
+  if same(k, "brand:typescript.regex_match") { return target.items }
   if same(k, "list") {
     return target
   }
@@ -1109,7 +1107,7 @@ body {
     }
     return items
   }
-  if same(k, "brand:ts.iterator") {
+  if same(k, "brand:typescript.iterator") {
       let iterator_items = []
       let next = target.next
       set next = invoke ts.callable(next)
@@ -1201,7 +1199,7 @@ body {
   # P: an existing plain-record field is constant work, even on native decline.
   if same(kind(target), "record") {
     if same(kind(key), "text") {
-      if bool.not(same(target.__ts_brand, ())) { return target[key] }
+      if bool.not(record.contains(target, "__lash_brand")) { return target[key] }
     }
   }
   # K-CHG-007: only dynamic work crosses the ordinary closure boundary.
@@ -1249,7 +1247,7 @@ body {
         }
       }
     }
-    if same(k, "brand:ts.arguments") {
+    if same(k, "brand:typescript.arguments") {
       let name = invoke ts.to_property_key(key)
       if same(name, "callee") { throw error.new("type_error", "Strict arguments.callee is restricted", null) }
       return target.properties[name]
@@ -1264,7 +1262,7 @@ body {
         throw error.new("TS_LONE_SURROGATE_UNSUPPORTED", "String index contains a lone surrogate", null)
       }
     }
-    if same(k, "brand:regex.ecma") {
+    if same(k, "brand:regex.ecma.reg_exp") {
       let name = invoke ts.to_property_key(key)
       if same(name, "lastIndex") { return target.lastIndex }
       if same(name, "source") {
@@ -1278,7 +1276,7 @@ body {
       }
       return absent
     }
-    if same(k, "brand:regex.match") {
+    if same(k, "brand:typescript.regex_match") {
       let name = invoke ts.to_property_key(key)
       if same(name, "length") { return num.to_float(list.len(target.items)) }
       for field in ["index", "input", "groups"] { if same(name, field) { return target[name] } }
@@ -1289,7 +1287,7 @@ body {
       let outcome = invoke ts.hole_value(element)
       return outcome
     }
-    if same(k, "brand:ts.iterator") {
+    if same(k, "brand:typescript.iterator") {
       let name = invoke ts.to_property_key(key)
       if same(name, "next") { return target.next }
       return absent
@@ -1326,7 +1324,7 @@ body {
   # A plain object and an array first, as ts.get takes them.
   if same(k, "record") {
     try {
-      if bool.not(same(target.__ts_brand, ())) {
+      if bool.not(record.contains(target, "__lash_brand")) {
         set target[key] = value
         return value
       }
@@ -1371,13 +1369,13 @@ body {
       }
     }
   }
-  if same(k, "brand:ts.arguments") {
+  if same(k, "brand:typescript.arguments") {
     let name = invoke ts.to_property_key(key)
     if same(name, "callee") { throw error.new("type_error", "Strict arguments.callee is restricted", null) }
     set target.properties[name] = value
     return value
   }
-  if same(k, "brand:regex.ecma") {
+  if same(k, "brand:regex.ecma.reg_exp") {
     let name = invoke ts.to_property_key(key)
     if same(name, "lastIndex") { set target.lastIndex = value
       return value }
@@ -1434,7 +1432,7 @@ body {
       }
     }
   }
-  if same(k, "brand:ts.arguments") {
+  if same(k, "brand:typescript.arguments") {
     let name = invoke ts.to_property_key(key)
     if same(name, "callee") { throw error.new("type_error", "Cannot delete strict arguments.callee", null) }
     remove target.properties[name]
@@ -1481,7 +1479,7 @@ charge sum(12, deep(key))
 body {
   let k = kind(target)
   if same(k, "record") {
-    if bool.not(same(target.__ts_brand, ())) {
+    if bool.not(record.contains(target, "__lash_brand")) {
       if same(kind(key), "text") { return record.contains(target, key) }
       let name = invoke ts.to_property_key(key)
       return record.contains(target, name)
@@ -1516,10 +1514,10 @@ body {
       if same(name, described) { throw error.new("TS_REFLECTION_UNSUPPORTED", "Testing a function's own properties is outside the TypeScript dialect", null) }
     }
   }
-  if same(k, "brand:regex.ecma") {
+  if same(k, "brand:regex.ecma.reg_exp") {
     throw error.new("TS_REFLECTION_UNSUPPORTED", "Testing a RegExp's own properties is outside the TypeScript dialect", null)
   }
-  if same(k, "brand:ts.iterator") { return same(name, "next") }
+  if same(k, "brand:typescript.iterator") { return same(name, "next") }
   if same(k, "text") {
     if same(name, "length") { return true }
     let length = text.utf16_len(target)
@@ -1534,15 +1532,15 @@ body {
     }
     return same(name, "message")
   }
-  for object_kind in ["map", "set", "timestamp", "closure", "bool", "number", "brand:date.invalid"] {
+  for object_kind in ["map", "set", "timestamp", "closure", "bool", "number", "brand:date.ecma.invalid_date"] {
     if same(k, object_kind) { return false }
   }
-  if same(k, "brand:ts.arguments") {
+  if same(k, "brand:typescript.arguments") {
     let name = invoke ts.to_property_key(key)
     if same(name, "callee") { return true }
     return record.contains(target.properties, name)
   }
-  if same(k, "brand:regex.match") {
+  if same(k, "brand:typescript.regex_match") {
     let name = invoke ts.to_property_key(key)
     for field in ["length", "index", "input", "groups"] { if same(name, field) { return true } }
     let length = list.len(target.items)
@@ -1597,7 +1595,7 @@ charge sum(4, product(size(target), size(target)))
 body {
   let k = kind(target)
   let hidden_fields = set{}
-  if same(k, "record") { if same((target.__ts_brand, target.__ts_type), ((), "brand:ts.arguments")) {
+  if same(k, "record") { if same(target.__lash_brand, ("typescript", "arguments")) {
     set hidden_fields = target.hidden
     set target = target.properties
   } }
@@ -1795,5 +1793,6 @@ body {
     set properties[key] = value
     set index = num.add(index, 1)
   }
-  return {__ts_brand: (), __ts_type: "brand:ts.arguments", properties: properties, hidden: set{"length"}}
+  let built = invoke typescript.__built()
+  return {__lash_brand: ("typescript", "arguments"), __lash_built: built, properties: properties, hidden: set{"length"}}
 }

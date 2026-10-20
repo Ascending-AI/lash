@@ -15,7 +15,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::Arc;
 
-use lash_dialect_typescript::{DiagnosticCode, define_helpers};
+use lash_dialect_typescript::DiagnosticCode;
 use lash_kernel_dialect::{Environment, Lowered, NamedLibrary};
 use lash_kernel_doc::{Datum, ErrorDatum, FunctionRegistry, Handle, Integer, Name, Timestamp};
 use lash_kernel_vm::{
@@ -94,29 +94,12 @@ pub(crate) fn executor() -> Box<dyn Executor> {
 fn registry() -> &'static Arc<FunctionRegistry> {
     static REGISTRY: std::sync::OnceLock<Arc<FunctionRegistry>> = std::sync::OnceLock::new();
     REGISTRY.get_or_init(|| {
-        let mut registry = FunctionRegistry::new();
-        lash_kernel_lib::register_numbers(&mut registry).expect("numeric library registration");
-        lash_kernel_lib::register_text_json(&mut registry).expect("text library registration");
-        lash_kernel_vm::register_machine_functions(&mut registry)
-            .expect("machine library registration");
-        lash_kernel_lib::register_collections(&mut registry)
-            .expect("collection library registration");
-        lash_ext_regex_ecma::register(
-            &mut registry,
-            &Arc::new(lash_ext_regex_ecma::Engine::new(32)),
+        let built = lash_ext_helper_compiler::library::Library::of(
+            lash_ext_helper_compiler::library::Dialect::TypeScript,
         )
-        .expect("regex extension registration");
-        lash_ext_date_ecma::register(&mut registry).expect("date extension registration");
-        lash_ext_url_whatwg::register(&mut registry).expect("URL extension registration");
-        let mut library = NamedLibrary::from_registry(&registry).expect("unique library names");
-        let mut helpers = Vec::new();
-        for definition in define_helpers(&mut library).expect("dialect library dependencies") {
-            helpers.push(
-                registry
-                    .register(definition, None)
-                    .expect("dialect helper registration"),
-            );
-        }
+        .expect("built packages");
+        let mut registry = built.registry;
+        let helpers = built.helpers;
         lash_ext_ts_core::implement(&mut registry, helpers).expect("TypeScript operation natives");
         Arc::new(registry)
     })

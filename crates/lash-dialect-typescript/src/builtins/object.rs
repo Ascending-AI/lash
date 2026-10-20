@@ -11,7 +11,7 @@ pub(super) fn object() -> Object {
             Row::Method {
                 path: "Object.prototype.hasOwnProperty",
                 receivers: &[
-                    Receiver::Brand("ts.arguments"),
+                    Receiver::Brand("typescript.arguments"),
                     Receiver::Record,
                     Receiver::List,
                     Receiver::Text,
@@ -27,12 +27,12 @@ pub(super) fn object() -> Object {
             },
             Row::Method {
                 path: "Object.prototype.toString",
-                receivers: &[Receiver::Brand("ts.arguments"), Receiver::Record],
+                receivers: &[Receiver::Brand("typescript.arguments"), Receiver::Record],
                 function: "ts.object.toString",
             },
             Row::Method {
                 path: "Object.prototype.valueOf",
-                receivers: &[Receiver::Brand("ts.arguments"), Receiver::Record],
+                receivers: &[Receiver::Brand("typescript.arguments"), Receiver::Record],
                 function: "ts.object.valueOf",
             },
             Row::Method {
@@ -48,7 +48,7 @@ pub(super) fn object() -> Object {
                     Receiver::Error,
                     Receiver::Timestamp,
                     Receiver::Closure,
-                    Receiver::Brand("ts.arguments"),
+                    Receiver::Brand("typescript.arguments"),
                 ],
                 function: "ts.object.propertyIsEnumerable",
             },
@@ -70,7 +70,7 @@ pub(super) fn object() -> Object {
                     Receiver::Error,
                     Receiver::Timestamp,
                     Receiver::Closure,
-                    Receiver::Brand("ts.arguments"),
+                    Receiver::Brand("typescript.arguments"),
                 ],
                 function: "ts.object.isPrototypeOf",
             },

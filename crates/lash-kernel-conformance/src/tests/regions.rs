@@ -1798,7 +1798,7 @@ fn typescript_for_of_over_an_array_runs_in_its_region_as_python_for_in_does() {
 /// islands (`docs/design/kernel-regions.md` §1, call island): the
 /// comparator a sort applies and the callbacks map and filter apply read
 /// the field in place behind the lowering's record guard, its
-/// `same(x.__ts_brand, ())` answered without building the tuple, and its
+/// `record.contains(x, "__lash_brand")` answered without building the tuple, and its
 /// fallback statements cold. Each forms an island, its natural run enters
 /// them, and under PLAN-INDEP's sweep it runs as the reference runs it:
 /// end, charge, tape and images, where the callbacks stay in their islands

@@ -118,7 +118,7 @@ pub(crate) fn dispatcher(
     {
         let passed = "items";
         source.push_str(&format!(
-            "  if same(receiver, \"brand:regex.match\") {{\n    let items = this.items\n    let outcome = invoke {function}({passed})\n    return outcome\n  }}\n"
+            "  if same(receiver, \"brand:typescript.regex_match\") {{\n    let items = this.items\n    let outcome = invoke {function}({passed})\n    return outcome\n  }}\n"
         ));
     }
     source.push_str(&format!(
@@ -133,7 +133,7 @@ pub(crate) fn dispatcher(
 /// member reads and calls have.
 const RECEIVER: &str = "  let receiver = kind(this)
   if same(receiver, \"record\") {
-    if same(this.__ts_brand, ()) { set receiver = this.__ts_type }
+    set receiver = invoke ts.receiver(this)
   } else {
     if same(receiver, \"list\") {} else {
       if same(receiver, \"text\") {} else { set receiver = invoke ts.receiver(this) }
@@ -230,15 +230,7 @@ fn computed_reader(table: &'static builtins::Table) -> String {
     // building the marker to compare.
     source.push_str(&format!(
         "  if same(kind(this), \"record\") {{
-    if record.contains(this, \"__ts_brand\") {{
-      if bool.not(same(this.__ts_brand, ())) {{
-        let own = absent
-        try {{ set own = this[key] }} catch generic {{}}
-        if same(own, absent) {{}} else {{
-        {own}
-        }}
-      }}
-    }} else {{
+    if bool.not(record.contains(this, \"__lash_brand\")) {{
       let own = absent
       try {{ set own = this[key] }} catch generic {{}}
       if bool.not(same(own, absent)) {{

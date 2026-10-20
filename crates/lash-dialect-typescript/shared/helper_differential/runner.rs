@@ -4,8 +4,7 @@ use std::sync::Arc;
 
 use lash_kernel_dialect::{Environment, NamedLibrary};
 use lash_kernel_doc::{
-    Datum, EffectName, ErrorDatum, FunctionRegistry, Handle, Integer, Name, Param, Signature,
-    Timestamp, Type,
+    Datum, EffectName, ErrorDatum, Handle, Integer, Name, Param, Signature, Timestamp, Type,
 };
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, Machine, Outcome, PreparedLibrary, Program, Request, RunError,
@@ -54,39 +53,19 @@ impl Runner {
     }
 
     pub fn new_with_charge(dialect: &str, charge: lash_kernel_vm::Charge) -> Result<Self, String> {
-        let mut registry = FunctionRegistry::new();
-        lash_kernel_vm::register_machine_functions(&mut registry).map_err(|e| e.to_string())?;
-        lash_kernel_lib::register_numbers(&mut registry).map_err(|e| e.to_string())?;
-        lash_kernel_lib::register_collections(&mut registry).map_err(|e| e.to_string())?;
-        lash_kernel_lib::register_text_json(&mut registry).map_err(|e| e.to_string())?;
-        if dialect == "typescript" {
-            lash_ext_date_ecma::register(&mut registry).map_err(|e| e.to_string())?;
-            lash_ext_url_whatwg::register(&mut registry).map_err(|e| e.to_string())?;
-            lash_ext_regex_ecma::register(
-                &mut registry,
-                &Arc::new(lash_ext_regex_ecma::Engine::new(32)),
-            )
-            .map_err(|e| e.to_string())?;
-        }
-        let mut library = NamedLibrary::from_registry(&registry).map_err(|e| e.to_string())?;
-        let definitions = match dialect {
-            "typescript" => lash_dialect_typescript::define_helpers(&mut library),
-            "python" => lash_dialect_python::define_helpers(&mut library),
+        let dialect = match dialect {
+            "typescript" => lash_ext_helper_compiler::library::Dialect::TypeScript,
+            "python" => lash_ext_helper_compiler::library::Dialect::Python,
             _ => return Err(format!("unknown dialect {dialect}")),
-        }
-        .map_err(|e| e.to_string())?;
-        let mut helpers = Vec::new();
-        for definition in definitions {
-            helpers.push(
-                registry
-                    .register(definition, None)
-                    .map_err(|e| e.to_string())?,
-            );
-        }
+        };
+        let built = lash_ext_helper_compiler::library::Library::of(dialect)?;
+        let mut registry = built.registry;
+        let helpers = built.helpers;
+        let library = NamedLibrary::from_registry(&registry).map_err(|e| e.to_string())?;
         // The runner installs each dialect's operation natives, as a worker
         // does (FIG-6440).
         match dialect {
-            "typescript" => {
+            lash_ext_helper_compiler::library::Dialect::TypeScript => {
                 lash_ext_ts_core::implement(&mut registry, helpers).map_err(|e| e.to_string())?
             }
             _ => lash_ext_py_core::implement(&mut registry, helpers).map_err(|e| e.to_string())?,

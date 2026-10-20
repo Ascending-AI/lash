@@ -127,16 +127,12 @@ body {
     if eq(list.len(args), 1) {
       let value = args[0]
       if same(kind(value), "timestamp") { return value }
-      if same(kind(value), "record") { if same((value.__ts_brand, value.__ts_type), ((), "brand:date.invalid")) { return {brand: "date.invalid", __ts_brand: (), __ts_type: "brand:date.invalid"} } }
+      if same(kind(value), "record") { if same(value.__lash_brand, ("date.ecma", "invalid_date")) { return date.ecma.timestamp(nan) } }
       let value = invoke ts.to_primitive(value, "default")
       if same(kind(value), "text") { set time = date.ecma.parse(value) } else { set time = invoke ts.to_number(value) }
     } else { set time = invoke ts.date.utc(args) }
   }
   let date = date.ecma.timestamp(num.to_float(time))
-  if same(kind(date), "record") {
-    set date.__ts_brand = ()
-    set date.__ts_type = "brand:date.invalid"
-  }
   return date
 }
 
@@ -146,7 +142,7 @@ errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
   if same(kind(value), "timestamp") { return true }
-  if same(kind(value), "record") { return same((value.__ts_brand, value.__ts_type), ((), "brand:date.invalid")) }
+  if same(kind(value), "record") { return same(value.__lash_brand, ("date.ecma", "invalid_date")) }
   return false
 }
 

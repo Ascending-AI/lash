@@ -2,3 +2,4 @@ url.whatwg.parse	url whatwg parse
 url.whatwg.query_parse	url whatwg query parse
 url.whatwg.query_stringify	url whatwg query stringify
 url.whatwg.update	url whatwg update
+url.whatwg.__built	url.whatwg building artifact

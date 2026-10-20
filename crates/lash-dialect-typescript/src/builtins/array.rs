@@ -2,7 +2,7 @@ use super::{Object, Receiver, Row};
 
 /// The receivers of every Array method: a list, and a regex match result,
 /// which answers them as the list of its items.
-const LISTS: &[Receiver] = &[Receiver::List, Receiver::Brand("regex.match")];
+const LISTS: &[Receiver] = &[Receiver::List, Receiver::Brand("typescript.regex_match")];
 
 /// Array operations carry the JavaScript differences in kernel bodies.
 pub(super) fn object() -> Object {
@@ -233,7 +233,7 @@ pub(super) fn object() -> Object {
         function: "ts.array.with",
     });
     rows.push(Row::Property {
-        receiver: Receiver::Brand("regex.match"),
+        receiver: Receiver::Brand("typescript.regex_match"),
         name: "length",
         function: "ts.array.match_length",
     });

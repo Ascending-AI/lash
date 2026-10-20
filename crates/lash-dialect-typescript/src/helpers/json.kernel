@@ -1,3 +1,4 @@
+use record.contains
 # JavaScript json behavior, expressed in kernel code.
 use ts.callable
 use ts.console.json
@@ -134,10 +135,10 @@ body {
         let passed = [name]
         set value = apply to_json(value, passed)
       } else {
-        if same(value.__ts_brand, ()) {
-          let brand = value.__ts_type
-          if same(brand, "brand:date.invalid") { set value = null }
-          if same(brand, "brand:url.whatwg") { set value = value.state.href }
+        if record.contains(value, "__lash_brand") {
+          let brand = invoke ts.receiver(value)
+          if same(brand, "brand:date.ecma.invalid_date") { set value = null }
+          if same(brand, "brand:url.whatwg.url") { set value = value.state.href }
         }
       }
     }
@@ -221,7 +222,7 @@ body {
 # Whether JSON.stringify writes `value` as the console's JSON render does:
 # a list, a record or a scalar whose containers hold only lists, records,
 # null, bools, text and finite numbers. A record with a `toJSON` or a
-# `__ts_brand` field, or with a key that begins with a digit (an index key, which
+# `__lash_brand` field, or with a key that begins with a digit (an index key, which
 # JSON writes before the others), is not plain. Containers more than eight
 # deep are not plain, so a cycle is not plain either. Classification reads
 # borrowed values, allocating nothing. Shared values count at every occurrence;
@@ -232,7 +233,7 @@ charge 1
 body {
   # The native is neutral: forbidden field names, key interval and bounds
   # are dialect policy. Its integer packs work and admission in its low bit.
-  let classified = json.classify(value, 8, ("toJSON", "__ts_brand"), "0", ":")
+  let classified = json.classify(value, 8, ("toJSON", "__lash_brand"), "0", ":")
   return same(num.rem_trunc(classified, 2), 1)
 }
 

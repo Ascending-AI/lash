@@ -7,7 +7,12 @@ use crate::define_helpers;
 /// emits a call to is defined.
 #[test]
 fn the_helper_package_is_defined_against_the_kernel_library() {
-    let mut library = lash_kernel_dialect::NamedLibrary::from_registry(&super::kernel_registry())
+    let mut library =
+        lash_kernel_dialect::NamedLibrary::resolving(super::machine::registry(), |id| {
+            super::machine::registry()
+                .get(id)
+                .is_some_and(|function| !function.name().starts_with("ts."))
+        })
         .expect("unique kernel names");
     let definitions = match define_helpers(&mut library) {
         Ok(definitions) => definitions,

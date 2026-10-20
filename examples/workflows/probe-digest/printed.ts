@@ -8,7 +8,7 @@ export async function digest(topics) {
     ((t2) => (undefined))((await await sleep(7000.0)));
     let t3 = undefined;
     if (helper_same(helper_kind(topic), "record")) {
-      if (!(helper_same(topic.__ts_brand, [] as const))) {
+      if (!(helper_record_contains(topic, "__lash_brand"))) {
         t3 = topic.urgent;
       } else {
         t3 = await helper_ts_read(topic, "urgent");

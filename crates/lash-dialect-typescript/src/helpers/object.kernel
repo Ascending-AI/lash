@@ -406,10 +406,10 @@ body {
   if same(k, "timestamp") { set tag = "Date" }
   if same(k, "error") { set tag = "Error" }
   if same(k, "closure") { set tag = "Function" }
-  if same(k, "brand:ts.arguments") { set tag = "Arguments" }
+  if same(k, "brand:typescript.arguments") { set tag = "Arguments" }
   if same(k, "builtin") { set tag = this[2] }
-  if same(k, "brand:regex.ecma") { set tag = "RegExp" }
-  if same(k, "brand:date.invalid") { set tag = "Date" }
+  if same(k, "brand:regex.ecma.reg_exp") { set tag = "RegExp" }
+  if same(k, "brand:date.ecma.invalid_date") { set tag = "Date" }
   return text.concat("[object ", text.concat(tag, "]"))
 }
 
@@ -463,7 +463,7 @@ body {
   let primitive = invoke ts.is_primitive(this)
   if primitive { return false }
   let receiver = invoke ts.receiver(this)
-  for instance in ["record", "list", "map", "set", "error", "timestamp", "closure", "brand:date.invalid", "brand:regex.ecma", "brand:ts.arguments"] {
+  for instance in ["record", "list", "map", "set", "error", "timestamp", "closure", "brand:date.ecma.invalid_date", "brand:regex.ecma.reg_exp", "brand:typescript.arguments"] {
     if same(receiver, instance) { return false }
   }
   # Ordinary guest objects cannot become another object's prototype:

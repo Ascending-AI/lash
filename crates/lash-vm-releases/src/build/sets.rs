@@ -62,8 +62,7 @@ pub fn kernel_names(registry: &FunctionRegistry) -> Result<Vec<&str>, String> {
 /// generated dispatchers, and keeps display data out of function definitions.
 pub fn validate(
     registry: &FunctionRegistry,
-    helpers: &[lash_kernel_doc::FunctionName],
-    _typescript: bool,
+    packages: &[&lash_kernel_package::Package],
 ) -> Result<(), String> {
     let mut expected = BTreeSet::new();
     let mut add = |name: &str| {
@@ -73,33 +72,10 @@ pub fn validate(
             Err(format!("helper sets share `{name}`"))
         }
     };
-    // Kernel names come from the registry: its reviewed enum is checked by
-    // the release law, so the explicit recorder can refresh that data.
-    for (_, function) in registry.iter() {
-        let name = function.definition().name.as_str();
-        if !name.starts_with("ts.")
-            && !name.starts_with("py.")
-            && !name.starts_with("regex.")
-            && !name.starts_with("date.")
-            && !name.starts_with("url.")
-        {
-            add(name)?;
+    for package in packages {
+        for at in 0..package.code().len() {
+            add(package.code().name(at))?;
         }
-    }
-    #[cfg(feature = "dialect-typescript")]
-    if _typescript {
-        for op in lash_ext_regex_ecma::Operation::ALL {
-            add(op.name())?;
-        }
-        for op in lash_ext_date_ecma::Operation::ALL {
-            add(op.name())?;
-        }
-        for op in lash_ext_url_whatwg::Operation::ALL {
-            add(op.name())?;
-        }
-    }
-    for helper in helpers {
-        add(helper.as_str())?;
     }
     let actual: BTreeSet<_> = registry
         .iter()

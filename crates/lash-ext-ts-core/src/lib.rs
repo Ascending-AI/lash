@@ -253,7 +253,7 @@ impl NativeFunction for Subtract {
     }
 }
 
-/// P is a record receiver, text key and a brand unequal to the empty tuple.
+/// P is a record receiver, text key and no package brand field.
 /// Every other input declines before coercion or allocation.
 struct Get;
 
@@ -270,14 +270,12 @@ impl NativeFunction for Get {
         let Some(fields) = args.table(record)? else {
             return Err(NativeError::Malformed("a record names another body"));
         };
-        let marker = ShortText::new("__ts_brand").map(Value::Text);
+        let marker = ShortText::new("__lash_brand").map(Value::Text);
         let brand = match &marker {
             Some(marker) => args.lookup(fields, marker)?,
             None => None,
         };
-        if let Some(brand @ Value::Tuple(_)) = brand
-            && args.sequence(brand)?.is_some_and(|tuple| tuple.is_empty())
-        {
+        if brand.is_some() {
             return Err(NativeError::Decline);
         }
         Ok(args.lookup(fields, key)?.copied().unwrap_or(Value::Absent))

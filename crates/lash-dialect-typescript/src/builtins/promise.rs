@@ -42,7 +42,7 @@ pub(super) fn object() -> Object {
         ]
         .map(|(path, function)| Row::Method {
             path,
-            receivers: &[Receiver::Brand("Promise")],
+            receivers: &[Receiver::Brand("typescript.promise")],
             function,
         }),
     );

@@ -12,7 +12,7 @@ export async function file_emails() {
     for (const email of emails) {
       let t3 = undefined;
       if (helper_same(helper_kind(email), "record")) {
-        if (!(helper_same(email.__ts_brand, [] as const))) {
+        if (!(helper_record_contains(email, "__lash_brand"))) {
           t3 = email.subject;
         } else {
           t3 = await helper_ts_read(email, "subject");

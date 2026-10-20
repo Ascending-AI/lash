@@ -355,19 +355,19 @@ fn plain_record_spines_skip_admission_and_preserve_heap_state() {
          await finish(tree);"
     ));
     let text = super::main_text_with_effects(&source);
-    assert!(!text.contains("__ts_brand"), "{text}");
+    assert!(!text.contains("__lash_brand"), "{text}");
     assert!(!text.contains("kind("), "{text}");
     let guarded = source.replace(
         "const tree = t0;",
         "function opaque(x) { return x; } const tree = opaque(t0);",
     );
-    assert!(super::main_text_with_effects(&guarded).contains("__ts_brand"));
+    assert!(super::main_text_with_effects(&guarded).contains("__lash_brand"));
     assert_eq!(super::machine::end(&source), super::machine::end(&guarded));
 }
 
 fn plain_fallback(source: &str) {
     let text = super::main_text_with_effects(source);
-    assert!(text.contains(".__ts_brand, ())"), "{text}");
+    assert!(text.contains("\"__lash_brand\""), "{text}");
     assert_eq!(
         super::machine::end(source),
         super::machine::Ended::Finished(lash_kernel_doc::Datum::Bool(true))
@@ -379,11 +379,11 @@ fn plain_fallback(source: &str) {
 #[test]
 fn plain_record_alias_writes_keep_nested_admission() {
     plain_fallback(
-        "const r = { next: {} }; const alias = r; alias.next = new Date(7); await finish(r.next.__ts_brand === undefined);",
+        "const r = { next: {} }; const alias = r; alias.next = new Date(7); await finish(r.next.__lash_brand === undefined);",
     );
     // A computed alias write may replace any structural link.
     plain_fallback(
-        "const r = { next: {} }; const alias = r; let key = 'next'; alias[key] = new Date(7); await finish(r.next.__ts_brand === undefined);",
+        "const r = { next: {} }; const alias = r; let key = 'next'; alias[key] = new Date(7); await finish(r.next.__lash_brand === undefined);",
     );
     // Deletion removes presence, even when the old field was a record.
     assert_eq!(
@@ -399,10 +399,10 @@ fn plain_record_alias_writes_keep_nested_admission() {
 #[test]
 fn plain_record_mutating_calls_keep_admission() {
     plain_fallback(
-        "const r = { next: {} }; function change(x) { x.next = new Date(7); } change(r); await finish(r.next.__ts_brand === undefined);",
+        "const r = { next: {} }; function change(x) { x.next = new Date(7); } change(r); await finish(r.next.__lash_brand === undefined);",
     );
     plain_fallback(
-        "const inner = { next: {} }; const r = { inner }; function change(x) { x.next = new Date(7); } change(r.inner); await finish(inner.next.__ts_brand === undefined);",
+        "const inner = { next: {} }; const r = { inner }; function change(x) { x.next = new Date(7); } change(r.inner); await finish(inner.next.__lash_brand === undefined);",
     );
 }
 
@@ -410,7 +410,7 @@ fn plain_record_mutating_calls_keep_admission() {
 #[test]
 fn plain_record_captures_keep_admission() {
     plain_fallback(
-        "const r = { next: {} }; const change = () => { r.next = new Date(7); }; change(); await finish(r.next.__ts_brand === undefined);",
+        "const r = { next: {} }; const change = () => { r.next = new Date(7); }; change(); await finish(r.next.__lash_brand === undefined);",
     );
 }
 
@@ -418,7 +418,7 @@ fn plain_record_captures_keep_admission() {
 /// reassigned internal receiver plain. User classes keep their refusal.
 #[test]
 fn plain_record_reassignment_keeps_brand_admission() {
-    plain_fallback("let r = {}; r = new Date(7); await finish(r.__ts_brand === undefined);");
+    plain_fallback("let r = {}; r = new Date(7); await finish(r.__lash_brand === undefined);");
     assert_eq!(
         super::lower("let r = {}; class C {} r = new C(); r.x;")
             .unwrap_err()
@@ -444,9 +444,9 @@ fn plain_record_getters_keep_the_accessor_refusal() {
 #[test]
 fn plain_record_unknown_definitions_keep_admission() {
     for source in [
-        "const r = { next: {}, next: new Date(7) }; await finish(r.next.__ts_brand === undefined);",
-        "const r = { next: {} }; const copy = { ...r }; copy.next = new Date(7); await finish(copy.next.__ts_brand === undefined);",
-        "let r = { next: {} }; r = { next: new Date(7) }; await finish(r.next.__ts_brand === undefined);",
+        "const r = { next: {}, next: new Date(7) }; await finish(r.next.__lash_brand === undefined);",
+        "const r = { next: {} }; const copy = { ...r }; copy.next = new Date(7); await finish(copy.next.__lash_brand === undefined);",
+        "let r = { next: {} }; r = { next: new Date(7) }; await finish(r.next.__lash_brand === undefined);",
     ] {
         plain_fallback(source);
     }
@@ -459,7 +459,7 @@ fn plain_record_unknown_definitions_keep_admission() {
             .unwrap()
             .document,
     );
-    assert!(text.contains("__ts_brand"), "{text}");
+    assert!(text.contains("__lash_brand"), "{text}");
     // Cyclic definitions cannot manufacture a proof or expand it without
     // bound before the ordinary boundness refusal runs.
     assert_eq!(
@@ -480,20 +480,20 @@ fn plain_record_unknown_definitions_keep_admission() {
 #[test]
 fn plain_record_implicit_calls_and_hidden_aliases_keep_admission() {
     plain_fallback(
-        "const r = { next: {}, toString() { Object.assign(this, { next: new Date(7) }); return 'x'; } }; const text = '' + r; await finish(r.next.__ts_brand === undefined);",
+        "const r = { next: {}, toString() { Object.assign(this, { next: new Date(7) }); return 'x'; } }; const text = '' + r; await finish(r.next.__lash_brand === undefined);",
     );
     plain_fallback(
-        "const inner = { next: {} }; const r = ({ inner } as any); Object.assign(r.inner, { next: new Date(7) }); await finish(inner.next.__ts_brand === undefined);",
+        "const inner = { next: {} }; const r = ({ inner } as any); Object.assign(r.inner, { next: new Date(7) }); await finish(inner.next.__lash_brand === undefined);",
     );
     plain_fallback(
-        "const r = { next: { child: {} } }; let alias; ({ next: alias } = r); Object.assign(alias, { child: new Date(7) }); await finish(r.next.child.__ts_brand === undefined);",
+        "const r = { next: { child: {} } }; let alias; ({ next: alias } = r); Object.assign(alias, { child: new Date(7) }); await finish(r.next.child.__lash_brand === undefined);",
     );
 }
 
 /// TS-PLAIN-OBJECT-KEY: A computed literal key may coerce and mutate its receiver before a later member path reads it.
 #[test]
 fn plain_record_computed_object_keys_keep_admission() {
-    let source = "const r = { next: {}, toString() { Object.assign(this, { next: new Date(7) }); return 'key'; } }; const keyed = { [r]: 1 }; await finish(r.next.__ts_brand === undefined);";
+    let source = "const r = { next: {}, toString() { Object.assign(this, { next: new Date(7) }); return 'key'; } }; const keyed = { [r]: 1 }; await finish(r.next.__lash_brand === undefined);";
     let guarded = super::machine::end(&source.replace("const r =", "var r ="));
     assert_eq!(
         guarded,
@@ -505,7 +505,7 @@ fn plain_record_computed_object_keys_keep_admission() {
 /// TS-PLAIN-PATTERN-KEY: Destructuring key coercion has the same escape semantics as computed member access.
 #[test]
 fn plain_record_computed_pattern_keys_keep_admission() {
-    let source = "const r = { next: {}, toString() { Object.assign(this, { next: new Date(7) }); return 'key'; } }; const { [r]: ignored } = {}; await finish(r.next.__ts_brand === undefined);";
+    let source = "const r = { next: {}, toString() { Object.assign(this, { next: new Date(7) }); return 'key'; } }; const { [r]: ignored } = {}; await finish(r.next.__lash_brand === undefined);";
     let guarded = super::machine::end(&source.replace("const r =", "var r ="));
     assert_eq!(
         guarded,
@@ -517,7 +517,7 @@ fn plain_record_computed_pattern_keys_keep_admission() {
 /// TS-PLAIN-THROW: A catch binding aliases the thrown value, so a call on that binding can invalidate the original nested facts.
 #[test]
 fn plain_record_thrown_aliases_keep_admission() {
-    let source = "const r = { next: {} }; try { throw r; } catch (caught) { Object.assign(caught, { next: new Date(7) }); } await finish(r.next.__ts_brand === undefined);";
+    let source = "const r = { next: {} }; try { throw r; } catch (caught) { Object.assign(caught, { next: new Date(7) }); } await finish(r.next.__lash_brand === undefined);";
     let guarded = super::machine::end(&source.replace("const r =", "var r ="));
     assert_eq!(
         guarded,
@@ -529,7 +529,7 @@ fn plain_record_thrown_aliases_keep_admission() {
 /// TS-PLAIN-FRESH-FIELD-ESCAPE: A field of an unnamed literal can expose a local alias to a mutating call.
 #[test]
 fn plain_record_fresh_literal_field_aliases_keep_admission() {
-    let source = "const r = { next: {} }; Object.assign(({ inner: r }).inner, { next: new Date(7) }); await finish(r.next.__ts_brand === undefined);";
+    let source = "const r = { next: {} }; Object.assign(({ inner: r }).inner, { next: new Date(7) }); await finish(r.next.__lash_brand === undefined);";
     let guarded = super::machine::end(&source.replace("const r =", "var r ="));
     assert_eq!(
         guarded,
@@ -544,12 +544,15 @@ fn plain_record_fresh_literal_field_aliases_keep_admission() {
 fn plain_record_restored_brand_markers_keep_admission() {
     let bindings = super::pages::Session::seeded([(
         lash_kernel_doc::Name::new("marker"),
-        lash_kernel_doc::Datum::Tuple(Vec::new()),
+        lash_kernel_doc::Datum::Tuple(vec![
+            lash_kernel_doc::Datum::Text("date.ecma".into()),
+            lash_kernel_doc::Datum::Text("invalid_date".into()),
+        ]),
     )]);
     let sources = [
-        "const r = {}; r.__ts_type = 'brand:date'; r.__ts_brand = marker; await finish(r.__ts_brand === undefined);",
-        "const r = {}; r.__ts_type = 'brand:date'; const key = '__ts_brand'; r[key] = marker; await finish(r.__ts_brand === undefined);",
-        "const r = { __ts_brand: marker, __ts_type: 'brand:date' }; await finish(({ __ts_brand: marker, __ts_type: 'brand:date' }).__ts_brand === undefined);",
+        "const r = {}; r.__lash_brand = marker; await finish(r.__lash_brand === undefined);",
+        "const r = {}; const key = '__lash_brand'; r[key] = marker; await finish(r.__lash_brand === undefined);",
+        "const r = { __lash_brand: marker }; await finish(({ __lash_brand: marker }).__lash_brand === undefined);",
     ];
     let observed: Vec<_> = sources
         .iter()
@@ -590,14 +593,14 @@ fn plain_record_proofs_hold_for_function_locals_and_numeric_writes() {
        for (let repeat = 0; repeat < 2; repeat++) { result = body(); }\n\
        await finish(result);";
     let text = super::main_text_with_effects(source);
-    assert!(!text.contains("__ts_brand"), "{text}");
+    assert!(!text.contains("__lash_brand"), "{text}");
     assert!(!text.contains("kind("), "{text}");
     let guarded = source.replace(
         "const tree = {",
         "function opaque(x) { return x; } const tree = opaque({",
     );
     let guarded = guarded.replace("} } };", "} } });");
-    assert!(super::main_text_with_effects(&guarded).contains("__ts_brand"));
+    assert!(super::main_text_with_effects(&guarded).contains("__lash_brand"));
     assert_eq!(super::machine::end(source), super::machine::end(&guarded));
 }
 
@@ -608,26 +611,29 @@ fn plain_record_proofs_hold_for_function_locals_and_numeric_writes() {
 fn plain_record_keys_that_may_be_text_keep_brand_admission() {
     let bindings = super::pages::Session::seeded([(
         lash_kernel_doc::Name::new("marker"),
-        lash_kernel_doc::Datum::Tuple(Vec::new()),
+        lash_kernel_doc::Datum::Tuple(vec![
+            lash_kernel_doc::Datum::Text("date.ecma".into()),
+            lash_kernel_doc::Datum::Text("invalid_date".into()),
+        ]),
     )]);
     for key in [
-        "const key: number = ('__ts_brand' as any);",
-        "let key = 0; key = '__ts_brand';",
-        "let key = 0; const change = () => { key = '__ts_brand'; }; change();",
-        "const prefix = '__ts_'; const key = prefix + 'brand';",
-        "const flag = false; const key = flag ? 0 : '__ts_brand';",
-        "let key = 0; key += '__ts_brand';",
+        "const key: number = ('__lash_brand' as any);",
+        "let key = 0; key = '__lash_brand';",
+        "let key = 0; const change = () => { key = '__lash_brand'; }; change();",
+        "const prefix = '__lash_'; const key = prefix + 'brand';",
+        "const flag = false; const key = flag ? 0 : '__lash_brand';",
+        "let key = 0; key += '__lash_brand';",
     ] {
         let source = format!(
-            "function body() {{ const r = {{}}; r.__ts_type = 'brand:date'; {key} r[key] = marker; \
-             return r.__ts_brand === undefined; }} await finish(body());"
+            "function body() {{ const r = {{}}; {key} r[key] = marker; \
+             return r.__lash_brand === undefined; }} await finish(body());"
         );
         let text = super::main_of(lower_against(
             &source,
             &["marker"],
             &super::machine::effects(),
         ));
-        assert!(text.contains(".__ts_brand, ())"), "{key}\n{text}");
+        assert!(text.contains("\"__lash_brand\""), "{key}\n{text}");
         assert_eq!(
             super::machine::end_with_bindings(&source, bindings.clone()),
             super::machine::Ended::Finished(lash_kernel_doc::Datum::Bool(true)),
@@ -636,7 +642,7 @@ fn plain_record_keys_that_may_be_text_keep_brand_admission() {
     }
     plain_fallback(
         "function body() { const r = { 0: {}, next: {} }; const n = 3; r[n % 3] = new Date(7); \
-         return r['0'].__ts_brand === undefined; } await finish(body());",
+         return r['0'].__lash_brand === undefined; } await finish(body());",
     );
 }
 
@@ -651,7 +657,7 @@ fn plain_record_captured_function_locals_keep_admission() {
     ] {
         plain_fallback(&format!(
             "function make() {{ const r = {{ next: {{}} }}; \
-             return {{ r: r, check: () => r.next.__ts_brand === undefined }}; }} \
+             return {{ r: r, check: () => r.next.__lash_brand === undefined }}; }} \
              const made = make(); {change} await finish(made.check());"
         ));
     }
@@ -663,7 +669,7 @@ fn plain_record_captured_function_locals_keep_admission() {
 fn plain_record_text_keyed_function_local_writes_keep_admission() {
     plain_fallback(
         "function body() { const r = { next: {} }; const alias = r; let key = 'next'; \
-         alias[key] = new Date(7); return r.next.__ts_brand === undefined; } await finish(body());",
+         alias[key] = new Date(7); return r.next.__lash_brand === undefined; } await finish(body());",
     );
 }
 
@@ -685,7 +691,7 @@ fn plain_record_proofs_survive_text_keys_with_an_ordinary_prefix() {
        }\n\
        await finish(body());";
     let text = super::main_text_with_effects(source);
-    for refused in ["__ts_brand", "kind(", "ts.set", "ts.get_computed"] {
+    for refused in ["__lash_brand", "kind(", "ts.set", "ts.get_computed"] {
         assert!(!text.contains(refused), "{refused}\n{text}");
     }
     let guarded = source.replace("const counts = {};", "const counts = opaque({});");
@@ -703,37 +709,52 @@ fn plain_record_proofs_survive_text_keys_with_an_ordinary_prefix() {
 fn plain_record_text_keys_that_may_be_the_brand_keep_admission() {
     let bindings = super::pages::Session::seeded([(
         lash_kernel_doc::Name::new("marker"),
-        lash_kernel_doc::Datum::Tuple(Vec::new()),
+        lash_kernel_doc::Datum::Tuple(vec![
+            lash_kernel_doc::Datum::Text("date.ecma".into()),
+            lash_kernel_doc::Datum::Text("invalid_date".into()),
+        ]),
     )]);
     for (params, key, argument) in [
-        ("", "const part = '_brand'; const key = '__ts' + part;", ""),
-        ("", "const part = 'brand'; const key = `__ts_${part}`;", ""),
-        ("", "const part = '__ts_brand'; const key = part + '';", ""),
-        ("", "let key = 'key_0'; key = '__ts_brand';", ""),
         (
             "",
-            "let key = 'key_0'; const change = () => { key = '__ts_brand'; }; change();",
+            "const part = '_brand'; const key = '__lash' + part;",
             "",
         ),
         (
             "",
-            "const flag = false; const key = flag ? 'key_0' : '__ts' + '_brand';",
+            "const part = 'brand'; const key = `__lash_${part}`;",
             "",
         ),
-        ("key", "", "'__ts_brand'"),
-        ("part", "const key = part as string;", "'__ts_brand'"),
-        ("part", "const key = String(part);", "'__ts_brand'"),
+        (
+            "",
+            "const part = '__lash_brand'; const key = part + '';",
+            "",
+        ),
+        ("", "let key = 'key_0'; key = '__lash_brand';", ""),
+        (
+            "",
+            "let key = 'key_0'; const change = () => { key = '__lash_brand'; }; change();",
+            "",
+        ),
+        (
+            "",
+            "const flag = false; const key = flag ? 'key_0' : '__lash' + '_brand';",
+            "",
+        ),
+        ("key", "", "'__lash_brand'"),
+        ("part", "const key = part as string;", "'__lash_brand'"),
+        ("part", "const key = String(part);", "'__lash_brand'"),
     ] {
         let source = format!(
-            "function body({params}) {{ const r = {{}}; r.__ts_type = 'brand:date'; {key} r[key] = marker; \
-             return r.__ts_brand === undefined; }} await finish(body({argument}));"
+            "function body({params}) {{ const r = {{}}; {key} r[key] = marker; \
+             return r.__lash_brand === undefined; }} await finish(body({argument}));"
         );
         let text = super::main_of(lower_against(
             &source,
             &["marker"],
             &super::machine::effects(),
         ));
-        assert!(text.contains(".__ts_brand, ())"), "{key}\n{text}");
+        assert!(text.contains("\"__lash_brand\""), "{key}\n{text}");
         assert_eq!(
             super::machine::end_with_bindings(&source, bindings.clone()),
             super::machine::Ended::Finished(lash_kernel_doc::Datum::Bool(true)),
@@ -752,7 +773,7 @@ fn plain_record_text_keys_that_may_name_a_member_keep_the_helper() {
          return [typeof r[key], typeof r.toString, r[other]]; } await finish(body());";
     let text = super::main_text_with_effects(source);
     assert!(text.contains("ts.get_computed"), "{text}");
-    assert!(text.contains(".__ts_brand, ())"), "{text}");
+    assert!(text.contains("\"__lash_brand\""), "{text}");
     let guarded = source.replace("const r = {", "const r = opaque({");
     let guarded = guarded.replace("a: 1 };", "a: 1 });");
     let guarded = format!("function opaque(x) {{ return x; }} {guarded}");
@@ -787,7 +808,7 @@ fn computed_reads_of_plain_records_answer_misses_as_the_rows_do() {
         "key_1",
         "toStrin",
         "toStringX",
-        "__ts_brand",
+        "__lash_brand",
         "zzzz",
         "a-long-row-label-past-the-inline-text-limit",
     ];

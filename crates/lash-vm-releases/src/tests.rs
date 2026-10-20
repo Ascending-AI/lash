@@ -270,29 +270,21 @@ fn helper_sets_cover_every_release_write_set() {
     let mut installed = BTreeMap::new();
     for dialect in DIALECTS {
         let held = dialect.held_releases().unwrap();
-        let mut expected: BTreeSet<_> = lash_kernel_lib::KernelHelper::ALL
-            .iter()
-            .map(|h| h.name())
-            .collect();
-        let helpers = lash_kernel_doc::ReleasedFunctions::read(
-            crate::package(dialect.dialect)
-                .expect("the dialect's package")
-                .image,
-        )
-        .expect("the helpers read");
-        for at in 0..helpers.len() {
-            assert!(expected.insert(helpers.name(at)));
-        }
-        #[cfg(feature = "dialect-typescript")]
-        if dialect.dialect == TYPESCRIPT {
-            for op in lash_ext_regex_ecma::Operation::ALL {
-                assert!(expected.insert(op.name()));
+        let mut expected = BTreeSet::new();
+        let mut visited = BTreeSet::new();
+        let mut pending = vec![dialect.dialect.to_string()];
+        while let Some(path) = pending.pop() {
+            if !visited.insert(path.clone()) {
+                continue;
             }
-            for op in lash_ext_date_ecma::Operation::ALL {
-                assert!(expected.insert(op.name()));
-            }
-            for op in lash_ext_url_whatwg::Operation::ALL {
-                assert!(expected.insert(op.name()));
+            let package = crate::package(&path).expect("declared package");
+            let header: lash_kernel_package::PackageHeader =
+                serde_json::from_str(package.header).expect("package header");
+            pending.extend(header.requires.keys().map(ToString::to_string));
+            let functions =
+                lash_kernel_doc::ReleasedFunctions::read(package.image).expect("package functions");
+            for at in 0..functions.len() {
+                assert!(expected.insert(functions.name(at).to_owned()));
             }
         }
         for release in &held.retained {
@@ -313,7 +305,13 @@ fn helper_sets_cover_every_release_write_set() {
             // Retained versions may write older sets; the current definitions
             // must be in bijection with the current generated variants.
             if release.ordinal == held.retained.last().unwrap().ordinal {
-                assert_eq!(names, expected);
+                assert_eq!(
+                    names
+                        .into_iter()
+                        .map(str::to_owned)
+                        .collect::<BTreeSet<_>>(),
+                    expected
+                );
             }
         }
     }

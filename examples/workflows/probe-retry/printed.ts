@@ -12,7 +12,7 @@ export async function resilient_search() {
       let found = (await await tools.web.search((await helper_ts_boundary({query: "workflow engines", limit: limit}))));
       let t2 = undefined;
       if (helper_same(helper_kind(found), "record")) {
-        if (!(helper_same(found.__ts_brand, [] as const))) {
+        if (!(helper_record_contains(found, "__lash_brand"))) {
           t2 = found.results;
         } else {
           t2 = await helper_ts_read(found, "results");
@@ -35,7 +35,7 @@ export async function resilient_search() {
       }
       let t4 = undefined;
       if (helper_same(helper_kind(t3), "record")) {
-        if (!(helper_same(t3.__ts_brand, [] as const))) {
+        if (!(helper_record_contains(t3, "__lash_brand"))) {
           t4 = t3.title;
         } else {
           t4 = await helper_ts_read(t3, "title");

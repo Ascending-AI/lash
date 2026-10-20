@@ -523,7 +523,7 @@ body {
   let padded = invoke ts.pad(args, 2)
   let arg_14 = padded[0]
   let receiver = invoke ts.receiver(arg_14)
-  if same(receiver, "brand:regex.ecma") {
+  if same(receiver, "brand:regex.ecma.reg_exp") {
     throw error.new("type_error", "Search string must not be a RegExp", null)
   }
   let arg_15 = padded[0]
@@ -548,7 +548,7 @@ body {
   let padded = invoke ts.pad(args, 2)
   let arg_17 = padded[0]
   let receiver = invoke ts.receiver(arg_17)
-  if same(receiver, "brand:regex.ecma") {
+  if same(receiver, "brand:regex.ecma.reg_exp") {
     throw error.new("type_error", "Search string must not be a RegExp", null)
   }
   let arg_18 = padded[0]
@@ -573,7 +573,7 @@ body {
   let padded = invoke ts.pad(args, 2)
   let arg_20 = padded[0]
   let receiver = invoke ts.receiver(arg_20)
-  if same(receiver, "brand:regex.ecma") {
+  if same(receiver, "brand:regex.ecma.reg_exp") {
     throw error.new("type_error", "Search string must not be a RegExp", null)
   }
   let arg_21 = padded[0]
