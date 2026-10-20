@@ -654,45 +654,7 @@ pub(crate) async fn load_session_head_meta_tx(
     decode_session_head_meta_row(tx, session_id, row, fleet, configs).await
 }
 
-/// The head that run `run`'s terminal named as its window (FIG-5931), read
-/// like the live head: its revision's head document, revision, leaf and
-/// checkpoint, and the frame its leaf row names. `None` when the run has no
-/// terminal or its terminal names no window;
-/// [`StoreError::RunWindowReleased`] once the session's retention released
-/// the revision (FIG-6606), never the head in its place.
-pub(crate) async fn load_terminal_head_meta_tx(
-    tx: &mut sqlx::PgConnection,
-    session_id: &SessionId,
-    run: &lash_protocol_types::TurnId,
-    fleet: lash_core_store::store::FleetFormat,
-) -> Result<Option<SessionHeadMeta>, StoreError> {
-    let row = crate::observed_sql::query(
-        crate::session_runs::session_runs_sql()
-            .runs
-            .select_terminal_window
-            .sql(),
-    )
-    .bind(session_id.as_str())
-    .bind(run.as_str())
-    .fetch_optional(crate::observed_sql::executor(&mut *tx))
-    .await
-    .map_err(store_sqlx_error)?;
-    if let Some(row) = &row
-        && row
-            .try_get::<Option<i64>, _>(5)
-            .map_err(store_sqlx_error)?
-            .is_none()
-    {
-        return Err(StoreError::RunWindowReleased {
-            session_id: session_id.clone(),
-            run: run.clone(),
-            revision: u64_from_sql("SessionRun", "terminal_window_revision", row.get(1))?,
-        });
-    }
-    decode_session_head_meta_row(tx, session_id, row, fleet, None).await
-}
-
-async fn decode_session_head_meta_row(
+pub(crate) async fn decode_session_head_meta_row(
     tx: &mut sqlx::PgConnection,
     session_id: &SessionId,
     row: Option<sqlx::postgres::PgRow>,

@@ -93,29 +93,17 @@ impl lash_core_store::store::SessionCatalogStore for SqliteStore {
         lash_core_store::store::validate_session_id(session_id)?;
         let session_id = session_id.clone();
         self.read_connection()
-            .read(move |conn| {
-                let deleted = conn
-                    .prepare_cached(
-                        crate::session_sql::session_sql()
-                            .deleted_sqlite
-                            .exists
-                            .sql(),
-                    )
-                    .and_then(|mut statement| {
-                        statement.query_row(params![session_id.as_str()], |_| Ok(()))
-                    })
-                    .optional()?
-                    .is_some();
-                if deleted {
-                    return Ok(Ok(lash_core_store::store::SessionLookup::Deleted));
-                }
-                let meta = crate::session_meta::load_session_meta_in_tx(conn, Some(&session_id));
-                Ok(meta.map(|meta| {
-                    meta.map_or(
-                        lash_core_store::store::SessionLookup::Absent,
-                        lash_core_store::store::SessionLookup::Live,
-                    )
-                }))
+            .call(move |conn| {
+                Ok(
+                    match crate::session_meta::load_session_meta_guarded(conn, &session_id) {
+                        Ok(Some(meta)) => Ok(lash_core_store::store::SessionLookup::Live(meta)),
+                        Ok(None) => Ok(lash_core_store::store::SessionLookup::Absent),
+                        Err(StoreError::SessionDeleted { .. }) => {
+                            Ok(lash_core_store::store::SessionLookup::Deleted)
+                        }
+                        Err(error) => Err(error),
+                    },
+                )
             })
             .await
             .map_err(sqlite_error)?

@@ -24,27 +24,57 @@ lash_store_sql::statements! {
              ON CONFLICT (session_id) DO NOTHING";
 
 
-        /// The stored relation of `?1`, share-locked for the duration of the
-        /// metadata load's transaction.
-        ///
-        /// The lock is the fork. SQLite's read runs under the database's own
-        /// single-writer lock and needs none; here the owner and
-        /// observer-intent reads that follow must see the same row this one
-        /// did.
-        select_relation_for_share = "SELECT session_id, relation_kind, parent_session_id,
-    caused_by_kind, caused_by_session_id, caused_by_turn_id,
-    caused_by_effect_id, caused_by_call_id, caused_by_process_id,
-    caused_by_process_event_sequence, caused_by_node_id, source_session_id,
-    source_node_id FROM session_meta WHERE session_id = ?1 FOR SHARE";
+        /// One statement owns relation, mutable owner, original ordered intent
+        /// indexes and deletion classification. The sole-session shape reads
+        /// two headers to preserve zero/one/many cardinality before decoding.
+        select_snapshot = "WITH meta AS (
+             SELECT session_id, relation_kind, parent_session_id,
+                    caused_by_kind, caused_by_session_id, caused_by_turn_id,
+                    caused_by_effect_id, caused_by_call_id, caused_by_process_id,
+                    caused_by_process_event_sequence, caused_by_node_id,
+                    source_session_id, source_node_id, owning_process_id
+             FROM session_meta
+             WHERE session_id = ?1
+             ORDER BY session_id LIMIT 2
+         )
+         SELECT meta.session_id, meta.relation_kind, meta.parent_session_id,
+                meta.caused_by_kind, meta.caused_by_session_id, meta.caused_by_turn_id,
+                meta.caused_by_effect_id, meta.caused_by_call_id, meta.caused_by_process_id,
+                meta.caused_by_process_event_sequence, meta.caused_by_node_id,
+                meta.source_session_id, meta.source_node_id, meta.owning_process_id,
+                CASE WHEN ?2 AND tombstone.session_id IS NOT NULL THEN '[]'
+                     ELSE COALESCE((SELECT jsonb_agg(jsonb_build_array(process_index, process_id)
+                                        ORDER BY process_index)::TEXT
+                           FROM session_meta_pending_observer_intents
+                           WHERE session_id = meta.session_id), '[]') END AS observer_intent_rows_json,
+                tombstone.session_id IS NOT NULL AS deleted
+         FROM (SELECT 1 AS singleton) AS request LEFT JOIN meta ON TRUE
+         LEFT JOIN deleted_sessions AS tombstone ON tombstone.session_id = ?1
+         ORDER BY meta.session_id";
 
-        /// The sole recorded session's relation, if this database holds
-        /// exactly one.
-        select_sole_relation_for_share = "SELECT session_id, relation_kind, parent_session_id,
-    caused_by_kind, caused_by_session_id, caused_by_turn_id,
-    caused_by_effect_id, caused_by_call_id, caused_by_process_id,
-    caused_by_process_event_sequence, caused_by_node_id, source_session_id,
-    source_node_id FROM session_meta
-             ORDER BY session_id ASC LIMIT 2 FOR SHARE";
+        /// The unfiltered sole-session shape retains at most two headers.
+        select_sole_snapshot = "WITH meta AS (
+             SELECT session_id, relation_kind, parent_session_id,
+                    caused_by_kind, caused_by_session_id, caused_by_turn_id,
+                    caused_by_effect_id, caused_by_call_id, caused_by_process_id,
+                    caused_by_process_event_sequence, caused_by_node_id,
+                    source_session_id, source_node_id, owning_process_id
+             FROM session_meta
+             ORDER BY session_id LIMIT 2
+         )
+         SELECT meta.session_id, meta.relation_kind, meta.parent_session_id,
+                meta.caused_by_kind, meta.caused_by_session_id, meta.caused_by_turn_id,
+                meta.caused_by_effect_id, meta.caused_by_call_id, meta.caused_by_process_id,
+                meta.caused_by_process_event_sequence, meta.caused_by_node_id,
+                meta.source_session_id, meta.source_node_id, meta.owning_process_id,
+                CASE WHEN (SELECT COUNT(*) FROM meta) = 1 THEN COALESCE((SELECT jsonb_agg(jsonb_build_array(process_index, process_id)
+                                        ORDER BY process_index)::TEXT
+                           FROM session_meta_pending_observer_intents
+                           WHERE session_id = meta.session_id), '[]')
+                     ELSE '[]' END AS observer_intent_rows_json,
+                FALSE AS deleted
+         FROM (SELECT 1 AS singleton) AS request LEFT JOIN meta ON TRUE
+         ORDER BY meta.session_id";
 
         /// The durable session-state version marker of `?1`, row-locked so a
         /// concurrent admission cannot move it inside this transaction.

@@ -432,6 +432,53 @@ async fn window_graph(
     Ok(windows.remember(session_id, &graph, leaf_at, bytes))
 }
 
+/// Select and admit raw head facts in the caller's snapshot. Hydration is
+/// deliberately later, so an unreadable generation wins even without a head.
+pub(crate) async fn admitted_head_row(
+    conn: &mut sqlx::PgConnection,
+    session_id: &SessionId,
+    run: Option<&lash_protocol_types::TurnId>,
+    fleet: lash_core_store::store::FleetFormat,
+    refuse_deleted: bool,
+) -> Result<Option<sqlx::postgres::PgRow>, StoreError> {
+    lash_core_store::store::validate_session_id(session_id)?;
+    let query = match run {
+        Some(run) => crate::observed_sql::query(session_sql().head.select_terminal_window.sql())
+            .bind(session_id.as_str())
+            .bind(run.as_str()),
+        None => crate::observed_sql::query(session_sql().head.select_window.sql())
+            .bind(session_id.as_str()),
+    };
+    let row = query
+        .fetch_one(crate::observed_sql::executor(&mut *conn))
+        .await
+        .map_err(store_sqlx_error)?;
+    if refuse_deleted && row.get::<bool, _>("deleted") {
+        return Err(StoreError::SessionDeleted {
+            session_id: session_id.clone(),
+        });
+    }
+    lash_core_store::store_backend_support::SessionMetaCodec::admit_projected_session_state(
+        row.get::<Option<String>, _>("meta_session_id").is_some(),
+        row.get::<Option<i32>, _>("session_state_version")
+            .map(i64::from),
+        fleet,
+    )?;
+    let Some(revision) = row.get::<Option<i64>, _>("head_revision") else {
+        return Ok(None);
+    };
+    if let Some(run) = run
+        && row.get::<Option<i64>, _>("retained_revision").is_none()
+    {
+        return Err(StoreError::RunWindowReleased {
+            session_id: session_id.clone(),
+            run: run.clone(),
+            revision: u64_from_sql("SessionRun", "terminal_window_revision", revision)?,
+        });
+    }
+    Ok(Some(row))
+}
+
 pub(crate) async fn window_conn(
     conn: &mut sqlx::PgConnection,
     session_id: &SessionId,
@@ -441,16 +488,13 @@ pub(crate) async fn window_conn(
     windows: &WindowCacheRead,
     #[cfg(any(test, feature = "testing"))] decoded: Option<&std::sync::atomic::AtomicU64>,
 ) -> Result<Option<SessionWindowRead>, StoreError> {
-    check_live(conn, session_id).await?;
-    read_session_state_version_tx(conn, session_id, false, fleet).await?;
-    let head = match &selector {
-        WindowSelector::Terminal(run) => {
-            load_terminal_head_meta_tx(conn, session_id, run, fleet).await?
-        }
-        WindowSelector::Current | WindowSelector::Admitted(_) => {
-            load_session_head_meta_tx(conn, session_id, false, fleet, None).await?
-        }
+    let run = match &selector {
+        WindowSelector::Terminal(run) => Some(run),
+        _ => None,
     };
+    let row = admitted_head_row(conn, session_id, run, fleet, true).await?;
+    let head =
+        crate::support::decode_session_head_meta_row(conn, session_id, row, fleet, None).await?;
     let Some(meta) = head else {
         return match selector {
             WindowSelector::Current | WindowSelector::Terminal(_) => Ok(None),

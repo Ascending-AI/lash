@@ -212,6 +212,27 @@ pub struct SessionMetaCodec {
 }
 
 impl SessionMetaCodec {
+    /// Classify the marker carried by an authoritative read before hydration.
+    /// An absent metadata row has no generation; a present NULL marker is legacy.
+    pub fn admit_projected_session_state(
+        present: bool,
+        marker: Option<i64>,
+        fleet: crate::store::FleetFormat,
+    ) -> Result<u32, crate::store::StoreError> {
+        if !present {
+            return Ok(crate::store::CURRENT_SESSION_STATE_VERSION);
+        }
+        let marker = marker
+            .map(|version| {
+                u32::try_from(version).map_err(|_| crate::store::StoreError::StoredDataCorrupt {
+                    record_kind: "SessionStateVersion",
+                    message: format!("marker {version} is outside the unsigned 32-bit domain"),
+                })
+            })
+            .transpose()?;
+        crate::store::resolve_session_state_version(marker, fleet)
+    }
+
     pub const fn new(backend_integer_type: &'static str) -> Self {
         Self {
             backend_integer_type,

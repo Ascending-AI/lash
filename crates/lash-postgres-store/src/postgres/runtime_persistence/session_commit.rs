@@ -200,19 +200,8 @@ impl SessionCommitStore for PostgresStore {
     }
 
     async fn read_session_state_version(&self, session_id: &SessionId) -> Result<u32, StoreError> {
-        let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = crate::observed_sql::control(
-            "BEGIN",
-            crate::guarded_tx::begin_pooled(connection, "BEGIN".to_owned()),
-        )
-        .await
-        .map_err(store_sqlx_error)?;
-        let version =
-            read_session_state_version_tx(&mut tx, session_id, false, self.fence.fleet()).await?;
-        crate::observed_sql::control("COMMIT", tx.commit())
-            .await
-            .map_err(store_sqlx_error)?;
-        Ok(version)
+        let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
+        read_session_state_version_tx(&mut connection, session_id, false, self.fence.fleet()).await
     }
 
     async fn admit_session_state(
@@ -275,18 +264,13 @@ impl SessionCommitStore for PostgresStore {
         &self,
         session_id: &SessionId,
     ) -> Result<Option<SessionHeadMeta>, StoreError> {
-        self.read_session_state_version(session_id).await?;
-        let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        let mut tx = crate::observed_sql::control(
-            "BEGIN",
-            crate::guarded_tx::begin_pooled(connection, "BEGIN".to_owned()),
-        )
-        .await
-        .map_err(store_sqlx_error)?;
-        let meta = load_session_head_meta_tx(
+        let mut tx = history::read_tx(self).await?;
+        let row = history::admitted_head_row(&mut tx, session_id, None, self.fence.fleet(), false)
+            .await?;
+        let meta = crate::support::decode_session_head_meta_row(
             &mut tx,
             session_id,
-            false,
+            row,
             self.fence.fleet(),
             Some(&self.configs),
         )
@@ -360,23 +344,7 @@ impl SessionCommitStore for PostgresStore {
         &self,
         session_id: &SessionId,
     ) -> Result<Option<SessionMeta>, StoreError> {
-        {
-            // The check's connection goes back to the pool before the load
-            // acquires its own: a caller never holds one while it waits on
-            // another (FIG-5237).
-            let connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-            let mut tx = crate::observed_sql::control(
-                "BEGIN",
-                crate::guarded_tx::begin_pooled(connection, "BEGIN".to_owned()),
-            )
-            .await
-            .map_err(store_sqlx_error)?;
-            ensure_session_not_deleted_tx(&mut tx, session_id).await?;
-            crate::observed_sql::control("COMMIT", tx.commit())
-                .await
-                .map_err(store_sqlx_error)?;
-        }
-        self.load_session_meta(session_id).await
+        crate::session_meta::load_session_meta_guarded(&self.pool, session_id, &self.observer).await
     }
 }
 

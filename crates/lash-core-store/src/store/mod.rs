@@ -645,8 +645,9 @@ fn validate_window_session(
 /// must fail instead of persisting a checkpoint that hydrates to `None`.
 #[async_trait::async_trait]
 pub trait SessionCommitStore: Send + Sync {
-    /// The session's physical session-state generation marker. A legacy
-    /// absent marker reads as [`OLDEST_SUPPORTED_SESSION_STATE_VERSION`].
+    /// The session's physical session-state generation marker. A present
+    /// NULL marker is legacy generation zero and goes through the resolver;
+    /// an absent metadata row has no generation to refuse.
     async fn read_session_state_version(&self, session_id: &SessionId) -> Result<u32, StoreError>;
 
     /// Classify the session-state marker of `session_id`.

@@ -143,22 +143,16 @@ impl lash_core_store::store::SessionCatalogStore for PostgresStore {
         session_id: &SessionId,
     ) -> Result<lash_core_store::store::SessionLookup, StoreError> {
         lash_core_store::store::validate_session_id(session_id)?;
-        let meta =
-            crate::session_meta::load_session_meta(&self.pool, Some(session_id), &self.observer)
-                .await?;
-        let deleted: bool =
-            crate::observed_sql::query_scalar(session_sql().deleted_postgres.exists.sql())
-                .bind(session_id.as_str())
-                .fetch_one(crate::observed_sql::executor(&self.pool))
-                .await
-                .map_err(store_sqlx_error)?;
-        Ok(if deleted {
-            lash_core_store::store::SessionLookup::Deleted
-        } else if let Some(meta) = meta {
-            lash_core_store::store::SessionLookup::Live(meta)
-        } else {
-            lash_core_store::store::SessionLookup::Absent
-        })
+        match crate::session_meta::load_session_meta_guarded(&self.pool, session_id, &self.observer)
+            .await
+        {
+            Ok(Some(meta)) => Ok(lash_core_store::store::SessionLookup::Live(meta)),
+            Ok(None) => Ok(lash_core_store::store::SessionLookup::Absent),
+            Err(StoreError::SessionDeleted { .. }) => {
+                Ok(lash_core_store::store::SessionLookup::Deleted)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     async fn delete_session(

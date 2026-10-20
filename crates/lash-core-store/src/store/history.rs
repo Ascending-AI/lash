@@ -481,6 +481,9 @@ pub trait SessionHistoryStore: Send + Sync {
     ///   [`StoreError::InvalidWindowAnchor`] or
     ///   [`StoreError::StoredDataCorrupt`], never a smaller window.
     ///
+    /// The physical session-state generation is admitted in the same snapshot,
+    /// before hydration or a missing-window answer.
+    ///
     /// Under `Current`, `Ok(None)` means the session has no head row. A
     /// head with no leaf answers an empty, unanchored window.
     async fn load_session_window(

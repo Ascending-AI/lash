@@ -27,25 +27,57 @@ lash_store_sql::statements! {
              VALUES (?1, ?15, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, NULL, ?16,
                      ?17, ?18)";
 
-        /// The stored relation of `?1`.
-        ///
-        /// PostgreSQL reads the same projection under `FOR SHARE`, which
-        /// SQLite has no equivalent of and no need for: the read runs inside a
-        /// transaction on the single-writer database.
-        select_relation = "SELECT session_id, relation_kind, parent_session_id,
-    caused_by_kind, caused_by_session_id, caused_by_turn_id,
-    caused_by_effect_id, caused_by_call_id, caused_by_process_id,
-    caused_by_process_event_sequence, caused_by_node_id, source_session_id,
-    source_node_id FROM session_meta WHERE session_id = ?1";
+        /// One statement owns relation, mutable owner, original ordered intent
+        /// indexes and deletion classification. The sole-session shape reads
+        /// two headers to preserve zero/one/many cardinality before decoding.
+        select_snapshot = "WITH meta AS (
+             SELECT session_id, relation_kind, parent_session_id,
+                    caused_by_kind, caused_by_session_id, caused_by_turn_id,
+                    caused_by_effect_id, caused_by_call_id, caused_by_process_id,
+                    caused_by_process_event_sequence, caused_by_node_id,
+                    source_session_id, source_node_id, owning_process_id
+             FROM session_meta
+             WHERE session_id = ?1
+             ORDER BY session_id LIMIT 2
+         )
+         SELECT meta.session_id, meta.relation_kind, meta.parent_session_id,
+                meta.caused_by_kind, meta.caused_by_session_id, meta.caused_by_turn_id,
+                meta.caused_by_effect_id, meta.caused_by_call_id, meta.caused_by_process_id,
+                meta.caused_by_process_event_sequence, meta.caused_by_node_id,
+                meta.source_session_id, meta.source_node_id, meta.owning_process_id,
+                CASE WHEN ?2 AND tombstone.session_id IS NOT NULL THEN '[]'
+                     ELSE (SELECT json_group_array(json_array(process_index, process_id))
+                 FROM (SELECT process_index, process_id
+                       FROM session_meta_pending_observer_intents
+                       WHERE session_id = meta.session_id ORDER BY process_index)) END AS observer_intent_rows_json,
+                tombstone.session_id IS NOT NULL AS deleted
+         FROM (SELECT 1 AS singleton) AS request LEFT JOIN meta ON TRUE
+         LEFT JOIN deleted_sessions AS tombstone ON tombstone.session_id = ?1
+         ORDER BY meta.session_id";
 
-        /// The sole recorded session, if this catalog holds exactly one.
-        ///
-        /// Two rows are read so "exactly one" can be decided; the caller
-        /// re-reads the row it picked through
-        /// [`SessionMetaSqliteStatements::select_relation`]. PostgreSQL reads
-        /// the whole relation here instead, because its read is already
-        /// holding a share lock it would rather not take twice.
-        select_sole_session_id = "SELECT session_id FROM session_meta ORDER BY session_id ASC LIMIT 2";
+        /// The unfiltered sole-session shape retains at most two headers.
+        select_sole_snapshot = "WITH meta AS (
+             SELECT session_id, relation_kind, parent_session_id,
+                    caused_by_kind, caused_by_session_id, caused_by_turn_id,
+                    caused_by_effect_id, caused_by_call_id, caused_by_process_id,
+                    caused_by_process_event_sequence, caused_by_node_id,
+                    source_session_id, source_node_id, owning_process_id
+             FROM session_meta
+             ORDER BY session_id LIMIT 2
+         )
+         SELECT meta.session_id, meta.relation_kind, meta.parent_session_id,
+                meta.caused_by_kind, meta.caused_by_session_id, meta.caused_by_turn_id,
+                meta.caused_by_effect_id, meta.caused_by_call_id, meta.caused_by_process_id,
+                meta.caused_by_process_event_sequence, meta.caused_by_node_id,
+                meta.source_session_id, meta.source_node_id, meta.owning_process_id,
+                CASE WHEN (SELECT COUNT(*) FROM meta) = 1 THEN (SELECT json_group_array(json_array(process_index, process_id))
+                 FROM (SELECT process_index, process_id
+                       FROM session_meta_pending_observer_intents
+                       WHERE session_id = meta.session_id ORDER BY process_index))
+                     ELSE '[]' END AS observer_intent_rows_json,
+                FALSE AS deleted
+         FROM (SELECT 1 AS singleton) AS request LEFT JOIN meta ON TRUE
+         ORDER BY meta.session_id";
 
         /// PostgreSQL wraps this existence query in `EXISTS(...)`.
         exists_materialized = "SELECT 1 FROM session_meta WHERE session_id = ?1

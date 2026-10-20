@@ -11,11 +11,6 @@ crate::statements! {
     /// `session_meta_pending_observer_intents` statements both backends issue
     /// verbatim.
     pub struct ObserverIntentStatements @ "session_meta_observer_intent" {
-        /// Session `?1`'s observer intents, in index order.
-        select_for_session = "SELECT process_index, process_id
-             FROM session_meta_pending_observer_intents
-             WHERE session_id = ?1 ORDER BY process_index";
-
         insert = "INSERT INTO session_meta_pending_observer_intents
              (session_id, process_index, process_id)
              VALUES (?1, ?2, ?3)";

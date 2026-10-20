@@ -272,21 +272,23 @@ pub(crate) fn select_session_head_row(
 ) -> Result<Option<SessionHeadRow>, StoreError> {
     conn.prepare_cached(crate::session_sql::session_sql().head.select_meta.sql())
         .and_then(|mut statement| {
-            statement.query_row(params![session_id.as_str()], |row| {
-                Ok(SessionHeadRow {
-                    head_json: crate::codec::optional_hash_column(row, 0)?,
-                    head_revision: row.get(1)?,
-                    leaf_node_id: row.get(2)?,
-                    checkpoint_ref: crate::codec::optional_hash_column(row, 3)?,
-                    current_frame_node_id: row.get(4)?,
-                })
-            })
+            statement.query_row(params![session_id.as_str()], SessionHeadRow::from_row)
         })
         .optional()
         .map_err(sqlite_error)
 }
 
 impl SessionHeadRow {
+    pub(crate) fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            head_json: optional_hash_column(row, 0)?,
+            head_revision: row.get(1)?,
+            leaf_node_id: row.get(2)?,
+            checkpoint_ref: optional_hash_column(row, 3)?,
+            current_frame_node_id: row.get(4)?,
+        })
+    }
+
     /// Hydrate the row's head metadata; `conn` must be in the snapshot the
     /// row was selected in.
     pub(crate) fn hydrate(

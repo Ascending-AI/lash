@@ -251,65 +251,60 @@ fn lineage(conn: &Connection, session: &SessionId) -> Result<LineageStamp, Store
     ))
 }
 
-/// The head that run `run`'s terminal named as its window (FIG-5931), read
-/// like the live head: its revision's head document, revision, leaf and
-/// checkpoint, and the frame its leaf row names. `None` when the run has no
-/// terminal or its terminal names no window;
-/// [`StoreError::RunWindowReleased`] once the session's retention released
-/// the revision (FIG-6606), never the head in its place.
-fn terminal_head(
+/// The authoritative window header, admitted before head/config decoding.
+/// The caller owns the snapshot through hydration.
+pub(crate) fn admitted_head_row(
     conn: &Connection,
     session: &SessionId,
-    run: &lash_protocol_types::TurnId,
+    run: Option<&lash_protocol_types::TurnId>,
     fleet: lash_core_store::store::FleetFormat,
-    configs: &lash_core_store::store_backend_support::ConfigCache,
-) -> Result<Option<lash_core_store::store::SessionHeadMeta>, StoreError> {
-    let Some((config_ref, revision, leaf, checkpoint, frame, retained)) = conn
-        .prepare_cached(
-            crate::session_runs::session_runs_sql()
-                .runs
-                .select_terminal_window
-                .sql(),
-        )
+    refuse_deleted: bool,
+) -> Result<Option<crate::codec::SessionHeadRow>, StoreError> {
+    lash_core_store::store::validate_session_id(session)?;
+    let sql = match run {
+        Some(_) => &session_sql::session_sql().head.select_terminal_window,
+        None => &session_sql::session_sql().head.select_window,
+    };
+    let mut statement = conn.prepare_cached(sql.sql()).map_err(sqlite_error)?;
+    let mut rows = match run {
+        Some(run) => statement.query(params![session.as_str(), run.as_str()]),
+        None => statement.query(params![session.as_str()]),
+    }
+    .map_err(sqlite_error)?;
+    let row = rows
+        .next()
         .map_err(sqlite_error)?
-        .query_row(params![session.as_str(), run.as_str()], |row| {
-            Ok((
-                crate::codec::optional_hash_column(row, 0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, Option<String>>(2)?,
-                crate::codec::optional_hash_column(row, 3)?,
-                row.get::<_, Option<String>>(4)?,
-                row.get::<_, Option<i64>>(5)?,
-            ))
-        })
-        .optional()
-        .map_err(sqlite_error)?
-    else {
+        .ok_or_else(|| corrupt("SessionWindow", "admission header is missing"))?;
+    if refuse_deleted && row.get::<_, bool>(8).map_err(sqlite_error)? {
+        return Err(StoreError::SessionDeleted {
+            session_id: session.clone(),
+        });
+    }
+    lash_core_store::store_backend_support::SessionMetaCodec::admit_projected_session_state(
+        row.get::<_, Option<String>>(6)
+            .map_err(sqlite_error)?
+            .is_some(),
+        row.get(7).map_err(sqlite_error)?,
+        fleet,
+    )?;
+    let Some(revision) = row.get::<_, Option<i64>>(1).map_err(sqlite_error)? else {
         return Ok(None);
     };
-    if retained.is_none() {
+    if let Some(run) = run
+        && row
+            .get::<_, Option<i64>>(5)
+            .map_err(sqlite_error)?
+            .is_none()
+    {
         return Err(StoreError::RunWindowReleased {
             session_id: session.clone(),
             run: run.clone(),
             revision: nonnegative("SessionRun", "terminal_window_revision", revision)?,
         });
     }
-    crate::codec::assemble_session_head_meta(
-        session,
-        || {
-            crate::codec::load_config_conn(
-                conn,
-                config_ref.as_deref(),
-                fleet,
-                Some(crate::codec::ConfigRead::Committed(configs)),
-            )
-        },
-        revision,
-        leaf,
-        checkpoint,
-        frame,
-    )
-    .map(Some)
+    crate::codec::SessionHeadRow::from_row(row)
+        .map(Some)
+        .map_err(sqlite_error)
 }
 
 /// The rows of `frame`'s window from `from` to `to` generation, decoded,
@@ -460,18 +455,20 @@ fn window(
         chunk_size,
     } = read;
     let chunk_size = *chunk_size;
-    live(conn, session)?;
-    let head = match &selector {
-        WindowSelector::Terminal(run) => terminal_head(conn, session, run, fleet, configs)?,
-        WindowSelector::Current | WindowSelector::Admitted(_) => {
-            try_load_session_head_meta_from_conn(
+    let run = match &selector {
+        WindowSelector::Terminal(run) => Some(run),
+        _ => None,
+    };
+    let head = admitted_head_row(conn, session, run, fleet, true)?
+        .map(|row| {
+            row.hydrate(
                 conn,
                 session,
                 fleet,
                 Some(crate::codec::ConfigRead::Committed(configs)),
-            )?
-        }
-    };
+            )
+        })
+        .transpose()?;
     let Some(meta) = head else {
         return match selector {
             WindowSelector::Current | WindowSelector::Terminal(_) => Ok(None),

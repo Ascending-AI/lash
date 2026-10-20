@@ -55,10 +55,10 @@ pub(super) async fn session_state_version_admission_contract(
         .expect("stamp newer marker above an undecodable payload");
 
     // The runtime's load reads the marker before it reads the window.
-    let recovery_error =
-        crate::conformance::helpers::load_window_state(store.store(), &request.session_id)
-            .await
-            .expect_err("recovery must stop at the marker before decoding the corrupt head");
+    let recovery_error = store
+        .load_session_window(crate::store::WindowSelector::Current)
+        .await
+        .expect_err("recovery must stop at the marker before decoding the corrupt head");
     assert!(
         matches!(
             &recovery_error,
@@ -85,10 +85,10 @@ pub(super) async fn session_state_version_admission_contract(
         .await
         .expect("stamp snapshot-era marker");
     for _ in 0..2 {
-        let error =
-            crate::conformance::helpers::load_window_state(store.store(), &request.session_id)
-                .await
-                .expect_err("old state refused before decode");
+        let error = store
+            .load_session_window(crate::store::WindowSelector::Current)
+            .await
+            .expect_err("old state refused before decode");
         assert!(matches!(
             error,
             crate::StoreError::SessionStateVersionUnsupported {

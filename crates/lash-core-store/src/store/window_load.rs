@@ -39,7 +39,6 @@ pub async fn load_session_window_state(
     store: &SessionStore,
     selector: WindowSelector,
 ) -> Result<Option<LoadedSessionWindow>, StoreError> {
-    store.read_session_state_version().await?;
     let Some(read) = store.load_session_window(selector).await? else {
         return Ok(None);
     };

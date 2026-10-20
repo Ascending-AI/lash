@@ -57,23 +57,6 @@ crate::statements! {
               AND revision.head_revision = head.head_revision
              WHERE head.session_id = ?1";
 
-        /// The window run `?2` of session `?1` ended on, in the columns
-        /// order of the head's own read (`select_meta`): its config graph
-        /// root, revision, leaf, checkpoint and the frame its leaf row names,
-        /// then the revision row's own revision, NULL once the session's
-        /// retention released it. No row when the run has no terminal or its
-        /// terminal names no window.
-        select_terminal_window = "SELECT revision.config_ref, ended.terminal_window_revision,
-                    revision.leaf_node_id, revision.checkpoint_ref, leaf.frame_node_id,
-                    revision.head_revision
-             FROM session_runs AS ended
-             LEFT JOIN session_revisions AS revision
-               ON revision.session_id = ended.session_id
-              AND revision.head_revision = ended.terminal_window_revision
-             LEFT JOIN graph_nodes AS leaf ON leaf.node_id = revision.leaf_node_id
-             WHERE ended.session_id = ?1 AND ended.run = ?2
-               AND ended.terminal_kind IS NOT NULL AND ended.terminal_window_revision IS NOT NULL";
-
         /// The distinct transcripts session `?1`'s turn terminals root, in
         /// hash order: what its deletion may reclaim (FIG-6601).
         select_session_transcripts = "SELECT DISTINCT terminal_transcript_ref

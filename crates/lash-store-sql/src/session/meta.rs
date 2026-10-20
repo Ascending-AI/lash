@@ -15,8 +15,8 @@ pub const INSERT_COLUMNS: &str =
 /// The stored relation, as `StoredRelation` decodes it positionally.
 ///
 /// The full row minus `session_state_version`, `created_at_ms` and
-/// `last_commit_at_ms`: the version marker is read on its own by the admission
-/// path, and the two timestamps are catalog reporting rather than relation
+/// `last_commit_at_ms`: admission projects the version with its head facts,
+/// and the two timestamps are catalog reporting rather than relation
 /// identity. Both backends decode this projection by position, so its order is
 /// load-bearing.
 pub const RELATION_COLUMNS: &str = "session_id, relation_kind, parent_session_id,
@@ -112,10 +112,9 @@ crate::statements! {
         select_lineage = "SELECT relation_kind, parent_session_id, source_session_id, source_node_id
              FROM session_meta WHERE session_id = ?1";
 
-        /// The process that runs session `?1` as its own, recorded when that
-        /// process's start created the session (FIG-3607 R1); NULL for every
-        /// other session.
-        select_owning_process = "SELECT owning_process_id FROM session_meta WHERE session_id = ?1";
+        /// Presence only, for an observer-selector mutation already guarded
+        /// by the caller's write transaction.
+        select_present = "SELECT session_id FROM session_meta WHERE session_id = ?1";
 
         /// The durable session-state version marker of `?1`.
         select_state_version = "SELECT session_state_version FROM session_meta WHERE session_id = ?1";

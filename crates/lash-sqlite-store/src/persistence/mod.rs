@@ -39,18 +39,11 @@ fn read_session_state_version_conn(
         })
         .optional()
         .map_err(sqlite_error)?;
-    let Some(marker) = marker else {
-        return Ok(lash_core_store::store::CURRENT_SESSION_STATE_VERSION);
-    };
-    let marker = marker
-        .map(|version| {
-            u32::try_from(version).map_err(|_| StoreError::StoredDataCorrupt {
-                record_kind: "SessionStateVersion",
-                message: format!("marker {version} is outside the unsigned 32-bit domain"),
-            })
-        })
-        .transpose()?;
-    lash_core_store::store::resolve_session_state_version(marker, fleet)
+    lash_core_store::store_backend_support::SessionMetaCodec::admit_projected_session_state(
+        marker.is_some(),
+        marker.flatten(),
+        fleet,
+    )
 }
 
 /// Refuse a write into session `session_id` once its close began: the

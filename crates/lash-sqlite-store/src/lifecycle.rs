@@ -291,8 +291,9 @@ impl SqliteStore {
         // between them.
         self.read_connection()
             .read(move |tx| {
-                let Some(row) = crate::codec::select_session_head_row(tx, &session_id)
-                    .map_err(sqlite_conversion_error)?
+                let Some(row) =
+                    crate::history::admitted_head_row(tx, &session_id, None, fleet, false)
+                        .map_err(sqlite_conversion_error)?
                 else {
                     return Ok(None);
                 };
@@ -325,10 +326,7 @@ impl SqliteStore {
                     crate::persistence::ensure_session_not_deleted_conn(tx, &session_id)?;
                     let present = tx
                         .query_row(
-                            crate::session_sql::session_sql()
-                                .meta
-                                .select_state_version
-                                .sql(),
+                            crate::session_sql::session_sql().meta.select_present.sql(),
                             params![session_id.as_str()],
                             |_| Ok(()),
                         )

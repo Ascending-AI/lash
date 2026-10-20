@@ -205,7 +205,6 @@ impl SessionCommitStore for SqliteStore {
         &self,
         session_id: &SessionId,
     ) -> Result<Option<SessionHeadMeta>, StoreError> {
-        self.read_session_state_version(session_id).await?;
         SqliteStore::load_session_head_meta(self, session_id).await
     }
 
@@ -266,10 +265,10 @@ impl SessionCommitStore for SqliteStore {
         let session_id = session_id.clone();
         self.conn
             .call(move |conn| {
-                Ok((|| {
-                    ensure_session_not_deleted_conn(conn, &session_id)?;
-                    crate::session_meta::load_session_meta(conn, Some(&session_id))
-                })())
+                Ok(crate::session_meta::load_session_meta_guarded(
+                    conn,
+                    &session_id,
+                ))
             })
             .await
             .map_err(sqlite_error)?

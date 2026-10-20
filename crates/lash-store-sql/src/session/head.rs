@@ -32,6 +32,48 @@ crate::statements! {
              WHERE head.session_id = ?1";
 
 
+        /// One mandatory admission header and the selected window's raw head
+        /// facts for a current/admitted read. Terminal selection has its own shape.
+        /// Presence is separate from a NULL marker and a missing head, so
+        /// generation refusal always precedes hydration and missing windows.
+        select_window = "WITH selected AS (
+             SELECT head.session_id, head.head_revision, revision.config_ref,
+                    revision.leaf_node_id, revision.checkpoint_ref,
+                    revision.head_revision AS retained_revision
+             FROM session_head AS head
+             LEFT JOIN session_revisions AS revision
+               ON revision.session_id = head.session_id AND revision.head_revision = head.head_revision
+             WHERE head.session_id = ?1
+         )
+         SELECT selected.config_ref, selected.head_revision, selected.leaf_node_id,
+                selected.checkpoint_ref, leaf.frame_node_id, selected.retained_revision,
+                meta.session_id AS meta_session_id, meta.session_state_version,
+                EXISTS(SELECT 1 FROM deleted_sessions WHERE session_id = ?1) AS deleted
+         FROM (SELECT 1 AS singleton) AS request
+         LEFT JOIN selected ON TRUE
+         LEFT JOIN session_meta AS meta ON meta.session_id = ?1
+         LEFT JOIN graph_nodes AS leaf ON leaf.node_id = selected.leaf_node_id";
+
+        /// The terminal selector has its own indexed run predicate.
+        select_terminal_window = "WITH selected AS (
+             SELECT ended.session_id, ended.terminal_window_revision AS head_revision, revision.config_ref,
+                    revision.leaf_node_id, revision.checkpoint_ref, revision.head_revision AS retained_revision
+             FROM session_runs AS ended
+             LEFT JOIN session_revisions AS revision
+               ON revision.session_id = ended.session_id
+              AND revision.head_revision = ended.terminal_window_revision
+             WHERE ended.session_id = ?1 AND ended.run = ?2
+               AND ended.terminal_kind IS NOT NULL AND ended.terminal_window_revision IS NOT NULL
+         )
+         SELECT selected.config_ref, selected.head_revision, selected.leaf_node_id,
+                selected.checkpoint_ref, leaf.frame_node_id, selected.retained_revision,
+                meta.session_id AS meta_session_id, meta.session_state_version,
+                EXISTS(SELECT 1 FROM deleted_sessions WHERE session_id = ?1) AS deleted
+         FROM (SELECT 1 AS singleton) AS request
+         LEFT JOIN selected ON TRUE
+         LEFT JOIN session_meta AS meta ON meta.session_id = ?1
+         LEFT JOIN graph_nodes AS leaf ON leaf.node_id = selected.leaf_node_id";
+
         /// The published revision of `?1`, read inside the write transaction
         /// so the commit's head verdict decides over what is actually stored.
         select_revision = "SELECT head_revision FROM session_head WHERE session_id = ?1";
