@@ -364,6 +364,11 @@ pub trait ProcessDocumentProvider: Send + Sync {
     ) -> Result<Option<lash_kernel_doc::PackageSetDigest>, crate::PluginError>;
     /// The producer's own package set, over its registry.
     fn initial_packages(&self) -> Result<crate::CellPackages, crate::PluginError>;
+    /// The package code the producer's workers hold. Core installs this
+    /// registration before its node starts, independently of the protocol.
+    fn held_packages(
+        &self,
+    ) -> Result<std::sync::Arc<lash_kernel_package::HeldPackages>, crate::PluginError>;
     /// Resolve the definition's selected surface snapshot.
     fn package_view(
         &self,

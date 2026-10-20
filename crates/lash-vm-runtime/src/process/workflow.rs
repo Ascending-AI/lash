@@ -192,21 +192,22 @@ impl lash_execution_contracts::process::ProcessDocumentProvider for KernelDocume
     fn initial_packages(
         &self,
     ) -> Result<lash_execution_contracts::CellPackages, lash_execution_contracts::PluginError> {
-        let held = self
-            .engine
-            .workers
-            .config()
-            .packages
-            .clone()
-            .map_or_else(lash_vm_releases::lash_packages, Ok)
-            .map_err(|error| {
-                lash_execution_contracts::PluginError::Registration(error.to_string())
-            })?;
+        let held = self.held_packages()?;
         lash_execution_contracts::CellPackages::held(&held, &held.own()).ok_or_else(|| {
             lash_execution_contracts::PluginError::Registration(
                 "the producer's packages lack their own set".into(),
             )
         })
+    }
+
+    fn held_packages(
+        &self,
+    ) -> Result<Arc<lash_kernel_package::HeldPackages>, lash_execution_contracts::PluginError> {
+        self.engine
+            .workers
+            .config()
+            .held_packages()
+            .map_err(|error| lash_execution_contracts::PluginError::Registration(error.to_string()))
     }
 
     fn package_view(

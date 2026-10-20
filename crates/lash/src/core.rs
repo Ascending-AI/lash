@@ -1322,6 +1322,20 @@ impl LashCoreBuilder {
         let host_process_engines = default_plugin_host
             .install_process_engine_contributions(core.clone(), process_lifecycle_available)?
             .process_engines;
+        // Every builder advertises the code its workers hold before the node
+        // starts. RLM may already have installed the hold shared with its gate.
+        #[cfg(feature = "codemode")]
+        if backend.packages().is_none() {
+            let packages = match host_process_engines
+                .document_provider(lash_vm_runtime::LASH_VM_ENGINE_KIND)
+            {
+                Some(provider) => provider.held_packages()?,
+                None => lash_vm_runtime::lash_packages().map_err(|error| {
+                    lash_execution_contracts::PluginError::Registration(error.to_string())
+                })?,
+            };
+            let _ = backend.hold_packages(Arc::new(crate::packages::NodeHold::new(packages)));
+        }
         // What the core's node serves (S7): every callback its installed
         // plugins and process components register, and the config formats
         // its components read. A projection that fails refuses the build,

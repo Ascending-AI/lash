@@ -486,6 +486,15 @@ async fn an_imported_definition_keeps_its_gate_set_and_runs_its_internal_body() 
         .unwrap(),
     );
     let core = make_core(start_held);
+    // Include this core's serving node in the fleet query: build starts it
+    // asynchronously, so querying sooner can hide a missing package hold.
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        while core.node.registration.snapshot().is_none() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the importing core's node registered");
     let hold = Arc::new(NodeHold::new(held.clone()));
     *hold.advertised.write().unwrap() = Some(held.artifacts().keys().map(held_artifact).collect());
     let chosen = super::FleetPackages::new(backend.clone(), hold)
@@ -656,6 +665,19 @@ async fn an_imported_definition_keeps_its_gate_set_and_runs_its_internal_body() 
     })
     .await
     .unwrap();
+    // Only the handwritten flow parks at sleep. Let the imported flow's
+    // Once effect settle before shutdown, so the restart cannot interrupt it.
+    for process in &started {
+        if process != parked {
+            tokio::time::timeout(
+                std::time::Duration::from_secs(120),
+                core.processes().await_output(process),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        }
+    }
     core.shutdown().await.unwrap();
     drop(core);
     let core = make_core(held.clone());
