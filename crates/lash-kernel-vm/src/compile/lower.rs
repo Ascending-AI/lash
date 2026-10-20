@@ -30,6 +30,7 @@ use super::{
     Action, ActionKind, Atom, Callee, CodeId, Compiler, Form, Local, Nested, NestedCallee,
     NestedKind, NestedRole, Runs, Shuffler, Stmt, Var, Via,
 };
+use crate::functions::brand_built;
 
 /// One statement's ops, the charge regions they head, and its static
 /// kill set: the dense register interval its expression tree uses, in
@@ -756,6 +757,19 @@ impl Compiler<'_> {
                     dst,
                     code: CodeIx(id.0),
                 });
+            }
+            // `brand.built()` answers the library body it is written in
+            // (`K-LIB-010`): a constant of that body, as a literal is.
+            doc::Expr::Call { function, .. }
+                if *function == brand_built() && self.resolve.lib(function).is_some() =>
+            {
+                let c = self.constant(match &self.unit {
+                    doc::Unit::Library(body) => {
+                        doc::Literal::Bytes(doc::Bytes::new(&body.as_bytes()[..]))
+                    }
+                    doc::Unit::Main | doc::Unit::Function(_) => doc::Literal::Absent,
+                });
+                ops.push(Op::Const { dst, c });
             }
             doc::Expr::Call { function, args } => match self.resolve.lib(function) {
                 // A function that runs its body enters a frame: the

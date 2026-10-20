@@ -1,6 +1,7 @@
 abs	abs
 add	add
 bool.not	bool not
+brand.built	brand built
 brand.of	brand of
 bytes.compare	bytes compare
 bytes.concat	bytes concat

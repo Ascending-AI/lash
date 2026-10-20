@@ -13,7 +13,7 @@
 //! | `regex.ecma.split` | `regex`, `input`, `limit`? | a list of texts and nulls |
 //!
 //! **A regex is data.** Its canonical `__lash_brand` is
-//! `("regex.ecma", "reg_exp")`; `__lash_built` names its building artifact.
+//! `("regex.ecma", "reg_exp")`; `__lash_built` holds the identity of `compile_check`, which built it.
 //! Its matching state is `pattern`, `flags` and `lastIndex`. No function changes its
 //! arguments: one that ECMAScript defines to write `lastIndex` returns the
 //! new value instead, and the caller's dialect writes it to the record.
@@ -49,7 +49,7 @@ mod testsupport;
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{ArtifactDigest, FunctionId, FunctionRegistry, RegistryError};
+use lash_kernel_doc::{FunctionId, FunctionRegistry, RegistryError};
 
 pub use definitions::{
     BRAND, CHARGE_BASE, CHARGE_PER_PATTERN_UNIT, GUARD_BASE, GUARD_PER_INPUT_UNIT, GUARD_UNIT,
@@ -93,15 +93,15 @@ impl Functions {
 pub fn implement(
     registry: &mut FunctionRegistry,
     engine: &Arc<Engine>,
-    built: ArtifactDigest,
 ) -> Result<Functions, RegistryError> {
     let mut implement = |operation: Operation| {
+        let definition = operation.definition();
         registry.implement_named(
-            operation.definition().name.as_str(),
+            definition.name.as_str(),
             Arc::new(functions::Function {
                 engine: Arc::clone(engine),
                 operation,
-                built,
+                own: definition.identity(),
             }),
         )
     };
@@ -115,8 +115,8 @@ pub fn implement(
     })
 }
 
-/// Declares the six functions. Install natives after building the package,
-/// passing its digest to [`implement`]. Use [`FunctionRegistry::declarations`].
+/// Declares the six functions. Install natives with [`implement`]. Use
+/// [`FunctionRegistry::declarations`].
 pub fn register(registry: &mut FunctionRegistry) -> Result<Functions, RegistryError> {
     let mut register = |operation: Operation| registry.register(operation.definition(), None);
     Ok(Functions {
@@ -129,10 +129,11 @@ pub fn register(registry: &mut FunctionRegistry) -> Result<Functions, RegistryEr
     })
 }
 
-/// Constructs the implementation selected by the build's identity table.
+/// Constructs the implementation of `function`, selected by the build's
+/// identity table.
 pub fn native(
     name: &str,
-    built: ArtifactDigest,
+    function: FunctionId,
 ) -> Option<Arc<dyn lash_kernel_doc::NativeFunction>> {
     static ENGINE: std::sync::OnceLock<Arc<Engine>> = std::sync::OnceLock::new();
     let operation = Operation::ALL
@@ -141,6 +142,6 @@ pub fn native(
     Some(Arc::new(functions::Function {
         engine: ENGINE.get_or_init(|| Arc::new(Engine::new(256))).clone(),
         operation,
-        built,
+        own: function,
     }))
 }

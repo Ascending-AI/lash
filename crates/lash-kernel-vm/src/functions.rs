@@ -1,13 +1,14 @@
 //! The library functions the machine implements itself (`K-LIB-010`).
 //!
-//! `deref` needs the kind of the object a ref names and `tasks.unfinished`
-//! needs the task set and the caller; a native function sees neither. Their
+//! `deref` needs the kind of the object a ref names, `tasks.unfinished`
+//! needs the task set and the caller, and `brand.built` the library body its
+//! call is written in; a native function sees none of them. Their
 //! definitions live here, an embedder registers them with
 //! [`register_machine_functions`], and the machine recognises them by
 //! identity.
 
 use std::collections::BTreeSet;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use lash_kernel_doc::{
     Formula, FunctionDefinition, FunctionId, FunctionRegistry, Implementation, KERNEL_VERSION,
@@ -19,6 +20,19 @@ use lash_kernel_doc::{
 pub(crate) enum MachineFunction {
     Deref,
     TasksUnfinished,
+    BrandBuilt,
+}
+
+/// The three, in the order they register.
+const ALL: [MachineFunction; 3] = [
+    MachineFunction::Deref,
+    MachineFunction::TasksUnfinished,
+    MachineFunction::BrandBuilt,
+];
+
+/// Whether `name` is one of their names.
+pub(crate) fn machine_name(name: &str) -> bool {
+    matches!(name, "deref" | "tasks.unfinished" | "brand.built")
 }
 
 /// The identities of the machine's own functions in a registry.
@@ -29,11 +43,23 @@ pub struct MachineFunctions {
     /// `tasks.unfinished()`: the handles of every other task that has not
     /// ended, in spawn order (`K-TASK-021`).
     pub tasks_unfinished: FunctionId,
+    /// `brand.built()`: the identity of the library function whose body,
+    /// or a closure in it, the call is written in; absent in a document's
+    /// own code (`K-LIB-010`). A package value records its constructor's.
+    pub brand_built: FunctionId,
+}
+
+/// The identity of `brand.built` under this build's kernel version: the
+/// lowering answers a call of it where the call is written.
+pub(crate) fn brand_built() -> FunctionId {
+    static BRAND_BUILT: LazyLock<FunctionId> =
+        LazyLock::new(|| definition(MachineFunction::BrandBuilt, KERNEL_VERSION).identity());
+    *BRAND_BUILT
 }
 
 #[expect(
     clippy::expect_used,
-    reason = "`deref` and `tasks.unfinished` are constant, well-formed qualified names"
+    reason = "the machine's functions have constant, well-formed qualified names"
 )]
 fn definition(function: MachineFunction, kernel: u32) -> FunctionDefinition {
     let (name, params, result, charge) = match function {
@@ -53,6 +79,14 @@ fn definition(function: MachineFunction, kernel: u32) -> FunctionDefinition {
             Type::List(Box::new(Type::Task(Box::new(Type::Any)))),
             Formula::Size(Operand::Result),
         ),
+        // Answered where its call is written, as a literal is: the node's
+        // own unit is all the call costs.
+        MachineFunction::BrandBuilt => (
+            "brand.built",
+            Vec::new(),
+            Type::Union(vec![Type::Bytes, Type::Absent]),
+            Formula::Constant(0),
+        ),
     };
     FunctionDefinition {
         kernel,
@@ -70,11 +104,10 @@ fn definition(function: MachineFunction, kernel: u32) -> FunctionDefinition {
 pub(crate) fn machine_function(candidate: &FunctionDefinition) -> Option<MachineFunction> {
     // Only a definition with one of their names can be either; most are
     // told apart without building theirs.
-    if !matches!(candidate.name.as_str(), "deref" | "tasks.unfinished") {
+    if !machine_name(candidate.name.as_str()) {
         return None;
     }
-    [MachineFunction::Deref, MachineFunction::TasksUnfinished]
-        .into_iter()
+    ALL.into_iter()
         .find(|function| definition(*function, candidate.kernel) == *candidate)
 }
 
@@ -91,8 +124,8 @@ impl NativeFunction for RunByTheMachine {
     }
 }
 
-/// Marks `deref` and `tasks.unfinished`, whose definitions the build's
-/// release image holds (FIG-6843), as run by the machine.
+/// Marks `deref`, `tasks.unfinished` and `brand.built`, whose definitions
+/// the build's release image holds (FIG-6843), as run by the machine.
 ///
 /// # Errors
 ///
@@ -107,11 +140,12 @@ pub fn implement_machine_functions(
     Ok(MachineFunctions {
         deref: implement(MachineFunction::Deref)?,
         tasks_unfinished: implement(MachineFunction::TasksUnfinished)?,
+        brand_built: implement(MachineFunction::BrandBuilt)?,
     })
 }
 
-/// Registers `deref` and `tasks.unfinished`, the two functions of the
-/// kernel library that the machine implements itself.
+/// Registers `deref`, `tasks.unfinished` and `brand.built`, the three
+/// functions of the kernel library that the machine implements itself.
 pub fn register_machine_functions(
     registry: &mut FunctionRegistry,
 ) -> Result<MachineFunctions, RegistryError> {
@@ -124,14 +158,14 @@ pub fn register_machine_functions(
     Ok(MachineFunctions {
         deref: register(MachineFunction::Deref)?,
         tasks_unfinished: register(MachineFunction::TasksUnfinished)?,
+        brand_built: register(MachineFunction::BrandBuilt)?,
     })
 }
 
 /// The machine-owned functions share a native marker; execution dispatches
 /// them through the machine's own entry before that marker is called.
 pub fn machine_native(name: &str) -> Option<Arc<dyn NativeFunction>> {
-    [MachineFunction::Deref, MachineFunction::TasksUnfinished]
-        .into_iter()
+    ALL.into_iter()
         .any(|function| definition(function, KERNEL_VERSION).name.as_str() == name)
         .then(|| Arc::new(RunByTheMachine) as Arc<dyn NativeFunction>)
 }

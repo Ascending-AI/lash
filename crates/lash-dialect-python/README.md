@@ -9,7 +9,7 @@ Programs use their paths without imports: `dataframe.col(x)`,
 `q.reduce_by_key(keys, values)` and `await inbox.send_item(input)`.
 Package values expose declared members only; indexing, iterating or
 converting one to a dict raises `TypeError`. A changed representation raises
-`package.stale_value` at member use and names the artifacts involved.
+`package.stale_value` at member use and names the releases involved.
 
 ## Parser
 

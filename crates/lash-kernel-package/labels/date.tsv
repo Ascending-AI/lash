@@ -2,4 +2,3 @@ date.ecma.format	date ecma format
 date.ecma.milliseconds	date ecma milliseconds
 date.ecma.parse	date ecma parse
 date.ecma.timestamp	date ecma timestamp
-date.ecma.__built	date.ecma building artifact

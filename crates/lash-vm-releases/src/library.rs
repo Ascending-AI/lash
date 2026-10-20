@@ -11,7 +11,7 @@
 //! by identity. The library of this crate holds data alone, and does not
 //! compile this file.
 
-use lash_kernel_doc::{ArtifactDigest, FunctionId, FunctionRegistry};
+use lash_kernel_doc::{FunctionId, FunctionRegistry};
 
 /// The release label of every lash package this tree builds.
 #[allow(
@@ -86,10 +86,9 @@ pub(crate) fn implement(
     path: &str,
     registry: &mut FunctionRegistry,
     functions: &[FunctionId],
-    built: ArtifactDigest,
 ) -> Result<(), String> {
     #[cfg(not(feature = "dialect-typescript"))]
-    let _ = (functions, built);
+    let _ = functions;
     match path {
         "kernel" => {
             lash_kernel_lib::implement_numbers(registry).map_err(|error| error.to_string())?;
@@ -103,15 +102,14 @@ pub(crate) fn implement(
         "regex.ecma" => lash_ext_regex_ecma::implement(
             registry,
             &std::sync::Arc::new(lash_ext_regex_ecma::Engine::new(CACHED_PATTERNS)),
-            built,
         )
         .map(|_| ())
         .map_err(|error| error.to_string()),
         #[cfg(feature = "dialect-typescript")]
-        "date.ecma" => lash_ext_date_ecma::implement(registry, functions.iter().copied(), built)
+        "date.ecma" => lash_ext_date_ecma::implement(registry, functions.iter().copied())
             .map_err(|error| error.to_string()),
         #[cfg(feature = "dialect-typescript")]
-        "url.whatwg" => lash_ext_url_whatwg::implement(registry, functions.iter().copied(), built)
+        "url.whatwg" => lash_ext_url_whatwg::implement(registry, functions.iter().copied())
             .map_err(|error| error.to_string()),
         #[cfg(feature = "dialect-typescript")]
         "typescript" => lash_ext_ts_core::implement(registry, functions.iter().copied())
@@ -123,8 +121,8 @@ pub(crate) fn implement(
     }
 }
 
-/// Constructs one implementation selected by a generated identity table.
-/// This path never constructs or registers definitions.
+/// Constructs the implementation of `function`, selected by a generated
+/// identity table. This path never constructs or registers definitions.
 #[allow(
     dead_code,
     reason = "used by the worker, which shares this source with the build"
@@ -132,20 +130,20 @@ pub(crate) fn implement(
 pub(crate) fn native(
     package: &str,
     name: &str,
-    built: ArtifactDigest,
+    function: FunctionId,
     callees: &[(FunctionId, &str)],
     registry: &FunctionRegistry,
 ) -> std::sync::Arc<dyn lash_kernel_doc::NativeFunction> {
     #[cfg(not(feature = "dialect-typescript"))]
-    let _ = (registry, callees, built);
+    let _ = (registry, callees, function);
     let native = match package {
         "kernel" => lash_kernel_lib::native(name).or_else(|| lash_kernel_vm::machine_native(name)),
         #[cfg(feature = "dialect-typescript")]
-        "regex.ecma" => lash_ext_regex_ecma::native(name, built),
+        "regex.ecma" => lash_ext_regex_ecma::native(name, function),
         #[cfg(feature = "dialect-typescript")]
-        "date.ecma" => lash_ext_date_ecma::native(name, built),
+        "date.ecma" => lash_ext_date_ecma::native(name, function),
         #[cfg(feature = "dialect-typescript")]
-        "url.whatwg" => lash_ext_url_whatwg::native(name, built),
+        "url.whatwg" => lash_ext_url_whatwg::native(name, function),
         #[cfg(feature = "dialect-typescript")]
         "typescript" => lash_ext_ts_core::native(name, |name| {
             let (function, _) = callees.iter().find(|(_, label)| *label == name)?;

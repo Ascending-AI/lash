@@ -299,16 +299,22 @@ user callback cannot yet carry between cells. Tasks, functions made by
 library code and functions performing control operations also prevent
 saving. Saving functions nested in data is in progress.
 
-Package values have the brand `(package, type)` and the digest of the
-artifact that built them. Only declared members are accessible. A member
+Package values have the brand `(package, type)` and, in `__lash_built`, the
+identity of the constructor that built them, which a constructor body writes
+with `brand.built()`. A constructor's identity never depends on its
+artifact's digest, so an unrelated release re-identifies no constructor and
+no code that calls one. Only declared members are accessible. A member
 checks its arguments recursively against its own artifact's declared
 representation, including package values inside lists, options and plans.
 A different brand raises `type_error`. The same brand with an incompatible
 shape raises `package.stale_value`, naming the type, first mismatched path,
-built artifact and current artifact, with the repair to rebuild the value.
-`StaleValue::of` decodes those facts and `StaleValue::message` renders the
-release labels, adding short digests when labels are equal or unknown. The
-diagnosis applies in either upgrade direction.
+the constructor that built the value and the check that refused it, with the
+repair to rebuild the value. `StaleValue::of` decodes those facts and
+`StaleValue::message` finds the held artifacts of the type's package whose
+code holds each function and renders their release labels, adding short
+digests when labels are equal or unknown. A constructor that several held
+releases share unchanged is named by every one of them. The diagnosis
+applies in either upgrade direction.
 
 There is no automatic representation conversion. Rebuild a stale dataframe
 plan by running its construction code under the cell's selected set. A brand

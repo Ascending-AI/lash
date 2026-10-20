@@ -39,9 +39,7 @@ pub use lash_kernel_dialect::{
 pub use lash_kernel_doc::{
     ArtifactDigest, ContractId, InvalidDigest, OperationRequirement, PackageSetDigest,
 };
-pub use package::{
-    ArtifactKey, Code, Origin, Package, PackageDisplay, PackageHeader, Root, built_function,
-};
+pub use package::{ArtifactKey, Code, Origin, Package, PackageDisplay, PackageHeader, Root};
 pub use refusal::{Declared, NameRole, PackageRefusal, SetHolds};
 pub use set::PackageSet;
 pub use shape::STALE_VALUE;

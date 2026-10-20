@@ -32,11 +32,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             callees.push(']');
             writeln!(
                 source,
-                "(lash_kernel_doc::FunctionId::from_bytes({:?}), |registry| crate::library::native({:?}, {:?}, lash_kernel_doc::ArtifactDigest::from_bytes({:?}), {callees}, registry)),",
+                "(lash_kernel_doc::FunctionId::from_bytes({:?}), |registry| crate::library::native({:?}, {:?}, lash_kernel_doc::FunctionId::from_bytes({:?}), {callees}, registry)),",
                 function.as_bytes(),
                 package.path,
                 name,
-                package.built.as_bytes()
+                function.as_bytes()
             )?;
         }
         source.push_str("],\n");

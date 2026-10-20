@@ -761,6 +761,11 @@ impl Evaluator<'_> {
     ) -> Option<Symbol> {
         let registered = self.library.registry.get(&function)?;
         let definition = registered.definition();
+        // `brand.built` answers the body it is written in (`K-LIB-010`),
+        // which a template entry is not.
+        if definition.name.as_str() == "brand.built" && definition.body().is_none() {
+            return None;
+        }
         // Kind is known even though the value is not. This is the only
         // intrinsic reduction; all value computations use native entries.
         if definition.name.as_str() == "kind" {

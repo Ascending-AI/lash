@@ -8,6 +8,7 @@ FunctionValue entry=run signature=Some(Signature { params: [Param { name: Name("
 kernel 1
 numbers float
 use bool.not = @bool.not
+use brand.built = @brand.built
 use brand.of = @brand.of
 use collection.function_check = @collection.function_check
 use collection.holds_none = @collection.holds_none
@@ -817,7 +818,6 @@ use ts.url_search_params.valueOf = @ts.url_search_params.valueOf
 use ts.url_search_params.values = @ts.url_search_params.values
 use ts.wrap_int32 = @ts.wrap_int32
 use tuple.len = @tuple.len
-use typescript.__built = @typescript.__built
 use url.whatwg.parse = @url.whatwg.parse
 use url.whatwg.query_stringify = @url.whatwg.query_stringify
 use url.whatwg.update = @url.whatwg.update

@@ -1,4 +1,4 @@
-use typescript.__built
+use brand.built
 # RegExp is an extension record. Only these helpers update lastIndex; the native matcher never mutates guest data.
 
 use ts.callable
@@ -167,7 +167,7 @@ body {
       if same(named[key], null) { set named[key] = absent }
     }
   }
-  let built = invoke typescript.__built()
+  let built = brand.built()
   return {__lash_brand: ("typescript", "regex_match"), __lash_built: built, items: items, index: num.to_float(match.index), input: input, groups: named}
 }
 

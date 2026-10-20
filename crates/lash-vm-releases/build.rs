@@ -112,7 +112,6 @@ fn package(
         library::RELEASE,
         roots,
         requires,
-        path != "kernel",
         registered,
     )?)
 }
@@ -133,7 +132,6 @@ fn helpers(
         library::RELEASE,
         [Root::new(root)],
         requires,
-        path == "typescript",
         |registry| {
             let mut library = lash_kernel_dialect::NamedLibrary::from_registry(registry)
                 .map_err(|error| error.to_string())?;
@@ -227,14 +225,12 @@ fn write_package(
             &dependency.path().to_string(),
             &mut checked,
             dependency.code().ids(),
-            dependency.digest(),
         )?;
     }
     library::implement(
         &package.path().to_string(),
         &mut checked,
         package.code().ids(),
-        package.digest(),
     )?;
     let mut rows: Vec<_> = package
         .code()
@@ -248,13 +244,6 @@ fn write_package(
         })
         .collect();
     rows.sort_by_key(|(function, _)| *function);
-    std::fs::write(
-        out.join(format!("{stem}.digest.rs")),
-        format!(
-            "lash_kernel_doc::ArtifactDigest::from_bytes({:?})\n",
-            package.digest().as_bytes()
-        ),
-    )?;
     let mut source = String::from("&[\n");
     for (function, name) in rows {
         source.push_str(&format!(

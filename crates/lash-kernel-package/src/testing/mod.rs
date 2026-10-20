@@ -51,7 +51,7 @@ pub fn kernel_and_dataframe(
             crate::Root::new(name.split('.').next().unwrap_or(name))
         })
         .collect();
-    let kernel = Package::lash(path, "1.0", roots, &[], false, |registry| {
+    let kernel = Package::lash(path, "1.0", roots, &[], |registry| {
         register(registry)?;
         Ok(registry
             .iter()

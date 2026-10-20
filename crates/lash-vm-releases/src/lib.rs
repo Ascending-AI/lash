@@ -30,8 +30,6 @@ pub struct BuiltPackage {
     pub header: &'static str,
     /// Its code, validated against the packages it requires.
     pub image: &'static [u8],
-    /// The artifact digest stamped by this package's native constructors.
-    pub built: lash_kernel_doc::ArtifactDigest,
     /// This build's native implementations, sorted by function identity.
     pub natives: &'static [(lash_kernel_doc::FunctionId, &'static str)],
 }
@@ -61,7 +59,6 @@ macro_rules! package {
             header: include_str!(concat!(env!("OUT_DIR"), "/", $stem, ".package.json")),
             image: include_bytes!(concat!(env!("OUT_DIR"), "/", $stem, ".bin")),
             natives: include!(concat!(env!("OUT_DIR"), "/", $stem, ".natives.rs")),
-            built: include!(concat!(env!("OUT_DIR"), "/", $stem, ".digest.rs")),
         }
     };
 }

@@ -734,13 +734,8 @@ pub(super) fn current_census() -> String {
     }
     let mut actual = String::new();
     for dialect in [crate::PYTHON, crate::TYPESCRIPT] {
-        // A package's generated `<path>.__built` is no helper (FIG-6921).
-        let built = format!("{dialect}.__built");
         let code = read(crate::package(dialect).expect("the dialect's package"));
-        let exports = (0..code.len())
-            .filter(|at| code.name(*at) != built)
-            .map(|at| code.id(at))
-            .collect();
+        let exports = (0..code.len()).map(|at| code.id(at)).collect();
         actual.push_str(&census(&definitions, &exports));
     }
     actual

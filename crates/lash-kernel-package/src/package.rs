@@ -8,8 +8,8 @@ use std::sync::Arc;
 use lash_helper_labels::MemberDisplay;
 use lash_kernel_dialect::{Export, MemberPath, PackagePath, Segment};
 use lash_kernel_doc::{
-    ArtifactDigest, Expr, FunctionDefinition, FunctionId, FunctionName, FunctionRegistry, Literal,
-    NativeFunction, ReleasedFunctions, Stmt,
+    ArtifactDigest, FunctionDefinition, FunctionId, FunctionName, FunctionRegistry, NativeFunction,
+    ReleasedFunctions,
 };
 use serde::{Deserialize, Serialize};
 
@@ -89,13 +89,6 @@ pub enum Origin {
 pub struct PackageDisplay {
     pub members: BTreeMap<MemberPath, MemberDisplay>,
     pub definitions: BTreeMap<FunctionName, MemberDisplay>,
-}
-
-/// The definition name of a package's generated building-artifact
-/// function, `<path>.__built() -> Bytes`.
-pub fn built_function(path: &PackagePath) -> FunctionName {
-    FunctionName::new(format!("{path}.__built"))
-        .unwrap_or_else(|_| unreachable!("a package path and a fixed segment form a name"))
 }
 
 /// A package's code: its definitions in the order they register.
@@ -416,21 +409,7 @@ impl Package {
             roots,
             exports,
         } = header;
-        let digest = match code.position(built_function(&path).as_str()) {
-            Some(at) => built_digest(
-                code.definition(at)
-                    .map_err(|message| PackageRefusal::Source {
-                        package: path.clone(),
-                        message,
-                    })?
-                    .as_ref(),
-            )
-            .ok_or_else(|| PackageRefusal::Source {
-                package: path.clone(),
-                message: "its building-artifact function returns no digest".into(),
-            })?,
-            None => digest_of(&path, origin, &requires, &roots, &exports, code.ids()),
-        };
+        let digest = digest_of(&path, origin, &requires, &roots, &exports, code.ids());
         Ok(Self {
             path,
             release,
@@ -443,21 +422,6 @@ impl Package {
             digest,
         })
     }
-}
-
-/// The digest a building-artifact function returns.
-fn built_digest(definition: &FunctionDefinition) -> Option<ArtifactDigest> {
-    let body = definition.body()?;
-    let [
-        Stmt::Return {
-            value: Expr::Literal(Literal::Bytes(bytes)),
-        },
-    ] = body.block.as_slice()
-    else {
-        return None;
-    };
-    let bytes: [u8; 32] = bytes.as_slice().try_into().ok()?;
-    Some(ArtifactDigest::from_bytes(bytes))
 }
 
 /// The blake3 digest of an artifact's canonical facts: its path, origin,

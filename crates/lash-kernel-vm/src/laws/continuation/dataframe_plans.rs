@@ -26,9 +26,9 @@ pub const PLANS: &[&p::HelperPlan] = &[
 
 const DATAFRAME_DATA_QUANTA_COLLECT_ROWS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "dataframe.data_quanta.collect_rows",
-    function: p::function("89253e4efbc198e8bedee607745bcb1efc09bbc9b9bafbf2a531d20dad95f9f0"),
+    function: p::function("a8218d9f12ec508a7679ebf3bb7436deb15eeed41c2dd0f2da763f29c7b58cbb"),
     callees: &[
-        p::function("ad1968cef1eaa4f43ada6d5707a49aeb3624b159442c3bdb46c21be5d72e3387"),
+        p::function("54819d41cf8f046723240c72206542ff430d4b330a877186f9394e685f20e76c"),
     ],
     literals: &[
         p::PlanLiteral::Text("self"),

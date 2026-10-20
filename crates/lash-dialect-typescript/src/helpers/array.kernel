@@ -1,4 +1,4 @@
-use typescript.__built
+use brand.built
 # JavaScript Array semantics on kernel collections.
 # Empty tuple slots are holes; JS values never use tuples.
 
@@ -1768,7 +1768,7 @@ body {
     let value = num.to_float(position)
     return {value: value, done: false}
   }
-  let built = invoke typescript.__built()
+  let built = brand.built()
   return {__lash_brand: ("typescript", "iterator"), __lash_built: built, next: ("ts.function", "", "next", 0.0, next, {})}
 }
 
@@ -1792,7 +1792,7 @@ body {
     let value = invoke ts.get(this, position)
     return {value: value, done: false}
   }
-  let built = invoke typescript.__built()
+  let built = brand.built()
   return {__lash_brand: ("typescript", "iterator"), __lash_built: built, next: ("ts.function", "", "next", 0.0, next, {})}
 }
 
@@ -1817,7 +1817,7 @@ body {
     set value = [num.to_float(position), value]
     return {value: value, done: false}
   }
-  let built = invoke typescript.__built()
+  let built = brand.built()
   return {__lash_brand: ("typescript", "iterator"), __lash_built: built, next: ("ts.function", "", "next", 0.0, next, {})}
 }
 

@@ -36,7 +36,7 @@ use lash_kernel_exec::{
 };
 
 use crate::costs::Costs;
-use crate::functions::{MachineFunction, machine_function};
+use crate::functions::{MachineFunction, machine_function, machine_name};
 
 pub(crate) mod expr;
 mod formula;

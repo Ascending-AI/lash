@@ -67,6 +67,8 @@ struct Emitter<'a> {
     library: &'a Library,
     /// The bodies whose plans answer at once: they reach no guest code.
     answering: &'a BTreeSet<FunctionId>,
+    /// The body's own identity, which `brand.built()` answers.
+    function: FunctionId,
     /// Whether the body compiles to a resumable segment.
     segment: bool,
     callees: Vec<FunctionId>,
@@ -479,6 +481,13 @@ impl Emitter<'_> {
 
     /// A call of library `function` with the `count` arguments from `at`,
     /// its value to `at`, holding `roles` when it is a callback site.
+    /// Whether `function` is the machine's `brand.built` (`K-LIB-010`).
+    fn brand_built(&self, function: &FunctionId) -> bool {
+        self.library.definition(function).is_some_and(|definition| {
+            definition.name.as_str() == "brand.built" && definition.body().is_none()
+        })
+    }
+
     fn library_call(
         &mut self,
         function: &FunctionId,
@@ -486,6 +495,11 @@ impl Emitter<'_> {
         at: u32,
         count: usize,
     ) -> Result<(), Unsupported> {
+        // The machine answers `brand.built` only where it is called by name
+        // in an expression; any other call of it raises, as the body does.
+        if self.brand_built(function) {
+            return Err(Unsupported("calls brand.built through an action".into()));
+        }
         let callee = self.callee(function)?;
         if self.answers(function) {
             self.op(&format!("ctx.call({callee}, {at}, {count})?;"));
@@ -621,6 +635,13 @@ impl Emitter<'_> {
                 Some(field) => self.op(&format!("ctx.field({dst}, {field})?;")),
                 None => self.op(&format!("ctx.index({dst})?;")),
             },
+            // The body's own identity, as the machine's lowering answers it.
+            Expr::Call { function, .. } if self.brand_built(function) => {
+                let own =
+                    Literal::Bytes(lash_kernel_doc::Bytes::new(&self.function.as_bytes()[..]));
+                let literal = self.literal(&own)?;
+                self.op(&format!("ctx.literal({literal}, {dst})?;"));
+            }
             Expr::Call { function, args } => {
                 let roles = self.roles();
                 let len = self.exprs(args, dst)?;

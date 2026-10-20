@@ -3,8 +3,12 @@ use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::{Datum, NewObject, Value};
 pub(super) use lash_kernel_state::arena::Bench;
 
-pub(super) const BUILT: lash_kernel_doc::ArtifactDigest =
-    lash_kernel_doc::ArtifactDigest::from_bytes([0x5a; 32]);
+/// The identity `compile_check` stamps the records it builds with.
+pub(super) fn built() -> lash_kernel_doc::FunctionId {
+    crate::definitions::Operation::CompileCheck
+        .definition()
+        .identity()
+}
 
 pub(super) fn fresh() -> Bench {
     Bench::new()
@@ -48,7 +52,7 @@ impl Fixture for Bench {
             ),
             (
                 "__lash_built",
-                self.run(&[], u64::MAX, |_, new| new.bytes(BUILT.as_bytes()))
+                self.run(&[], u64::MAX, |_, new| new.bytes(built().as_bytes()))
                     .unwrap()
                     .0,
             ),

@@ -43,13 +43,13 @@ fn brand_one_regex_constructor_uses_the_canonical_package_type() {
             .find(|(name, _)| name == "__lash_built")
             .map(|(_, value)| value),
         Some(&Datum::Bytes(lash_kernel_doc::Bytes::new(
-            super::testsupport::BUILT.as_bytes().to_vec()
+            super::testsupport::built().as_bytes().to_vec()
         ))),
     );
     assert_eq!(
         fields.len(),
         5,
-        "one brand, its artifact and the three matching fields"
+        "one brand, its constructor and the three matching fields"
     );
 }
 
@@ -121,7 +121,7 @@ fn run(
 ) -> Run {
     let mut registry = FunctionRegistry::declarations();
     let functions = register(&mut registry).unwrap();
-    crate::implement(&mut registry, engine, super::testsupport::BUILT).unwrap();
+    crate::implement(&mut registry, engine).unwrap();
     let registered = registry.get(&functions.get(operation)).unwrap();
     let definition = registered.definition().as_ref();
 
@@ -550,7 +550,7 @@ fn compile_check_returns_the_regex_record_or_a_syntax_error() {
             (
                 "__lash_built",
                 Datum::Bytes(lash_kernel_doc::Bytes::new(
-                    super::testsupport::BUILT.as_bytes().to_vec()
+                    super::testsupport::built().as_bytes().to_vec()
                 ))
             ),
             ("pattern", text("a+")),
@@ -609,7 +609,7 @@ fn operands_of_the_wrong_shape_are_typed_errors() {
                 .0;
             let built = heap
                 .run(&[], u64::MAX, |_, new| {
-                    new.bytes(super::testsupport::BUILT.as_bytes())
+                    new.bytes(super::testsupport::built().as_bytes())
                 })
                 .unwrap()
                 .0;

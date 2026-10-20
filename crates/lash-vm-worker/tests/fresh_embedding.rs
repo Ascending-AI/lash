@@ -215,7 +215,6 @@ fn a_shipped_native_uses_its_declared_callee_identity_among_retained_versions() 
             "retained-native",
             [Root::new("num")],
             &[],
-            false,
             |registry| {
                 registry
                     .register(definition.clone(), None)

@@ -36,6 +36,7 @@ pub fn emit(
     let mut emitter = Emitter {
         library,
         answering,
+        function,
         segment,
         callees: Vec::new(),
         literals: Vec::new(),

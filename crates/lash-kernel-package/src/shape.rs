@@ -8,7 +8,8 @@
 //! `type_error` for a value of another brand, or none, and
 //! `package.stale_value` for a value of this brand whose record is not the
 //! type's representation, naming the type and the first path that differs,
-//! with the value's building artifact and the checker's own. Every member
+//! with the identity of the value's constructor and the checker's own, from
+//! which a host finds the two artifacts. Every member
 //! body begins by walking each slot whose declared type mentions a package
 //! value type, by that declared type, to those checks.
 
@@ -17,7 +18,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use lash_kernel_dialect::{BRAND_FIELD, BUILT_FIELD, brand_type};
 use lash_kernel_doc::{RecordType, Signature, Type};
 
-use crate::package::built_function;
 use lash_kernel_dialect::PackagePath;
 
 /// The error kind of a value a release of its package built with another
@@ -36,8 +36,8 @@ pub(crate) struct Text {
     pub(crate) lines: Vec<String>,
     pub(crate) calls: BTreeSet<String>,
     fresh: usize,
-    /// A Both body cannot invoke body-only shape helpers or its digest helper.
-    inline_built: Option<String>,
+    /// A Both body cannot invoke the body-only shape checks: it holds them.
+    inline: bool,
 }
 
 impl Text {
@@ -184,21 +184,9 @@ impl<'a> Shapes<'a> {
 
     /// The checks a member's body begins with: one walk of each slot whose
     /// declared type mentions a package value type.
-    pub(crate) fn slots(
-        &self,
-        signature: &Signature,
-        inline_built: Option<&[u8]>,
-    ) -> Option<(Text, Vec<String>)> {
+    pub(crate) fn slots(&self, signature: &Signature, inline: bool) -> Option<(Text, Vec<String>)> {
         let mut text = Text {
-            inline_built: inline_built.map(|bytes| {
-                format!(
-                    "b\"{}\"",
-                    bytes
-                        .iter()
-                        .map(|byte| format!("{byte:02x}"))
-                        .collect::<String>()
-                )
-            }),
+            inline,
             ..Text::default()
         };
         let mut checked = Vec::new();
@@ -210,7 +198,6 @@ impl<'a> Shapes<'a> {
             text.line(0, format!("let {at} = \"{}\"", param.name));
             let fail = Fail {
                 ty: String::new(),
-                built: String::new(),
                 value: String::new(),
             };
             self.value(
@@ -265,10 +252,8 @@ impl<'a> Shapes<'a> {
         let Type::Record(record) = self.types[ty] else {
             unreachable!("a package representation is a record")
         };
-        text.calls.insert(built_function(self.path).to_string());
         let fail = Fail {
             ty: format!("{}.{ty}", self.path),
-            built: built_function(self.path).to_string(),
             value: built.to_owned(),
         };
         self.record(text, depth, var, at, record, Fails::Stale, &fail);
@@ -290,7 +275,7 @@ impl<'a> Shapes<'a> {
         fail: &Fail,
     ) {
         if let Some(name) = self.package_type(ty) {
-            if text.inline_built.is_some() {
+            if text.inline {
                 let (brand, built) = (text.fresh(), text.fresh());
                 self.check(text, depth, var, at, name, (&brand, &built));
                 return;
@@ -504,9 +489,8 @@ impl<'a> Shapes<'a> {
 struct Fail {
     /// The value type whose record is checked, for a stale value.
     ty: String,
-    /// The checker's building-artifact function.
-    built: String,
-    /// The original value's building artifact, fresh at each nesting level.
+    /// The variable holding the original value's constructor, fresh at
+    /// each nesting level.
     value: String,
 }
 
@@ -520,8 +504,8 @@ impl Fail {
             Fails::Stale => {
                 let package = self.ty.rsplit_once('.').map_or("", |(package, _)| package);
                 let current = text.fresh();
-                let expression = text.inline_built.clone().unwrap_or_else(|| format!("invoke {}()", self.built));
-                text.line(depth, format!("let {current} = {expression}"));
+                text.calls.insert("brand.built".into());
+                text.line(depth, format!("let {current} = brand.built()"));
                 text.line(
                     depth,
                     format!(

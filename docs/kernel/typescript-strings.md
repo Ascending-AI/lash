@@ -15,7 +15,8 @@ Trimming and numeric parsing use ECMAScript WhiteSpace and LineTerminator
 code units: BOM is included and NEL is excluded.
 
 Every package value carries one canonical brand, `__lash_brand: (package,
-type)`, and `__lash_built: Bytes`, the digest of its building artifact.
+type)`, and `__lash_built: Bytes`, the identity of its constructor
+(`brand.built()`).
 `brand.of` reads the tuple; `ts.receiver` derives a dispatch tag from it.
 A brand selects members and is not a capability: a typed decode can create
 one, so package functions still check their arguments. Dialect readers hide

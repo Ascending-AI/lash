@@ -855,6 +855,12 @@ impl KernelMachine {
                 })?;
                 Ok(self.new_object(NewObject::List(unfinished))?)
             }
+            // Lowering answers a call written by name in an expression; an
+            // action's call reaches no body it is written in.
+            LibRun::Machine(MachineFunction::BrandBuilt) => Err(self.error_value(
+                "type_error",
+                "`brand.built` is called by name in an expression",
+            )),
             LibRun::Native { native, body, .. } => {
                 let limit = match &function.limit {
                     Some(limit) => {

@@ -1,7 +1,8 @@
 //! PKG-SHAPE: a member called with a value of a package type's brand and
-//! another shape raises `package.stale_value`, naming the type, the path
-//! and both artifacts' labels, with a short digest when the labels are
-//! equal; a value of another brand raises `type_error`.
+//! another shape raises `package.stale_value`, naming the type, the path,
+//! the value's constructor and the check, whose artifacts' labels the
+//! message names, with a short digest when the labels are equal; a value
+//! of another brand raises `type_error`.
 
 use std::sync::Arc;
 
@@ -55,7 +56,11 @@ impl Fixture {
         assert_eq!(error.kind, STALE_VALUE, "{error:?}");
         let stale = StaleValue::of(&error).expect("a stale value's data");
         assert_eq!(stale.ty, "dataframe.expr");
-        assert_eq!(stale.current, self.built.digest());
+        assert_eq!(
+            Some(stale.current),
+            self.built.function("dataframe.expr.check_shape"),
+            "the check names itself"
+        );
         stale
     }
 }
@@ -159,7 +164,7 @@ fn pkg_shape_a_stale_value_names_both_artifacts_by_label() {
             "let value = {}\nlet name = invoke dataframe.expr.name(value)\nreturn name",
             literal(&value)
         ));
-        assert_eq!(stale.built, Some(older.digest()));
+        assert_eq!(stale.built, older.function("dataframe.make_expr"));
         assert_eq!(stale.at, "self.name");
 
         let current = fixture.held.view(&fixture.held.own()).unwrap();
@@ -190,4 +195,86 @@ fn pkg_shape_a_stale_value_names_both_artifacts_by_label() {
             )
         );
     }
+}
+
+/// A constructor two held releases share, unchanged, cannot tell which of
+/// them built a value: the message names both, and picks neither.
+#[test]
+fn pkg_shape_a_constructor_two_releases_share_names_both() {
+    let fixture = fixture();
+    let other_kernel = kernel_with(&[SHOUT]);
+    let sharing = Package::build("dataframe", "0.2.9", &DATAFRAME, &[&other_kernel]).unwrap();
+    assert_eq!(
+        sharing.function("dataframe.make_expr"),
+        fixture.built.function("dataframe.make_expr"),
+        "unchanged source keeps its constructor"
+    );
+    let reshaped = Package::build(
+        "dataframe",
+        "0.4.0",
+        &PackageSources {
+            kernel: &DATAFRAME
+                .kernel
+                .replace(
+                    "{op: op, args: args, name: name,",
+                    "{op: op, args: args, title: name,",
+                )
+                .replace("return self.name", "return self.title"),
+            surface: &DATAFRAME.surface.replace(
+                "type expr = Record{op: Text, args: List(Any), name: Text}",
+                "type expr = Record{op: Text, args: List(Any), title: Text}",
+            ),
+            ..DATAFRAME
+        },
+        &[&other_kernel],
+    )
+    .unwrap();
+    let value = finished(run(
+        &fixture.registry,
+        &fixture.members,
+        "let made = invoke dataframe.col(\"x\")\nreturn made",
+    ));
+    let registry = runtime(&[&reshaped]);
+    let name = functions(&registry, &[&reshaped], &["dataframe.expr.name"]);
+    let error = raised(run(
+        &registry,
+        &name,
+        &format!(
+            "let value = {}\nlet name = invoke dataframe.expr.name(value)\nreturn name",
+            literal(&value)
+        ),
+    ));
+    let stale = StaleValue::of(&error).expect("a stale value's data");
+    let own = fixture
+        .held
+        .view(&fixture.held.own())
+        .unwrap()
+        .set()
+        .clone();
+    let sets = [
+        own.clone(),
+        PackageSet::new([&other_kernel, &sharing]).unwrap(),
+        PackageSet::new([&other_kernel, &reshaped]).unwrap(),
+    ];
+    let artifacts: Vec<Arc<Package>> = fixture
+        .held
+        .artifacts()
+        .values()
+        .cloned()
+        .chain([other_kernel, sharing.clone(), reshaped.clone()].map(Arc::new))
+        .collect();
+    let held = HeldPackages::new(artifacts, sets, own.digest()).unwrap();
+    let mut both = [&fixture.built, &sharing];
+    both.sort_by_key(|package| package.digest());
+    assert_eq!(
+        stale.message(&held),
+        format!(
+            "`dataframe.expr` at `self.title` was built by another release of `dataframe` (one of {} {}, {} {}; current 0.4.0 {}); rebuild it",
+            both[0].release(),
+            both[0].digest().short(),
+            both[1].release(),
+            both[1].digest().short(),
+            reshaped.digest().short(),
+        )
+    );
 }

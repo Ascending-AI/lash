@@ -943,6 +943,64 @@ main {{
     );
 }
 
+/// `probe.own()`: what `brand.built()` answers in its body and in a
+/// closure its body makes.
+fn own_probe(
+    registry: &mut lash_kernel_doc::FunctionRegistry,
+    _: &std::collections::BTreeMap<&'static str, lash_kernel_doc::FunctionId>,
+) -> Vec<(&'static str, lash_kernel_doc::FunctionId)> {
+    let definition = lash_kernel_doc::parse_definition(&format!(
+        "function probe.own() -> Any\nkernel 1\ncharge 4\nuse brand.built = @{}\n\
+         body {{ let own = brand.built() let inner = fn() {{ return brand.built() }} \
+         let closed = apply inner() return (own, closed) }}\n",
+        crate::functions::brand_built()
+    ))
+    .unwrap();
+    vec![("probe.own", registry.register(definition, None).unwrap())]
+}
+
+/// `K-LIB-010`: `brand.built()` answers the identity of the library body
+/// its call is written in, a closure's included, and absent in a
+/// document's own code; called through an action it raises `type_error`.
+#[test]
+fn brand_built_answers_the_body_it_is_written_in() {
+    let setup = || Setup {
+        probes: Some(own_probe),
+        ..Setup::default()
+    };
+    let uses = format!("use brand.built = @{}\n", crate::functions::brand_built());
+    let mut embedder = Embedder::with(
+        &format!(
+            "{uses}fn declared() {{ return brand.built() }}\n\
+             main {{ let made = invoke probe.own() let here = brand.built() let there = call declared() \
+             return (made, here, there) }}"
+        ),
+        setup(),
+    );
+    let own = Datum::Bytes(lash_kernel_doc::Bytes::new(
+        &embedder.library.ids["probe.own"].as_bytes()[..],
+    ));
+    assert_eq!(
+        result(embedder.run_to_end(&[])),
+        Datum::Tuple(vec![
+            Datum::Tuple(vec![own.clone(), own]),
+            Datum::Absent,
+            Datum::Absent,
+        ])
+    );
+    let mut invoked = Embedder::with(
+        &format!("{uses}main {{ let made = invoke brand.built() return made }}"),
+        setup(),
+    );
+    assert!(
+        matches!(
+            invoked.run_to_end(&[]),
+            End::Error(RunError::Uncaught { error: Datum::Error(error), .. }) if error.kind == "type_error"
+        ),
+        "an action's call of `brand.built` raises"
+    );
+}
+
 /// `K-TASK-023`: when no task is ready and none waits on an effect or a
 /// sleep, the run ends in a deadlock that names the waiting tasks.
 #[test]

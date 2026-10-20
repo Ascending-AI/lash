@@ -51,17 +51,17 @@ const REVIEWED: &[(&str, &str, &str)] = &[
         "Argument-size: captured n/m cap the increasing index by min(len(xs),len(ys)); neither input is mutated and no guest code runs.",
     ),
     (
-        "ad1968cef1eaa4f43ada6d5707a49aeb3624b159442c3bdb46c21be5d72e3387",
+        "54819d41cf8f046723240c72206542ff430d4b330a877186f9394e685f20e76c",
         "dataframe.data_quanta.check_shape",
         "Argument-size: generated shape loops visit x.plan and each step.exprs without mutation, guest dispatch or awaits; even stale-value refusal is bounded by the unchanged input graph.",
     ),
     (
-        "3b37ccc0b49b429d7ebfa8ea907bae77c6c2dd903320a717d9e36d4ff5468a7d",
+        "9b76034b719078cdb5f33ec6780c7e64e1e26735005bac01c62d374b82097908",
         "dataframe.data_quanta.reduce_by_key",
         "Argument-size: generated prologues scan keys and aggregates once, checking each expr without guests or mutation; shape errors shorten these unchanged argument-list scans.",
     ),
     (
-        "60ddc70d39cf948af9f2eb65ad58aae5c7df0eab09433a6d5f86ce68b340ad4d",
+        "4f720a4fba4cdd6de0c3ffc2da18b9114b176d82b425220b13bd93064b6fb31b",
         "dataframe.data_quanta.sort",
         "Argument-size: the generated prologue scans keys once with callback-free expr checks; input is unchanged and stale-value refusal can only shorten the scan.",
     ),
@@ -236,7 +236,7 @@ const REVIEWED: &[(&str, &str, &str)] = &[
         "Argument-size: source conversion is callback-free and inputs are unchanged; outer scans total len(sequences), with at most shortest times len(sequences) nested cell visits, bounded by their deep input size.",
     ),
     (
-        "f1445f58b7dbaad20085e926273f407f0bf75703610c884e9ce3bf737fa8ca13",
+        "380779531cfadb38c8cac230416e82e975dbfe9d08703cc1de13af98c73bb2a0",
         "ts.arguments",
         "Argument-size: items is unchanged while one property is written per element to a fresh private record; numeric index spelling cannot call guests.",
     ),
@@ -381,7 +381,7 @@ const REVIEWED: &[(&str, &str, &str)] = &[
         "Argument-size: pattern is immutable Text and position advances by a complete scalar (one or two UTF-16 units), so even refusal cannot exceed its input length.",
     ),
     (
-        "752855e098680a7dce5d4d116f7cf6d6e6a66f79ba23c46ee7d6da0dea9c8b64",
+        "e1966f0f529457742fb199236b2bd3f1007e6f665d5613b62484d13222dc7bb5",
         "ts.regexp.match_record",
         "Argument-size: match.groups is scanned once and record.keys(named) is a private snapshot; replacing null slots preserves sizes, with no guest code or awaits.",
     ),

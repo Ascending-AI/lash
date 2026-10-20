@@ -1,4 +1,4 @@
-use typescript.__built
+use brand.built
 # Promises over kernel tasks.
 #
 # A promise is a record `{__lash_brand: ("typescript", "promise"), state, task}`: `task` is the
@@ -56,7 +56,7 @@ function ts.promise.pending() -> Any
 kernel 1
 charge 5
 body {
-  let built = invoke typescript.__built()
+  let built = brand.built()
   return {__lash_brand: ("typescript", "promise"), __lash_built: built, state: "pending", task: absent}
 }
 

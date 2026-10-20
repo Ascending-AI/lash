@@ -221,7 +221,7 @@ fn pkg_roots_a_host_package_lives_under_its_own_path_off_lash_roots() {
 
 /// PKG-DIGEST: an artifact is keyed by (path, digest); unchanged source
 /// over a changed dependency is a new digest and installs beside the old
-/// one.
+/// one, while its constructors keep their identities.
 #[test]
 fn pkg_digest_unchanged_source_over_another_kernel_is_another_artifact() {
     let (first, second) = (kernel(), kernel_with(&[SHOUT]));
@@ -237,18 +237,30 @@ fn pkg_digest_unchanged_source_over_another_kernel_is_another_artifact() {
     assert_eq!(over_first.release(), over_second.release());
     assert_ne!(over_first.key(), over_second.key());
 
-    // Each artifact's values hold the digest it is keyed by.
+    // A constructor stamps its values with its own identity, which
+    // unchanged source keeps over another kernel.
     let registry = runtime(&[&over_first]);
-    let built = functions(&registry, &[&over_first], &["dataframe.__built"]);
+    let col = functions(&registry, &[&over_first], &["dataframe.col"]);
+    let Datum::Record(fields) = finished(run(
+        &registry,
+        &col,
+        "let made = invoke dataframe.col(\"a\")\nreturn made",
+    )) else {
+        panic!("an expr is a record")
+    };
+    let constructor = over_first.function("dataframe.make_expr").unwrap();
     assert_eq!(
-        finished(run(
-            &registry,
-            &built,
-            "let built = invoke dataframe.__built()\nreturn built"
-        )),
-        Datum::Bytes(lash_kernel_doc::Bytes::new(
-            over_first.digest().as_bytes().to_vec()
-        ))
+        fields
+            .iter()
+            .find(|(name, _)| name == "__lash_built")
+            .map(|(_, built)| built),
+        Some(&Datum::Bytes(lash_kernel_doc::Bytes::new(
+            &constructor.as_bytes()[..]
+        )))
+    );
+    assert_eq!(
+        over_second.function("dataframe.make_expr"),
+        Some(constructor)
     );
 
     let sets = [
@@ -382,4 +394,48 @@ fn pkg_ops_a_body_performs_only_what_its_package_exports() {
             "{effect}: {refused:?}"
         );
     }
+}
+
+/// PKG-STABLE (FIG-6987): a host package built over another release of a
+/// host package it requires, which changed only definitions it does not
+/// call, is another artifact whose every definition, its constructors
+/// among them, keeps its identity.
+#[test]
+fn pkg_stable_a_host_package_keeps_its_identities_over_an_unrelated_host_release() {
+    let kernel = kernel();
+    let one =
+        "function helper.one(value: Text) -> Text\nkernel 1\ncharge 1\nbody {\n  return value\n}\n";
+    let two =
+        "function helper.two(value: Text) -> Text\nkernel 1\ncharge 1\nbody {\n  return value\n}\n";
+    let helper = |kernel_text: &str| {
+        Package::build(
+            "helper",
+            "1",
+            &PackageSources {
+                kernel: kernel_text,
+                ..PackageSources::default()
+            },
+            &[&kernel],
+        )
+        .unwrap()
+    };
+    let (first, second) = (helper(one), helper(&format!("{one}\n{two}")));
+    assert_ne!(first.digest(), second.digest());
+    let over = |helper: &Package| {
+        Package::build("dataframe", RELEASE, &DATAFRAME, &[&kernel, helper]).unwrap()
+    };
+    let (over_first, over_second) = (over(&first), over(&second));
+    assert_ne!(
+        over_first.digest(),
+        over_second.digest(),
+        "another artifact"
+    );
+    let identities = |package: &Package| {
+        let code = package.code();
+        (0..code.len())
+            .map(|at| (code.name(at).to_owned(), code.ids()[at]))
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+    assert!(identities(&over_first).contains_key("dataframe.make_expr"));
+    assert_eq!(identities(&over_first), identities(&over_second));
 }

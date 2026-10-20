@@ -1,6 +1,7 @@
 kernel 1
 numbers float
 effect corpus.echo(input?: Json) -> Json contract "52910906e3f939a5ce2e34bd105cd37184ead8ac272080fcbff759b3b6db6560"
+use brand.built = @c373085ebe73e883e1942e301da0444bc0c91072bc5d5c1d909f09b06c2ceb78
 use brand.of = @bd9a21264286394a5cd731fecaa03951fb50517689667675c0788623eb529dc1
 use collection.holds_none = @a58e0ba0d11b84096fd0264a5a281ef308aa5fe9a7bf26dd7b662b283fa491fe
 use date.ecma.format = @c6a7adc42030625a48d7f0b4786f2d0c81c0bd606025ddc6aa3db070f1af59a5
@@ -66,14 +67,14 @@ use ts.pad = @e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1
 use ts.primitive_to_number = @e3f5ecc4293cdbcf0996708034c6c8db4dcc7cc8c8ff730e6fe472078484bc39
 use ts.primitive_to_string = @183bb1ba4d4e942766ce640b2bb78ac02e9dbda5c2f98aee87db7ac92a650d66
 use ts.promise.adopt = @ec07dd4e314068cde58b9c1223c9fc11094029f4f5fe6f8d325a12e10b32a475
-use ts.promise.all = @9f7e9d630d002da1a87107c58796b4231420ca8edbb05fe4a6c8db58bc33e52d
+use ts.promise.all = @da0ae993d04e27760dfbdc73acf6692404db24c3bc494791c65971f87974c6be
 use ts.promise.decided = @0ac2376081f53b9524b0d3df74d59d37b6a3f6946504bd421a26f5c308733264
 use ts.promise.is = @0f99cae1fc6ad1ff6812fb50d4070182ec247c6fe07f1a7b049a4fa7aa9c82a5
-use ts.promise.members = @ab095c2ca103260ed36e8fb05af39ff6a73b86fa912377abf1f4fec14c771b76
-use ts.promise.pending = @d3ff9fceaeaf73d07104aca6e6572abc48d0f8915db2ce6dc150913366e0beeb
+use ts.promise.members = @6a36fdee9fc8937a4eb8a1f42e028b5bb4f4091dab36c57b3b4af2cabd0d184e
+use ts.promise.pending = @fe3c6398a88ccbf7d94c89866a9ae6bf339b8d3137d24ac0335391feec55cce8
 use ts.promise.run = @16fe1f1d98e1f2072247aeee93643c627d12d9fb390ee5c3c99baf2cd2455330
-use ts.promise.settled = @5f4023b66e52ea4c9cb3f8a93b6aa667e4faf3910643f28206ee60877e21b585
-use ts.promise.start = @687b760894f83bd43e568f551a5e323d39ae42a4042ffabfc6a207313317d929
+use ts.promise.settled = @68a891dc1db07199ec0549c5ef2bfdb7d77236f0eb9330cb30f4ddad073d7f5f
+use ts.promise.start = @875c36466719a5b387ab5f5241da695208b61ff4632bc449a7b566d2c67c5ad0
 use ts.receiver = @9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42
 use ts.regexp.escaped_source = @ec4fee5a46bb2d63665dd02de716b63bf630c4877fc96abc3b23525960656a0f
 use ts.regexp.spell = @17105be7ba3a8330dee6f0c09c5d302249850963f4312c7c272341d89c731bb9
@@ -81,7 +82,6 @@ use ts.string.trim_value = @2845fabd1d62dd6ae12b69a56f9d794fb12ffe649201c3673b74
 use ts.to_number = @a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f
 use ts.to_primitive = @04a7708dc45d479ed37f6240f5db8e0e93ded5280313782b87fc7dab40f125da
 use tuple.len = @2eced051afe955ac8dbeed3762acd4b8ce74b7a4ed15763ea47dfd01e5cc5f71
-use typescript.__built = @1d6f2e35f350bcc4ac16259ff3456882dcb0aa00f7a589c1b7936fd40e1cfc32
 entry demo() -> Any ts_direct(ts.await)
 
 fn demo() {

@@ -4,64 +4,76 @@ use super::pages::Session;
 use lash_kernel_doc::{Datum, Name};
 
 /// BRAND-ONE: native and body constructors agree on one canonical brand
-/// and name the artifact that built the value, including nested URL params.
+/// and stamp the value with their own identity, including nested URL
+/// params, so no constructor's identity depends on its artifact's.
 #[test]
-fn brand_one_package_constructors_use_canonical_brands_and_artifact_digests() {
+fn brand_one_package_constructors_use_canonical_brands_and_their_own_identities() {
     let cases = [
         (
             "regex.ecma",
             "reg_exp",
             "let value = regex.ecma.compile_check(\"a\", \"\")",
+            "regex.ecma.compile_check",
         ),
         (
             "date.ecma",
             "invalid_date",
             "let value = date.ecma.timestamp(nan)",
+            "date.ecma.timestamp",
         ),
         (
             "url.whatwg",
             "url",
             "let value = url.whatwg.parse(\"https://example.test/?a=1\", absent)",
+            "url.whatwg.parse",
         ),
         (
             "url.whatwg",
             "url_search_params",
             "let url = url.whatwg.parse(\"https://example.test/?a=1\", absent) let value = url.searchParams",
+            "url.whatwg.parse",
         ),
         (
             "url.whatwg",
             "url_search_params",
             "let value = invoke ts.url_search_params.construct(absent, [])",
+            "ts.url_search_params.construct",
         ),
         (
             "typescript",
             "promise",
             "let value = invoke ts.promise.pending()",
+            "ts.promise.pending",
         ),
         (
             "typescript",
             "arguments",
             "let value = invoke ts.arguments([])",
+            "ts.arguments",
         ),
         (
             "typescript",
             "iterator",
             "let value = invoke ts.array.keys([], [])",
+            "ts.array.keys",
         ),
         (
             "typescript",
             "iterator",
             "let value = invoke ts.array.values([], [])",
+            "ts.array.values",
         ),
         (
             "typescript",
             "iterator",
             "let value = invoke ts.array.entries([], [])",
+            "ts.array.entries",
         ),
         (
             "typescript",
             "regex_match",
             "let value = invoke ts.regexp.match_record({index: 0, groups: [\"a\"], named: null}, \"a\")",
+            "ts.regexp.match_record",
         ),
     ];
     let registry = machine::registry();
@@ -69,28 +81,31 @@ fn brand_one_package_constructors_use_canonical_brands_and_artifact_digests() {
     for (id, function) in registry.iter() {
         header.push_str(&format!("use {} = @{id}\n", function.name()));
     }
-    for (package, ty, constructor) in cases {
+    for (package, ty, constructor, stamping) in cases {
         let source = format!(
             "{header}entry run() -> Any\nfn run() {{\n{constructor}\n\
              let brand = invoke brand.of(value)\n\
-             let built = invoke {package}.__built()\n\
-             return (brand, value.__lash_built, built)\n}}\nmain {{}}\n"
+             return (brand, value.__lash_built)\n}}\nmain {{}}\n"
         );
         let mut document = lash_kernel_doc::parse_document(&source).expect("constructor law");
         document.manifest.functions =
             lash_kernel_check::requirements(&document, registry.as_ref()).functions;
         let (_, result) = machine::end_of_entry(document, "run", vec![]);
         let Datum::Tuple(parts) = result else {
-            panic!("constructor returns its brand and digests: {package}.{ty}");
+            panic!("constructor returns its brand and stamp: {package}.{ty}");
         };
         assert_eq!(
             parts[0],
             Datum::Tuple(vec![Datum::Text(package.into()), Datum::Text(ty.into())]),
             "{constructor}"
         );
-        assert_eq!(parts[1], parts[2], "{constructor}");
-        assert!(
-            matches!(&parts[1], Datum::Bytes(bytes) if bytes.as_slice().len() == 32),
+        let own = registry
+            .named(stamping)
+            .next()
+            .unwrap_or_else(|| panic!("{stamping} is registered"));
+        assert_eq!(
+            parts[1],
+            Datum::Bytes(lash_kernel_doc::Bytes::new(&own.as_bytes()[..])),
             "{constructor}"
         );
     }

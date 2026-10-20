@@ -16,8 +16,8 @@ use std::sync::Arc;
 
 use lash_kernel_doc::arena::ShortText;
 use lash_kernel_doc::{
-    Args, ArtifactDigest, Integer, NativeCall, NativeError, NativeFunction, NewObject, Nursery,
-    Value, WorkCounter,
+    Args, FunctionId, Integer, NativeCall, NativeError, NativeFunction, NewObject, Nursery, Value,
+    WorkCounter,
 };
 use num_traits::ToPrimitive;
 
@@ -29,7 +29,8 @@ use crate::pattern::{Engine, Flags, SyntaxError, text_from_units};
 pub(crate) struct Function {
     pub(crate) engine: Arc<Engine>,
     pub(crate) operation: Operation,
-    pub(crate) built: ArtifactDigest,
+    /// This function's identity, which a regex record it builds holds.
+    pub(crate) own: FunctionId,
 }
 
 impl NativeFunction for Function {
@@ -44,7 +45,7 @@ impl NativeFunction for Function {
             let pattern = text_arg(&args, heap, arg(0), "pattern")?;
             let flags = text_arg(&args, heap, arg(1), "flags")?;
             let flags = self.engine.check(&pattern, &flags).map_err(syntax_error)?;
-            return Ok(regex_value(heap, &pattern, flags, self.built));
+            return Ok(regex_value(heap, &pattern, flags, self.own));
         }
         let regex = Regex::read(&args, heap, arg(0))?;
         let input = text_arg(&args, heap, arg(1), "input")?;
@@ -590,12 +591,7 @@ impl Output<'_, '_> {
 
 /// The record `compile_check` returns: the pattern, the flags in canonical
 /// order and a `lastIndex` of zero.
-fn regex_value(
-    heap: &mut Nursery<'_>,
-    pattern: &str,
-    flags: Flags,
-    built: ArtifactDigest,
-) -> Value {
+fn regex_value(heap: &mut Nursery<'_>, pattern: &str, flags: Flags, built: FunctionId) -> Value {
     let brand = heap.allocate(NewObject::Tuple(vec![name(BRAND), name("reg_exp")]));
     let built = heap.bytes(built.as_bytes());
     let pattern = heap.text(pattern);

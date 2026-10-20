@@ -439,7 +439,6 @@ fn conf_shape_both_members_check_nested_values_with_their_own_artifacts() {
         surface: "type item = Record{name: Text}\ntype bundle = Record{item: item}\n  method name(self: bundle, children: List(item)) -> Text = nested.name",
         labels: "",
     }, &[&kernel]).unwrap();
-    let current = package.digest();
     let id = package.function("nested.name").unwrap();
     let held = HeldPackages::install([kernel, package]).unwrap();
     let mut registry = FunctionRegistry::declarations();
@@ -477,7 +476,7 @@ fn conf_shape_both_members_check_nested_values_with_their_own_artifacts() {
         };
         let stale = lash_kernel_package::StaleValue::of(&error).unwrap();
         assert_eq!(stale.at, expected_path);
-        assert_eq!(stale.current, current);
+        assert_eq!(stale.current, id, "a Both prologue names its own member");
         let Datum::Record(fields) = error.data else {
             panic!("stale data is a record")
         };

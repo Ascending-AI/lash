@@ -13,7 +13,6 @@ use lash_kernel_doc::{
     FunctionRegistry, Implementation, Node, Operand, Type, parse_definition,
 };
 
-use crate::lash::built_definition;
 use crate::package::{Code, PackageDisplay, digest_of};
 use crate::shape::{STALE_VALUE, Shapes};
 use crate::surface;
@@ -34,6 +33,7 @@ pub struct PackageSources<'a> {
 const CHECK_CALLS: &[&str] = &[
     "add",
     "bool.not",
+    "brand.built",
     "brand.of",
     "eq",
     "error.new",
@@ -52,9 +52,9 @@ impl Package {
     /// Defines, checks and freezes the host package at `path` from
     /// `sources`, against `requires`, the exact artifacts its bodies call
     /// into. Its one root is its own path. For each value type it
-    /// generates `<path>.<type>.check_shape`, each member's body begins by
-    /// checking its package-typed slots, and `<path>.__built()` returns the
-    /// artifact's digest, which a constructor stamps its values with.
+    /// generates `<path>.<type>.check_shape`, and each member's body begins
+    /// by checking its package-typed slots. A constructor stamps its values
+    /// with its own identity (`brand.built`).
     ///
     /// # Errors
     ///
@@ -98,54 +98,40 @@ impl Package {
         let order = shapes.order().map_err(source)?;
         let members = members_by_definition(&exports);
         let kernel = resolve_signatures(&path.to_string(), &type_names, sources.kernel);
-        let pass =
-            |built: &[u8]| -> Result<Vec<(FunctionId, Arc<FunctionDefinition>)>, PackageRefusal> {
-                let mut registry = FunctionRegistry::declarations();
-                for package in requires {
-                    package
-                        .code()
-                        .register_into(&mut registry, &|_| None)
-                        .map_err(source)?;
+        let mut registry = FunctionRegistry::declarations();
+        for package in requires {
+            package
+                .code()
+                .register_into(&mut registry, &|_| None)
+                .map_err(source)?;
+        }
+        let mut library =
+            NamedLibrary::from_registry(&registry).map_err(|error| source(error.to_string()))?;
+        let mut checks = uses(CHECK_CALLS.iter().copied().map(str::to_owned));
+        for ty in &order {
+            checks.push_str(&format!("use {path}.{ty}.check_shape\n"));
+        }
+        for ty in &order {
+            checks.push_str(&shapes.definition(ty).lines.join("\n"));
+            checks.push('\n');
+        }
+        let mut code = define_functions(&checks, &mut library)
+            .map_err(|error| source(format!("a generated shape check: {error}")))?;
+        code.extend(
+            define_functions_with(&kernel, &mut library, &mut |definition, library| {
+                if members.contains_key(&definition.name) {
+                    check_slots(&shapes, definition, library)?;
                 }
-                let mut library = NamedLibrary::from_registry(&registry)
-                    .map_err(|error| source(error.to_string()))?;
-                let mut code = Vec::new();
-                let stamp = built_definition(&path, built);
-                library
-                    .insert(stamp.clone())
-                    .map_err(|error| source(error.to_string()))?;
-                code.push(stamp);
-                let mut checks = uses(CHECK_CALLS.iter().copied().map(str::to_owned));
-                checks.push_str(&format!("use {}\n", crate::built_function(&path)));
-                for ty in &order {
-                    checks.push_str(&format!("use {path}.{ty}.check_shape\n"));
-                }
-                for ty in &order {
-                    checks.push_str(&shapes.definition(ty).lines.join("\n"));
-                    checks.push('\n');
-                }
-                code.extend(
-                    define_functions(&checks, &mut library)
-                        .map_err(|error| source(format!("a generated shape check: {error}")))?,
-                );
-                code.extend(
-                    define_functions_with(&kernel, &mut library, &mut |definition, library| {
-                        if members.contains_key(&definition.name) {
-                            check_slots(&shapes, definition, library, built)?;
-                        }
-                        Ok(())
-                    })
-                    .map_err(|error| source(error.to_string()))?,
-                );
-                Ok(code
-                    .into_iter()
-                    .map(|definition| (definition.identity(), Arc::new(definition)))
-                    .collect())
-            };
-        let first = pass(&[])?;
-        let ids: Vec<FunctionId> = first.iter().map(|(function, _)| *function).collect();
+                Ok(())
+            })
+            .map_err(|error| source(error.to_string()))?,
+        );
+        let code: Vec<(FunctionId, Arc<FunctionDefinition>)> = code
+            .into_iter()
+            .map(|definition| (definition.identity(), Arc::new(definition)))
+            .collect();
+        let ids: Vec<FunctionId> = code.iter().map(|(function, _)| *function).collect();
         let digest = digest_of(&path, Origin::Host, &requirements, &roots, &exports, &ids);
-        let code = pass(digest.as_bytes())?;
         let package = Self {
             path,
             release: release.to_owned(),
@@ -320,9 +306,8 @@ fn check_slots(
     shapes: &Shapes<'_>,
     definition: &mut FunctionDefinition,
     library: &NamedLibrary,
-    built: &[u8],
 ) -> Result<(), String> {
-    let inline = matches!(definition.implementation, Implementation::Both(_)).then_some(built);
+    let inline = matches!(definition.implementation, Implementation::Both(_));
     let Some((checks, slots)) = shapes.slots(&definition.signature, inline) else {
         return Ok(());
     };

@@ -1,4 +1,4 @@
-use url.whatwg.__built
+use brand.built
 # JavaScript url_search_params behavior, expressed in kernel code.
 use ts.callable
 use eq
@@ -82,7 +82,7 @@ let value = invoke ts.to_string(builtin_arg_2)
       }
     }
   }
-  let built = invoke url.whatwg.__built()
+  let built = brand.built()
   return {__lash_brand: ("url.whatwg", "url_search_params"), __lash_built: built, pairs: pairs, owner: absent}
 }
 

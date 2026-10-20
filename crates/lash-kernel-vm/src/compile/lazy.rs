@@ -434,7 +434,7 @@ impl Prepared {
         // function the machine runs itself only by one of its names
         // (FIG-6931).
         let header = Arc::clone(registered.header());
-        let machine = if matches!(header.name.as_str(), "deref" | "tasks.unfinished") {
+        let machine = if machine_name(header.name.as_str()) {
             machine_function(registered.definition())
         } else {
             None

@@ -63,7 +63,6 @@ pub(super) fn corpus_registry() -> lash_kernel_doc::FunctionRegistry {
     lash_ext_regex_ecma::implement(
         &mut registry,
         &std::sync::Arc::new(lash_ext_regex_ecma::Engine::new(4)),
-        lash_kernel_doc::ArtifactDigest::from_bytes([0x5a; 32]),
     )
     .expect("fixture regex natives");
     registry

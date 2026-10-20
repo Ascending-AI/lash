@@ -4,7 +4,7 @@ effect dataframe.run(plan: Any) -> List(Any) contract "dataframe.run/1"
 effect dataframe.explain(plan: Any) -> Text contract "dataframe.explain/1"
 use list.concat
 use list.len
-use dataframe.__built
+use brand.built
 use dataframe.make_expr
 use dataframe.make_quanta
 use dataframe.data_quanta.then
@@ -13,7 +13,7 @@ function dataframe.make_expr(op: Text, args: List(Any), name: Text) -> expr
 kernel 1
 charge 8
 body {
-  let built = invoke dataframe.__built()
+  let built = brand.built()
   return {op: op, args: args, name: name, __lash_brand: ("dataframe", "expr"), __lash_built: built}
 }
 
@@ -21,7 +21,7 @@ function dataframe.make_quanta(source: Text, plan: List(Any)) -> data_quanta
 kernel 1
 charge 8
 body {
-  let built = invoke dataframe.__built()
+  let built = brand.built()
   return {source: source, plan: plan, __lash_brand: ("dataframe", "data_quanta"), __lash_built: built}
 }
 

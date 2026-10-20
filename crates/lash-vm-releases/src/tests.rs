@@ -48,16 +48,11 @@ fn helper_sets_cover_every_dialects_packages() {
             .copied()
             .collect()
     );
-    // A package's generated `<path>.__built` is no helper (FIG-6921).
     let names_of = |path: &str| -> Vec<String> {
         let code =
             lash_kernel_doc::ReleasedFunctions::read(package(path).expect("the package").image)
                 .expect("the package reads");
-        let built = format!("{path}.__built");
-        (0..code.len())
-            .map(|at| code.name(at).to_owned())
-            .filter(|name| *name != built)
-            .collect()
+        (0..code.len()).map(|at| code.name(at).to_owned()).collect()
     };
     let mut checked = 0;
     for dialect in SHIPPED_DIALECTS {

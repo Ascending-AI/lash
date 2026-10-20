@@ -104,7 +104,6 @@ fn package(
         release,
         [lash_kernel_package::Root::new(root)],
         &[],
-        false,
         |registry| Ok(definitions(registry)),
     )
     .unwrap()

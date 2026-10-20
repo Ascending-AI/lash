@@ -3,14 +3,14 @@
 //! Native calls allocate new data and never mutate their inputs. The dialect
 //! owns setters and the stable live URLSearchParams alias.
 use lash_kernel_doc::{
-    ArtifactDigest, FunctionId, FunctionRegistry, NativeCall, NativeError, NativeFunction,
-    NewObject, RecordType, RecordTypeField, RegistryError, Type, Value, parse_definition,
+    FunctionId, FunctionRegistry, NativeCall, NativeError, NativeFunction, NewObject, RecordType,
+    RecordTypeField, RegistryError, Type, Value, parse_definition,
 };
 use std::{borrow::Cow, collections::BTreeMap, sync::Arc};
 use url::{Url, form_urlencoded};
 
 /// Declares parsing, component replacement and form-query codecs in a declarations registry.
-/// Install natives with the owning package digest through [`implement`].
+/// Install natives through [`implement`].
 #[expect(
     clippy::expect_used,
     reason = "literal definitions are valid kernel text"
@@ -148,7 +148,7 @@ fn pairs(call: &mut NativeCall<'_, '_>, input: &str) -> Value {
     }
     call.new.allocate(NewObject::List(result))
 }
-fn record(call: &mut NativeCall<'_, '_>, url: &Url, built: ArtifactDigest) -> Value {
+fn record(call: &mut NativeCall<'_, '_>, url: &Url, built: FunctionId) -> Value {
     let fields = [
         ("href", url.as_str().to_owned()),
         ("origin", url.origin().ascii_serialization()),
@@ -215,7 +215,8 @@ fn record(call: &mut NativeCall<'_, '_>, url: &Url, built: ArtifactDigest) -> Va
 }
 struct Function {
     operation: Operation,
-    built: ArtifactDigest,
+    /// This function's identity, which a value it builds holds.
+    own: FunctionId,
 }
 
 impl NativeFunction for Function {
@@ -232,7 +233,7 @@ impl NativeFunction for Function {
                     _ => return Err(raise("Expected text or absent base")),
                 }
                 .map_err(|_| raise("Invalid URL"))?;
-                Ok(record(&mut call, &url, self.built))
+                Ok(record(&mut call, &url, self.own))
             }
             Operation::Update => {
                 let mut url = Url::parse(&text(&mut call, 0)?).map_err(|_| raise("Invalid URL"))?;
@@ -279,7 +280,7 @@ impl NativeFunction for Function {
                     }),
                     _ => return Err(raise("Unsupported URL field")),
                 }
-                Ok(record(&mut call, &url, self.built))
+                Ok(record(&mut call, &url, self.own))
             }
             Operation::QueryParse => {
                 let input = text(&mut call, 0)?;
@@ -319,7 +320,6 @@ impl NativeFunction for Function {
 pub fn implement(
     registry: &mut FunctionRegistry,
     functions: impl IntoIterator<Item = FunctionId>,
-    built: ArtifactDigest,
 ) -> Result<(), RegistryError> {
     for function in functions {
         let registered = registry
@@ -329,22 +329,32 @@ pub fn implement(
             .into_iter()
             .find(|operation| operation.name() == registered.name())
         {
-            registry.implement(function, Arc::new(Function { operation, built }))?;
+            registry.implement(
+                function,
+                Arc::new(Function {
+                    operation,
+                    own: function,
+                }),
+            )?;
         }
     }
     Ok(())
 }
 
-/// Constructs the implementation selected by the build's identity table.
+/// Constructs the implementation of `function`, selected by the build's
+/// identity table.
 pub fn native(
     name: &str,
-    built: ArtifactDigest,
+    function: FunctionId,
 ) -> Option<Arc<dyn lash_kernel_doc::NativeFunction>> {
     Operation::ALL
         .into_iter()
         .find(|operation| operation.name() == name)
         .map(|operation| {
-            Arc::new(Function { operation, built }) as Arc<dyn lash_kernel_doc::NativeFunction>
+            Arc::new(Function {
+                operation,
+                own: function,
+            }) as Arc<dyn lash_kernel_doc::NativeFunction>
         })
 }
 
@@ -355,10 +365,10 @@ mod tests {
     use lash_kernel_state::arena::Bench;
 
     /// BRAND-ONE: a native constructor returns its canonical package/type
-    /// tuple and the artifact digest supplied at installation.
+    /// tuple and the identity it is installed under.
     #[test]
-    fn brand_one_native_constructor_stamps_its_package_and_artifact() {
-        let built = ArtifactDigest::from_bytes([0x5a; 32]);
+    fn brand_one_native_constructor_stamps_its_package_and_identity() {
+        let built = FunctionId::from_bytes([0x5a; 32]);
         let mut heap = Bench::new();
         let source = heap.arena_mut().text("https://example.test/?a=1");
         let arguments = [source, Value::Absent];

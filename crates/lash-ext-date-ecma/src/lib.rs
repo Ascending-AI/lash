@@ -7,15 +7,14 @@ mod calendar;
 
 use lash_kernel_doc::arena::ShortText;
 use lash_kernel_doc::{
-    Args, ArtifactDigest, Float, FunctionId, FunctionRegistry, Integer, NativeCall, NativeError,
-    NativeFunction, NewObject, RecordType, RecordTypeField, RegistryError, Type, Value,
-    parse_definition,
+    Args, Float, FunctionId, FunctionRegistry, Integer, NativeCall, NativeError, NativeFunction,
+    NewObject, RecordType, RecordTypeField, RegistryError, Type, Value, parse_definition,
 };
 use num_traits::ToPrimitive;
 use std::{collections::BTreeMap, sync::Arc};
 
 /// Declares deterministic date conversion, ISO parsing and formatting functions in a declarations registry.
-/// Install natives with the owning package digest through [`implement`].
+/// Install natives through [`implement`].
 #[expect(
     clippy::expect_used,
     reason = "constant library definitions are valid kernel text"
@@ -154,7 +153,8 @@ fn milliseconds(value: &Value, args: &Args<'_>) -> Result<f64, NativeError> {
 }
 struct Function {
     operation: Operation,
-    built: ArtifactDigest,
+    /// This function's identity, which a value it builds holds.
+    own: FunctionId,
 }
 
 impl NativeFunction for Function {
@@ -174,7 +174,7 @@ impl NativeFunction for Function {
                         short("date.ecma"),
                         short("invalid_date"),
                     ]));
-                    let built = call.new.bytes(self.built.as_bytes());
+                    let built = call.new.bytes(self.own.as_bytes());
                     return Ok(call.new.allocate(NewObject::Record(vec![
                         (short("__lash_brand"), brand),
                         (short("__lash_built"), built),
@@ -237,7 +237,6 @@ fn short(name: &'static str) -> Value {
 pub fn implement(
     registry: &mut FunctionRegistry,
     functions: impl IntoIterator<Item = FunctionId>,
-    built: ArtifactDigest,
 ) -> Result<(), RegistryError> {
     for function in functions {
         let registered = registry
@@ -247,22 +246,32 @@ pub fn implement(
             .into_iter()
             .find(|operation| operation.name() == registered.name())
         {
-            registry.implement(function, Arc::new(Function { operation, built }))?;
+            registry.implement(
+                function,
+                Arc::new(Function {
+                    operation,
+                    own: function,
+                }),
+            )?;
         }
     }
     Ok(())
 }
 
-/// Constructs the implementation selected by the build's identity table.
+/// Constructs the implementation of `function`, selected by the build's
+/// identity table.
 pub fn native(
     name: &str,
-    built: ArtifactDigest,
+    function: FunctionId,
 ) -> Option<Arc<dyn lash_kernel_doc::NativeFunction>> {
     Operation::ALL
         .into_iter()
         .find(|operation| operation.name() == name)
         .map(|operation| {
-            Arc::new(Function { operation, built }) as Arc<dyn lash_kernel_doc::NativeFunction>
+            Arc::new(Function {
+                operation,
+                own: function,
+            }) as Arc<dyn lash_kernel_doc::NativeFunction>
         })
 }
 
@@ -273,10 +282,10 @@ mod tests {
     use lash_kernel_state::arena::Bench;
 
     /// BRAND-ONE: a native constructor returns its canonical package/type
-    /// tuple and the artifact digest supplied at installation.
+    /// tuple and the identity it is installed under.
     #[test]
-    fn brand_one_native_constructor_stamps_its_package_and_artifact() {
-        let built = ArtifactDigest::from_bytes([0x5a; 32]);
+    fn brand_one_native_constructor_stamps_its_package_and_identity() {
+        let built = FunctionId::from_bytes([0x5a; 32]);
         let mut heap = Bench::new();
         let arguments = [Value::Float(Float::new(f64::NAN))];
         let native = native("date.ecma.timestamp", built).expect("the native constructor");

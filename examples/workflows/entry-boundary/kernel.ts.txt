@@ -1,15 +1,15 @@
 kernel 1
 numbers float
+use brand.built = @c373085ebe73e883e1942e301da0444bc0c91072bc5d5c1d909f09b06c2ceb78
 use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 use list.copy = @9582e9497de80ffe91797c946b2d48fc9e1621735e02d33bf53c8c828a41d63a
 use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
 use ts.await = @18a30299db399e09c5772b4431f1c4baf6e139a164f476b6fe173b1447d54a6f
 use ts.promise.adopt = @ec07dd4e314068cde58b9c1223c9fc11094029f4f5fe6f8d325a12e10b32a475
 use ts.promise.is = @0f99cae1fc6ad1ff6812fb50d4070182ec247c6fe07f1a7b049a4fa7aa9c82a5
-use ts.promise.pending = @d3ff9fceaeaf73d07104aca6e6572abc48d0f8915db2ce6dc150913366e0beeb
+use ts.promise.pending = @fe3c6398a88ccbf7d94c89866a9ae6bf339b8d3137d24ac0335391feec55cce8
 use ts.promise.run = @16fe1f1d98e1f2072247aeee93643c627d12d9fb390ee5c3c99baf2cd2455330
-use ts.promise.start = @687b760894f83bd43e568f551a5e323d39ae42a4042ffabfc6a207313317d929
-use typescript.__built = @1d6f2e35f350bcc4ac16259ff3456882dcb0aa00f7a589c1b7936fd40e1cfc32
+use ts.promise.start = @875c36466719a5b387ab5f5241da695208b61ff4632bc449a7b566d2c67c5ad0
 entry arrow(value: Number) -> Any ts_direct(ts.await)
 entry declared() -> Any ts_direct(ts.await)
 

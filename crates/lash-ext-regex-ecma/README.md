@@ -7,13 +7,12 @@ on no other lash crate.
 
 An embedder creates one `Engine`, stating how many compiled patterns it may
 keep, calls `register` to declare the six functions in its
-`FunctionRegistry::declarations()`, and calls `implement` with that engine and the package
-artifact digest after building the package. A front end calls `Engine::check` on a regex literal.
+`FunctionRegistry::declarations()`, and calls `implement` with that engine. A front end calls `Engine::check` on a regex literal.
 
 ## Values
 
 A regex carries `__lash_brand: ("regex.ecma", "reg_exp")` and
-`__lash_built: Bytes`, its building artifact digest. Its matching state is
+`__lash_built: Bytes`, the identity of `regex.ecma.compile_check`, which built it. Its matching state is
 `pattern`, `flags` and `lastIndex`: `flags` contains any of `g`, `i`, `m`, `s`, `u`, `y` at most once
 each, and `lastIndex` an integer of zero or more. Every index counts UTF-16
 code units. A function is strict: any other record, or an operand of another

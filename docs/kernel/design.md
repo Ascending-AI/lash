@@ -109,7 +109,7 @@ A function with a kernel-code body is ordinary kernel code: it may nest actions 
 2. **Guard.** A function that can run away (a backtracking regex) also states, in its identity, a work unit and a limit as a formula over its arguments. The implementation counts that unit deterministically, independent of caches, and a call that passes the limit ends with a typed bound error. Because the unit and limit are in the identity, the point of failure is pinned like any other behaviour. Memory for engine-side caches is the embedder's, bounded by its worker limits, and is never a guest-visible failure.
 3. **Values in, values out.** A native function sees only its arguments and its counter, does no I/O and is deterministic. The conformance harness re-runs every native function and compares results. Native functions are registered by the embedder in Rust at startup, never loaded from a document.
 4. **No callbacks.** A function that takes a function argument has a kernel-code body and no native implementation.
-5. **No mutation.** Extension values are kernel data: a regex is a record with `__lash_brand: ("regex.ecma", "reg_exp")`, the building artifact digest in `__lash_built`, and `pattern`, `flags` and `lastIndex`. `regex.ecma.exec` returns the match and the next `lastIndex`; the helper that wraps it writes `lastIndex` back to the record, so aliases see the update.
+5. **No mutation.** Extension values are kernel data: a regex is a record with `__lash_brand: ("regex.ecma", "reg_exp")`, its constructor's identity in `__lash_built`, and `pattern`, `flags` and `lastIndex`. `regex.ecma.exec` returns the match and the next `lastIndex`; the helper that wraps it writes `lastIndex` back to the record, so aliases see the update.
 
 ## 3. The document
 

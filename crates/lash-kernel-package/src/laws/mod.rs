@@ -54,7 +54,6 @@ fn kernel_with(more: &[&str]) -> Package {
         "1.0",
         roots,
         &[],
-        false,
         |registry| {
             register_kernel(registry)?;
             for text in more {

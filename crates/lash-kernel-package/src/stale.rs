@@ -2,20 +2,21 @@
 //! their release labels.
 
 use lash_kernel_dialect::PackagePath;
-use lash_kernel_doc::{ArtifactDigest, Datum, ErrorDatum};
+use lash_kernel_doc::{ArtifactDigest, Datum, ErrorDatum, FunctionId};
 
+use crate::HeldPackages;
 use crate::shape::STALE_VALUE;
-use crate::{ArtifactKey, HeldPackages};
 
 /// What a `package.stale_value` error names: the value type, the first
-/// path that differs, the artifact that built the value, when it holds
-/// one, and the checking member's own.
+/// path that differs, the identity of the function that built the value,
+/// when it holds one, and the checking function's own. Each identity
+/// names its artifact through the artifacts a node holds.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StaleValue {
     pub ty: String,
     pub at: String,
-    pub built: Option<ArtifactDigest>,
-    pub current: ArtifactDigest,
+    pub built: Option<FunctionId>,
+    pub current: FunctionId,
 }
 
 impl StaleValue {
@@ -37,54 +38,91 @@ impl StaleValue {
             Some(Datum::Text(text)) => Some(text.clone()),
             _ => None,
         };
-        let digest = |name: &str| match field(name) {
+        let function = |name: &str| match field(name) {
             Some(Datum::Bytes(bytes)) => <[u8; 32]>::try_from(bytes.as_slice())
                 .ok()
-                .map(ArtifactDigest::from_bytes),
+                .map(FunctionId::from_bytes),
             _ => None,
         };
         Some(Self {
             ty: text("type")?,
             at: text("at")?,
-            built: digest("built"),
-            current: digest("current")?,
+            built: function("built"),
+            current: function("current")?,
         })
     }
 
-    /// The message: the type, the path, and the release labels of both
-    /// artifacts, each with a short digest when the labels are equal or
-    /// one is unknown.
+    /// The message: the type, the path, and the release labels of the
+    /// artifacts that hold the two functions, each with a short digest
+    /// when the labels are equal or one is unknown. A function no held
+    /// artifact of the type's package holds names an unknown release; one
+    /// that several hold, unchanged across them, names every one of them,
+    /// since it cannot tell which built the value.
     pub fn message(&self, held: &HeldPackages) -> String {
         let package = self
             .ty
             .rsplit_once('.')
             .map_or(self.ty.as_str(), |(package, _)| package);
-        let label = |digest: &ArtifactDigest| {
-            PackagePath::parse(package).ok().and_then(|path| {
-                held.artifacts()
-                    .get(&ArtifactKey {
-                        path,
-                        digest: *digest,
-                    })
-                    .map(|artifact| artifact.release().to_owned())
-            })
+        let path = PackagePath::parse(package).ok();
+        let releases = |function: &FunctionId| {
+            path.as_ref()
+                .map_or_else(Vec::new, |path| releases(held, path, function))
         };
-        let current = label(&self.current);
-        let built = self.built.as_ref().and_then(label);
-        let short = built.is_none() || current.is_none() || built == current;
-        let describe = |label: Option<String>, digest: Option<&ArtifactDigest>| {
-            let label = label.unwrap_or_else(|| "an unknown release".to_owned());
-            match digest {
-                Some(digest) if short => format!("{label} {}", digest.short()),
-                _ => label,
+        let current = releases(&self.current);
+        let built = self.built.as_ref().map_or_else(Vec::new, releases);
+        let short =
+            one(&built).is_none() || one(&current).is_none() || one(&built) == one(&current);
+        let describe = |releases: &[Release<'_>], function: Option<&FunctionId>| match releases {
+            [] => match function {
+                Some(function) if short => {
+                    let mut digest = function.to_string();
+                    digest.truncate(12);
+                    format!("an unknown release {digest}")
+                }
+                _ => "an unknown release".to_owned(),
+            },
+            [(label, _)] if !short => (*label).to_owned(),
+            [(label, digest)] => format!("{label} {}", digest.short()),
+            several => {
+                let each: Vec<String> = several
+                    .iter()
+                    .map(|(label, digest)| format!("{label} {}", digest.short()))
+                    .collect();
+                format!("one of {}", each.join(", "))
             }
         };
         format!(
             "`{}` at `{}` was built by another release of `{package}` ({}; current {}); rebuild it",
             self.ty,
             self.at,
-            describe(built, self.built.as_ref()),
-            describe(current, Some(&self.current)),
+            describe(&built, self.built.as_ref()),
+            describe(&current, Some(&self.current)),
         )
     }
+}
+
+/// A release of a package: its label and its artifact's digest.
+type Release<'a> = (&'a str, ArtifactDigest);
+
+/// The label of the one release of `releases`, when it is one.
+fn one<'a>(releases: &[Release<'a>]) -> Option<&'a str> {
+    match releases {
+        [(label, _)] => Some(label),
+        _ => None,
+    }
+}
+
+/// Every release of the package at `path` whose code holds `function`, in
+/// artifact key order: the one place the diagnosis finds which releases
+/// hold a constructor or a check.
+fn releases<'a>(
+    held: &'a HeldPackages,
+    path: &PackagePath,
+    function: &FunctionId,
+) -> Vec<Release<'a>> {
+    held.artifacts()
+        .iter()
+        .filter(|(key, package)| key.path == *path && package.code().ids().contains(function))
+        .map(|(key, package)| (package.release(), key.digest))
+        .collect()
 }

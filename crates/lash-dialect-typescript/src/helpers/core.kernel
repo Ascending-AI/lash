@@ -1,4 +1,4 @@
-use typescript.__built
+use brand.built
 use brand.of
 # The TypeScript dialect's own operations (tier 2): what JavaScript means by
 # an operator, a coercion, a member access and a call, written in kernel
@@ -1794,6 +1794,6 @@ body {
     set properties[key] = value
     set index = num.add(index, 1)
   }
-  let built = invoke typescript.__built()
+  let built = brand.built()
   return {__lash_brand: ("typescript", "arguments"), __lash_built: built, properties: properties, hidden: set{"length"}}
 }
