@@ -73,8 +73,6 @@ pub trait SnapshotHeap {
 pub enum CaptureRefusal {
     #[error("which holds a task or a pending promise")]
     Task,
-    #[error("which holds a function that is bound to no name of its own")]
-    Function,
     #[error("which holds data that contains itself")]
     Cyclic,
     /// Two of the functions it holds read different variables of this
@@ -253,8 +251,10 @@ pub fn closure_held(
     }
 }
 
-/// Whether `value` can be frozen as capture data: no task, no closure but
-/// one of `named`, nothing with no constant, no cycle.
+/// Whether `value` can be frozen as capture data: no task, nothing with no
+/// constant, no cycle. Every closure in it is one of `named`, which the
+/// freeze refers to by name: the walk that named them ([`super::reach`])
+/// found each.
 ///
 /// # Errors
 ///
@@ -266,9 +266,9 @@ pub fn validate_capture(
     active: &mut BTreeSet<EntityId>,
 ) -> Result<(), CaptureCheck> {
     match value {
-        PageValue::Closure(id) if !named.contains_key(id) => {
-            Err(CaptureCheck::Refused(CaptureRefusal::Function))
-        }
+        PageValue::Closure(id) if !named.contains_key(id) => Err(CaptureCheck::Heap(
+            HeapFault::Malformed("a captured closure was named by no walk".into()),
+        )),
         PageValue::Task(_) | PageValue::Ref(Identity::Task(_)) => {
             Err(CaptureCheck::Refused(CaptureRefusal::Task))
         }
@@ -395,9 +395,10 @@ pub struct Gathered<F> {
 
 /// Gathers the code the closure `root` reaches and the captures it reads,
 /// with its helpers made in its own body. `named` are the closures a name
-/// of their own holds, which the code reaches by reference;
-/// `helper_owners` the named functions that share a helper. `avoid` says
-/// whether a reserved capture name is taken.
+/// of their own holds, which the code reaches by reference; a closure a
+/// capture holds whole that `named` does not name is a helper.
+/// `helper_owners` are the named functions that share a helper. `avoid`
+/// says whether a reserved capture name is taken.
 ///
 /// # Errors
 ///
@@ -496,7 +497,7 @@ pub fn gather<H: SnapshotHeap>(
 /// # Errors
 ///
 /// The heap's fault, or [`SnapshotRefusal::Token`] for a member that is no
-/// capture data.
+/// capture data. A closure among the members is one of `named`.
 pub fn freeze_token<H: SnapshotHeap>(
     heap: &mut H,
     values: &[PageValue],
@@ -508,11 +509,12 @@ pub fn freeze_token<H: SnapshotHeap>(
         values
             .iter()
             .map(|value| {
-                validate_capture(heap.pages(), value, &BTreeMap::new(), &mut BTreeSet::new())
-                    .map_err(|error| match error {
+                validate_capture(heap.pages(), value, named, &mut BTreeSet::new()).map_err(
+                    |error| match error {
                         CaptureCheck::Heap(e) => SnapshotError::Heap(e),
                         CaptureCheck::Refused(_) => SnapshotRefusal::Token.into(),
-                    })?;
+                    },
+                )?;
                 heap.freeze(value, named).map(|(frozen, _)| frozen)
             })
             .collect()
@@ -645,10 +647,9 @@ impl CodecVariant for CaptureRefusal {
     fn codec_variant(&self) -> u32 {
         match self {
             Self::Task => 0,
-            Self::Function => 1,
-            Self::Cyclic => 2,
-            Self::Conflict => 3,
-            Self::NoConstant { .. } => 4,
+            Self::Cyclic => 1,
+            Self::Conflict => 2,
+            Self::NoConstant { .. } => 3,
         }
     }
 }
@@ -657,7 +658,7 @@ impl TokenCodec for CaptureRefusal {
     fn encode(&self, out: &mut TokenWriter) {
         let variant = self.codec_variant();
         match self {
-            Self::Task | Self::Function | Self::Cyclic | Self::Conflict => out.sum(variant, 0),
+            Self::Task | Self::Cyclic | Self::Conflict => out.sum(variant, 0),
             Self::NoConstant { kind } => {
                 out.sum(variant, 1);
                 out.sum(value_kind_variant(*kind), 0);
@@ -670,10 +671,9 @@ impl TokenCodec for CaptureRefusal {
         let arity = |expected| TokenReader::expect_fields(fields, expected);
         Ok(match variant {
             0 => arity(0).map(|()| Self::Task)?,
-            1 => arity(0).map(|()| Self::Function)?,
-            2 => arity(0).map(|()| Self::Cyclic)?,
-            3 => arity(0).map(|()| Self::Conflict)?,
-            4 => {
+            1 => arity(0).map(|()| Self::Cyclic)?,
+            2 => arity(0).map(|()| Self::Conflict)?,
+            3 => {
                 arity(1)?;
                 let (kind, fields) = input.sum()?;
                 TokenReader::expect_fields(fields, 0)?;

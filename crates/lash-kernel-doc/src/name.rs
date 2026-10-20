@@ -40,7 +40,28 @@ impl Name {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// The name a session saves its `n`th function held by no binding of
+    /// its own under: a closure reached only through carried data or a
+    /// capture (SAVE-KEY). Its form, `saved#n`, is an identifier in no
+    /// dialect, so no source declares it, and every printer renders it as
+    /// a generated name.
+    #[must_use]
+    pub fn saved(n: u64) -> Self {
+        Self::new(format!("{SAVED_PREFIX}{n}"))
+    }
+
+    /// `n` when this is [`Name::saved`]`(n)`.
+    #[must_use]
+    pub fn saved_index(&self) -> Option<u64> {
+        let digits = self.0.strip_prefix(SAVED_PREFIX)?;
+        let n: u64 = digits.parse().ok()?;
+        (n.to_string() == digits).then_some(n)
+    }
 }
+
+/// What every [`Name::saved`] starts with.
+const SAVED_PREFIX: &str = "saved#";
 
 impl fmt::Display for Name {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

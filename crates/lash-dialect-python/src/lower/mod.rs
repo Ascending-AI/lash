@@ -395,19 +395,21 @@ pub(crate) fn lower_with_calls(
         lash_kernel_dialect::regions::reachable(lowerer.used, environment.library);
     document.manifest.effects = lowerer.performed;
     lash_kernel_dialect::require_through_bodies(&mut document.manifest, environment.library);
-    if !lowerer.saved_used.is_empty() {
-        lash_kernel_dialect::install(
-            &mut document,
-            cell.functions,
-            &lowerer.saved_used,
-            &lash_kernel_doc::FunctionRepresentation::Bare,
-            environment.namespaces,
-            environment.library,
-        ).map_err(|unusable| {
-            let mut error = diagnostics::unplaced(Code::SavedFunctionUnusable, unusable.to_string());
-            error.repairs.push("provide the saved function's required tools and library functions, or define a function using this session's tools".to_owned());
-            error
-        })?;
+    // The saved functions the source names, and each one carried data
+    // holds, are declared in the cell's own document.
+    let installed = lash_kernel_dialect::install(
+        &mut document,
+        cell.functions,
+        &lowerer.saved_used,
+        &lash_kernel_doc::FunctionRepresentation::Bare,
+        environment.namespaces,
+        environment.library,
+    ).map_err(|unusable| {
+        let mut error = diagnostics::unplaced(Code::SavedFunctionUnusable, unusable.to_string());
+        error.repairs.push("provide the saved function's required tools and library functions, or define a function using this session's tools".to_owned());
+        error
+    })?;
+    if !installed.is_empty() {
         document.manifest.functions = lash_kernel_dialect::regions::reachable(
             std::mem::take(&mut document.manifest.functions),
             environment.library,

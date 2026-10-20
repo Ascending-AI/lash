@@ -603,24 +603,25 @@ pub(crate) fn lower_beside(
         lash_kernel_dialect::regions::reachable(lowerer.used, environment.library);
     document.manifest.effects = lowerer.performed;
     lash_kernel_dialect::require_through_bodies(&mut document.manifest, environment.library);
-    if !lowerer.saved_used.is_empty() {
-        // The saved functions the source names are declared in the cell's
-        // own document, with what they require.
-        lash_kernel_dialect::install(
-            &mut document,
-            cell.functions,
-            &lowerer.saved_used,
-            &crate::function_values(),
-            environment.namespaces,
-            environment.library,
+    // The saved functions the source names, and each one carried data
+    // holds, are declared in the cell's own document, with what they
+    // require.
+    let installed = lash_kernel_dialect::install(
+        &mut document,
+        cell.functions,
+        &lowerer.saved_used,
+        &crate::function_values(),
+        environment.namespaces,
+        environment.library,
+    )
+    .map_err(|unusable| {
+        Diagnostic::new(
+            DiagnosticCode::SavedFunctionUnusable,
+            unusable.to_string(),
+            None,
         )
-        .map_err(|unusable| {
-            Diagnostic::new(
-                DiagnosticCode::SavedFunctionUnusable,
-                unusable.to_string(),
-                None,
-            )
-        })?;
+    })?;
+    if !installed.is_empty() {
         document.manifest.functions = lash_kernel_dialect::regions::reachable(
             std::mem::take(&mut document.manifest.functions),
             environment.library,

@@ -67,6 +67,14 @@ fn library(retained: &Release, release: &Release) -> NamedLibrary {
     NamedLibrary::resolving(&registry, |function| set.contains(function)).expect("one set")
 }
 
+/// The package set of `release` alone, as a node that no longer holds the
+/// release a function was saved against holds it.
+fn alone(release: &Release) -> NamedLibrary {
+    let mut registry = FunctionRegistry::new();
+    let set = release.register(&mut registry);
+    NamedLibrary::resolving(&registry, |function| set.contains(function)).expect("one set")
+}
+
 /// The `dataframe` package's exports in a set: its `run` operation under
 /// `contract`, with `params` as its parameters.
 struct Owns(BTreeMap<Segment, Export>);
@@ -103,7 +111,8 @@ impl ExportView for Owns {
 }
 
 /// `keep`, saved under `library`'s set: it calls `dataframe.col` and
-/// `dataframe.collect`, and performs `dataframe.run` itself.
+/// `dataframe.collect`, held against that set's signatures of them, and
+/// performs `dataframe.run` itself.
 fn keep(library: &NamedLibrary) -> SavedFunction {
     let col = library.resolve("dataframe.col").expect("col");
     let collect = library.resolve("dataframe.collect").expect("collect");
@@ -113,6 +122,14 @@ fn keep(library: &NamedLibrary) -> SavedFunction {
     ))
     .expect("a document");
     document.manifest.functions = super::relink::reachable(&[col, collect], library);
+    let catalog: &dyn lash_kernel_doc::FunctionCatalog = library;
+    let against = [col, collect]
+        .into_iter()
+        .map(|function| {
+            let header = catalog.header(&function).expect("a held function");
+            (function, header.signature.clone())
+        })
+        .collect();
     SavedFunction {
         name: Name::new("keep"),
         document,
@@ -125,6 +142,8 @@ fn keep(library: &NamedLibrary) -> SavedFunction {
         references: BTreeSet::new(),
         written: None,
         token: None,
+        held: None,
+        against,
     }
 }
 
@@ -212,13 +231,16 @@ fn a_saved_function_relinks_to_the_cell_set_with_the_earlier_one_retained() {
 /// RELINK-CLOSURE: a saved function whose callee the cell's set removed,
 /// or defines under another signature, or whose own operation the set
 /// declares under another signature, is refused, naming it and the
-/// callee.
+/// callee. The node holds the cell's set alone, as a production node does:
+/// the callee's old signature is the one the function was saved against,
+/// and a callee whose old signature is not known is refused too. One saved
+/// under a generated name is named by the path a binding held it at.
 #[test]
 fn a_saved_function_whose_callee_the_set_does_not_serve_is_refused_naming_both() {
     let r1 = Release::of("1");
     let saved = keep(&library(&Release::of("0"), &r1));
     let refused = |release: Release, owns: Owns| {
-        relink_saved(&saved, &library(&r1, &release), &owns).expect_err("refused")
+        relink_saved(&saved, &alone(&release), &owns).expect_err("refused")
     };
     let run = || Owns::run("plan: Any", "dataframe.run/1");
     for (release, owns, callee, gap) in [
@@ -262,6 +284,37 @@ fn a_saved_function_whose_callee_the_set_does_not_serve_is_refused_naming_both()
             "{message}"
         );
     }
+    let unknown = SavedFunction {
+        against: BTreeMap::new(),
+        ..saved.clone()
+    };
+    assert_eq!(
+        relink_saved(&unknown, &alone(&Release::of("2")), &run())
+            .expect_err("an old signature no one holds serves no call"),
+        Unusable::Relink {
+            function: Name::new("keep"),
+            callee: "dataframe.col".to_owned(),
+            gap: RelinkGap::Signature,
+        }
+    );
+    // One saved under a generated name is named by where a binding held it.
+    let held = SavedFunction {
+        held: Some(HeldAt {
+            binding: Name::new("plan"),
+            path: "plan.map".to_owned(),
+        }),
+        ..saved.clone()
+    };
+    let removed = Release {
+        col: None,
+        ..Release::of("2")
+    };
+    assert!(
+        relink_saved(&held, &alone(&removed), &run())
+            .expect_err("refused")
+            .to_string()
+            .contains("`plan.map`")
+    );
 }
 
 /// A changed contract under an unchanged signature is taken: the relinked
@@ -276,7 +329,7 @@ fn a_saved_function_whose_operation_changed_contract_alone_runs_under_the_new_re
         ..Release::of("2")
     };
     let owns = Owns::run("plan: Any", "dataframe.run/2");
-    let relinked = relink_saved(&saved, &library(&r1, &r2), &owns).expect("relinked");
+    let relinked = relink_saved(&saved, &alone(&r2), &owns).expect("relinked");
     let run = EffectName::new("dataframe.run").expect("an effect");
     assert_eq!(
         saved.document.manifest.effects[&run].contract,

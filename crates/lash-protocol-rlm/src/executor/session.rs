@@ -600,13 +600,18 @@ impl CodeModeExecutionState {
                         lash_vm_broker::kernel::closure::Natives::Declared,
                     )
                     .map_err(|refusal| RelinkError::Library(refusal.to_string()))?;
+                    function.against = relinked.against;
                     function.document = lash_kernel_doc::IdentifiedDocument::new(relinked.document);
                     rewritten.push((name.clone(), function.description(), closure));
                 }
-                Err(unusable) => dropped.push((name.clone(), unusable.to_string())),
+                Err(unusable) => dropped.push((
+                    name.clone(),
+                    function.held.as_ref().map(|held| held.binding.clone()),
+                    unusable.to_string(),
+                )),
             }
         }
-        for (name, _) in &dropped {
+        for (name, _, _) in &dropped {
             functions.remove(name);
         }
         // A relinked record names its new closure, which the cell's run
@@ -631,6 +636,8 @@ impl CodeModeExecutionState {
             .values()
             .flat_map(|function| function.document.manifest.functions.keys().copied())
             .collect();
+        // Each dropped function's name, and the binding dropped with it.
+        let mut unbound: Vec<(Name, Name)> = Vec::new();
         if let Some(session) = self.current.session
             && (!rewritten.is_empty() || !dropped.is_empty())
         {
@@ -647,45 +654,84 @@ impl CodeModeExecutionState {
                     )
                 })
                 .collect();
-            let drops: Vec<Name> = dropped.iter().map(|(name, _)| name.clone()).collect();
-            next.session = Some(
-                self.pages
-                    .read(move |source| {
-                        let mut editor = SessionEditor::open(Some(&session), source)?;
-                        for (name, description, closure) in &edits {
-                            editor.relink_function(name, description, *closure)?;
+            let drops: Vec<(Name, Option<Name>)> = dropped
+                .iter()
+                .map(|(name, holder, _)| (name.clone(), holder.clone()))
+                .collect();
+            let (session, removed) = self
+                .pages
+                .read(move |source| {
+                    let mut editor = SessionEditor::open(Some(&session), source)?;
+                    for (name, description, closure) in &edits {
+                        editor.relink_function(name, description, *closure)?;
+                    }
+                    // A function's binding goes with it. One saved under a
+                    // generated name takes the binding that held it, while
+                    // that binding still refers to it.
+                    let mut removed = Vec::new();
+                    for (name, holder) in &drops {
+                        let holder = match holder {
+                            Some(holder) if editor.refers(holder, name)? => Some(holder.clone()),
+                            Some(_) => None,
+                            None => Some(name.clone()),
+                        };
+                        editor.drop_function(name)?;
+                        if let Some(holder) = holder {
+                            editor.remove(&holder)?;
+                            removed.push((name.clone(), holder));
                         }
-                        for name in &drops {
-                            editor.drop_function(name)?;
+                    }
+                    Ok((editor.seal()?, removed))
+                })
+                .await?;
+            next.session = Some(session);
+            unbound = removed;
+            let root = self.current.notes;
+            let functions: Vec<Name> = dropped.iter().map(|(name, _, _)| name.clone()).collect();
+            let notes: Vec<(Name, String)> = unbound
+                .iter()
+                .filter_map(|(function, binding)| {
+                    dropped
+                        .iter()
+                        .find(|(name, _, _)| name == function)
+                        .map(|(_, _, why)| (binding.clone(), why.clone()))
+                })
+                .collect();
+            next.notes = self
+                .pages
+                .read(move |source| {
+                    edit_notes(&root, source, |edit| {
+                        for name in &functions {
+                            edit.saved(name, None)?;
                         }
-                        editor.seal()
+                        for (binding, why) in &notes {
+                            edit.not_carried(binding, why)?;
+                        }
+                        Ok(())
                     })
-                    .await?,
-            );
-            if !dropped.is_empty() {
-                let root = self.current.notes;
-                let notes = dropped.clone();
-                next.notes = self
-                    .pages
-                    .read(move |source| {
-                        edit_notes(&root, source, |edit| {
-                            for (name, why) in &notes {
-                                edit.not_carried(name, why)?;
-                                edit.saved(name, None)?;
-                            }
-                            Ok(())
-                        })
-                    })
-                    .await?;
+                })
+                .await?;
+        }
+        if let Some(notes) = &mut self.view.notes {
+            for (name, _, _) in &dropped {
+                if let Some(note) = notes.get_mut(name) {
+                    note.saved = None;
+                    if note.not_carried.is_none() {
+                        notes.remove(name);
+                    }
+                }
             }
         }
-        for (name, why) in &dropped {
+        for (function, binding) in &unbound {
             if let Some(names) = &mut self.view.names {
-                names.remove(name);
+                names.remove(binding);
             }
-            self.view.values.remove(name);
-            if let Some(notes) = &mut self.view.notes {
-                let note = notes.entry(name.clone()).or_default();
+            self.view.values.remove(binding);
+            if let (Some(notes), Some((_, _, why))) = (
+                &mut self.view.notes,
+                dropped.iter().find(|(name, _, _)| name == function),
+            ) {
+                let note = notes.entry(binding.clone()).or_default();
                 note.not_carried = Some(why.clone());
                 note.saved = None;
             }
@@ -1296,15 +1342,21 @@ impl CodeModeExecutionState {
             .is_some_and(|note| note.saved.is_some())
     }
 
-    /// Each saved function the session holds, with its signature and the
-    /// cell whose end froze what it reads.
+    /// Each saved function the session holds by a name of its own, with
+    /// its signature and the cell whose end froze what it reads.
     pub(crate) fn held_functions(&self) -> Vec<(String, String, Option<u64>)> {
         let described = self.view.functions.as_ref();
         self.view
             .notes
             .iter()
             .flatten()
-            .filter(|(name, note)| note.saved.is_some() && !self.protected.contains(*name))
+            // One saved under a generated name is reached only through the
+            // data that holds it, never by a name of its own.
+            .filter(|(name, note)| {
+                note.saved.is_some()
+                    && name.saved_index().is_none()
+                    && !self.protected.contains(*name)
+            })
             .map(|(name, note)| {
                 let signature = described
                     .and_then(|functions| functions.get(name))

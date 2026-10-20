@@ -315,7 +315,15 @@ that set claims the session while the cell stands parked. The turn's commit
 after the cell clears the stamp.
 
 A top-level function binding is saved as a self-contained document when
-its cell succeeds, with its captures frozen at cell end. At the start of
+its cell succeeds, with its captures frozen at cell end. So is every
+function a carried binding holds inside data, such as a dataframe plan
+retaining its user callback, or a lambda inside a record that another
+function captures (`save`, `Saved`). A function no binding holds as its own
+value is saved under a generated name, `saved#n` (`Name::saved`), which no
+dialect can spell and the prompt never lists, so a later cell declaring a
+function of any name never meets it. Every place that held the function
+holds a reference to that one saved function, so two bindings that shared a
+function or a record still share it in the next cell. At the start of
 each later cell, the session relinks every saved function by name to the
 cell's package set (`relink_saved`). Each package function it calls takes
 the identity that set defines under the same name, even while the node
@@ -324,16 +332,27 @@ the set's requirement, so a changed contract under an unchanged signature is
 taken. A saved function whose callee the set no longer defines, or defines
 or offers under another signature, is dropped at the cell's start. The
 session lists it as not carried with `Unusable::Relink`, naming the function,
-the callee and the `RelinkGap`. The session records the set it is linked to
+the callee and the `RelinkGap`; one saved under a generated name is named by
+the binding path that held it (`plan.map`), and that binding is dropped
+with it. The signature a callee must keep is the one the function was saved,
+or last relinked, against, which the saved function holds
+(`SavedFunction::against`); a callee whose old signature is not known is
+refused, never taken unchecked. The session records the set it is linked to
 (`linked`); a cell under that set rewrites nothing. Installing a saved
 function into a cell checks that every function it lists is the cell's
 set's.
 
-Functions nested inside carried data are refused as
-`NotSaved::FunctionInData`. In particular, a dataframe plan retaining its
-user callback cannot yet carry between cells. Tasks, functions made by
-library code and functions performing control operations also prevent
-saving. Saving functions nested in data is in progress.
+Tasks, functions made by library code and functions performing control
+operations still prevent saving the binding that reaches them
+(`NotSaved::Task`, `NotSaved::MadeByLibrary`,
+`NotSaved::PerformsControl`). So does a function held where no reference can
+stand: as a map key or set member, behind a ref, or inside an error
+(`NotSaved::Keyed`).
+
+A package value crosses to a runner, or into any tool input, as its own
+fields: its provenance fields `__lash_brand` and `__lash_built` are left out
+of the JSON whatever their encoding, since no runner reads them. A record
+without `__lash_brand` keeps every field.
 
 Package values have the brand `(package, type)` and, in `__lash_built`, the
 identity of the constructor that built them, which a constructor body writes
@@ -378,7 +397,7 @@ facts and what model-facing guidance to supply.
 | Package sets | Lash stores each member map under its computed digest and assigns install order. Node advertisements list held artifacts; holding a set is derived from them. |
 | Workflow documents and execution closures | Preserve the document's exact identities and its referrer's retention. Parked state remains opaque to the host. |
 | Operation links and committed outcomes | Lash records the chosen provider, policy and codec payload before a park. Supply a runner that can read its retained payload. |
-| Session bindings and saved functions | Lash retains data and saved function documents with frozen captures. Nested functions in data are currently refused. |
+| Session bindings and saved functions | Lash retains data and saved function documents with frozen captures, including functions nested in carried data. |
 | External runner resources and credentials | The host owns them. Package artifacts contain declarations and code, with no live handles or credentials. |
 
 Hosts submit session work through `send()` and observe the engine's drive.

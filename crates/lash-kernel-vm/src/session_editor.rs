@@ -194,6 +194,59 @@ impl SessionEditor {
         }))
     }
 
+    /// Whether the value bound to `binding` refers to the saved function
+    /// `function` anywhere in it: what a cell start asks before dropping
+    /// the binding that held a function saved under a generated name.
+    ///
+    /// # Errors
+    ///
+    /// The heap's faults.
+    pub fn refers(&self, binding: &Name, function: &Name) -> Result<bool, HeapFault> {
+        use lash_kernel_doc::heap::{Element, PageReader as _};
+        use lash_kernel_doc::snapshot::{members, text_of};
+        let Some(record) = self
+            .bindings
+            .get(&metadata_key(binding), self.heap.pages())?
+        else {
+            return Ok(false);
+        };
+        let mut pending = vec![match record.value {
+            BoundRecord::Value(value) => value,
+            BoundRecord::Shared(id) => self.heap.variable_get(id)?,
+        }];
+        let mut objects = BTreeSet::new();
+        while let Some(value) = pending.pop() {
+            match &value {
+                PageValue::Function(name) => {
+                    if text_of(&self.heap, name)? == function.as_str() {
+                        return Ok(true);
+                    }
+                }
+                PageValue::Tuple(tuple) => pending.extend(members(&self.heap, tuple)?),
+                PageValue::List(id)
+                | PageValue::Map(id)
+                | PageValue::Set(id)
+                | PageValue::Record(id)
+                    if objects.insert(*id) =>
+                {
+                    self.heap.visit(*id, &mut |element| {
+                        match element {
+                            Element::Item(item) => pending.push(item.clone()),
+                            Element::Entry { key, value } => {
+                                pending.push(key.clone());
+                                pending.push(value.clone());
+                            }
+                            Element::Field { value, .. } => pending.push(value.clone()),
+                        }
+                        std::ops::ControlFlow::Continue(())
+                    })?;
+                }
+                _ => {}
+            }
+        }
+        Ok(false)
+    }
+
     /// Binds `name` to `value`, declared at `main` of no cell.
     ///
     /// # Errors

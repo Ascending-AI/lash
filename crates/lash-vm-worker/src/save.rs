@@ -1,11 +1,12 @@
 //! A session cell's end, saving the functions its carry would drop
-//! (`K-SES-004`), in the worker that runs the cell: the dialect's own
-//! rules decide which qualify, each one's captures are frozen once on the
-//! cell's heap, and every binding that held one is bound to its value.
+//! (`K-SES-004`), in the worker that runs the cell: every closure a
+//! dropped binding reaches is saved once, its captures frozen on the
+//! cell's heap, and each of those bindings is bound to its value with
+//! every closure in it a reference to its saved function.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_dialect::{EffectControl, Kept, Left, NotSaved};
+use lash_kernel_dialect::{EffectControl, Left, NotSaved};
 use lash_kernel_doc::heap::HeapFault;
 use lash_kernel_doc::{EffectName, Site};
 use lash_kernel_vm::{CellSave, CellSaveContext, SaveCell, SavedCell};
@@ -38,7 +39,7 @@ impl CellSave for DialectSave {
                 ..SavedCell::default()
             });
         };
-        let (kept, refused) = saving.save(
+        let saved = saving.save(
             Left {
                 document: cell.document,
                 bindings: cell.bindings,
@@ -51,22 +52,20 @@ impl CellSave for DialectSave {
             },
             cell.held,
         )?;
-        let mut saved = SavedCell {
-            refused: refused
+        let mut cell = SavedCell {
+            refused: saved
+                .refused
                 .into_iter()
                 .map(|(name, why)| (name, why.to_string()))
                 .collect(),
+            rebound: saved.bindings.into_iter().collect(),
             ..SavedCell::default()
         };
-        for (name, Kept { function, aliases }) in kept {
+        for (name, function) in saved.functions {
             let description = LowerFunction::from(&function).description();
-            let (record, value) = saving.record(&function, &description)?;
-            // Every alias is the one function: one value, bound to each.
-            for binding in std::iter::once(&name).chain(&aliases) {
-                saved.rebound.push((binding.clone(), value.clone()));
-            }
-            saved.functions.push((function.name.clone(), record));
+            cell.functions
+                .push((name, saving.record(&function, &description)?));
         }
-        Ok(saved)
+        Ok(cell)
     }
 }

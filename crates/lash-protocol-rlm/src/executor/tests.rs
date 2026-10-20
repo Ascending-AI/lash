@@ -2,6 +2,7 @@
 //! through the production entry, in a worker, on a claimed session actor
 //! over a SQLite durable store.
 
+mod carried_data;
 mod crossing;
 mod document_trips;
 mod finish_value;
@@ -1167,9 +1168,9 @@ async fn deferred_host_explanations_survive_commit_and_reopen_verbatim() {
 
 /// FIG-5766: a cell's response says what its committed transition did to
 /// the session's bindings, by name. A binding the cell left alone is in no
-/// list, a function bound to a name of its own is saved and so is added
-/// like any binding, data that holds a function (`K-SES-003`) is named as
-/// not carried, and a cell that failed committed nothing and reports nothing,
+/// list, a function bound to a name of its own, or held in data
+/// (`K-SES-003`), is saved and so is added like any binding, and a cell
+/// that failed committed nothing and reports nothing,
 /// whatever it assigned before it failed.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_cell_reports_the_bindings_its_committed_transition_changed() {
@@ -1205,9 +1206,8 @@ async fn a_cell_reports_the_bindings_its_committed_transition_changed() {
     assert_eq!(
         *second.bindings,
         lash_core::BindingChanges {
-            added: vec!["increment".to_owned(), "rows".to_owned()],
+            added: vec!["held".to_owned(), "increment".to_owned(), "rows".to_owned()],
             changed: vec!["count".to_owned()],
-            not_carried: vec!["held".to_owned()],
             ..Default::default()
         }
     );

@@ -102,6 +102,12 @@ pub struct LowerFunction {
     pub written: Option<lash_kernel_dialect::Written>,
     /// The tag of the function value that held it, when one did.
     pub token: Option<String>,
+    /// Where a carried binding held it, for one saved under a generated
+    /// name.
+    pub held: Option<lash_kernel_dialect::HeldAt>,
+    /// The signature of each library function its code holds, as it was
+    /// saved or last relinked.
+    pub against: BTreeMap<lash_kernel_doc::FunctionId, lash_kernel_doc::Signature>,
 }
 
 impl From<&lash_kernel_dialect::SavedFunction> for LowerFunction {
@@ -113,6 +119,8 @@ impl From<&lash_kernel_dialect::SavedFunction> for LowerFunction {
             references: function.references.clone(),
             written: function.written.clone(),
             token: function.token.as_ref().map(|token| token.tag.clone()),
+            held: function.held.clone(),
+            against: function.against.clone(),
         }
     }
 }
@@ -138,23 +146,28 @@ impl LowerFunction {
                 before: Vec::new(),
                 after: Vec::new(),
             }),
+            held: self.held,
+            against: self.against,
         }
     }
 
     /// The function's description: a token sequence of its name, its
     /// document's token body (copied, not encoded), its helper owners, its
-    /// references, what its source wrote and its token's tag.
+    /// references, what its source wrote, its token's tag, where a binding
+    /// held it and the signatures of its library functions.
     #[must_use]
     pub fn description(&self) -> Vec<u8> {
         use lash_kernel_doc::graph_tokens::{TokenCodec as _, TokenWriter};
         let mut out = TokenWriter::with_capacity(self.document.body().len() + 64);
-        out.seq(6);
+        out.seq(8);
         self.name.encode(&mut out);
         out.raw(self.document.body());
         self.helper_owners.encode(&mut out);
         self.references.encode(&mut out);
         self.written.encode(&mut out);
         self.token.encode(&mut out);
+        self.held.encode(&mut out);
+        self.against.encode(&mut out);
         out.into_bytes()
     }
 
@@ -170,7 +183,7 @@ impl LowerFunction {
     ) -> Result<Self, lash_kernel_doc::graph_tokens::TokenError> {
         use lash_kernel_doc::graph_tokens::{TokenCodec as _, TokenReader};
         let mut input = TokenReader::new(description).with_data_limits(limits);
-        input.expect_struct(6)?;
+        input.expect_struct(8)?;
         let name = Name::decode(&mut input)?;
         let document = lash_kernel_doc::IdentifiedDocument::decode(input.tree()?, limits)?;
         let function = Self {
@@ -180,6 +193,8 @@ impl LowerFunction {
             references: BTreeSet::decode(&mut input)?,
             written: Option::decode(&mut input)?,
             token: Option::decode(&mut input)?,
+            held: Option::decode(&mut input)?,
+            against: BTreeMap::decode(&mut input)?,
         };
         input.finish()?;
         Ok(function)

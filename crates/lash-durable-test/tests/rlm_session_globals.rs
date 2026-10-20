@@ -145,7 +145,9 @@ fn names(names: &[&str]) -> BTreeSet<String> {
 /// the top-level `let answer` and `let counter` are.
 const CELL_1_GLOBALS: &[&str] = &["answer", "box", "counter", "fetched", "total"];
 /// `reader` is saved with its block-local `answer` frozen at 5. The private
-/// slot itself stays out of the globals, even after a restart.
+/// slot itself stays out of the globals, even after a restart. `plan`
+/// holds a lambda, saved under a generated name that no global shows, and
+/// `run` reaches it through its capture of `plan` (SAVE-IN-DATA).
 const CELL_2_GLOBALS: &[&str] = &[
     "answer",
     "box",
@@ -156,7 +158,9 @@ const CELL_2_GLOBALS: &[&str] = &[
     "worker",
     "handle",
     "later",
+    "plan",
     "reader",
+    "run",
 ];
 
 /// After every cell and every restart the session's globals are exactly the
@@ -237,7 +241,9 @@ if (counter > 0) {
 const worker = async () => { await sleep(60000); return null; };
 const handle = await processes.start({ definition: worker });
 const later = reader() + answer;
-const from_host = host_config.label;"#,
+const from_host = host_config.label;
+const plan = { map: (x) => x + answer };
+const run = () => plan.map(1);"#,
     )
     .await;
     served::assert_answered("cell 2", &second);
@@ -262,7 +268,7 @@ const from_host = host_config.label;"#,
   box.n = answer;
 }
 const fetched = "rebound";
-await control.finish({ answer: answer, counter: counter, n: box.n, later: later, saved_reader: reader(), fetched: fetched, from_host: from_host, total: total, handle: typeof handle });"#,
+await control.finish({ answer: answer, counter: counter, n: box.n, later: later, saved_reader: reader(), fetched: fetched, from_host: from_host, total: total, handle: typeof handle, planned: plan.map(2), ran: run() });"#,
     )
     .await;
     served::assert_answered("cell 3", &third);
@@ -281,6 +287,8 @@ await control.finish({ answer: answer, counter: counter, n: box.n, later: later,
         "\"from_host\":\"from-host\"",
         "\"total\":3",
         "\"handle\":\"object\"",
+        "\"planned\":44",
+        "\"ran\":43",
     ] {
         assert!(
             rendered.contains(expected),

@@ -1,9 +1,11 @@
 use super::*;
 use lash_kernel_doc::graph_tokens::{ChildRef, decode_body, encode_body};
 use lash_kernel_doc::heap_values::key_digest;
+use lash_kernel_doc::{Action, Callee, Rhs, Stmt};
 use lash_kernel_state::kernel_internals::census_impl::Census;
 use lash_kernel_state::paged::{
-    AllocationCensus, EditEpoch, NameRef, ObjectInit, PageAnswer, PageBody, PageSource, SiteRef,
+    AllocationCensus, EditEpoch, HeapLifecycle, NameRef, ObjectInit, PageAnswer, PageBody,
+    PageSource, SiteRef,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -95,6 +97,8 @@ fn saved(heap: &mut PagedHeap, live: EntityId) -> SavedFunction {
         references: BTreeSet::new(),
         written: None,
         token: None,
+        held: None,
+        against: BTreeMap::new(),
     }
 }
 /// Writes the one value of a one-value list, as a projection writes its
@@ -253,7 +257,7 @@ fn saved_captures_use_names_when_free_variable_slots_are_reordered() {
     for id in [first, second] {
         let bindings = BTreeMap::from([(Name::new("read"), PageValue::Closure(id))]);
         let dropped = vec![Name::new("read")];
-        let (saved, refused) = save(
+        let saved = save(
             &mut heap,
             Left {
                 document: &document,
@@ -271,8 +275,8 @@ fn saved_captures_use_names_when_free_variable_slots_are_reordered() {
             &BTreeSet::new(),
         )
         .expect("save");
-        assert!(refused.is_empty(), "{refused:?}");
-        let captures = &saved[&Name::new("read")].function.captures;
+        assert!(saved.refused.is_empty(), "{:?}", saved.refused);
+        let captures = &saved.functions[&Name::new("read")].captures;
         frozen.push(
             captures
                 .iter()
@@ -284,7 +288,7 @@ fn saved_captures_use_names_when_free_variable_slots_are_reordered() {
 }
 /// A saved function `name` whose body calls each of `calls` by name, and
 /// whose forwarded private bodies `owners` declare.
-fn calling(name: &str, calls: &[&str], owners: &[&str]) -> SavedFunction {
+pub(super) fn calling(name: &str, calls: &[&str], owners: &[&str]) -> SavedFunction {
     let mut document = Document::new(lash_kernel_doc::NumberPolicy::Float, Vec::new());
     document.functions.insert(
         Name::new(name),
@@ -315,6 +319,8 @@ fn calling(name: &str, calls: &[&str], owners: &[&str]) -> SavedFunction {
         references: BTreeSet::new(),
         written: None,
         token: None,
+        held: None,
+        against: BTreeMap::new(),
     }
 }
 /// The body a bundle stages, and the documents it staged by reference.
@@ -489,7 +495,7 @@ fn a_function_reaching_a_control_through_a_body_is_not_saved() {
     let bindings = BTreeMap::from([(Name::new("stop"), PageValue::Closure(made))]);
     let dropped = vec![Name::new("stop")];
     let finish = EffectName::new("control.finish").expect("an effect name");
-    let (saved, refused) = save(
+    let saved = save(
         &mut heap,
         Left {
             document: &document,
@@ -510,9 +516,9 @@ fn a_function_reaching_a_control_through_a_body_is_not_saved() {
         &BTreeSet::new(),
     )
     .expect("save");
-    assert!(saved.is_empty());
+    assert!(saved.functions.is_empty());
     assert_eq!(
-        refused[&Name::new("stop")],
+        saved.refused[&Name::new("stop")],
         NotSaved::PerformsControl { effect: finish }
     );
 }
@@ -571,6 +577,279 @@ fn installing_refuses_a_second_requirement_of_one_effect() {
             effect: fetch.clone(),
             held: Box::new(interim.clone()),
             saved: Box::new(declared.clone()),
+        }
+    );
+}
+
+/// The closure `return step` made at `main`'s first statement, capturing
+/// `step` from `variable`, and the document that makes it.
+fn reading_step(heap: &mut PagedHeap, variable: EntityId) -> (Document, EntityId) {
+    let closure = lash_kernel_doc::Closure {
+        params: Vec::new(),
+        body: vec![Stmt::Return {
+            value: Expr::Variable(Name::new("step")),
+        }],
+        start: None,
+    };
+    let document = Document::new(
+        lash_kernel_doc::NumberPolicy::Float,
+        vec![Stmt::Let {
+            name: Name::new("g"),
+            value: Rhs::Expr(Expr::Closure(Box::new(closure))),
+        }],
+    );
+    let site = Site {
+        unit: Unit::Main,
+        path: vec![0, 0],
+    };
+    let made = heap
+        .allocate_object(ObjectInit::Closure {
+            site: SiteRef::new(&site, heap.pages()).unwrap(),
+            captures: vec![(
+                NameRef::new(&Name::new("step"), heap.pages()).unwrap(),
+                variable,
+            )],
+        })
+        .expect("closure");
+    (document, made)
+}
+
+/// `bindings`, every one dropped, saved on `document` with `held` already
+/// saved and `controls` ending the turn.
+fn save_all(
+    heap: &mut PagedHeap,
+    document: &Document,
+    bindings: &BTreeMap<Name, PageValue>,
+    held: &BTreeSet<Name>,
+    controls: &BTreeMap<EffectName, BTreeSet<crate::EffectControl>>,
+    catalog: &dyn FunctionCatalog,
+) -> Saved {
+    let dropped: Vec<Name> = bindings.keys().cloned().collect();
+    save(
+        heap,
+        Left {
+            document,
+            bindings,
+            not_carried: &dropped,
+            controls,
+            written: &BTreeMap::new(),
+            values: &lash_kernel_doc::FunctionRepresentation::Bare,
+            closure: PageRef {
+                id: PageId([1; 32]),
+                grant: PageGrant::NONE,
+            },
+            catalog,
+        },
+        held,
+    )
+    .expect("save")
+}
+
+/// The function a slot of a saved binding refers to.
+fn referred(heap: &PagedHeap, value: Option<PageValue>) -> String {
+    let Some(PageValue::Function(name)) = value else {
+        panic!("a reference to a saved function, not {value:?}")
+    };
+    lash_kernel_doc::snapshot::text_of(heap, &name).expect("a name")
+}
+
+/// SAVE-IN-DATA, SAVE-KEY and K-SES-002: a closure no binding holds as its
+/// own value, held in one record two bindings share, in a second record
+/// and in a list, is saved once, under the generated name after the
+/// highest one the session holds, found at the first binding's path. Every
+/// slot that held it holds a reference to it, the shared record stays one
+/// object, and its capture is frozen at the cell's end value.
+#[test]
+fn a_closure_carried_data_holds_is_saved_once_under_a_generated_name() {
+    let (mut heap, _) = fresh();
+    let step = heap
+        .allocate_object(ObjectInit::Variable(int(1)))
+        .expect("step");
+    let (document, made) = reading_step(&mut heap, step);
+    let field = heap.text("g").expect("text");
+    let shared = heap
+        .allocate_object(ObjectInit::Record(vec![(
+            field.clone(),
+            PageValue::Closure(made),
+        )]))
+        .expect("record");
+    let copied = heap
+        .allocate_object(ObjectInit::Record(vec![(field, PageValue::Closure(made))]))
+        .expect("record");
+    let listed = heap
+        .allocate_object(ObjectInit::List(vec![PageValue::Closure(made)]))
+        .expect("list");
+    heap.variable_write(step, int(2))
+        .expect("the cell's last write");
+    let bindings = BTreeMap::from([
+        (Name::new("a"), PageValue::Record(shared)),
+        (Name::new("b"), PageValue::Record(shared)),
+        (Name::new("c"), PageValue::Record(copied)),
+        (Name::new("listed"), PageValue::List(listed)),
+    ]);
+    let saved = save_all(
+        &mut heap,
+        &document,
+        &bindings,
+        &BTreeSet::from([Name::new("f"), Name::saved(3)]),
+        &BTreeMap::new(),
+        &lash_kernel_doc::FunctionRegistry::new(),
+    );
+    assert!(saved.refused.is_empty(), "{:?}", saved.refused);
+    let generated = Name::saved(4);
+    assert_eq!(saved.functions.keys().collect::<Vec<_>>(), [&generated]);
+    let function = &saved.functions[&generated];
+    assert_eq!(
+        function.held,
+        Some(HeldAt {
+            binding: Name::new("a"),
+            path: "a.g".to_owned(),
+        })
+    );
+    let record = |name: &str| {
+        let PageValue::Record(record) = saved.bindings[&Name::new(name)] else {
+            panic!("a record")
+        };
+        record
+    };
+    assert_eq!(record("a"), record("b"));
+    assert_ne!(record("a"), record("c"));
+    for name in ["a", "c"] {
+        let record = record(name);
+        let slot = heap
+            .record_get(record, lash_kernel_doc::heap::FieldName::Static("g"))
+            .expect("the field");
+        assert_eq!(referred(&heap, slot), generated.as_str());
+    }
+    let PageValue::List(list) = saved.bindings[&Name::new("listed")] else {
+        panic!("a list")
+    };
+    assert_eq!(
+        referred(&heap, heap.list_get(list, 0).expect("the item")),
+        generated.as_str()
+    );
+    heap.variable_write(step, int(3)).expect("a later write");
+    let captures = function.captures_for_call(&mut heap).expect("captures");
+    assert!(
+        matches!(&captures[&Name::new("step")], PageValue::Int(IntRef::Inline(n)) if *n == 2.into()),
+        "{captures:?}"
+    );
+}
+
+/// SAVE-CONTROL in carried data: a record holding a closure that performs
+/// a control is not carried, for that closure's reason, and saves nothing.
+#[test]
+fn data_holding_a_function_that_performs_a_control_is_not_carried() {
+    let finish = EffectName::new("control.finish").expect("an effect name");
+    let closure = lash_kernel_doc::Closure {
+        params: Vec::new(),
+        body: vec![
+            Stmt::Let {
+                name: Name::new("x"),
+                value: Rhs::Action(Action::Perform {
+                    effect: finish.clone(),
+                    args: Vec::new(),
+                    result: lash_kernel_doc::Type::Any,
+                    then_yield: false,
+                }),
+            },
+            Stmt::Return {
+                value: Expr::Variable(Name::new("x")),
+            },
+        ],
+        start: None,
+    };
+    let mut document = Document::new(
+        lash_kernel_doc::NumberPolicy::Float,
+        vec![Stmt::Let {
+            name: Name::new("stop"),
+            value: Rhs::Expr(Expr::Closure(Box::new(closure))),
+        }],
+    );
+    document.manifest.effects.insert(
+        finish.clone(),
+        OperationRequirement::new(
+            lash_kernel_doc::Signature {
+                params: Vec::new(),
+                result: lash_kernel_doc::Type::Any,
+            },
+            lash_kernel_doc::ContractId::new("1"),
+        ),
+    );
+    let (mut heap, _) = fresh();
+    let site = Site {
+        unit: Unit::Main,
+        path: vec![0, 0],
+    };
+    let made = heap
+        .allocate_object(ObjectInit::Closure {
+            site: SiteRef::new(&site, heap.pages()).unwrap(),
+            captures: Vec::new(),
+        })
+        .expect("closure");
+    let field = heap.text("stop").expect("text");
+    let plan = heap
+        .allocate_object(ObjectInit::Record(vec![(field, PageValue::Closure(made))]))
+        .expect("record");
+    let saved = save_all(
+        &mut heap,
+        &document,
+        &BTreeMap::from([(Name::new("plan"), PageValue::Record(plan))]),
+        &BTreeSet::new(),
+        &BTreeMap::from([(
+            finish.clone(),
+            BTreeSet::from([crate::EffectControl::Finish]),
+        )]),
+        &lash_kernel_doc::FunctionRegistry::new(),
+    );
+    assert!(saved.functions.is_empty());
+    assert_eq!(
+        saved.refused[&Name::new("plan")],
+        NotSaved::PerformsControl { effect: finish }
+    );
+}
+
+/// SAVE-KEY at install: a function saved under a generated name never
+/// meets a function the next cell's document declares, though it declares
+/// one named like the binding that held it; a function saved under a
+/// binding's name still does.
+#[test]
+fn a_generated_name_never_meets_a_declared_function() {
+    let mut generated = calling("saved#0", &[], &[]);
+    generated.held = Some(HeldAt {
+        binding: Name::new("plan"),
+        path: "plan.map".to_owned(),
+    });
+    let functions = BTreeMap::from([
+        (generated.name.clone(), generated),
+        (Name::new("f"), calling("f", &[], &[])),
+    ]);
+    let declaring = || {
+        let mut document = calling("plan", &[], &[]).document;
+        document
+            .functions
+            .extend(calling("f", &[], &[]).document.functions);
+        document
+    };
+    let install_into = |document: &mut Document, roots: &[&str]| {
+        install(
+            document,
+            &functions,
+            &roots.iter().map(|root| Name::new(*root)).collect(),
+            &lash_kernel_doc::FunctionRepresentation::Bare,
+            &crate::Namespaces::default(),
+            &crate::NamedLibrary::new(),
+        )
+    };
+    let mut document = declaring();
+    let installed = install_into(&mut document, &[]).expect("installed");
+    assert_eq!(installed.keys().collect::<Vec<_>>(), [&Name::saved(0)]);
+    assert!(document.functions.contains_key(&Name::new("plan")));
+    assert!(document.functions.contains_key(&Name::saved(0)));
+    assert_eq!(
+        install_into(&mut declaring(), &["f"]).expect_err("declared"),
+        Unusable::Declared {
+            function: Name::new("f"),
         }
     );
 }

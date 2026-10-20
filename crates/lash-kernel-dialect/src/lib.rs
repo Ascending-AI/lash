@@ -62,14 +62,14 @@ pub use namespaces::{
 pub use notes::{Note, SiteLayers, SiteLayersRefusal, site_layers};
 pub use saved::{
     Bundle, BundleBody, BundleRefusal, CaptureRefusal, DOCUMENT_NODE_KIND,
-    FUNCTION_BUNDLE_NODE_KIND, Kept, Left, NotSaved, RelinkGap, Unusable, closure_of, install,
+    FUNCTION_BUNDLE_NODE_KIND, Left, NotSaved, RelinkGap, Saved, Unusable, closure_of, install,
     relink_saved,
 };
 /// A saved function as the kernel holds it: its captures and token are
 /// frozen heap values, which only the kernel crates read (FIG-6688). A
 /// host carries one between the dialect and the machine, never into it.
 #[doc(hidden)]
-pub use saved::{InstalledFunction, MemberBody, SavedFunction, Token};
+pub use saved::{HeldAt, InstalledFunction, MemberBody, SavedFunction, Token};
 pub use source::{SourceError, define_functions, define_functions_with};
 pub use spelling::{SpellKind, Spelling};
 pub use written::{CallParam, CallShape, Written, closure_site, function_captions, written_table};
@@ -88,21 +88,5 @@ pub mod source_types;
 /// `crates/lash-kernel-*` names this module (scripts/check-kernel-boundary.py).
 #[doc(hidden)]
 pub mod kernel_internals {
-    use lash_kernel_doc::heap::PageValue;
-    use lash_kernel_state::kernel_internals::PagedHeap;
-    use lash_kernel_state::paged::HeapWriteError;
-
     pub use crate::saved::save;
-
-    /// The value every binding that held `function` is bound to.
-    ///
-    /// # Errors
-    ///
-    /// The heap's refusals.
-    pub fn saved_value(
-        function: &crate::SavedFunction,
-        heap: &mut PagedHeap,
-    ) -> Result<PageValue, HeapWriteError> {
-        function.value(heap)
-    }
 }

@@ -417,6 +417,8 @@ mod tests {
             references: Default::default(),
             written: None,
             token: None,
+            held: None,
+            against: Default::default(),
         };
         let wire =
             rmp_serde::to_vec_named(&lower([(name.clone(), function)].into())).expect("request");

@@ -148,7 +148,7 @@ impl lash_kernel_vm::CellSave for Saving {
         saving: &mut lash_kernel_vm::CellSaveContext<'_>,
         cell: lash_kernel_vm::SaveCell<'_>,
     ) -> Result<lash_kernel_vm::SavedCell, lash_kernel_doc::heap::HeapFault> {
-        let (kept, refused) = saving.save(
+        let saved = saving.save(
             lash_kernel_dialect::Left {
                 document: cell.document,
                 bindings: cell.bindings,
@@ -161,10 +161,8 @@ impl lash_kernel_vm::CellSave for Saving {
             },
             cell.held,
         )?;
-        assert!(refused.is_empty(), "{refused:?}");
-        self.saved
-            .borrow_mut()
-            .extend(kept.into_iter().map(|(name, kept)| (name, kept.function)));
+        assert!(saved.refused.is_empty(), "{:?}", saved.refused);
+        self.saved.borrow_mut().extend(saved.functions);
         Ok(lash_kernel_vm::SavedCell::default())
     }
 }

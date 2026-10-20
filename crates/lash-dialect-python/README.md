@@ -62,8 +62,9 @@ A source is a cell of a session: the names its top level binds are session
 bindings, which the next cell sees, and a cell may `await` at its top
 level. In a code mode session, a top-level `def` or lambda is saved as a
 self-contained function when the cell succeeds. Captures are frozen then;
-later cells copy the definition into their own documents. Captures must be
-data or other saved functions; a task capture prevents saving. Saved functions
+later cells copy the definition into their own documents. A function held
+inside carried data, such as a lambda in a dict, is saved the same way, and
+a capture holding one refers to it; a task capture prevents saving. Saved functions
 can seed a new session explicitly, and `await processes.start({"definition":
 work, "args": {"n": 21}})` starts one as a durable process when the host offers
 the process tools. `await control.finish(value)`, awaited at the top level, answers the turn: it is a

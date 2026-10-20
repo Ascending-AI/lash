@@ -20,10 +20,10 @@ use lash_kernel_doc::graph_tokens::{
     encode_body,
 };
 use lash_kernel_doc::heap::PageRef;
-use lash_kernel_doc::{Document, EffectName, Name, OperationRequirement};
+use lash_kernel_doc::{Document, EffectName, FunctionId, Name, OperationRequirement, Signature};
 use lash_kernel_state::paged::FrozenRef;
 
-use super::{CaptureRefusal, NotSaved, SavedFunction, Token};
+use super::{CaptureRefusal, HeldAt, NotSaved, SavedFunction, Token};
 use crate::Written;
 
 /// The registry number of a Document node (`checkpoint_graph::NodeKind::DOCUMENT`).
@@ -144,10 +144,12 @@ impl Bundle {
                 document,
                 captures: function.captures.clone(),
                 closure: function.closure,
-                references: function.references.clone(),
                 helper_owners: function.helper_owners.clone(),
+                references: function.references.clone(),
                 written: function.written.clone(),
                 token: function.token.clone(),
+                held: function.held.clone(),
+                against: function.against.clone(),
             });
         }
         let body = BundleBody {
@@ -175,10 +177,12 @@ impl Bundle {
                 document: document(member.document)?,
                 captures: member.captures,
                 closure: member.closure,
-                references: member.references,
                 helper_owners: member.helper_owners,
+                references: member.references,
                 written: member.written,
                 token: member.token,
+                held: member.held,
+                against: member.against,
             };
             if function.definition().is_none() {
                 return Err(BundleRefusal::Undeclared {
@@ -216,6 +220,8 @@ pub struct MemberBody {
     pub helper_owners: BTreeSet<Name>,
     pub written: Option<Written>,
     pub token: Option<Token>,
+    pub held: Option<HeldAt>,
+    pub against: BTreeMap<FunctionId, Signature>,
 }
 
 impl TokenCodec for BundleBody {
@@ -254,7 +260,7 @@ impl TokenCodec for BundleBody {
 
 impl TokenCodec for MemberBody {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(8);
+        out.seq(10);
         self.name.encode(out);
         self.document.encode(out);
         self.captures.encode(out);
@@ -263,10 +269,12 @@ impl TokenCodec for MemberBody {
         self.helper_owners.encode(out);
         self.written.encode(out);
         self.token.encode(out);
+        self.held.encode(out);
+        self.against.encode(out);
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(8)?;
+        input.expect_struct(10)?;
         Ok(Self {
             name: Name::decode(input)?,
             document: ChildRef::decode(input)?,
@@ -276,6 +284,24 @@ impl TokenCodec for MemberBody {
             helper_owners: BTreeSet::decode(input)?,
             written: Option::decode(input)?,
             token: Option::decode(input)?,
+            held: Option::decode(input)?,
+            against: BTreeMap::decode(input)?,
+        })
+    }
+}
+
+impl TokenCodec for HeldAt {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.seq(2);
+        self.binding.encode(out);
+        out.text(&self.path);
+    }
+
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input.expect_struct(2)?;
+        Ok(Self {
+            binding: Name::decode(input)?,
+            path: String::decode(input)?,
         })
     }
 }
@@ -298,20 +324,20 @@ impl TokenCodec for Token {
     }
 }
 
-/// Explicit codec variant numbers, the zero-based declaration order at
-/// revision `9503e220ed` (FIG-5887 §2).
+/// Explicit codec variant numbers, the zero-based declaration order
+/// (FIG-5887 §2).
 #[doc(hidden)]
 impl CodecVariant for NotSaved {
     fn codec_variant(&self) -> u32 {
         match self {
             Self::Task => 0,
-            Self::FunctionInData => 1,
-            Self::MadeByLibrary => 2,
-            Self::Capture { .. } => 3,
-            Self::Needs { .. } => 4,
-            Self::Token => 5,
-            Self::PerformsControl { .. } => 6,
-            Self::Dialect => 7,
+            Self::MadeByLibrary => 1,
+            Self::Capture { .. } => 2,
+            Self::Needs { .. } => 3,
+            Self::Token => 4,
+            Self::PerformsControl { .. } => 5,
+            Self::Dialect => 6,
+            Self::Keyed => 7,
             Self::NotMigrated { .. } => 8,
             Self::Unreadable { .. } => 9,
         }
@@ -322,11 +348,9 @@ impl TokenCodec for NotSaved {
     fn encode(&self, out: &mut TokenWriter) {
         let variant = self.codec_variant();
         match self {
-            Self::Task
-            | Self::FunctionInData
-            | Self::MadeByLibrary
-            | Self::Token
-            | Self::Dialect => out.sum(variant, 0),
+            Self::Task | Self::MadeByLibrary | Self::Token | Self::Dialect | Self::Keyed => {
+                out.sum(variant, 0);
+            }
             Self::Capture { name, why } => {
                 out.sum(variant, 2);
                 name.encode(out);
@@ -357,29 +381,29 @@ impl TokenCodec for NotSaved {
         let arity = |expected| TokenReader::expect_fields(fields, expected);
         Ok(match variant {
             0 => arity(0).map(|()| Self::Task)?,
-            1 => arity(0).map(|()| Self::FunctionInData)?,
-            2 => arity(0).map(|()| Self::MadeByLibrary)?,
-            3 => {
+            1 => arity(0).map(|()| Self::MadeByLibrary)?,
+            2 => {
                 arity(2)?;
                 Self::Capture {
                     name: Name::decode(input)?,
                     why: CaptureRefusal::decode(input)?,
                 }
             }
-            4 => {
+            3 => {
                 arity(1)?;
                 Self::Needs {
                     function: Name::decode(input)?,
                 }
             }
-            5 => arity(0).map(|()| Self::Token)?,
-            6 => {
+            4 => arity(0).map(|()| Self::Token)?,
+            5 => {
                 arity(1)?;
                 Self::PerformsControl {
                     effect: EffectName::decode(input)?,
                 }
             }
-            7 => arity(0).map(|()| Self::Dialect)?,
+            6 => arity(0).map(|()| Self::Dialect)?,
+            7 => arity(0).map(|()| Self::Keyed)?,
             8 => {
                 arity(2)?;
                 Self::NotMigrated {

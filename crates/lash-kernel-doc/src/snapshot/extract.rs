@@ -2,9 +2,10 @@
 //!
 //! The root is a closure, a token holding one, or a reference to a declared
 //! function. Extraction gathers the root's code with its helpers
-//! ([`super::gather`]), then every declared function that code reaches, to
-//! a fixed point, each with the captures it reads frozen as constants ahead
-//! of its body. The entry calls the root as its [`StartAdapter`] says; a
+//! ([`super::gather`]), and the code of every closure its captures hold in
+//! data, each a function of its own ([`super::reach`]); then every declared
+//! function that code reaches, to a fixed point, each with the captures it
+//! reads frozen as constants ahead of its body. The entry calls the root as its [`StartAdapter`] says; a
 //! declared entry is its own entry. Names are then made canonical
 //! ([`super::canon`]), and the value is checked and bounded.
 
@@ -22,6 +23,7 @@ use super::collect::{
     SnapshotError, SnapshotHeap, SnapshotRefusal, closure_at, gather, members, text_is, text_of,
     unreadable,
 };
+use super::reach::reach;
 use super::reads::CodeReads;
 
 /// What a crossing reads besides the heap: the running document, the
@@ -180,29 +182,45 @@ pub fn extract<H: SnapshotHeap<Frozen = Expr>>(
                 .clone()
                 .ok_or(SnapshotRefusal::NoStartSignature)?;
             let root_name = fresh("root");
-            named = BTreeMap::from([(*id, root_name.clone())]);
-            let gathered = gather(
+            let mut names = BTreeMap::from([(*id, root_name.clone())]);
+            // Each closure the root's captures hold in data is a function of
+            // its own, which the data refers to by name; one a capture holds
+            // whole is a helper of the function that reads it.
+            let held = reach(
                 heap,
                 document,
                 crossing.tag,
-                *id,
-                &named,
-                &BTreeMap::new(),
-                &|_| false,
+                vec![(String::new(), PageValue::Closure(*id))],
+                &names,
             )?;
-            pending.extend(gathered.references.iter().cloned());
-            origins.insert(
-                root_name.clone(),
-                (
-                    site.child(0),
-                    gathered.captures.len() + gathered.function.body.len()
-                        - gathered.root.body.len(),
-                ),
-            );
-            units.insert(
-                root_name.clone(),
-                with_prelude(gathered.function, gathered.captures),
-            );
+            for (at, found) in held.iter().enumerate() {
+                names.insert(found.closure, fresh(&format!("closure_{at}")));
+            }
+            named = names;
+            for (closure, name) in &named {
+                let gathered = gather(
+                    heap,
+                    document,
+                    crossing.tag,
+                    *closure,
+                    &named,
+                    &BTreeMap::new(),
+                    &|_| false,
+                )?;
+                pending.extend(gathered.references.iter().cloned());
+                origins.insert(
+                    name.clone(),
+                    (
+                        gathered.site.child(0),
+                        gathered.captures.len() + gathered.function.body.len()
+                            - gathered.root.body.len(),
+                    ),
+                );
+                units.insert(
+                    name.clone(),
+                    with_prelude(gathered.function, gathered.captures),
+                );
+            }
             let wrapper = fresh("run");
             units.insert(wrapper.clone(), entry_wrapper(&start, &root_name));
             (

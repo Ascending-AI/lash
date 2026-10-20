@@ -97,8 +97,9 @@ pub struct SaveCell<'a> {
 pub struct SavedCell {
     /// Each saved function's record, by its declared name.
     pub functions: Vec<(Name, FunctionRecord)>,
-    /// Each binding that held a saved function, bound to the function's
-    /// value now: data, which carries.
+    /// Each binding that reached a saved function, bound to its value
+    /// with every closure in it a reference to its saved function: data,
+    /// which carries.
     pub rebound: Vec<(Name, PageValue)>,
     /// Each dropped binding not saved, with why.
     pub refused: Vec<(Name, String)>,

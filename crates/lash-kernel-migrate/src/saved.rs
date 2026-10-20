@@ -27,15 +27,33 @@ pub fn saved_function(
     functions: &dyn FunctionCatalog,
 ) -> Result<SavedFunction, DocumentRefusal> {
     let document = rooted(migration, &function.document, &function.name, functions)?;
+    // A library function the rewrite renamed is held against the next
+    // version's signature of it.
+    let against = document
+        .document
+        .manifest
+        .functions
+        .keys()
+        .filter_map(|id| {
+            let signature = function
+                .against
+                .get(id)
+                .cloned()
+                .or_else(|| functions.header(id).map(|header| header.signature.clone()))?;
+            Some((*id, signature))
+        })
+        .collect();
     Ok(SavedFunction {
         name: function.name.clone(),
         document: document.document,
         captures: function.captures.clone(),
         closure: function.closure,
-        references: function.references.clone(),
         helper_owners: function.helper_owners.clone(),
+        references: function.references.clone(),
         written: function.written.clone(),
         token: function.token.clone(),
+        held: function.held.clone(),
+        against,
     })
 }
 

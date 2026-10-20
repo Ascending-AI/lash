@@ -12,11 +12,20 @@
 //! `{"$lash_function": <FunctionValue>}` in canonical JSON, and a record key
 //! a guest wrote in that reserved prefix is escaped
 //! ([`lash_kernel_doc::escape_function_key`]): this encoder alone mints the
-//! tag.
+//! tag. A package value, a record holding `__lash_brand`, is written as
+//! its own fields, without its brand and `__lash_built`.
 //!
 //! [`Float::json_number`]: lash_kernel_doc::Float::json_number
 
 use lash_kernel_doc::{Datum, KernelDataLimits, NumberToken};
+
+/// The field a package value holds its brand in
+/// (`lash_kernel_dialect::BRAND_FIELD`).
+const BRAND_FIELD: &str = "__lash_brand";
+
+/// A package value's provenance fields: its brand, and what built it
+/// (`lash_kernel_dialect::BUILT_FIELD`).
+const PROVENANCE: [&str; 2] = [BRAND_FIELD, "__lash_built"];
 
 /// A value JSON cannot carry.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -109,8 +118,15 @@ fn write(
             out.push(']');
         }
         Datum::Record(fields) => {
+            // A package value crosses as its own fields: its brand and
+            // what built it are provenance, which no runner reads, whatever
+            // their encoding.
+            let branded = fields.iter().any(|(key, _)| key.as_str() == BRAND_FIELD);
             write_object(
-                fields.iter().map(|(key, value)| (key.as_str(), value)),
+                fields
+                    .iter()
+                    .filter(|(key, _)| !branded || !PROVENANCE.contains(&key.as_str()))
+                    .map(|(key, value)| (key.as_str(), value)),
                 depth,
                 out,
                 limit,
@@ -432,6 +448,35 @@ mod tests {
                 ),
                 (" c".into(), Datum::Text("x\u{e9}\n".into())),
             ])
+        );
+    }
+
+    /// A package value crosses as its own fields: its brand and what built
+    /// it, provenance no runner reads, are left out whatever their kinds,
+    /// and a record without a brand keeps a field of that name.
+    #[test]
+    fn a_package_value_leaves_as_its_own_fields() {
+        let built = Datum::Bytes(lash_kernel_doc::Bytes::new(vec![7u8; 32]));
+        let value = Datum::Record(vec![
+            (
+                "__lash_brand".into(),
+                Datum::Tuple(vec![
+                    Datum::Text("dataframe".into()),
+                    Datum::Text("expr".into()),
+                ]),
+            ),
+            ("__lash_built".into(), built.clone()),
+            ("column".into(), Datum::Text("n".into())),
+        ]);
+        assert_eq!(
+            datum_to_json(&Datum::List(vec![value])).expect("JSON"),
+            r#"[{"column":"n"}]"#
+        );
+        assert_eq!(
+            datum_to_json(&Datum::Record(vec![("__lash_built".into(), built)])),
+            Err(NotJson::Kind {
+                kind: JsonlessKind::Bytes
+            })
         );
     }
 

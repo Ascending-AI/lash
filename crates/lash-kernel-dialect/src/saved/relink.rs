@@ -40,13 +40,19 @@ pub enum RelinkGap {
 /// holds takes the set's identity of its name, its document lists that
 /// set's closure of them, and each operation a package of the set owns
 /// takes the set's requirement. A changed contract under an unchanged
-/// signature is taken. The record's closure is the caller's to derive.
+/// signature is taken. A callee whose identity changes keeps the signature
+/// the function was saved or last relinked against
+/// ([`SavedFunction::against`]) or refuses it, whether or not the node
+/// still holds the old callee. The record's closure is the caller's to
+/// derive.
 ///
 /// # Errors
 ///
 /// [`Unusable::Relink`] naming the function and the first callee the set
 /// does not serve; [`Unusable::EffectRequirement`] when the relinked code
-/// requires one operation two ways.
+/// requires one operation two ways. A function saved under a generated
+/// name is named by the path a binding held it at
+/// ([`SavedFunction::label`]).
 pub fn relink_saved(
     function: &SavedFunction,
     library: &dyn Library,
@@ -54,13 +60,14 @@ pub fn relink_saved(
 ) -> Result<SavedFunction, Unusable> {
     let catalog: &dyn FunctionCatalog = library;
     let refuse = |callee: &str, gap: RelinkGap| Unusable::Relink {
-        function: function.name.clone(),
+        function: function.label(),
         callee: callee.to_owned(),
         gap,
     };
     let listed = &function.document.manifest.functions;
     let mut resolved: BTreeMap<FunctionId, FunctionId> = BTreeMap::new();
     let mut relinked = function.clone();
+    let mut against = BTreeMap::new();
     relinked.document.try_each_function_mut(|_, identity| {
         if let Some(replacement) = resolved.get(identity) {
             *identity = *replacement;
@@ -72,15 +79,20 @@ pub fn relink_saved(
         let replacement = library
             .resolve(name.as_str())
             .ok_or_else(|| refuse(name.as_str(), RelinkGap::Removed))?;
-        if let (Some(was), Some(now)) = (catalog.header(identity), catalog.header(&replacement))
-            && was.signature != now.signature
-        {
+        // A signature that cannot be read is no signature that serves.
+        let now = catalog
+            .header(&replacement)
+            .map(|header| header.signature.clone())
+            .ok_or_else(|| refuse(name.as_str(), RelinkGap::Signature))?;
+        if function.against.get(identity) != Some(&now) {
             return Err(refuse(name.as_str(), RelinkGap::Signature));
         }
+        against.insert(replacement, now);
         resolved.insert(*identity, replacement);
         *identity = replacement;
         Ok(())
     })?;
+    relinked.against = against;
     let direct: Vec<FunctionId> = resolved.values().copied().collect();
     relinked.document.manifest.functions = reachable(&direct, catalog);
     // What its own code performs: an operation a package of the set owns
@@ -117,7 +129,7 @@ pub fn relink_saved(
                 .or_insert_with(|| requirement.clone());
             if held != requirement {
                 return Err(Unusable::EffectRequirement {
-                    function: function.name.clone(),
+                    function: function.label(),
                     effect,
                     held: Box::new(held.clone()),
                     saved: Box::new(requirement.clone()),

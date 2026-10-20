@@ -2,28 +2,30 @@
 //!
 //! A saved function is cut out of the cell's heap by the root-based
 //! snapshot every crossing function is cut by
-//! ([`lash_kernel_doc::snapshot`]): this module selects the bindings that
-//! qualify and freezes their captures as pages.
+//! ([`lash_kernel_doc::snapshot`]): this module saves every closure a
+//! carried binding reaches ([`save`]) and freezes its captures as pages.
 use crate::Written;
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::snapshot::{
-    CodeReads, FrozenToken, SnapshotError, SnapshotHeap, SnapshotRefusal, closure_held,
-    freeze_token, gather, members, text_is, text_of, token_closure,
+    CodeReads, FrozenToken, SnapshotError, SnapshotHeap, SnapshotRefusal, gather, members, text_is,
+    text_of,
 };
 use lash_kernel_doc::{
-    Action, Callee, Document, EffectName, Expr, Function, FunctionCatalog, FunctionRepresentation,
-    Name, OperationRequirement, Rhs, Site, Stmt, Unit,
+    Document, EffectName, Expr, Function, FunctionCatalog, FunctionId, FunctionRepresentation,
+    Name, OperationRequirement, Signature, Site, Unit,
 };
 use lash_kernel_state::kernel_internals::PagedHeap;
-use lash_kernel_state::paged::{FrozenRef, HeapLifecycle, HeapWriteError, SemanticHeap};
+use lash_kernel_state::paged::{FrozenRef, HeapWriteError, SemanticHeap};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
+mod carry;
 mod graph;
 #[cfg(test)]
 mod laws;
 mod relink;
 #[cfg(test)]
 mod relink_laws;
+pub use carry::{Saved, save};
 pub use graph::{
     Bundle, BundleBody, BundleRefusal, DOCUMENT_NODE_KIND, FUNCTION_BUNDLE_NODE_KIND, MemberBody,
 };
@@ -41,6 +43,30 @@ pub struct SavedFunction {
     pub references: BTreeSet<Name>,
     pub written: Option<Written>,
     pub token: Option<Token>,
+    /// Where a carried binding held it, when no binding held it as its own
+    /// value and it is saved under a generated name ([`Name::saved`]).
+    pub held: Option<HeldAt>,
+    /// The signature of each library function its code holds, as the
+    /// set it was saved or last relinked on declared it: a relink takes a
+    /// callee's new identity only under the same signature
+    /// (RELINK-CLOSURE).
+    pub against: BTreeMap<FunctionId, Signature>,
+}
+/// Where the save walk first found a saved function that no binding holds
+/// as its own value: the binding, and the path to it from the binding's
+/// value (`plan.map`), which names it wherever the function is refused.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HeldAt {
+    pub binding: Name,
+    /// The path from the binding's name, which it starts with.
+    pub path: String,
+}
+impl HeldAt {
+    /// What a refusal calls the function.
+    #[must_use]
+    pub fn label(&self) -> Name {
+        Name::new(self.path.clone())
+    }
 }
 /// The members of the token a saved function is held in, around its
 /// callable, frozen.
@@ -59,11 +85,6 @@ impl Token {
         }
     }
 }
-#[derive(Clone, Debug)]
-pub struct Kept {
-    pub function: SavedFunction,
-    pub aliases: BTreeSet<Name>,
-}
 /// Why a binding that holds a function was not saved.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -72,11 +93,6 @@ pub enum NotSaved {
     /// handle.
     #[error("it holds a task or a pending promise, which ends with its cell")]
     Task,
-    /// The binding is data that holds a function somewhere inside it.
-    #[error(
-        "it holds a function inside other data; only a function bound to a name of its own is kept"
-    )]
-    FunctionInData,
     /// The function was made inside a library function's body.
     #[error("its function was made by a library function, whose code is not the cell's")]
     MadeByLibrary,
@@ -99,6 +115,13 @@ pub enum NotSaved {
     /// The session's dialect declares no saved function in a later cell.
     #[error("it holds a function, and this session's dialect keeps none between cells")]
     Dialect,
+    /// The binding holds a function where no reference to a saved
+    /// function can stand for it: as a map key or a set member, behind a
+    /// ref, or in an error's data.
+    #[error(
+        "it holds a function as a key, behind a ref or in an error, where no saved function can stand for it"
+    )]
+    Keyed,
     /// The function was saved under an earlier kernel version, whose
     /// migration does not carry it to this one.
     #[error(
@@ -366,7 +389,16 @@ fn save_closure(
             }
         }
     }
+    let mut against = BTreeMap::new();
     for function in &library {
+        against.insert(
+            *function,
+            left.catalog
+                .header(function)
+                .ok_or_else(|| unreadable("its library function is not held"))?
+                .signature
+                .clone(),
+        );
         document.manifest.functions.insert(
             *function,
             left.document
@@ -403,6 +435,8 @@ fn save_closure(
                 written
             }),
         token: None,
+        held: None,
+        against,
     })
 }
 /// Each start adapter `function` and the closures in its body carry.
@@ -425,179 +459,6 @@ fn each_start(function: &Function, visit: &mut dyn FnMut(&lash_kernel_doc::Start
     }
     walk(lash_kernel_doc::Node::Block(&function.body), visit);
 }
-/// The qualifying functions and the typed refusals of the other bindings.
-pub type SavedBindings = (BTreeMap<Name, Kept>, BTreeMap<Name, NotSaved>);
-
-/// Qualifies closures against semantic names and freezes their captures once.
-pub fn save(
-    heap: &mut PagedHeap,
-    left: Left<'_>,
-    held: &BTreeSet<Name>,
-) -> Result<SavedBindings, HeapFault> {
-    let mut named = BTreeMap::new();
-    for (name, value) in left.bindings {
-        if let Some(id) = closure_held(heap, value, left.values.tag())? {
-            named.entry(id).or_insert_with(|| name.clone());
-        }
-    }
-    let mut helper_owners: BTreeMap<EntityId, BTreeSet<Name>> = BTreeMap::new();
-    for (id, owner) in &named {
-        let mut saving = Saving {
-            heap: &mut *heap,
-            left: &left,
-        };
-        let site = saving.closure_site(*id)?;
-        let Some(closure) = lash_kernel_doc::snapshot::closure_at(left.document, &site) else {
-            continue;
-        };
-        let [
-            ..,
-            Stmt::Let {
-                name: result,
-                value:
-                    Rhs::Action(Action::Call {
-                        callee: Callee::Value(callee),
-                        ..
-                    }),
-            },
-            Stmt::Return {
-                value: Expr::Variable(returned),
-            },
-        ] = closure.body.as_slice()
-        else {
-            continue;
-        };
-        if result != returned {
-            continue;
-        }
-        let reads = CodeReads::of(&closure.params, &closure.body);
-        if !reads.effects.is_empty()
-            || !reads.declared.is_empty()
-            || reads.free.len() != 1
-            || !reads.free.contains(callee)
-        {
-            continue;
-        }
-        for free in &reads.free {
-            let value = match saving.closure_capture(*id, free)? {
-                Some(value) => Some(value),
-                None if site.unit == Unit::Main => saving.unit_binding(&Unit::Main, free)?,
-                None => None,
-            };
-            if let Some(value) = value
-                && let Some(helper) = closure_held(saving.heap, &value, left.values.tag())?
-                && !named.contains_key(&helper)
-            {
-                helper_owners
-                    .entry(helper)
-                    .or_default()
-                    .insert(owner.clone());
-            }
-        }
-    }
-    let mut saved = BTreeMap::new();
-    let mut refused = BTreeMap::new();
-    let mut aliases: BTreeMap<Name, BTreeSet<Name>> = BTreeMap::new();
-    for name in left.not_carried {
-        let Some(value) = left.bindings.get(name) else {
-            refused.insert(name.clone(), NotSaved::Task);
-            continue;
-        };
-        let Some(id) = closure_held(heap, value, left.values.tag())? else {
-            refused.insert(name.clone(), NotSaved::FunctionInData);
-            continue;
-        };
-        let known = named
-            .get(&id)
-            .ok_or_else(|| HeapFault::Malformed("named closure is missing".into()))?;
-        if name != known {
-            aliases
-                .entry(known.clone())
-                .or_default()
-                .insert(name.clone());
-            continue;
-        }
-        let result =
-            save_closure(heap, &left, name, id, &named, &helper_owners).and_then(|mut function| {
-                if let Some((_, at)) = token_closure(heap, value, left.values.tag())?
-                    && let PageValue::Tuple(t) = value
-                {
-                    let values = members(heap, t)?;
-                    let mut saving = Saving {
-                        heap: &mut *heap,
-                        left: &left,
-                    };
-                    function.token = Some(Token::frozen(freeze_token(
-                        &mut saving,
-                        &values,
-                        at,
-                        left.values.tag().unwrap_or_default(),
-                        &named,
-                    )?));
-                }
-                Ok(function)
-            });
-        match result {
-            Ok(function) => {
-                saved.insert(
-                    name.clone(),
-                    Kept {
-                        function,
-                        aliases: BTreeSet::new(),
-                    },
-                );
-            }
-            Err(SaveError::Refused(why)) => {
-                refused.insert(name.clone(), why);
-            }
-            Err(SaveError::Heap(e)) => return Err(e),
-        }
-    }
-    for (name, names) in aliases {
-        if let Some(kept) = saved.get_mut(&name) {
-            kept.aliases = names;
-        } else if let Some(why) = refused.get(&name).cloned() {
-            refused.extend(names.into_iter().map(|n| (n, why.clone())));
-        }
-    }
-    loop {
-        let mut missing = None;
-        for (name, kept) in &saved {
-            for needed in kept.function.needs() {
-                let still_held = held.contains(&needed)
-                    && left
-                        .bindings
-                        .get(&needed)
-                        .map(|v| function_reference(heap, v, left.values))
-                        .transpose()?
-                        .flatten()
-                        == Some(needed.clone());
-                if !saved.contains_key(&needed) && !still_held {
-                    missing = Some((name.clone(), needed));
-                    break;
-                }
-            }
-            if missing.is_some() {
-                break;
-            }
-        }
-        let Some((name, function)) = missing else {
-            break;
-        };
-        if let Some(kept) = saved.remove(&name) {
-            for alias in kept.aliases {
-                refused.insert(
-                    alias,
-                    NotSaved::Needs {
-                        function: function.clone(),
-                    },
-                );
-            }
-        }
-        refused.insert(name, NotSaved::Needs { function });
-    }
-    Ok((saved, refused))
-}
 impl SavedFunction {
     pub fn definition(&self) -> Option<&Function> {
         self.document.functions.get(&self.name)
@@ -614,20 +475,13 @@ impl SavedFunction {
         }
         names
     }
-    pub(crate) fn value(&self, heap: &mut PagedHeap) -> Result<PageValue, HeapWriteError> {
-        let function = PageValue::Function(heap.text(self.name.as_str())?);
-        let Some(token) = &self.token else {
-            return Ok(function);
-        };
-        let mut members = vec![PageValue::Text(heap.text(&token.tag)?)];
-        for frozen in &token.before {
-            members.push(heap.instantiate(frozen)?);
-        }
-        members.push(function);
-        for frozen in &token.after {
-            members.push(heap.instantiate(frozen)?);
-        }
-        Ok(PageValue::Tuple(heap.tuple(members)?))
+    /// What a refusal calls it: its name, or for one saved under a
+    /// generated name, the path a binding held it at.
+    #[must_use]
+    pub fn label(&self) -> Name {
+        self.held
+            .as_ref()
+            .map_or_else(|| self.name.clone(), HeldAt::label)
     }
     pub fn renamed(&self, name: &Name) -> Self {
         let mut value = self.clone();
@@ -643,6 +497,7 @@ impl SavedFunction {
         &self,
         heap: &mut PagedHeap,
     ) -> Result<BTreeMap<Name, PageValue>, HeapWriteError> {
+        use lash_kernel_state::paged::HeapLifecycle as _;
         self.captures
             .iter()
             .map(|(name, frozen)| Ok((name.clone(), heap.instantiate(frozen)?)))
@@ -683,6 +538,16 @@ pub struct InstalledFunction {
     pub captures: BTreeMap<Name, FrozenRef>,
     pub closure: PageRef,
 }
+/// Declares in `document` the saved functions `roots` name and every one
+/// they use, each with what it requires, refusing the first that does not
+/// install. A function saved under a generated name ([`Name::saved`]) is
+/// held only in carried data, which any cell may read, so each one is
+/// declared too, with every function it uses; one of those that does not
+/// install leaves it out, and a call through a reference to it raises.
+///
+/// # Errors
+///
+/// Why a function `roots` name, or one it uses, does not install here.
 pub fn install(
     document: &mut Document,
     functions: &BTreeMap<Name, SavedFunction>,
@@ -691,50 +556,117 @@ pub fn install(
     namespaces: &crate::Namespaces,
     library: &dyn crate::Library,
 ) -> Result<BTreeMap<Name, InstalledFunction>, Unusable> {
-    let mut declarations = BTreeMap::new();
     // One effect name is one requirement across the document and every
     // function installed into it (`ADM-REQUIREMENT`).
-    let mut required = document.manifest.effects.clone();
+    let required = document.manifest.effects.clone();
+    let mut installing = Installing {
+        document,
+        values,
+        namespaces,
+        library,
+        required,
+        declared: BTreeMap::new(),
+    };
     for (name, function) in closure_of(functions, roots)? {
+        installing.admit(name, function)?;
+    }
+    for root in functions.keys().filter(|name| name.saved_index().is_some()) {
+        if installing.declared.contains_key(root) {
+            continue;
+        }
+        let Ok(closure) = closure_of(functions, &BTreeSet::from([root.clone()])) else {
+            continue;
+        };
+        let mut attempt = installing.clone();
+        let admitted = closure
+            .into_iter()
+            .filter(|(name, _)| !installing.declared.contains_key(name))
+            .try_for_each(|(name, function)| attempt.admit(name, function));
+        if admitted.is_ok() {
+            installing = attempt;
+        }
+    }
+    let Installing {
+        required, declared, ..
+    } = installing;
+    if declared.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    for (name, (_, declaration)) in &declared {
+        document
+            .functions
+            .insert(name.clone(), declaration.code.clone());
+    }
+    document.manifest.effects = required;
+    for (function, _) in declared.values() {
+        document
+            .manifest
+            .functions
+            .extend(function.document.manifest.functions.clone());
+    }
+    Ok(declared
+        .into_iter()
+        .map(|(name, (_, declaration))| (name, declaration))
+        .collect())
+}
+
+/// The saved functions an [`install`] has admitted so far, and the
+/// requirements they and the document hold.
+#[derive(Clone)]
+struct Installing<'d, 'a> {
+    document: &'d Document,
+    values: &'a FunctionRepresentation,
+    namespaces: &'a crate::Namespaces,
+    library: &'a dyn crate::Library,
+    required: BTreeMap<EffectName, OperationRequirement>,
+    declared: BTreeMap<Name, (&'a SavedFunction, InstalledFunction)>,
+}
+
+impl<'a> Installing<'_, 'a> {
+    /// Admits `function`, declared under `name`, or answers why it does not
+    /// install in the document.
+    fn admit(&mut self, name: Name, function: &'a SavedFunction) -> Result<(), Unusable> {
+        let label = function.label();
         if function
             .token
             .as_ref()
-            .is_some_and(|t| values.tag() != Some(t.tag.as_str()))
+            .is_some_and(|t| self.values.tag() != Some(t.tag.as_str()))
         {
-            return Err(Unusable::Token { function: name });
+            return Err(Unusable::Token { function: label });
         }
-        if function.document.manifest.numbers != document.manifest.numbers {
-            return Err(Unusable::Numbers { function: name });
+        if function.document.manifest.numbers != self.document.manifest.numbers {
+            return Err(Unusable::Numbers { function: label });
         }
         for (effect, requirement) in &function.document.manifest.effects {
-            match namespaces.operation(effect) {
+            match self.namespaces.operation(effect) {
                 Some((_, offered)) if !offered.controls.is_empty() => {
                     return Err(Unusable::EffectControls {
-                        function: name,
+                        function: label,
                         effect: effect.clone(),
                     });
                 }
                 None => {
                     return Err(Unusable::EffectMissing {
-                        function: name,
+                        function: label,
                         effect: effect.clone(),
                     });
                 }
                 Some((_, offered)) if offered.requirement.signature != requirement.signature => {
                     return Err(Unusable::Relink {
-                        function: name,
+                        function: label,
                         callee: effect.to_string(),
                         gap: RelinkGap::Signature,
                     });
                 }
                 _ => (),
             }
-            let held = required
+            let held = self
+                .required
                 .entry(effect.clone())
                 .or_insert_with(|| requirement.clone());
             if held != requirement {
                 return Err(Unusable::EffectRequirement {
-                    function: name,
+                    function: label,
                     effect: effect.clone(),
                     held: Box::new(held.clone()),
                     saved: Box::new(requirement.clone()),
@@ -744,12 +676,12 @@ pub fn install(
         // Everything one cell runs comes from its one package set
         // (CURRENT-RELEASE): each function the saved one lists is the
         // set's of its name, as relinking at the cell's start left it.
-        for (function, listed) in &function.document.manifest.functions {
-            match library.resolve(listed.as_str()) {
-                Some(held) if held == *function => {}
+        for (listed_function, listed) in &function.document.manifest.functions {
+            match self.library.resolve(listed.as_str()) {
+                Some(held) if held == *listed_function => {}
                 held => {
                     return Err(Unusable::Relink {
-                        function: name,
+                        function: label,
                         callee: listed.to_string(),
                         gap: if held.is_some() {
                             RelinkGap::Unlinked
@@ -760,36 +692,27 @@ pub fn install(
                 }
             }
         }
-        if document.functions.contains_key(&name) {
-            return Err(Unusable::Declared { function: name });
+        if self.document.functions.contains_key(&name) {
+            return Err(Unusable::Declared { function: label });
         }
         let code = function
             .definition()
             .ok_or_else(|| Unusable::Missing {
-                function: name.clone(),
-                needs: name.clone(),
+                function: label.clone(),
+                needs: label.clone(),
             })?
             .clone();
-        declarations.insert(
+        self.declared.insert(
             name,
-            InstalledFunction {
-                code,
-                captures: function.captures.clone(),
-                closure: function.closure,
-            },
+            (
+                function,
+                InstalledFunction {
+                    code,
+                    captures: function.captures.clone(),
+                    closure: function.closure,
+                },
+            ),
         );
+        Ok(())
     }
-    for (name, declaration) in &declarations {
-        document
-            .functions
-            .insert(name.clone(), declaration.code.clone());
-    }
-    document.manifest.effects = required;
-    for function in closure_of(functions, roots)?.values() {
-        document
-            .manifest
-            .functions
-            .extend(function.document.manifest.functions.clone());
-    }
-    Ok(declarations)
 }

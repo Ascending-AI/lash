@@ -98,7 +98,7 @@ const _: () = assert!(KERNEL_PARKED_STATE_VERSION == KernelVersion::NEWEST.numbe
 /// under it.
 ///
 /// version_guard(
-///     items(path = "crates/lash-kernel-dialect/src/saved.rs", SavedFunction, Token, NotSaved, CaptureRefusal),
+///     items(path = "crates/lash-kernel-dialect/src/saved.rs", SavedFunction, Token, HeldAt, NotSaved, CaptureRefusal),
 ///     items(
 ///         path = "crates/lash-kernel-dialect/src/saved/graph.rs",
 ///         DOCUMENT_NODE_KIND, FUNCTION_BUNDLE_NODE_KIND, BundleBody, MemberBody, VALUE_KINDS, encode,

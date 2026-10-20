@@ -184,14 +184,31 @@ fn hold(
     (Arc::new(held), digests)
 }
 
+/// The services of a node holding `held`, its cells written under the set
+/// `gate` answers.
+fn node(
+    dialect: &CellDialect,
+    held: &Arc<HeldPackages>,
+    gate: &Arc<Switch>,
+) -> super::super::CellServices {
+    let mut services = cell_services(
+        dialect,
+        lash_vm_client::service::Service::default().with_packages(Arc::clone(held)),
+    );
+    services.kernel = super::super::KernelCarry::holding(Some(Arc::clone(held)), None);
+    services.packages = Some(Arc::clone(gate) as Arc<dyn crate::plugin::PackageGate>);
+    services
+}
+
 /// A session of `held`'s node on `host`, its cells written under the set
 /// `gate` answers.
 struct Session {
+    dialect: CellDialect,
     host: DurableHost,
     state: super::super::CodeModeExecutionState,
     services: super::super::CellServices,
     gate: Arc<Switch>,
-    tools: Arc<CellTools>,
+    tools: Arc<dyn lash_core::ToolProvider>,
     held: Arc<HeldPackages>,
     cells: usize,
 }
@@ -207,21 +224,30 @@ impl Session {
         first: PackageSetDigest,
     ) -> Self {
         let gate = Arc::new(Switch(Mutex::new(first)));
-        let mut services = cell_services(
-            &dialect,
-            lash_vm_client::service::Service::default().with_packages(Arc::clone(held)),
-        );
-        services.kernel = super::super::KernelCarry::holding(Some(Arc::clone(held)), None);
-        services.packages = Some(Arc::clone(&gate) as Arc<dyn crate::plugin::PackageGate>);
+        let services = node(&dialect, held, &gate);
         Self {
-            host: open_host().await,
             state: crate::testing::session_state(&dialect),
+            dialect,
+            host: open_host().await,
             services,
             gate,
             tools: Arc::new(CellTools::default()),
             held: Arc::clone(held),
             cells: 0,
         }
+    }
+
+    /// The session's next cells served by a node holding `held`: one that
+    /// no longer holds the release earlier cells ran on.
+    fn on(&mut self, held: &Arc<HeldPackages>) {
+        self.services = node(&self.dialect, held, &self.gate);
+        self.held = Arc::clone(held);
+    }
+
+    /// The session with its cells offered `tools`'s operations.
+    fn serving(mut self, tools: Arc<dyn lash_core::ToolProvider>) -> Self {
+        self.tools = tools;
+        self
     }
 
     async fn cell_under(&mut self, set: PackageSetDigest, code: &str) -> lash_core::ExecResponse {
@@ -340,21 +366,44 @@ async fn saved_functions_relink_to_the_cell_set_and_a_linked_set_rewrites_nothin
 
 /// RELINK-CLOSURE: a saved function whose callee the cell's set removed,
 /// or declares under another signature, is dropped at the cell's start,
-/// named with the callee, and is no binding of a later cell.
+/// named with the callee, and is no binding of a later cell. The node of
+/// the next cell holds that set alone, as a production node does: the
+/// callee's old signature is the one the function was saved against. One
+/// a binding's data held, saved under a generated name, is named by its
+/// path there (`plan.map`), and the binding goes with it.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_saved_function_the_cell_set_does_not_serve_is_dropped_naming_it_and_the_callee() {
     let lash = lash();
     for r2 in [r2_removed(&lash), r2_resigned(&lash)] {
-        let (held, sets) = hold(&lash, vec![vec![r1(&lash)], vec![r2]]);
-        let mut session = Session::open(&held, sets[0]).await;
+        let (earlier, first) = hold(&lash, vec![vec![r1(&lash)]]);
+        let (later, second) = hold(&lash, vec![vec![r2]]);
+        let mut session = Session::open(&earlier, first[0]).await;
         ok(&session
-            .cell_under(sets[0], "function w(row) { return dataframe.width(row); }")
+            .cell_under(
+                first[0],
+                "function w(row) { return dataframe.width(row); }\nconst plan = { map: (row) => dataframe.width(row) };",
+            )
             .await);
-        ok(&session.cell_under(sets[1], "const other = 1;").await);
-        let why = session.state.not_carried()[&lash_kernel_doc::Name::new("w")].clone();
+        session.on(&later);
+        ok(&session.cell_under(second[0], "const other = 1;").await);
+        let not_carried = session.state.not_carried();
+        let why = not_carried[&lash_kernel_doc::Name::new("w")].clone();
         assert!(
             why.contains("`w`") && why.contains("dataframe.width"),
             "{why}"
+        );
+        let why = not_carried[&lash_kernel_doc::Name::new("plan")].clone();
+        assert!(
+            why.contains("`plan.map`") && why.contains("dataframe.width"),
+            "{why}"
+        );
+        assert!(
+            session
+                .state
+                .lowering_functions()
+                .keys()
+                .all(|name| name.saved_index().is_none()),
+            "the generated function is dropped"
         );
         assert!(
             !session
@@ -364,10 +413,16 @@ async fn a_saved_function_the_cell_set_does_not_serve_is_dropped_naming_it_and_t
         );
         let message = failed(
             &session
-                .cell_under(sets[1], "await control.finish(w([1]));")
+                .cell_under(second[0], "await control.finish(w([1]));")
                 .await,
         );
         assert!(message.contains("`w`"), "{message}");
+        let message = failed(
+            &session
+                .cell_under(second[0], "await control.finish(plan.map([1]));")
+                .await,
+        );
+        assert!(message.contains("plan"), "{message}");
     }
 }
 
@@ -731,4 +786,120 @@ async fn a_parked_cell_keeps_its_session_stamped_with_its_set_across_a_reclaim()
         host.kill_and_resume_past_a_lacking_node().await,
         "a session between cells pins no code"
     );
+}
+
+/// `dataframe.run`, served by a fake that keeps each plan it receives and
+/// answers one row per step.
+#[derive(Default)]
+struct Runs {
+    received: Mutex<Vec<serde_json::Value>>,
+}
+
+fn run_tool() -> lash_core::ToolDefinition {
+    lash_core::ToolDefinition::raw(
+        "tool:dataframe_run",
+        "dataframe.run",
+        "Run a dataframe plan",
+        // The plan is the input, its callback a function slot.
+        serde_json::json!({
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "step": { "type": "string" },
+                    "exprs": { "type": "array" },
+                    "callback": { "x-lash": { "kind": "function" } },
+                    "n": { "type": "integer" }
+                },
+                "required": ["step", "exprs"],
+                "additionalProperties": false
+            }
+        }),
+        serde_json::json!({ "type": "array" }),
+    )
+    .expect("valid declared tool schemas")
+    .declared_contract(lash_core::ContractId::new("dataframe.run/1"))
+    .with_execution(std::time::Duration::from_secs(120))
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for Runs {
+    fn tool_manifests(
+        &self,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Result<Vec<lash_core::ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
+    {
+        Ok(vec![run_tool().manifest()])
+    }
+
+    fn resolve_contract(
+        &self,
+        name: &str,
+        _config: &lash_core::OwnerConfigView,
+    ) -> Option<Arc<lash_core::ToolContract>> {
+        let tool = run_tool();
+        (name == tool.manifest.tool() || name == tool.id().as_str())
+            .then(|| Arc::new(tool.contract()))
+    }
+
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        let steps = call.args.as_array().map_or(0, Vec::len);
+        self.received
+            .lock()
+            .expect("received plans")
+            .push(call.args.clone());
+        lash_core::ToolAttemptOutcome::done_without_intents(lash_core::ToolOutcomeDone::ok(
+            serde_json::json!(vec!["row"; steps]),
+        ))
+    }
+}
+
+/// PKG-CARRY: a package value holding only user closures carries and
+/// crosses. The `DataQuanta` a cell's `flat_map` builds holds the user's
+/// lambda as given (§2.4); it carries to the next cell, its lambda saved
+/// under a generated name, and its `collect_rows` there crosses the plan
+/// into `dataframe.run`, the lambda a function value. Each dialect, in its
+/// own spelling.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_package_value_holding_a_user_lambda_carries_and_crosses_in_the_next_cell() {
+    let lash = lash();
+    let (held, sets) = hold(&lash, vec![vec![r1(&lash)]]);
+    for (dialect, built, collected) in [
+        (
+            CellDialect::typescript(),
+            "const q = dataframe.DataQuanta.readText(\"a b\").flatMap((line: string) => line.split(\" \"), { output: \"utf8\" });",
+            "const rows = await q.collectRows();\nawait control.finish(rows);",
+        ),
+        (
+            CellDialect::python(),
+            "q = dataframe.DataQuanta.read_text(\"a b\").flat_map(lambda line: line.split(), output=\"utf8\")",
+            "rows = await q.collect_rows()\nawait control.finish(rows)",
+        ),
+    ] {
+        let runs = Arc::new(Runs::default());
+        let mut session = Session::open_in(dialect, &held, sets[0])
+            .await
+            .serving(Arc::clone(&runs) as Arc<dyn lash_core::ToolProvider>);
+        let made = session.cell_under(sets[0], built).await;
+        ok(&made);
+        assert!(made.bindings.not_carried.is_empty(), "{:?}", made.bindings);
+        assert!(
+            session
+                .state
+                .lowering_functions()
+                .keys()
+                .any(|name| name.saved_index().is_some()),
+            "the lambda is saved under a generated name"
+        );
+        assert_eq!(
+            finish_of(&session.cell_under(sets[0], collected).await),
+            serde_json::json!(["row"])
+        );
+        let received = runs.received.lock().expect("received plans").clone();
+        let callback = &received[0][0]["callback"];
+        assert!(
+            callback.get(lash_kernel_doc::FUNCTION_VALUE_TAG).is_some(),
+            "the lambda crossed as a function value: {callback}"
+        );
+    }
 }
