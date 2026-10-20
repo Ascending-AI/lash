@@ -526,18 +526,22 @@ fn a_cell_within_the_resident_bound_opens_no_file_per_page() {
     assert_eq!(moved.2, resident.2, "one manifest wherever the pages are");
 }
 
-/// The file under `dir`, at any depth, named `name`.
-fn find(dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
-    std::fs::read_dir(dir)
-        .expect("dir")
-        .map(|entry| entry.expect("entry").path())
-        .find_map(|path| {
-            if path.is_dir() && !path.is_symlink() {
-                find(&path, name)
-            } else {
-                (path.file_name() == Some(std::ffi::OsStr::new(name))).then_some(path)
-            }
-        })
+/// The regular page file under `dir`, excluding refcount symlinks with the
+/// same digest as their basename, regardless of directory enumeration order.
+fn find_page(dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+    std::fs::read_dir(dir).expect("dir").find_map(|entry| {
+        let entry = entry.expect("entry");
+        let kind = entry.file_type().expect("file type");
+        let path = entry.path();
+        if kind.is_dir() {
+            find_page(&path, name)
+        } else {
+            (kind.is_file()
+                && dir.file_name() == Some(std::ffi::OsStr::new("pages"))
+                && entry.file_name() == std::ffi::OsStr::new(name))
+            .then_some(path)
+        }
+    })
 }
 
 /// FIG-6932: a store takes a manifest's fresh pages as checked, so only a
@@ -570,7 +574,7 @@ fn a_page_read_back_from_disk_is_checked_again() {
         intact,
         "intact pages read back checked"
     );
-    let file = find(dir.path(), &leaf.id.to_hex()).expect("the leaf's file");
+    let file = find_page(dir.path(), &leaf.id.to_hex()).expect("the leaf's page file");
     let mut bytes = std::fs::read(&file).expect("read");
     *bytes.last_mut().expect("a byte") ^= 1;
     std::fs::write(&file, bytes).expect("write");

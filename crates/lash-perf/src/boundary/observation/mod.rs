@@ -359,6 +359,12 @@ pub(super) async fn publish(core: &lash::LashCore, document: &str) -> Result<Pub
         parse_document(document).map_err(|error| anyhow::anyhow!("workflow document: {error}"))?;
     let environment = environment(!document.manifest.effects.is_empty())?;
     let artifacts = core.host_artifacts();
+    let packages = artifacts.cell_packages().await?;
+    // Publish the linked env before measuring starts: namespace authority
+    // belongs to this snapshot, and its first publication is not start work.
+    let environment = environment.with_package_roots(
+        lash_kernel_dialect::ExportView::namespace_roots(&packages.view()),
+    );
     // The document performs each effect under the requirement this host
     // offers it under: its signature and contract.
     let offered = artifacts
@@ -381,7 +387,7 @@ pub(super) async fn publish(core: &lash::LashCore, document: &str) -> Result<Pub
             &lash::workflow::document::DocumentBytes::from(document.clone()),
             &Name::new(ENTRY),
             &environment,
-            artifacts.cell_packages().await?,
+            packages,
             None,
         ),
     )

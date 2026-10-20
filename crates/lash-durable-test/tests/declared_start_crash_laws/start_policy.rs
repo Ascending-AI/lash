@@ -401,8 +401,6 @@ const START_OUTCOME: CommitLabel = CommitLabel::ROUND_OUTCOME;
 /// once.
 #[tokio::test(flavor = "current_thread")]
 async fn a_start_policy_runs_once_per_committed_declaration() {
-    let committed = limited(5).stable_ref().unwrap();
-
     // A committed declaration, then a crash before the child's first pass
     // and a changed policy: recovery realizes what was declared.
     let bounds = Bounds {
@@ -412,6 +410,16 @@ async fn a_start_policy_runs_once_per_committed_declaration() {
     let clock = SimClock::new();
     let policy = Counting::new(Stated::First);
     let (deployment, database) = Deployment::new(&clock, &policy, Some(bounds)).await;
+    let packages = deployment
+        .first
+        .host_artifacts()
+        .cell_packages()
+        .await
+        .expect("the closure's package snapshot");
+    let committed = limited(5)
+        .with_package_roots(lash::dialect::ExportView::namespace_roots(&packages.view()))
+        .stable_ref()
+        .unwrap();
     let script = Script::new();
     script.cut_on("a", START_OUTCOME, 1, Fault::CommitThenAbort);
     let children = deployment
@@ -462,6 +470,8 @@ async fn a_start_policy_runs_once_per_committed_declaration() {
 
     // A crash after the policy returned, before the outcome committed: the
     // abandoned attempt registers nothing.
+    // These held-engine starts have no document provider or package snapshot.
+    let committed = limited(5).stable_ref().unwrap();
     let clock = SimClock::new();
     let policy = Counting::new(Stated::First);
     let (deployment, database) = Deployment::new(&clock, &policy, None).await;

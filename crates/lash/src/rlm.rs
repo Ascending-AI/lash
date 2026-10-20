@@ -107,8 +107,6 @@ pub use lash_protocol_rlm::{
     DialectRefusal as DialectPromptRefusal, DialectRefusalKind, ExecutionSection,
     ExecutionSectionRequest, PythonPrompts, TypescriptPrompts,
 };
-/// Which package set a host's cells are written under (FIG-6918).
-pub use lash_protocol_rlm::{CellPackages, PackageGate};
 /// Projection vocabulary: bind projected values to the active session via
 /// [`rlm_session_projection_extension`], a durable session extension the
 /// session's command lane records as an [`RlmSeed`] event (FIG-5134).

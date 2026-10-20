@@ -500,6 +500,13 @@ async fn a_process_runs_under_its_own_recorded_environment_after_its_session_is_
     let session_id = SessionId::try_from(SESSION.to_owned()).unwrap();
 
     let (backend, first) = worker(&stores, &seen, true, "first");
+    let packages = first
+        .host_artifacts()
+        .cell_packages()
+        .await
+        .expect("the start's package snapshot");
+    let new_env = new_environment()
+        .with_package_roots(lash::dialect::ExportView::namespace_roots(&packages.view()));
     let session = first
         .session(session_id.clone())
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
@@ -706,10 +713,7 @@ async fn a_process_runs_under_its_own_recorded_environment_after_its_session_is_
         parent.env_ref(),
         "a new env records its own ref"
     );
-    assert_eq!(
-        fresh_child.env_ref(),
-        Some(&new_environment().stable_ref().unwrap())
-    );
+    assert_eq!(fresh_child.env_ref(), Some(&new_env.stable_ref().unwrap()));
     for child in [&inherited, &fresh_child] {
         assert!(parent.provenance.run.is_some());
         assert_eq!(
