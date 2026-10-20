@@ -11,8 +11,9 @@ use lash_core::{
 };
 use lash_execution_contracts::process::ObservedProcessEvent;
 
-/// The stored form of [`ProcessObservationEventPayload`], one variant each.
-#[derive(serde::Serialize, serde::Deserialize)]
+/// The stored form of [`ProcessObservationEventPayload`], one variant each:
+/// what a row reads back as.
+#[derive(serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum StoredPayload {
     LanguageExecution {
@@ -22,16 +23,47 @@ enum StoredPayload {
         observation: Box<lash_core::StepBodyStartedObservation>,
     },
     Committed {
-        #[serde(serialize_with = "serialize_event")]
         event: Box<ObservedProcessEvent>,
     },
 }
 
+/// [`StoredPayload`] borrowed from the payload a draft carries: what a row
+/// is written from, without copying the payload the publication still
+/// answers with.
+#[derive(serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum StoredPayloadView<'a> {
+    LanguageExecution {
+        observation: &'a LanguageExecutionObservation,
+    },
+    StepBodyStarted {
+        observation: &'a lash_core::StepBodyStartedObservation,
+    },
+    Committed {
+        #[serde(serialize_with = "serialize_event")]
+        event: &'a ObservedProcessEvent,
+    },
+}
+
+impl<'a> StoredPayloadView<'a> {
+    fn of(payload: &'a ProcessObservationEventPayload) -> Self {
+        match payload {
+            ProcessObservationEventPayload::LanguageExecution(observation) => {
+                Self::LanguageExecution { observation }
+            }
+            ProcessObservationEventPayload::StepBodyStarted(observation) => {
+                Self::StepBodyStarted { observation }
+            }
+            ProcessObservationEventPayload::Committed { event } => Self::Committed { event },
+        }
+    }
+}
+
 fn serialize_event<S: serde::Serializer>(
-    event: &ObservedProcessEvent,
+    event: &&ObservedProcessEvent,
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
-    serde::Serialize::serialize(&lash_protocol_types::Durable(event), serializer)
+    serde::Serialize::serialize(&lash_protocol_types::Durable(*event), serializer)
 }
 
 fn codec_error(context: &str, error: impl std::fmt::Display) -> ProcessReplayStoreError {
@@ -71,22 +103,8 @@ pub(super) fn encode(
 ) -> Result<EncodedDraft, ProcessReplayStoreError> {
     let sequence = draft.sequence();
     let payload = draft.into_payload();
-    let stored = match &payload {
-        ProcessObservationEventPayload::LanguageExecution(observation) => {
-            StoredPayload::LanguageExecution {
-                observation: Box::new(observation.clone()),
-            }
-        }
-        ProcessObservationEventPayload::StepBodyStarted(observation) => {
-            StoredPayload::StepBodyStarted {
-                observation: Box::new(observation.clone()),
-            }
-        }
-        ProcessObservationEventPayload::Committed { event } => StoredPayload::Committed {
-            event: Box::new(event.clone()),
-        },
-    };
-    let bytes = serde_json::to_vec(&stored).map_err(|error| codec_error("encode", error))?;
+    let bytes = serde_json::to_vec(&StoredPayloadView::of(&payload))
+        .map_err(|error| codec_error("encode", error))?;
     let identity = payload.identity();
     let key = identity_key(&identity);
     let charge =
@@ -220,3 +238,40 @@ const EVERY_PROCESS: &str = "*";
 
 /// PostgreSQL refuses a notification payload of 8000 bytes or more.
 const PAYLOAD_LIMIT: usize = 7_900;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// FIG-7053: a row written from the draft's borrowed payload reads back
+    /// as the payload it was written from, under its stored kind, and
+    /// writes again to the very same bytes, for every stored variant.
+    #[test]
+    fn every_stored_variant_reads_back_as_the_bytes_it_was_written_as() {
+        let process = ProcessId::fixture("view-codec");
+        let payloads = [
+            ProcessObservationEventPayload::LanguageExecution(
+                lash_core::testing::process_language_observation(&process, "start", "cell"),
+            ),
+            ProcessObservationEventPayload::StepBodyStarted(
+                lash_core::testing::process_step_body_started(&process, "step", 1, 7),
+            ),
+            ProcessObservationEventPayload::Committed {
+                event: lash_core::testing::process_committed_event(3, "requester"),
+            },
+        ];
+        let kinds = ["language_execution", "step_body_started", "committed"];
+        for (payload, kind) in payloads.into_iter().zip(kinds) {
+            let bytes =
+                serde_json::to_vec(&StoredPayloadView::of(&payload)).expect("the payload encodes");
+            let row: serde_json::Value =
+                serde_json::from_slice(&bytes).expect("a stored payload is JSON");
+            assert_eq!(row["kind"], kind);
+            let decoded = decode_payload(&bytes).expect("the stored payload decodes");
+            assert_eq!(decoded, payload, "{kind}");
+            let rewritten = serde_json::to_vec(&StoredPayloadView::of(&decoded))
+                .expect("the decoded payload encodes");
+            assert_eq!(rewritten, bytes, "{kind}");
+        }
+    }
+}

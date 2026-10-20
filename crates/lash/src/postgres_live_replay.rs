@@ -16,6 +16,10 @@
 //!   past its cursor, and each doorbell after that re-reads past the last
 //!   position it delivered. A missed doorbell (a listener reconnect) rings
 //!   every subscription, which re-reads from its cursor.
+//! - **Fan-out.** A replica's subscribers of one session share one bounded
+//!   decoded copy of each event and, while parked at one position, one read
+//!   per doorbell (FIG-7053, `fanout`). Each still judges its own cursor,
+//!   gap, expiry and lag against that read's snapshot.
 //! - **Incarnation.** One logged row names the history the unlogged tables
 //!   hold. Crash recovery and failover truncate unlogged tables; a missing
 //!   sentinel row rotates the incarnation, and every older cursor gaps.
@@ -56,6 +60,7 @@ type BellGuard = postgres_replay::BellGuard<SessionId>;
 
 mod cleanup;
 mod codec;
+mod fanout;
 mod heads;
 mod listener;
 mod mirror;
@@ -67,6 +72,7 @@ mod subscription;
 pub use schema_shape::{PostgresLiveReplaySchemaFinding, PostgresLiveReplaySchemaReport};
 
 use codec::Doorbell;
+use fanout::Fanout;
 use mirror::Mirror;
 use schema::{Incarnation, Statements};
 use subscription::Read;
@@ -119,6 +125,7 @@ struct Shared {
     sql: Statements,
     mirror: StdMutex<Mirror>,
     bells: Bells<SessionId>,
+    fanout: Fanout,
 }
 
 impl Shared {
@@ -163,19 +170,23 @@ impl Shared {
             self.ring_all();
             return;
         }
-        let ring = |session: &str| {
+        // A doorbell that ends a session's continuity also drops what its
+        // subscribers share of it.
+        let ring = |session: &str, ends: bool| {
             if let Ok(session_id) = SessionId::parse(session) {
+                self.fanout.rang(&session_id, ends);
                 self.bells.ring([session_id]);
             }
         };
         for doorbell in doorbells {
             match doorbell {
-                Doorbell::Published { session, .. }
-                | Doorbell::Invalidated { session, .. }
-                | Doorbell::Trimmed { session, .. } => ring(session),
+                Doorbell::Published { session, .. } => ring(session, false),
+                Doorbell::Invalidated { session, .. } | Doorbell::Trimmed { session, .. } => {
+                    ring(session, true);
+                }
                 Doorbell::Forgotten { sessions, .. } => {
                     for session in sessions {
-                        ring(session);
+                        ring(session, true);
                     }
                 }
                 Doorbell::Rotated { .. } => {}
@@ -186,6 +197,7 @@ impl Shared {
     /// Wake every subscriber on this replica: each re-reads from its
     /// cursor.
     fn ring_all(&self) {
+        self.fanout.rang_all();
         self.bells.ring_all();
     }
 
@@ -256,6 +268,7 @@ impl PostgresLiveReplayStore {
             sql,
             mirror: StdMutex::new(Mirror::new(incarnation)),
             bells: Bells::default(),
+            fanout: Fanout::default(),
             retry: config.retry.live_replay,
             prelude: TransactionPrelude::new(&config.guards.replay),
             config: policy.data,
@@ -381,6 +394,11 @@ impl LiveReplayStore for PostgresLiveReplayStore {
     ) -> Result<LiveReplaySubscribeOutcome, LiveReplayStoreError> {
         let parsed = cursor.parse()?;
         let bell = self.shared.bell(&parsed.session_id).await?;
+        let follow = self.shared.fanout.follow(
+            &parsed.session_id,
+            self.shared.config.max_events_per_session,
+            self.shared.config.max_bytes_per_session,
+        );
         // From here the replica's cleanup passes keep the head; this covers
         // the time until the first of them.
         cleanup::keep(&self.shared, &[parsed.session_id.to_string()]).await?;
@@ -398,6 +416,7 @@ impl LiveReplayStore for PostgresLiveReplayStore {
             parsed.replay_incarnation_id.to_string(),
             last,
             bell,
+            follow,
         );
         Ok(LiveReplaySubscribeOutcome::Subscribed(
             LiveReplaySubscription::new(events, live),

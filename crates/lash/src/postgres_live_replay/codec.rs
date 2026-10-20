@@ -11,8 +11,9 @@ use lash_core::{
 };
 use lash_protocol_types::SessionId;
 
-/// The stored form of [`SessionObservationEventPayload`], one variant each.
-#[derive(serde::Serialize, serde::Deserialize)]
+/// The stored form of [`SessionObservationEventPayload`], one variant each:
+/// what a row reads back as.
+#[derive(serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum StoredPayload {
     LanguageExecution {
@@ -38,6 +39,76 @@ enum StoredPayload {
         process: SessionProcessEventKind,
         process_ids: Vec<ProcessId>,
     },
+}
+
+/// [`StoredPayload`] borrowed from the payload a draft carries: what a row
+/// is written from. It writes the bytes the stored form reads, without
+/// copying the payload the publication still answers with.
+#[derive(serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum StoredPayloadView<'a> {
+    LanguageExecution {
+        observation: &'a lash_trace::LanguageExecutionObservation,
+    },
+    TurnActivity {
+        activity: &'a TurnActivity,
+    },
+    Committed {
+        base_revision: SessionRevision,
+        entries: &'a [TranscriptEntry],
+    },
+    ResidentChanged,
+    AgentFrameSwitched {
+        frame_id: &'a str,
+        commit: Option<SessionRevision>,
+    },
+    QueueChanged {
+        queue: SessionQueueEventKind,
+        batch_ids: &'a [String],
+    },
+    ProcessChanged {
+        process: SessionProcessEventKind,
+        process_ids: &'a [ProcessId],
+    },
+}
+
+impl<'a> StoredPayloadView<'a> {
+    fn of(payload: &'a SessionObservationEventPayload) -> Self {
+        match payload {
+            SessionObservationEventPayload::LanguageExecution(observation) => {
+                Self::LanguageExecution { observation }
+            }
+            SessionObservationEventPayload::TurnActivity(activity) => {
+                Self::TurnActivity { activity }
+            }
+            SessionObservationEventPayload::Committed {
+                base_revision,
+                entries,
+            } => Self::Committed {
+                base_revision: *base_revision,
+                entries,
+            },
+            SessionObservationEventPayload::ResidentChanged => Self::ResidentChanged,
+            SessionObservationEventPayload::AgentFrameSwitched { frame_id, commit } => {
+                Self::AgentFrameSwitched {
+                    frame_id,
+                    commit: *commit,
+                }
+            }
+            SessionObservationEventPayload::QueueChanged { kind, batch_ids } => {
+                Self::QueueChanged {
+                    queue: *kind,
+                    batch_ids,
+                }
+            }
+            SessionObservationEventPayload::ProcessChanged { kind, process_ids } => {
+                Self::ProcessChanged {
+                    process: *kind,
+                    process_ids,
+                }
+            }
+        }
+    }
 }
 
 fn codec_error(context: &str, error: impl std::fmt::Display) -> LiveReplayStoreError {
@@ -73,43 +144,8 @@ pub(super) fn encode(
     session_id: &SessionId,
     draft: LiveReplayEventDraft,
 ) -> Result<EncodedDraft, LiveReplayStoreError> {
-    let stored = match &draft.payload {
-        SessionObservationEventPayload::LanguageExecution(observation) => {
-            StoredPayload::LanguageExecution {
-                observation: observation.clone(),
-            }
-        }
-        SessionObservationEventPayload::TurnActivity(activity) => StoredPayload::TurnActivity {
-            activity: Box::new(activity.clone()),
-        },
-        SessionObservationEventPayload::Committed {
-            base_revision,
-            entries,
-        } => StoredPayload::Committed {
-            base_revision: *base_revision,
-            entries: entries.clone(),
-        },
-        SessionObservationEventPayload::ResidentChanged => StoredPayload::ResidentChanged,
-        SessionObservationEventPayload::AgentFrameSwitched { frame_id, commit } => {
-            StoredPayload::AgentFrameSwitched {
-                frame_id: frame_id.clone(),
-                commit: *commit,
-            }
-        }
-        SessionObservationEventPayload::QueueChanged { kind, batch_ids } => {
-            StoredPayload::QueueChanged {
-                queue: *kind,
-                batch_ids: batch_ids.clone(),
-            }
-        }
-        SessionObservationEventPayload::ProcessChanged { kind, process_ids } => {
-            StoredPayload::ProcessChanged {
-                process: *kind,
-                process_ids: process_ids.clone(),
-            }
-        }
-    };
-    let bytes = serde_json::to_vec(&stored).map_err(|error| codec_error("encode", error))?;
+    let bytes = serde_json::to_vec(&StoredPayloadView::of(&draft.payload))
+        .map_err(|error| codec_error("encode", error))?;
     let identity = match &draft.payload {
         SessionObservationEventPayload::LanguageExecution(observation) => {
             Some(Identity::Language(observation.clone()))
@@ -367,6 +403,64 @@ mod tests {
             panic!("a stored language fact decodes as language evidence");
         };
         assert_eq!(read.as_ref(), &original);
+    }
+
+    /// FIG-7053: a row written from the draft's borrowed payload reads back
+    /// as the stored form, under its stored kind, and writes again to the
+    /// very same bytes, for every stored variant.
+    #[test]
+    fn every_stored_variant_reads_back_as_the_bytes_it_was_written_as() {
+        let session = SessionId::from("view-codec");
+        let payloads = [
+            SessionObservationEventPayload::LanguageExecution(Box::new(
+                lash_core::testing::session_language_observation(&session, "start", "cell"),
+            )),
+            SessionObservationEventPayload::TurnActivity(TurnActivity::new(
+                TurnActivityId::new("activity"),
+                TurnEvent::Error(ReportedFailure {
+                    message: "failed".to_string(),
+                    envelope: None,
+                }),
+            )),
+            SessionObservationEventPayload::Committed {
+                base_revision: SessionRevision::new(3),
+                entries: Vec::new(),
+            },
+            SessionObservationEventPayload::ResidentChanged,
+            SessionObservationEventPayload::AgentFrameSwitched {
+                frame_id: "frame".to_string(),
+                commit: Some(SessionRevision::new(4)),
+            },
+            SessionObservationEventPayload::QueueChanged {
+                kind: SessionQueueEventKind::Enqueued,
+                batch_ids: vec!["batch".to_string()],
+            },
+            SessionObservationEventPayload::ProcessChanged {
+                kind: SessionProcessEventKind::Waiting { sequence: 2 },
+                process_ids: vec![ProcessId::fixture("process")],
+            },
+        ];
+        let kinds = [
+            "language_execution",
+            "turn_activity",
+            "committed",
+            "resident_changed",
+            "agent_frame_switched",
+            "queue_changed",
+            "process_changed",
+        ];
+        for (payload, kind) in payloads.into_iter().zip(kinds) {
+            let draft = LiveReplayEventDraft::new(None::<TurnId>, payload);
+            let encoded = encode(&session, draft).expect("the payload encodes");
+            let row: serde_json::Value =
+                serde_json::from_slice(&encoded.bytes).expect("a stored payload is JSON");
+            assert_eq!(row["kind"], kind);
+            let cursor = SessionCursor::new("incarnation", &session, SessionRevision::new(1), 1);
+            let decoded = decode(cursor, None, &encoded.bytes).expect("the stored payload decodes");
+            let rewritten = serde_json::to_vec(&StoredPayloadView::of(&decoded.payload))
+                .expect("the decoded payload encodes");
+            assert_eq!(rewritten, encoded.bytes, "{kind}");
+        }
     }
 
     fn stored(event: TurnEvent) -> (serde_json::Value, TurnEvent) {

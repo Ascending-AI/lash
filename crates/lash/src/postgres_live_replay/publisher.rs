@@ -259,9 +259,10 @@ impl Delivered {
     }
 }
 
-/// The rows a tick appends, column by column.
+/// The rows a tick appends, column by column; payloads are bound from the
+/// drafts that encoded them.
 #[derive(Default)]
-struct Rows {
+struct Rows<'a> {
     session: Vec<String>,
     position: Vec<i64>,
     revision: Vec<i64>,
@@ -270,12 +271,12 @@ struct Rows {
     activity_key: Vec<Option<String>>,
     activity_first: Vec<Option<i64>>,
     activity_last: Vec<Option<i64>>,
-    payload: Vec<Vec<u8>>,
+    payload: Vec<&'a [u8]>,
     bytes: Vec<i64>,
 }
 
-impl Rows {
-    fn push(&mut self, session: &str, position: u64, revision: u64, draft: &EncodedDraft) {
+impl<'a> Rows<'a> {
+    fn push(&mut self, session: &str, position: u64, revision: u64, draft: &'a EncodedDraft) {
         let (id, key, first, last) = match &draft.identity {
             None | Some(Identity::Language(_)) => (None, None, None, None),
             Some(Identity::Opaque(id)) => (Some(id.clone()), None, None, None),
@@ -295,7 +296,7 @@ impl Rows {
         self.activity_key.push(key);
         self.activity_first.push(first);
         self.activity_last.push(last);
-        self.payload.push(draft.bytes.clone());
+        self.payload.push(&draft.bytes);
         self.bytes.push(column(draft.charge));
     }
 

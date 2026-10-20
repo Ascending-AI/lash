@@ -303,6 +303,100 @@ async fn writers_on_two_replicas_share_one_gap_free_order_that_both_observe() {
     );
 }
 
+/// FIG-7053: subscribers on one replica share one decoded copy of each
+/// event, and still see exactly what an independent subscriber on another
+/// replica sees. A shared copy stands only for the row it was decoded
+/// from: a row rewritten under a position the subscribers hold reads back
+/// as the rewritten row.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn subscribers_on_one_replica_share_each_decoded_event_and_see_what_another_replica_sees() {
+    let Replicas {
+        database,
+        schema,
+        a,
+        b,
+    } = replicas().await;
+    let session = SessionId::from("fanned-out");
+    let start = a.current_cursor(&session, SessionRevision::new(0));
+    let mut on_a = Vec::new();
+    for _ in 0..8 {
+        on_a.push(subscribed(a.subscribe_after_cursor(&start).await));
+    }
+    let mut on_b = subscribed(b.subscribe_after_cursor(&start).await);
+
+    const EVENTS: usize = 12;
+    for index in 0..EVENTS {
+        let store = if index % 2 == 0 { &a } else { &b };
+        publish(
+            store,
+            &session,
+            &format!("fan-{index}"),
+            &format!("body-{index}"),
+        )
+        .await;
+    }
+    let mut independent = Vec::new();
+    while independent.len() < EVENTS {
+        independent.push(next(&mut on_b).await);
+    }
+    let mut shared = Vec::new();
+    for subscription in &mut on_a {
+        let mut delivered = Vec::new();
+        while delivered.len() < EVENTS {
+            delivered.push(next(subscription).await);
+        }
+        shared.push(delivered);
+    }
+    let seen = |events: &[Arc<SessionObservationEvent>]| {
+        events
+            .iter()
+            .map(|event| (event.cursor.clone(), label(event)))
+            .collect::<Vec<_>>()
+    };
+    for delivered in &shared {
+        assert_eq!(
+            seen(delivered),
+            seen(&independent),
+            "every subscriber on A sees what B's subscriber sees"
+        );
+        assert!(
+            delivered
+                .iter()
+                .zip(&shared[0])
+                .all(|(event, first)| Arc::ptr_eq(event, first)),
+            "A's subscribers share one decoded copy of each event"
+        );
+    }
+
+    let rewritten = live_position(&independent[3].cursor);
+    let mut connection = <sqlx::PgConnection as sqlx::Connection>::connect(database.url())
+        .await
+        .expect("connect to the database");
+    sqlx::query(&format!(
+        "UPDATE \"{schema}\".live_replay_log \
+         SET payload = convert_to(replace(convert_from(payload, 'UTF8'), 'body-3', 'rewritten'), 'UTF8') \
+         WHERE session_id = $1 AND position = $2"
+    ))
+    .bind(session.as_str())
+    .bind(i64::try_from(rewritten).expect("a position fits a column"))
+    .execute(&mut connection)
+    .await
+    .expect("rewrite one stored row");
+    let replayed = match a.replay_after_cursor(&start).await.expect("replay on A") {
+        LiveReplayOutcome::Replayed(events) => events,
+        LiveReplayOutcome::Gap(reason) => panic!("replay on A gapped: {reason:?}"),
+    };
+    assert_eq!(label(&replayed[3]), "rewritten");
+    assert!(
+        replayed
+            .iter()
+            .zip(&shared[0])
+            .enumerate()
+            .all(|(index, (event, held))| (index == 3) != Arc::ptr_eq(event, held)),
+        "only the rewritten row decodes again"
+    );
+}
+
 /// The link between one replica's listener session and the database, which
 /// a law cuts and restores: a TCP relay the replica's session endpoint
 /// names. While it is cut it carries no connection and refuses new ones, so

@@ -1,9 +1,11 @@
 //! Replay and subscription: reads judged against the head in one snapshot,
-//! and a live tail that re-reads the table whenever its doorbell rings.
+//! and a live tail that re-reads the table whenever its doorbell rings. The
+//! replica's [`Fanout`](super::fanout::Fanout) shares what those reads
+//! decode and what its parked tails fetch.
 
 use std::sync::Arc;
 
-use futures_util::Stream;
+use futures_util::{FutureExt as _, Stream};
 use lash_core::runtime::ParsedSessionCursor;
 use lash_core::{
     LiveReplayGapReason, LiveReplayStoreError, SessionObservationEvent, SessionRevision,
@@ -11,10 +13,12 @@ use lash_core::{
 use lash_protocol_types::SessionId;
 use sqlx::Row as _;
 
+use super::fanout::{Follow, Row};
 use super::schema::{Incarnation, column, db_error, ensure_incarnation, micros, position};
 use super::{BellGuard, Shared};
 
 /// What a read after a position found.
+#[derive(Clone)]
 pub(super) enum Read {
     Gap(LiveReplayGapReason),
     /// The retained events after the position, in order.
@@ -26,12 +30,14 @@ pub(super) enum Read {
 ///
 /// One statement reads the incarnation, the head, the window's start by
 /// database time and the rows, so the judgment and the rows are one
-/// snapshot.
+/// snapshot. The rows decode through the session's share as it stood
+/// before that statement ran.
 pub(super) async fn read(
     shared: &Shared,
     cursor: &ParsedSessionCursor<'_>,
 ) -> Result<Read, LiveReplayStoreError> {
     let session = cursor.session_id.as_str();
+    let reader = shared.fanout.reader(&cursor.session_id);
     let rows = sqlx::query(&shared.sql.read)
         .bind(session)
         .bind(column(cursor.live_position))
@@ -91,12 +97,24 @@ pub(super) async fn read(
         let Some(event_position) = row.get::<Option<i64>, _>("position").map(position) else {
             continue;
         };
-        let revision = SessionRevision::new(position(row.get("revision")));
-        events.push(super::codec::decode(
-            incarnation.cursor(&cursor.session_id, revision, event_position),
-            row.get("turn_id"),
-            &row.get::<Vec<u8>, _>("payload"),
-        )?);
+        let row = Row {
+            incarnation: &incarnation.id,
+            position: event_position,
+            revision: position(row.get("revision")),
+            turn_id: row.get("turn_id"),
+            payload: row.get("payload"),
+        };
+        events.push(reader.event(row, |row| {
+            super::codec::decode(
+                incarnation.cursor(
+                    &cursor.session_id,
+                    SessionRevision::new(row.revision),
+                    row.position,
+                ),
+                row.turn_id.clone(),
+                &row.payload,
+            )
+        })?);
     }
     Ok(Read::Events(events))
 }
@@ -104,12 +122,15 @@ pub(super) async fn read(
 type LiveItem = Result<Arc<SessionObservationEvent>, LiveReplayStoreError>;
 
 /// The feed owns cursor and gap semantics; shared plumbing drains its tail.
+/// A tail reads through its session's share, so tails parked at one
+/// position share one read until the next doorbell.
 pub(super) fn live_tail(
     shared: Arc<Shared>,
     session_id: SessionId,
     incarnation: String,
     last: u64,
     bell: BellGuard,
+    follow: Follow,
 ) -> impl Stream<Item = LiveItem> + Send + 'static {
     crate::postgres_replay::live_tail(
         bell,
@@ -118,16 +139,27 @@ pub(super) fn live_tail(
         LiveReplayStoreError::Closed,
         move |last| {
             let shared = Arc::clone(&shared);
+            let share = Arc::clone(follow.share());
             let session_id = session_id.clone();
             let incarnation = incarnation.clone();
             async move {
                 let cursor = Incarnation {
-                    id: incarnation,
+                    id: incarnation.clone(),
                     watermark: 0,
                 }
                 .cursor(&session_id, SessionRevision::new(0), last);
-                let parsed = cursor.parse()?;
-                match read(&shared, &parsed).await {
+                cursor.parse()?;
+                let flight = share.live_read(&incarnation, last, || {
+                    async move {
+                        let result = match cursor.parse() {
+                            Ok(parsed) => read(&shared, &parsed).await,
+                            Err(error) => Err(error.into()),
+                        };
+                        Arc::new(result)
+                    }
+                    .boxed()
+                });
+                match flight.await.as_ref() {
                     Ok(Read::Events(events)) => {
                         let position = events.last().map_or(last, |event| {
                             event
@@ -136,7 +168,7 @@ pub(super) fn live_tail(
                                 .map(|parsed| parsed.live_position)
                                 .unwrap_or(last)
                         });
-                        Ok((position, events))
+                        Ok((position, events.clone()))
                     }
                     Ok(Read::Gap(LiveReplayGapReason::Trimmed)) => {
                         Err(LiveReplayStoreError::SubscriberLagged(1))
