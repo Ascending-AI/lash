@@ -1,9 +1,9 @@
 {
   "cases": [
     {
-      "document": "kernel 1\nnumbers by_spelling\nuse list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b\nuse collection.map = @4ee10360ff0dc3e017e438bdaef46dba19176d0eff5ba9f3fea11bcb903775e8\nuse collection.function_check = @a76697deec5c174c74ed173a04b4207532f093c3fa95ae478cdebc9c38466e0c\nmain { let xs = [1] let cb = fn(x) { return x } let ys = invoke collection.map(xs, cb) finish ys }\n",
+      "document": "kernel 1\nnumbers by_spelling\nuse list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b\nuse collection.map = @a32cef1db898deeeb889934b0f5865954dad79dd73367a53d5f2009fb0296eea\nuse collection.function_check = @a76697deec5c174c74ed173a04b4207532f093c3fa95ae478cdebc9c38466e0c\nmain { let xs = [1] let cb = fn(x) { return x } let ys = invoke collection.map(xs, cb) finish ys }\n",
       "expected": {
-        "charged": 22,
+        "charged": 26,
         "end": {
           "finished": {
             "list": [

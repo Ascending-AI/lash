@@ -60,14 +60,14 @@ body {
   if same(kind(input), "absent") {} else {
     if same(kind(input), "record") {
       if same(input.__lash_brand, ("url.whatwg", "url_search_params")) {
-        for pair in input.pairs { set pairs[list.len(pairs)] = [pair[0], pair[1]] }
+        for pair in input.pairs metered 2 { set pairs[list.len(pairs)] = [pair[0], pair[1]] }
       } else {
-        for key in record.keys(input) { let builtin_arg_0 = input[key]
+        for key in record.keys(input) metered 2 { let builtin_arg_0 = input[key]
 let value = invoke ts.to_string(builtin_arg_0) set pairs[list.len(pairs)] = [key, value] }
       }
     } else {
       if same(kind(input), "list") {
-        for pair in input {
+        for pair in input metered 2 {
           let values = invoke ts.iterate(pair)
           if eq(list.len(values), 2) {} else { throw error.new("type_error", "Each query pair needs two items", null) }
           let builtin_arg_1 = values[0]
@@ -130,7 +130,7 @@ let name = invoke ts.to_string(builtin_arg_3)
   let output = []
   let filter = args[1]
   if same(kind(filter), "absent") {} else { set filter = invoke ts.to_string(filter) }
-  for pair in this.pairs {
+  for pair in this.pairs metered 2 {
     if same(pair[0], name) {
       return pair[1]
     }
@@ -149,7 +149,7 @@ let name = invoke ts.to_string(builtin_arg_4)
   let output = []
   let filter = args[1]
   if same(kind(filter), "absent") {} else { set filter = invoke ts.to_string(filter) }
-  for pair in this.pairs {
+  for pair in this.pairs metered 2 {
     if same(pair[0], name) {
       set output[list.len(output)] = pair[1]
     }
@@ -168,7 +168,7 @@ let name = invoke ts.to_string(builtin_arg_5)
   let output = []
   let filter = args[1]
   if same(kind(filter), "absent") {} else { set filter = invoke ts.to_string(filter) }
-  for pair in this.pairs {
+  for pair in this.pairs metered 2 {
     if same(pair[0], name) {
       if same(kind(filter), "absent") { return true }
       if same(pair[1], filter) { return true }
@@ -300,7 +300,7 @@ body {
   set callback = invoke ts.callable(callback)
   let receiver = args[1]
   let i = 0
-  while num.lt(i, list.len(this.pairs)) {
+  while num.lt(i, list.len(this.pairs)) metered 2 {
     let pair = this.pairs[i]
     let passed = [pair[1], pair[0], this]
     do apply callback(receiver, passed)

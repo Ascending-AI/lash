@@ -56,6 +56,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_FOR_IN_VALUES_PLAN,
     &MAP_CLEAR_PLAN,
     &SET_CLEAR_PLAN,
+    &PY_SORTED_PLAN,
     &PY_METHOD_SPLIT_PLAN,
     &PY_FOR_IN_OPEN_PLAN,
     &PY_EXC_IS_EXCEPTION_PLAN,
@@ -64,7 +65,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_FOR_IN_KEYS_PLAN,
     &PY_SUM_PLAN,
     &PY_METHOD_APPEND_PLAN,
-    &PY_SORTED_PLAN,
     &PY_TO_TUPLE_PLAN,
     &PY_TEXT_DECIMAL_PLAN,
     &PY_TO_SET_PLAN,
@@ -91,7 +91,6 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_FOR_IN_CHECK_PLAN,
     &PY_METHOD_INTERSECTION_PLAN,
     &PY_EXC_MATCHES_PLAN,
-    &PY_METHOD_SORT_PLAN,
     &PY_SLICE_PLAN,
     &PY_METHOD_RSTRIP_PLAN,
     &PY_TO_LIST_PLAN,
@@ -112,6 +111,7 @@ pub const PLANS: &[&p::HelperPlan] = &[
     &PY_SETITEM_PLAN,
     &PY_METHOD_VALUES_PLAN,
     &PY_SET_OP_PLAN,
+    &PY_METHOD_SORT_PLAN,
     &PY_ARG_MISSING_PLAN,
     &PY_INDEX_PLAN,
     &PY_METHOD_UPPER_PLAN,
@@ -13040,7 +13040,7 @@ fn py_sum(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
 
 const PY_SORTED_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.sorted",
-    function: p::function("64165cdfdd702ff9a4447aef7f338ef44647b17984901c86ebf22e629ea23061"),
+    function: p::function("56ac4e556f460c7bf39d8c231025d228650bd2fdacfa5856d4d0c35d2c9b7dd2"),
     callees: &[
         p::function("a3779293e724337ceef8595cb51e8c00450da006aeac56b5dbb444396298bc01"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
@@ -13151,7 +13151,7 @@ fn py_sorted(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanE
                 }
                 let c0 = if r == 0 { ctx.open(0, 6)? } else { p::Cursor(0) };
                 'l0: loop {
-                    if r == 0 { if !ctx.next(c0, 0)? { break 'l0; } ctx.bind(7, 0)?; } else if !matches!(r, 1) { break 'l0; }
+                    if r == 0 { ctx.meter(2)?; if !ctx.next(c0, 0)? { break 'l0; } ctx.bind(7, 0)?; } else if !matches!(r, 1) { break 'l0; }
                     if r == 0 || matches!(r, 1) {
                         if r == 0 { ctx.begin()?; }
                         if r == 0 { ctx.local(1, 0)?; }
@@ -16272,11 +16272,11 @@ fn py_method_count(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
 
 const PY_METHOD_SORT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.sort",
-    function: p::function("9f120d038dffa0c73bccc1e664d7160b9848219902fc3eb1b607212267110526"),
+    function: p::function("c8ff09ce120fbdda4967219d2f5caa418f673004e5ed937846855b2465a53bb0"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
-        p::function("64165cdfdd702ff9a4447aef7f338ef44647b17984901c86ebf22e629ea23061"),
+        p::function("56ac4e556f460c7bf39d8c231025d228650bd2fdacfa5856d4d0c35d2c9b7dd2"),
         p::function("efd75614e8825ba13ed2192eb9a0ccbabc76c56ba3b5d29e352d934cec02af48"),
         p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
         p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),

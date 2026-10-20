@@ -99,7 +99,7 @@ kernel 1
 charge sum(6, size(tasks), size(result))
 body {
   let members = []
-  for task in tasks {
+  for task in tasks metered 2 {
     if same(kind(task), "task") {
       let member = spawn invoke py.task.bridge(task)
       set members[list.len(members)] = member
@@ -116,7 +116,7 @@ body {
     if same(kind(reason), "tuple") {
       throw reason[1]
     }
-    for task in tasks {
+    for task in tasks metered 2 {
       do cancel task
     }
     let ended = join settled members

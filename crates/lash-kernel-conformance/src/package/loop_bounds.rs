@@ -51,17 +51,17 @@ const REVIEWED: &[(&str, &str, &str)] = &[
         "Argument-size: captured n/m cap the increasing index by min(len(xs),len(ys)); neither input is mutated and no guest code runs.",
     ),
     (
-        "91f3ef243fd270a0b967358c7da81a033131b183bc3e7d83f36fbbc1847fd1a6",
+        "ad1968cef1eaa4f43ada6d5707a49aeb3624b159442c3bdb46c21be5d72e3387",
         "dataframe.data_quanta.check_shape",
         "Argument-size: generated shape loops visit x.plan and each step.exprs without mutation, guest dispatch or awaits; even stale-value refusal is bounded by the unchanged input graph.",
     ),
     (
-        "0580749406f9130069d5791a53e845117be519aa2bf7c28e124e7f4eb9d6880c",
+        "3b37ccc0b49b429d7ebfa8ea907bae77c6c2dd903320a717d9e36d4ff5468a7d",
         "dataframe.data_quanta.reduce_by_key",
         "Argument-size: generated prologues scan keys and aggregates once, checking each expr without guests or mutation; shape errors shorten these unchanged argument-list scans.",
     ),
     (
-        "bb8eafc75a1e1e08d008f27efdd15d86fc06d22526773fd1f87846deeeb9d763",
+        "60ddc70d39cf948af9f2eb65ad58aae5c7df0eab09433a6d5f86ce68b340ad4d",
         "dataframe.data_quanta.sort",
         "Argument-size: the generated prologue scans keys once with callback-free expr checks; input is unchanged and stale-value refusal can only shorten the scan.",
     ),
@@ -236,12 +236,12 @@ const REVIEWED: &[(&str, &str, &str)] = &[
         "Argument-size: source conversion is callback-free and inputs are unchanged; outer scans total len(sequences), with at most shortest times len(sequences) nested cell visits, bounded by their deep input size.",
     ),
     (
-        "61a28ca87ba1cb77599cc7f745909416fb7859049602e02252bc00be85026a96",
+        "f1445f58b7dbaad20085e926273f407f0bf75703610c884e9ce3bf737fa8ca13",
         "ts.arguments",
         "Argument-size: items is unchanged while one property is written per element to a fresh private record; numeric index spelling cannot call guests.",
     ),
     (
-        "7ea433237e6399b1f86ac8245d9526c0b161e2a904a511d00c4c47d72215f879",
+        "bf75b558a144f9fc1461b47fe3639b201fb2163e06a5906aca10f8d9f2051d1f",
         "ts.array.concat",
         "Argument-size: sources snapshots this and args; nested length-capped array reads with numeric keys do not call guests, and all appends target a fresh output, leaving inputs unchanged.",
     ),
@@ -301,12 +301,12 @@ const REVIEWED: &[(&str, &str, &str)] = &[
         "Argument-size: receiver validation precedes a callback-free scan of unchanged this; identity-key decoding and fresh-output writes cannot extend the map.",
     ),
     (
-        "45b78310c7c14a366905519c1cb0dad6f323651c378aad2b003957b0062438b7",
+        "d2160019a5f38f82f2e5a0cd91aa55725258ce3cdf67462bbb61baf8e7397c57",
         "ts.math.clz32",
         "Fixed-algorithm: ToInt32 is reduced modulo 2^32, then floor-divided by two, giving at most 32 visits independent of guest coercion output.",
     ),
     (
-        "6e71dd7bbe4bc1253824508495455a8d96782a81458ab349021c8f13954c7781",
+        "a1f407bcfbb5aaa2ddfced7addd80c14599d0b8a198e34a215e1c14a5cbc9c03",
         "ts.math.fround",
         "Fixed-algorithm: after finite/nonzero guards, doubling binade from 2^-126 to a finite binary64 magnitude needs at most 1150 visits; no guest code runs inside.",
     ),
@@ -326,22 +326,27 @@ const REVIEWED: &[(&str, &str, &str)] = &[
         "Argument-size: the only loop removes trailing decimal zeros from an immutable Int spelling, whose digit count is bounded linearly by the integer word-size; floats take the loop-free branch.",
     ),
     (
-        "8d4487ce7f204174eed506cb0db46f5578e0b36ebdace6e967d11506eaf101b2",
+        "909cd0df1a0c9024f6a8fa1bcdcbaebbd5750b1561528ba7cd7563555f27d1e2",
+        "ts.number.ratio",
+        "Fixed-algorithm: the entry guard raises RangeError for NaN and infinities; a finite binary64 magnitude becomes an integer after at most 1074 doublings, within the constant 2200 formula, and no guest code runs.",
+    ),
+    (
+        "d3a217cc5b6c591606081ab4b159aedb7595c3922041a3dd5b8bb631a740d21a",
         "ts.number.toString",
         "Fixed-algorithm: after radix and finite guards, the only loop increments count and explicitly breaks at 1100, regardless of coerced radix or fraction.",
     ),
     (
-        "e044e97f4ad246e2d4c2f31c062987f3ced1024e2c9d7bbb6455d9425d5471bb",
+        "bb887c7061ac4287f5f603b21938f6deaa2ce5632952d135293b8543dab80a7c",
         "ts.object.assign",
         "Argument-size: ts.rest snapshots sources and own_keys snapshots each key list; ts.get with Text keys does not call guests, and writes cannot extend either snapshot.",
     ),
     (
-        "82e1b5aad1cb7b1a82e2b26d9c8baed89b89f6c0df1b99af9da9bb0ef0b1e102",
+        "7a64cd58a5a1e90c950fd83b91be339ea876f95f39b2e9427c9738488574ca04",
         "ts.object.entries",
         "Argument-size: own_keys snapshots target keys before iteration; ts.get with Text keys does not call guests, so each key is visited once even on refusal.",
     ),
     (
-        "95d311b780b1952aaabd4a40be32b93863de320cc74af1e9e1c1d6fbf9c7939b",
+        "8be1a4402692a61703af2d3b8ebb49ee12e491e12f61906924e334b008ce1670",
         "ts.object.isPrototypeOf",
         "Fixed-algorithm: the only loop checks ten literal receiver tags; all guest coercions precede the table scan and cannot extend it.",
     ),
@@ -351,7 +356,7 @@ const REVIEWED: &[(&str, &str, &str)] = &[
         "Argument-size: ts.keys returns a private key list; insertion sort strictly decreases position and needs at most n squared moves, followed by one private remainder scan.",
     ),
     (
-        "d8224d9fae31686b38b0d56b6b332a9e94c40421f48457638709c7f291d07f20",
+        "a643e25936ad2defc4657edc0a026f28022c635929d6d1700db670dd7f390516",
         "ts.object.values",
         "Argument-size: own_keys snapshots target keys before iteration; ts.get with Text keys does not call guests, so each key is visited once even on refusal.",
     ),
@@ -359,6 +364,11 @@ const REVIEWED: &[(&str, &str, &str)] = &[
         "53db560d550e2fe9ad845b269a3f7f21d8ea190c3c4f61607cb62458a6807584",
         "ts.object_rest",
         "Argument-size: taken and ts.keys(source) are scanned once each with Text keys; neither membership tests nor data-only ts.get calls guests or mutates either input.",
+    ),
+    (
+        "e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1",
+        "ts.pad",
+        "Argument-size: the copy loop visits each items member once without guest code or mutation of items. The append loop's trip count comes from count's value, which magnitude(count) does not measure, so it is metered.",
     ),
     (
         "0ac2376081f53b9524b0d3df74d59d37b6a3f6946504bd421a26f5c308733264",
@@ -371,7 +381,7 @@ const REVIEWED: &[(&str, &str, &str)] = &[
         "Argument-size: pattern is immutable Text and position advances by a complete scalar (one or two UTF-16 units), so even refusal cannot exceed its input length.",
     ),
     (
-        "8ae5662f9021ef7af090ef451785554985079c643964d1f88b41afe268f14bf1",
+        "752855e098680a7dce5d4d116f7cf6d6e6a66f79ba23c46ee7d6da0dea9c8b64",
         "ts.regexp.match_record",
         "Argument-size: match.groups is scanned once and record.keys(named) is a private snapshot; replacing null slots preserves sizes, with no guest code or awaits.",
     ),

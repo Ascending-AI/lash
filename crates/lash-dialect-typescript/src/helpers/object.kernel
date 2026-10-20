@@ -161,7 +161,7 @@ body {
   let builtin_arg_3 = args[0]
 let source = invoke ts.iterate(builtin_arg_3)
   let output = {}
-  for pair_item in source {
+  for pair_item in source metered 2 {
     let entry_kind = kind(pair_item)
     if same(entry_kind, "list") {} else {
       if same(entry_kind, "record") {} else { throw error.new("type_error", "Iterator value is not an entry object", null) }
@@ -244,7 +244,7 @@ body {
 let source = invoke ts.iterate(builtin_arg_7)
   let output = {}
   let index = 0.0
-  for item in source {
+  for item in source metered 2 {
     let passed = [item, index]
     let key = apply callback(absent, passed)
     let key = invoke ts.to_property_key(key)
@@ -423,7 +423,7 @@ body {
   let key = invoke ts.to_property_key(value)
   do invoke ts.require_object_coercible(this)
   let keys = invoke ts.keys(this)
-  for name in keys { if same(name, key) { return true } }
+  for name in keys metered 2 { if same(name, key) { return true } }
   return false
 }
 

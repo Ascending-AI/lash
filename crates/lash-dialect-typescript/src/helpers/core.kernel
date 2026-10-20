@@ -1019,7 +1019,8 @@ body {
   for item in items {
     set padded[list.len(padded)] = item
   }
-  while num.lt(list.len(padded), count) {
+  # The count's value, not its measured magnitude, sets this trip count.
+  while num.lt(list.len(padded), count) metered 2 {
     set padded[list.len(padded)] = absent
   }
   return padded
@@ -1098,7 +1099,7 @@ body {
     let items = []
     let position = 0
     let length = text.utf16_len(target)
-    while num.lt(position, length) {
+    while num.lt(position, length) metered 2 {
       let unit = text.utf16_get(target, position)
       let end = num.add(position, 1)
       if num.le(55296, unit) { if num.le(unit, 56319) { set end = num.add(end, 1) } }
@@ -1364,7 +1365,7 @@ body {
     if same(kind(target), "tuple") { set builtin = bool.not(same(target[1], "")) }
     if builtin {} else {
       # Own or inherited from Function.prototype, both are read-only.
-      for described in ["name", "length"] {
+      for described in ["name", "length"] metered 2 {
         if same(name, described) { throw error.new("type_error", text.concat("Cannot assign to read only property '", text.concat(name, "' of function")), null) }
       }
     }
@@ -1504,13 +1505,13 @@ body {
   }
   if same(k, "closure") {
     if same(kind(target), "tuple") {
-      for described in ["name", "length"] {
+      for described in ["name", "length"] metered 2 {
         if same(name, described) { return bool.not(record.contains(target[5], name)) }
       }
     }
     # A function's own `prototype` carries attributes the dialect does not
     # keep, and so do the `name` and `length` of one it did not make.
-    for described in ["name", "length", "prototype"] {
+    for described in ["name", "length", "prototype"] metered 2 {
       if same(name, described) { throw error.new("TS_REFLECTION_UNSUPPORTED", "Testing a function's own properties is outside the TypeScript dialect", null) }
     }
   }
@@ -1532,7 +1533,7 @@ body {
     }
     return same(name, "message")
   }
-  for object_kind in ["map", "set", "timestamp", "closure", "bool", "number", "brand:date.ecma.invalid_date"] {
+  for object_kind in ["map", "set", "timestamp", "closure", "bool", "number", "brand:date.ecma.invalid_date"] metered 2 {
     if same(k, object_kind) { return false }
   }
   if same(k, "brand:typescript.arguments") {
@@ -1542,7 +1543,7 @@ body {
   }
   if same(k, "brand:typescript.regex_match") {
     let name = invoke ts.to_property_key(key)
-    for field in ["length", "index", "input", "groups"] { if same(name, field) { return true } }
+    for field in ["length", "index", "input", "groups"] metered 2 { if same(name, field) { return true } }
     let length = list.len(target.items)
     let position = invoke ts.list_index(name, length)
     if num.lt(position, 0) { return false }
@@ -1573,17 +1574,17 @@ body {
   let k = invoke ts.receiver(target)
   let name = invoke ts.to_property_key(key)
   if same(k, "error") {
-    for inherited in ["name", "message", "toString", "constructor", "hasOwnProperty", "propertyIsEnumerable", "valueOf", "toLocaleString", "isPrototypeOf"] {
+    for inherited in ["name", "message", "toString", "constructor", "hasOwnProperty", "propertyIsEnumerable", "valueOf", "toLocaleString", "isPrototypeOf"] metered 2 {
       if same(name, inherited) { return true }
     }
   }
   let own = invoke ts.has_own(target, name)
   if own { return true }
-  for inherited in ["valueOf", "toString", "hasOwnProperty", "constructor", "isPrototypeOf", "propertyIsEnumerable", "toLocaleString"] {
+  for inherited in ["valueOf", "toString", "hasOwnProperty", "constructor", "isPrototypeOf", "propertyIsEnumerable", "toLocaleString"] metered 2 {
     if same(name, inherited) { return true }
   }
   if same(k, "closure") {
-    for inherited in ["call", "apply", "bind", "caller", "arguments"] { if same(name, inherited) { return true } }
+    for inherited in ["call", "apply", "bind", "caller", "arguments"] metered 2 { if same(name, inherited) { return true } }
   }
   return false
 }

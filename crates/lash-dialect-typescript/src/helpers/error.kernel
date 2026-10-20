@@ -61,7 +61,7 @@ body {
     let builtin_arg_0 = args[0]
 set error_items = invoke ts.iterate(builtin_arg_0)
     let copied = []
-    for item in error_items { set copied[list.len(copied)] = item }
+    for item in error_items metered 2 { set copied[list.len(copied)] = item }
     set error_items = copied
     set message = args[1]
     set options = args[2]

@@ -91,7 +91,7 @@ body {
   let defaults = [absent, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0]
   let components = []
   let i = 0
-  while num.lt(i, 7) {
+  while num.lt(i, 7) metered 2 {
     let value = defaults[i]
     if num.lt(i, list.len(args)) { set value = args[i] }
     let value = invoke ts.to_number(value)

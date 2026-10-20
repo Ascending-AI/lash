@@ -82,7 +82,7 @@ body {
   let empty = invoke ts.is_nullish(source)
   if empty {} else {
     let entries = invoke ts.iterate(source)
-    for pair_item in entries {
+    for pair_item in entries metered 2 {
       let entry_kind = kind(pair_item)
     if same(entry_kind, "list") {} else {
       if same(entry_kind, "record") {} else { throw error.new("type_error", "Iterator value is not an entry object", null) }
@@ -244,7 +244,7 @@ body {
 let source = invoke ts.iterate(builtin_arg_8)
   let output = map{}
   let index = 0.0
-  for item in source {
+  for item in source metered 2 {
     let passed = [item, index]
     let key = apply callback(absent, passed)
     let key = invoke ts.map.key(key)

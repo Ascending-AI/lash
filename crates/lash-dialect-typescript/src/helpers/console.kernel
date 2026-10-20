@@ -28,7 +28,7 @@ errors "type_error"
 charge sum(4, deep(args))
 body {
   let pieces = []
-  for item in args {
+  for item in args metered 2 {
     let k = invoke ts.receiver(item)
     let structured = same(k, "record")
     if structured {} else {

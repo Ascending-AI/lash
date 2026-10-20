@@ -110,7 +110,7 @@ body {
       if same(name, \"name\") { return target[2] }
       if same(name, \"length\") { return target[3] }
       if same(name, \"prototype\") { return absent }
-      for poisoned in [\"caller\", \"arguments\"] {
+      for poisoned in [\"caller\", \"arguments\"] metered 2 {
         if same(name, poisoned) { throw error.new(\"TS_REFLECTION_UNSUPPORTED\", \"Reflection on a built-in function is outside the TypeScript dialect\", null) }
       }
     }
@@ -371,7 +371,7 @@ fn in_operator(table: &Table) -> String {
     for (receiver, names) in &inherited {
         let names: Vec<String> = names.iter().map(|name| format!("\"{name}\"")).collect();
         branches.push_str(&format!(
-            "  if same(receiver, \"{receiver}\") {{\n    for member in [{}] {{ if same(name, member) {{ return true }} }}\n  }}\n",
+            "  if same(receiver, \"{receiver}\") {{\n    for member in [{}] metered 2 {{ if same(name, member) {{ return true }} }}\n  }}\n",
             names.join(", ")
         ));
     }
@@ -391,7 +391,7 @@ fn in_operator(table: &Table) -> String {
          \x20 if own {{ return true }}\n\
          \x20 let name = invoke ts.to_property_key(key)\n\
          \x20 let receiver = invoke ts.receiver(target)\n{branches}\
-         \x20 for member in [{}] {{ if same(name, member) {{ return true }} }}\n\
+         \x20 for member in [{}] metered 2 {{ if same(name, member) {{ return true }} }}\n\
          \x20 return false\n}}\n",
         common.join(", ")
     )

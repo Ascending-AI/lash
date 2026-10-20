@@ -52,9 +52,9 @@ use text.utf16_len = @7be9b48ecb000bf8c0c6267fce3ef23096b08740ce0279b456bd06e9c5
 use text.utf16_slice = @e63080421899ba41a3d2d26b5a0e27ab7e48207de832479e1e6614032c6fe409
 use ts.array.integer = @73cf5440457f0488161c4946183b6f8aa140666ef9bdf1ef14765753b2a811dd
 use ts.array.is = @5519731ddb6c9d2183742b87ee54c7244f9e08d2f4557c9f7a3513595ed71db7
-use ts.array.iterator = @c77ca5f7395849f262e43496373fdd107bc41adbe3f2a94ea6b373f3679c4c4b
+use ts.array.iterator = @b5f05ef1f29c86076d4656b638bf3e655d864c3bcb4806bc93317577dea0a067
 use ts.array.length = @6d765a1c4ff10aa2652f0b0adadb0a1c5b1872bb3f079301141ae536b2ad28d3
-use ts.array.values = @2ef216aca9d0a748a28e4276abab065f7ddcd17feda65dd919ac0bff7f6a0a5f
+use ts.array.values = @6c01f1345e7c2191e51375ed87ea093f36198cb3184fa02afae2d52e5cda272f
 use ts.await = @18a30299db399e09c5772b4431f1c4baf6e139a164f476b6fe173b1447d54a6f
 use ts.boundary = @ac89e50257ae69e06fe10e8faa4c6567d50315aca6fcecee2a967bdc8b4af23b
 use ts.callable = @7fb5154d44a31046fccc5c7dc57c6e347c7722d7774389baf931942e74602e22
@@ -64,12 +64,12 @@ use ts.exotic.iterate = @690182cf08e5924b669d1ea7c32d0fc1f17dc7fb8384ead9df28de5
 use ts.exotic.to_primitive = @5f26f14804bc9ee15bbf1e6ada733414c3a2fb387ba4acc671c10e8f75aa50e8
 use ts.for_of.item = @9ca984cf92050630538b9cce7f1d1e121c03a9f071916630311c72ba43304ed4
 use ts.for_of.next = @b01e9bc78562470d442df6a60d4cdbf11011107ae94c38fa3a3aefcc5d4e7667
-use ts.for_of.open = @91906232a0961ff221d41e80cf6bc583504fffbe087cfa9ef88bd5c8de24fbee
+use ts.for_of.open = @bbaefd37def780c42cde803bf34f059bda815042c4c951c055b00e55763f2061
 use ts.get = @6d85a5db708b9eacee39796ab1556021e5310f316a9f5736e5f4c785f6a54324
 use ts.hole_value = @a5e96b5c94e54ba44f74acb077f7c16258ab243ea1df7931ae5f3edb69731eda
 use ts.is_nullish = @d03fe5e4e3e3d05cb1759701a45670d5304f2a0b3cd9b10ac54a3a75b7c1f329
 use ts.is_primitive = @3e69ab18f4601aeb45d3cd1d49dd3a82f3929ee7a7de58a6d13ac0cc2255b230
-use ts.iterate = @8747cddc7af57944b4d0066ba0a6678bcf43ddea2e19b712979a66d9ac521c42
+use ts.iterate = @2b13f4f8d1eb10f312ed2cbe665b0207adf83f053b8574e39b4362d82032356d
 use ts.list_index = @54dfeddf2cdae29653d493078bbdd0e86fd6e7cb67068eac8b64a3dd5af4c817
 use ts.map.value = @3b2ee022ee040a49d72d15e26389d4ba272fc9bea81b3a8905d739a43a95cdd7
 use ts.number.digit = @4a65f8097abc850ff87a2d2f08438bd602b3b51601d2c94adec2d09331836400
@@ -95,7 +95,7 @@ use ts.to_primitive = @04a7708dc45d479ed37f6240f5db8e0e93ded5280313782b87fc7dab4
 use ts.to_property_key = @802dfd92c69326cab249403280675a5fb1ce4e299a0bf653659123953c8a924a
 use ts.to_string = @df85fc159a8cabd4b521557da045e4fa9c64115e31a21d9d1f7b0dbf0f180d5d
 use tuple.len = @2eced051afe955ac8dbeed3762acd4b8ce74b7a4ed15763ea47dfd01e5cc5f71
-use typescript.__built = @0f3ddbe8e41f84f0bc4180d2c05fddf818b7cb22abc84af09ce7a73d2b7f7abc
+use typescript.__built = @1d6f2e35f350bcc4ac16259ff3456882dcb0aa00f7a589c1b7936fd40e1cfc32
 entry demo(items: Any) -> Any ts_direct(ts.await)
 
 fn demo(items) {

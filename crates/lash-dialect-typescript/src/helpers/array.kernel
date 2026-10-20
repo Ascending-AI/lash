@@ -398,7 +398,7 @@ body {
   if num.lt(9007199254740991.0, num.add(length, list.len(args))) {
     throw error.new("type_error", "array-like length exceeds the safe integer limit", null)
   }
-  for value in args {
+  for value in args metered 2 {
     do invoke ts.array.set(this, length, value)
     set length = num.add(length, 1)
   }
@@ -1853,7 +1853,7 @@ errors "type_error"
 charge sum(8, size(subject), size(result))
 body {
   let k = invoke ts.receiver(subject)
-  for walked in ["list", "map", "set", "text"] {
+  for walked in ["list", "map", "set", "text"] metered 2 {
     if same(k, walked) { return subject }
   }
   if same(k, "brand:typescript.regex_match") { return subject.items }
@@ -1924,7 +1924,7 @@ body {
   let output = []
   let k = invoke ts.receiver(source)
   let iterable = same(k, "list")
-  for other in ["text", "map", "set", "brand:typescript.regex_match", "brand:typescript.iterator"] {
+  for other in ["text", "map", "set", "brand:typescript.regex_match", "brand:typescript.iterator"] metered 2 {
     if same(k, other) { set iterable = true }
   }
   let index = 0.0

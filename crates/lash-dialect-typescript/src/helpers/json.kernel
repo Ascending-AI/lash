@@ -97,7 +97,7 @@ body {
   let allowed = absent
   if same(kind(replacer), "list") {
     set allowed = []
-    for item in replacer {
+    for item in replacer metered 2 {
       let k = invoke ts.receiver(item)
       if same(k, "text") {
         if list.contains(allowed, item) {} else { set allowed[list.len(allowed)] = item }

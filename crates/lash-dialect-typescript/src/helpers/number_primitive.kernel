@@ -1,6 +1,7 @@
 # JavaScript number_primitive behavior, expressed in kernel code.
 use bool.not
 use eq
+use error.new
 use text.utf16_get
 use text.utf16_len
 use float.parse
@@ -14,6 +15,7 @@ use kind
 use num.abs
 use num.add
 use num.floor
+use num.is_finite
 use num.is_nan
 use num.le
 use num.lt
@@ -286,6 +288,8 @@ kernel 1
 errors "type_error", "RangeError"
 charge 2200
 body {
+  # Only a finite number has an exact ratio; NaN never equals its floor.
+  if num.is_finite(value) {} else { throw error.new("RangeError", "A non-finite number has no exact ratio", null) }
   let numerator = num.abs(value)
   let denominator = 1
   while bool.not(eq(numerator, num.floor(numerator))) {

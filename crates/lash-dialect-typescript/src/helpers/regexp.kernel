@@ -385,7 +385,7 @@ body {
     set regex.lastIndex = 0.0
     if eq(list.len(matches), 0) { return null }
     let output_value = []
-    for match in matches { set output_value[list.len(output_value)] = match.groups[0] }
+    for match in matches metered 2 { set output_value[list.len(output_value)] = match.groups[0] }
     return output_value
   }
   let passed = [text]
@@ -428,7 +428,7 @@ body {
   let snapshot = invoke ts.regexp.snapshot(value)
   let matches = invoke ts.regexp.native_match_all(snapshot, text)
   let output_value = []
-  for match in matches {
+  for match in matches metered 2 {
     let item = invoke ts.regexp.match_record(match, text)
     set output_value[list.len(output_value)] = item
   }
@@ -454,7 +454,7 @@ body {
     let snapshot = {__lash_brand: ("regex.ecma", "reg_exp"), __lash_built: value.__lash_built, pattern: value.pattern, flags: value.flags, lastIndex: 0}
     let split = invoke ts.regexp.native_split(snapshot, text, limit)
     let output_value = []
-    for part in split {
+    for part in split metered 2 {
       if same(part, null) { set output_value[list.len(output_value)] = absent } else { set output_value[list.len(output_value)] = part }
     }
     return output_value
@@ -472,7 +472,7 @@ body {
     if eq(text.len(text), length) {} else {
       let output_value = []
       let start = 0
-      while num.lt(start, length) {
+      while num.lt(start, length) metered 2 {
         let end = num.add(start, 1)
         let part = invoke ts.string.slice_units(text, start, end)
         set output_value[list.len(output_value)] = part
@@ -593,16 +593,16 @@ body {
     }
     let pieces = []
     let end = 0
-    for match in matches {
+    for match in matches metered 2 {
       let passed = []
-      for capture in match.groups {
+      for capture in match.groups metered 2 {
         if same(capture, null) { set passed[list.len(passed)] = absent } else { set passed[list.len(passed)] = capture }
       }
       set passed[list.len(passed)] = num.to_float(match.index)
       set passed[list.len(passed)] = text
       if same(match.named, null) {} else {
         let named = match.named
-        for key in record.keys(named) { if same(named[key], null) { set named[key] = absent } }
+        for key in record.keys(named) metered 2 { if same(named[key], null) { set named[key] = absent } }
         set passed[list.len(passed)] = named
       }
       let value = apply replacement(absent, passed)
@@ -626,7 +626,7 @@ body {
   let next = 0
   let length = text.utf16_len(text)
   let width = text.utf16_len(needle)
-  while num.le(next, length) {
+  while num.le(next, length) metered 2 {
     let position = text.utf16_find(text, needle, next)
     if num.lt(position, 0) { break }
     let piece = ""

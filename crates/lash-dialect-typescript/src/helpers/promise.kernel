@@ -273,7 +273,7 @@ body {
   let elements = invoke ts.iterate(items)
   let tasks = []
   let states = []
-  for element in elements {
+  for element in elements metered 2 {
     let member = element
     let promise = invoke ts.promise.is(element)
     if promise {} else {
@@ -389,7 +389,7 @@ body {
   let elements = invoke ts.iterate(items)
   let tasks = []
   let originals = []
-  for element in elements {
+  for element in elements metered 2 {
     let member = element
     let promise = invoke ts.promise.is(member)
     if promise {} else { set member = invoke ts.promise.settled(element, false) }

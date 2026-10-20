@@ -58,7 +58,7 @@ py.float	42e4f719816f9ae0ff432f59d8b02b7a0bc0a59350b9a06c3fbe687699f08806	callba
 py.abs	b1e33b52ca4c86c53aa41b25c7758d360cef1bf9ab87fd0c193b1b269baa7e83	closed	-	false	0	false	sum(4, size(value))	generated
 py.extreme	2ad9e4c43da5f8cd07cca24f5cc9e78dbe25952b989f7528f5cc4fe436314f27	closed	-	false	0	false	sum(4, deep_size(args))	generated
 py.sum	5b04378d1b8001145efd58ca3e4c660e7a11f9db28bd32a6e80421f95c67f832	closed	-	false	0	false	sum(4, deep_size(values))	generated
-py.sorted	64165cdfdd702ff9a4447aef7f338ef44647b17984901c86ebf22e629ea23061	callback	apply sort; apply key	true	1	false	sum(8, product(2, size(values)), size(result))	segment of 2 sites
+py.sorted	56ac4e556f460c7bf39d8c231025d228650bd2fdacfa5856d4d0c35d2c9b7dd2	callback	apply sort; apply key	true	1	true	sum(8, product(2, size(values)), size(result))	segment of 2 sites
 collection.range	efb76d65f63fa5b890c80d863df5f033917719d0a28f970f8a08212860534cb5	closed	-	true	0	false	sum(1, size(start), size(end), size(step), size(result))	generated
 py.range	d7c9e36ad51e265806e58d2175e6becb8182e82ad10d0ec1f357d3aaeec075d5	closed	-	true	0	false	sum(4, size(result))	generated
 py.enumerate	07f338d1310160ee2c456de9a51ed2675b12b788833ce20c512a80f376c9c097	closed	-	true	0	false	sum(4, size(values), size(result))	generated
@@ -81,7 +81,7 @@ py.method.pop	054debe5c9fc7cb4486e5ba8c978d5b53aabd943b8091804e9a6b6765b0024e7	c
 py.method.remove	a780375c0d319ce592c51adf46634b859b1246ce6c2f87e4213d6add630edbf3	callback	invoke py.repr	true	0	false	sum(6, size(self), deep_size(value))	segment of 1 sites
 py.method.index	361dfe0857f8d055f0d6609b7f82ede259a904bb3c8d7cbe4e713cd167a45fe6	callback	invoke py.repr	false	0	false	sum(6, size(self), deep_size(value))	segment of 1 sites
 py.method.count	867f1cda2de2e2b42f6c261c841bf5a5dec618724120904db0fcee8e4d076fef	closed	-	false	0	false	sum(6, size(self), deep_size(value))	generated
-py.method.sort	9f120d038dffa0c73bccc1e664d7160b9848219902fc3eb1b607212267110526	callback	invoke py.sorted	true	0	true	sum(8, product(4, size(self)))	segment of 2 sites
+py.method.sort	c8ff09ce120fbdda4967219d2f5caa418f673004e5ed937846855b2465a53bb0	callback	invoke py.sorted	true	0	true	sum(8, product(4, size(self)))	segment of 2 sites
 py.method.reverse	a87a221806e581f3306c833885d5107af4ff8ff07476809bb19feffeb72f0ff1	closed	-	true	0	false	sum(4, size(self))	generated
 py.method.copy	6641a459d7d7ffbc8202e9e07da7b334663ccfe6ee257254b95f2d5aa2e9d844	closed	-	false	0	false	sum(4, size(self))	generated
 map.clear	51aec9def67e7dc51d8c93a505490008aa58dde2ffa7cb3dc8a494e5fc914c16	closed	-	true	0	true	sum(1, size(xs))	generated
@@ -123,5 +123,5 @@ py.task.run	4c101896846d468753c0737a490e0141b23941901ec24fe3a0b25e0fb6a415bc	cal
 py.await	5aced5a2051d7dc9848ecb6ef203494d5537d5f41019ea8b56b345c8cee471d5	task	cancel; join	false	0	false	6	reaches task
 py.await.result	7b9759842eed2a7355b3c1f1c1eb74edbadc2e6167664ec0af271dec147a70a7	host	invoke py.await	false	0	false	6	reaches host
 py.task.bridge	865fe98abfd95becc81fa075365881ff6ad42bd4eb831066a10fa2d4ce6706d9	task	join	false	0	false	6	reaches task
-py.gather	388ae16d76d6f29ff823babf770181df293b7a47862bc6f50111c12cf5ff3a2f	task	join; cancel; join; spawn; invoke py.task.bridge	true	0	false	sum(6, size(tasks), size(result))	reaches task
+py.gather	51bbae4efb764c080900cafc19cfef36cb90aa60f65c0688d0435e23ce1e0be7	task	join; cancel; join; spawn; invoke py.task.bridge	true	0	true	sum(6, size(tasks), size(result))	reaches task
 py.sleep	38b0be884b46ebdc286887fdf12f9b3cbbc2eaf81085ba9f722087f5db86658e	task	sleep; yield	false	0	false	6	reaches task

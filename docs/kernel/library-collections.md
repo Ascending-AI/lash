@@ -81,7 +81,9 @@ the catalog exposes every body. The bodies are written in kernel text.
   bounding copying, merging and publication. Completion formulas cover body
   forms and nested library calls. Dynamic or shrinking traversals declare
   metered loop tests, including sort's captured copy when a comparator mutates
-  the input. Guest callbacks and closures keep ordinary charges (K-CHG-007).
+  the input, and every callback traversal (`map`, `filter`, `reduce`, `find`,
+  `any`, `all`, `for_each`, `group_by`), whose callback can grow the live input
+  and clear it before completion. Guest callbacks and closures keep ordinary charges (K-CHG-007).
   Charges do not depend on caches.
 
 This completes the collection definitions of the 1.0 baseline. Native functions

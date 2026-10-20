@@ -350,7 +350,7 @@ body {
   let ranks = items
   if keyed {
     set ranks = []
-    for item in items {
+    for item in items metered 2 {
       let rank = apply key(item)
       set ranks[list.len(ranks)] = rank
     }

@@ -509,3 +509,482 @@ fn conf_shape_both_members_check_nested_values_with_their_own_artifacts() {
     .unwrap();
     assert_eq!(body.end, ExpectedEnd::Finished(Datum::Text("good".into())));
 }
+
+/// Runs `main` with `uses` under the reference bodies and the installed
+/// code, which must agree in every observation and charge event. Returns
+/// the reference observations and how many two-unit events it charged.
+fn metered_events(
+    kit: &Kit<'_>,
+    registry: &FunctionRegistry,
+    uses: &[&str],
+    main: &str,
+) -> (crate::Observations, usize) {
+    let uses = uses
+        .iter()
+        .map(|name| format!("use {name} = @{}\n", registry.named(name).next().unwrap()))
+        .collect::<String>();
+    let case = close(
+        case(main, format!("kernel 1\nnumbers by_spelling\n{uses}{main}")),
+        registry,
+    );
+    let (body, events) = super::observe(
+        &kit.bodies,
+        &case,
+        lash_kernel_vm::kernel_internals::Layout(3),
+    )
+    .unwrap();
+    let (installed, installed_events) = super::observe(
+        &kit.installed,
+        &case,
+        lash_kernel_vm::kernel_internals::Layout(0),
+    )
+    .unwrap();
+    assert_eq!(installed, body, "{main}");
+    assert_eq!(installed_events, events, "{main}");
+    let metered = events
+        .iter()
+        .filter(|event| **event == lash_kernel_exec::charge::Weight::Atomic(2))
+        .count();
+    (body, metered)
+}
+
+/// How many more continuation tests the library charged for `n = 64`
+/// visits than for `n = 8`. Each size runs beside a control that makes the
+/// same guest calls without the library, so guest events cancel out.
+fn metered_slope(
+    kit: &Kit<'_>,
+    registry: &FunctionRegistry,
+    uses: &[&str],
+    main: impl Fn(u32, bool) -> String,
+) -> i64 {
+    let library = |n| {
+        let (_, helper) = metered_events(kit, registry, uses, &main(n, false));
+        let (_, control) = metered_events(kit, registry, uses, &main(n, true));
+        i64::try_from(helper).unwrap() - i64::try_from(control).unwrap()
+    };
+    library(64) - library(8)
+}
+
+/// A library traversal over a live input that applies guest code, with the
+/// adversarial guest code for it: each visit appends one element until the
+/// `n`th, which clears the input and then returns the value that keeps the
+/// traversal going, or raises where the helper's output would bound it.
+struct Traversal {
+    helper: &'static str,
+    params: &'static str,
+    setup: &'static str,
+    items: &'static str,
+    element: &'static str,
+    call: &'static str,
+    control: &'static str,
+    keep: &'static str,
+    raises: bool,
+}
+
+const fn applying(
+    helper: &'static str,
+    call: &'static str,
+    keep: &'static str,
+    raises: bool,
+) -> Traversal {
+    Traversal {
+        helper,
+        params: "x",
+        setup: "set xs[0] = 0",
+        items: "xs",
+        element: "n",
+        call,
+        control: "for x in xs { do apply f(x) }",
+        keep,
+        raises,
+    }
+}
+
+/// Live aliases: the callback reaches the source it walks. The last entry
+/// reaches it through a coercion (`valueOf`), not a direct callback, and
+/// its nested coercion helpers add metered tests of their own per visit.
+const TRAVERSALS: &[Traversal] = &[
+    applying(
+        "collection.all",
+        "invoke collection.all(xs, f)",
+        "true",
+        false,
+    ),
+    applying(
+        "collection.any",
+        "invoke collection.any(xs, f)",
+        "false",
+        false,
+    ),
+    applying(
+        "collection.filter",
+        "invoke collection.filter(xs, f)",
+        "false",
+        false,
+    ),
+    applying(
+        "collection.find",
+        "invoke collection.find(xs, f)",
+        "false",
+        false,
+    ),
+    applying(
+        "collection.for_each",
+        "invoke collection.for_each(xs, f)",
+        "null",
+        false,
+    ),
+    Traversal {
+        params: "acc, x",
+        control: "let acc = 0 for x in xs { set acc = apply f(acc, x) }",
+        ..applying(
+            "collection.reduce",
+            "invoke collection.reduce(xs, f, 0)",
+            "0",
+            false,
+        )
+    },
+    applying("collection.map", "invoke collection.map(xs, f)", "x", true),
+    applying(
+        "collection.group_by",
+        "invoke collection.group_by(xs, f)",
+        "0",
+        true,
+    ),
+    Traversal {
+        params: "context, args",
+        setup: "set xs = {pairs: [(\"a\", \"b\")]}",
+        items: "xs.pairs",
+        element: "(n, n)",
+        control: "for p in xs.pairs { do apply f(null, [p[1], p[0], xs]) }",
+        ..applying(
+            "ts.url_search_params.forEach",
+            "invoke ts.url_search_params.forEach(xs, [f])",
+            "null",
+            false,
+        )
+    },
+    Traversal {
+        params: "context, args",
+        control: "let a = [0, 0.0] for x in xs { do apply f(absent, a) }",
+        ..applying(
+            "ts.map.groupBy",
+            "invoke ts.map.groupBy(null, [xs, f])",
+            "0.0",
+            true,
+        )
+    },
+    Traversal {
+        params: "this, args",
+        setup: "set o = {valueOf: f} set xs[0] = o",
+        element: "o",
+        control: "for a in xs { do apply f(a, []) }",
+        ..applying("ts.math.max", "invoke ts.math.max(null, xs)", "1.0", false)
+    },
+];
+
+impl Traversal {
+    const USES: [&str; 3] = ["num.add", "num.lt", "list.len"];
+
+    /// The witness for `n` visits, finishing with the visit count and the
+    /// input's final length whether or not it raised. The control applies
+    /// the callback from a guest loop instead of the helper.
+    fn main(&self, n: u32, control: bool) -> String {
+        let Self {
+            params,
+            setup,
+            items,
+            element,
+            call,
+            keep,
+            ..
+        } = self;
+        let last = if self.raises {
+            "throw \"discarded\""
+        } else {
+            ""
+        };
+        let run = if control {
+            self.control.to_owned()
+        } else {
+            format!("do {call}")
+        };
+        format!(
+            "main {{ let xs = [] let o = absent let n = 0 \
+             let f = fn({params}) {{ let items = {items} set n = num.add(n, 1) print n \
+             if num.lt(n, {n}) {{ set items[list.len(items)] = {element} }} \
+             else {{ while num.lt(0, list.len(items)) {{ remove items[0] }} {last} }} return {keep} }} \
+             {setup} try {{ {run} }} catch e {{ }} finish (n, list.len({items})) }}"
+        )
+    }
+
+    fn uses(&self) -> Vec<&str> {
+        let mut uses = Self::USES.to_vec();
+        uses.push(self.helper);
+        uses
+    }
+}
+
+/// K-CHG-007, live alias: guest code that grows the walked input and
+/// clears it before completion cannot buy uncharged library work. Each
+/// traversal bills two units for every continuation test, under its body
+/// and its installed code alike, so its charge follows the visits, not
+/// the final size.
+#[test]
+fn conf_meter_live_alias_traversals_charge_every_visit_of_a_grown_and_cleared_input() {
+    let (held, registry) = installed();
+    let registry = Arc::new(registry);
+    let kit = Kit::new(held.view(&held.own()).unwrap(), registry.clone());
+    let mut failures = vec![];
+    for traversal in TRAVERSALS {
+        let uses = traversal.uses();
+        for n in [8, 64] {
+            let (body, _) = metered_events(&kit, &registry, &uses, &traversal.main(n, false));
+            assert_eq!(
+                body.end,
+                ExpectedEnd::Finished(Datum::Tuple(vec![
+                    Datum::Int(i64::from(n).into()),
+                    Datum::Int(0.into()),
+                ])),
+                "{}",
+                traversal.helper
+            );
+        }
+        let slope = metered_slope(&kit, &registry, &uses, |n, control| {
+            traversal.main(n, control)
+        });
+        if slope < 56 {
+            failures.push(format!(
+                "{}: {slope} more library tests for 56 more visits",
+                traversal.helper
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// A charge bound reached mid-traversal stops the installed code at the
+/// reference body's visit, with its charge and its ordered charge events.
+#[test]
+fn conf_meter_bounded_traversals_stop_at_the_reference_visit() {
+    let (held, registry) = installed();
+    let registry = Arc::new(registry);
+    let kit = Kit::new(held.view(&held.own()).unwrap(), registry.clone());
+    for traversal in TRAVERSALS {
+        let uses = traversal
+            .uses()
+            .iter()
+            .map(|name| format!("use {name} = @{}\n", registry.named(name).next().unwrap()))
+            .collect::<String>();
+        let mut case = close(
+            case(
+                traversal.helper,
+                format!(
+                    "kernel 1\nnumbers by_spelling\n{uses}{}",
+                    traversal.main(64, false)
+                ),
+            ),
+            &registry,
+        );
+        let (whole, _) = super::observe(
+            &kit.bodies,
+            &case,
+            lash_kernel_vm::kernel_internals::Layout(3),
+        )
+        .unwrap();
+        case.environment.bounds.charge = whole.charged.unwrap() / 2;
+        let (reference, events) = super::observe(
+            &kit.bodies,
+            &case,
+            lash_kernel_vm::kernel_internals::Layout(3),
+        )
+        .unwrap();
+        assert!(
+            matches!(reference.end, ExpectedEnd::Bound { .. })
+                && (1..63).contains(&reference.prints.len()),
+            "{}: {reference:?}",
+            traversal.helper
+        );
+        let (installed, installed_events) = super::observe(
+            &kit.installed,
+            &case,
+            lash_kernel_vm::kernel_internals::Layout(0),
+        )
+        .unwrap();
+        assert_eq!(installed, reference, "{}", traversal.helper);
+        assert_eq!(installed_events, events, "{}", traversal.helper);
+    }
+}
+
+/// K-CHG-007, coerced-text trip count: a receiver whose `toString` makes an
+/// `n`-unit text from nothing the call holds still pays for every position
+/// the search visits, though the receiver, arguments and result stay tiny.
+#[test]
+fn conf_meter_coerced_text_trip_counts_charge_every_test() {
+    let (held, registry) = installed();
+    let registry = Arc::new(registry);
+    let kit = Kit::new(held.view(&held.own()).unwrap(), registry.clone());
+    let slope = metered_slope(
+        &kit,
+        &registry,
+        &["ts.string.lastIndexOf", "num.lt", "text.len", "text.concat"],
+        |n, control| {
+            let run = if control {
+                "let r = apply f(o, [])"
+            } else {
+                "let r = invoke ts.string.lastIndexOf(o, [\"\"])"
+            };
+            format!(
+                "main {{ let f = fn(this, args) {{ let s = \"\" while num.lt(text.len(s), {n}) {{ set s = text.concat(s, \"a\") }} return s }} \
+                 let o = {{toString: f}} {run} finish null }}"
+            )
+        },
+    );
+    assert!(
+        slope >= 56,
+        "{slope} more library tests for 56 more positions"
+    );
+}
+
+/// K-CHG-007, task join: a wait whose later round raises discards the
+/// results that bounded its earlier round, so each round's tests are
+/// metered as they run.
+#[test]
+fn conf_meter_task_joins_charge_every_collected_result() {
+    let (held, registry) = installed();
+    let registry = Arc::new(registry);
+    let kit = Kit::new(held.view(&held.own()).unwrap(), registry.clone());
+    let slope = metered_slope(
+        &kit,
+        &registry,
+        &["tasks.wait_all", "num.lt", "num.add"],
+        |n, control| {
+            let run = if control {
+                format!(
+                    "set hs[{n}] = s try {{ let vs = join all hs let b = vs[{n}] let x = join b }} catch e {{ }}"
+                )
+            } else {
+                "try { let out = invoke tasks.wait_all() } catch e { }".to_owned()
+            };
+            format!(
+                "fn one() {{ do yield return 1 }}\nfn bad() {{ do yield throw \"bad\" }}\nfn spawner() {{ do yield let b = spawn call bad() return b }}\n\
+                 main {{ let hs = [] let i = 0 while num.lt(i, {n}) {{ set hs[i] = spawn call one() set i = num.add(i, 1) }} \
+                 let s = spawn call spawner() {run} finish i }}"
+            )
+        },
+    );
+    assert_eq!(slope, 56, "more library tests for 56 more results");
+}
+
+/// Runs `main` under the reference bodies and the installed code on a
+/// thread, failing the law if either does not stop within a minute. The
+/// two must agree in every observation and charge event.
+fn stopping(
+    kit: &Kit<'_>,
+    registry: &Arc<FunctionRegistry>,
+    helper: &str,
+    main: &str,
+    charge: u64,
+) -> crate::Observations {
+    let id = registry.named(helper).next().unwrap();
+    let mut case = close(
+        case(
+            main,
+            format!("kernel 1\nnumbers by_spelling\nuse {helper} = @{id}\n{main}"),
+        ),
+        registry,
+    );
+    case.environment.bounds.charge = charge;
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let libraries = [(kit.bodies.clone(), 3), (kit.installed.clone(), 0)];
+    let run = case.clone();
+    std::thread::spawn(move || {
+        let observed = libraries.map(|(library, layout)| {
+            super::observe(
+                &library,
+                &run,
+                lash_kernel_vm::kernel_internals::Layout(layout),
+            )
+            .unwrap()
+        });
+        sender.send(observed).ok();
+    });
+    let [(body, events), (installed, installed_events)] = receiver
+        .recv_timeout(std::time::Duration::from_secs(60))
+        .unwrap_or_else(|_| panic!("{main} did not stop"));
+    assert_eq!(installed, body, "{main}");
+    assert_eq!(installed_events, events, "{main}");
+    body
+}
+
+/// A non-finite number has no exact ratio: NaN never equals its floor, so
+/// the doubling loop would never end. The helper raises at entry instead.
+#[test]
+fn conf_meter_ratio_of_a_non_finite_number_raises_at_entry() {
+    let (held, registry) = installed();
+    let registry = Arc::new(registry);
+    let kit = Kit::new(held.view(&held.own()).unwrap(), registry.clone());
+    for value in ["nan", "inf", "-inf"] {
+        let main = format!("main {{ let r = invoke ts.number.ratio({value}) finish r }}");
+        let body = stopping(&kit, &registry, "ts.number.ratio", &main, 1_000_000);
+        assert!(
+            matches!(&body.end, ExpectedEnd::Uncaught(Datum::Error(error)) if error.kind == "RangeError"),
+            "ratio({value}): {body:?}"
+        );
+    }
+}
+
+/// Padding to an infinite count appends without end; every append test is
+/// charged, so the charge bound stops it, at the same unit in every plan.
+#[test]
+fn conf_meter_padding_to_an_infinite_count_stops_at_the_charge_bound() {
+    let (held, registry) = installed();
+    let registry = Arc::new(registry);
+    let kit = Kit::new(held.view(&held.own()).unwrap(), registry.clone());
+    let body = stopping(
+        &kit,
+        &registry,
+        "ts.pad",
+        "main { let r = invoke ts.pad([], inf) finish r }",
+        10_000,
+    );
+    assert_eq!(
+        body.end,
+        ExpectedEnd::Bound {
+            name: "charge".into(),
+            limit: 10_000
+        }
+    );
+}
+
+/// K-CHG-007, guest code after a loop: an aggregate error copies its items,
+/// then coerces its message, whose `toString` detaches the items from the
+/// arguments the formula measures and raises. The copy was charged per
+/// item as it ran, so the detached items cannot make it free.
+#[test]
+fn conf_meter_loops_before_guest_code_charge_inputs_detached_later() {
+    let (held, registry) = installed();
+    let registry = Arc::new(registry);
+    let kit = Kit::new(held.view(&held.own()).unwrap(), registry.clone());
+    let slope = metered_slope(
+        &kit,
+        &registry,
+        &["ts.error.construct", "num.lt", "num.add", "list.len"],
+        |n, control| {
+            let run = if control {
+                "let r = apply f(o, [])"
+            } else {
+                "let r = invoke ts.error.construct(\"AggregateError\", args, true)"
+            };
+            format!(
+                "main {{ let xs = [] let i = 0 while num.lt(i, {n}) {{ set xs[i] = i set i = num.add(i, 1) }} let args = [xs] \
+                 let f = fn(this, a) {{ while num.lt(0, list.len(args)) {{ remove args[0] }} throw \"detached\" }} \
+                 let o = {{toString: f}} set args[1] = o try {{ {run} }} catch e {{ }} finish list.len(xs) }}"
+            )
+        },
+    );
+    assert!(
+        slope >= 56,
+        "{slope} more library tests for 56 more copied items"
+    );
+}

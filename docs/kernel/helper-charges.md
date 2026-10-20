@@ -27,14 +27,14 @@ or constant schedules.
 | `py.number_underscores` | `sum(8, size(digits))` | `sum(8, product(size(digits), size(digits)))` | 0 × 2/test | Repeated text assembly copies growing prefixes. |
 | `py.mul` | `sum(4, size(left), size(right), size(result))` | `sum(4, size(left), size(right), size(result))` | 2 × 2/test | Empty sequences repeat without growing; numeric multiplication keeps its size schedule. |
 | `py.format.group` | `sum(4, size(digits))` | `sum(4, product(size(digits), size(digits)))` | 1 × 2/test | Repeated prefix copies are quadratic; zero width requires a metered termination guard. |
-| `py.sorted` | `sum(8, product(256, size(values), sum(1, ceil_log2(size(values)))))` | `sum(8, product(2, size(values)), size(result))` | 0 × 2/test | Linear copying and key collection; key callbacks and the native merge bill separately. |
+| `py.sorted` | `sum(8, product(256, size(values), sum(1, ceil_log2(size(values)))))` | `sum(8, product(2, size(values)), size(result))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
 | `py.method.sort` | `sum(8, product(256, size(self), sum(1, ceil_log2(size(self)))))` | `sum(8, product(4, size(self)))` | 1 × 2/test | Linear copying, key collection, clearing and replacement; the native merge bills separately, and replacement pays 2 per test. |
 | `ts.array.integer` | `8` | `sum(8, deep(value))` | 0 × 2/test | Numeric coercion parses variable-sized input. |
 | `ts.array.dense` | `8` | `sum(8, size(this), size(result))` | 1 × 2/test | Dynamic or shrinking traversal pays 2 per test; formula covers the remaining work. |
 | `ts.array.spread` | `8` | `sum(8, size(this), size(result))` | 0 × 2/test | Container copying, scans and delegated collection work scale with operands and output. |
 | `ts.array.construct` | `8` | `sum(8, deep(args), size(result))` | 0 × 2/test | Container copying, scans and delegated collection work scale with operands and output. |
 | `ts.array.of` | `8` | `sum(8, deep(args), size(result))` | 0 × 2/test | Container copying, scans and delegated collection work scale with operands and output. |
-| `ts.array.push` | `8` | `sum(8, size(this), deep(args), size(result))` | 0 × 2/test | Container copying, scans and delegated collection work scale with operands and output. |
+| `ts.array.push` | `8` | `sum(8, size(this), deep(args), size(result))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
 | `ts.array.slice_generic` | `8` | `sum(8, size(this), deep(args), size(result))` | 2 × 2/test | Dynamic or shrinking traversal pays 2 per test; formula covers the remaining work. |
 | `ts.array.slice` | `8` | `sum(8, size(this), deep(args), size(result))` | 0 × 2/test | Container copying, scans and delegated collection work scale with operands and output. |
 | `ts.array.concat` | `8` | `sum(8, deep(this), deep(args), size(result))` | 0 × 2/test | Nested input arrays are traversed when concatenating. |
@@ -75,19 +75,19 @@ or constant schedules.
 | `ts.array.flatten` | `8` | `sum(8, size(source), size(depth), size(output), size(result))` | 0 × 2/test | Container copying, scans and delegated collection work scale with operands and output. |
 | `ts.array.flat` | `8` | `sum(8, size(this), deep(args), size(result))` | 0 × 2/test | Container copying, scans and delegated collection work scale with operands and output. |
 | `ts.array.flatMap` | `8` | `sum(8, size(this), deep(args), size(result))` | 1 × 2/test | Dynamic or shrinking traversal pays 2 per test; formula covers the remaining work. |
-| `ts.for_of.open` | `8` | `sum(8, size(subject), size(result))` | 0 × 2/test | Container copying, scans and delegated collection work scale with operands and output. |
+| `ts.for_of.open` | `8` | `sum(8, size(subject), size(result))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
 | `ts.for_of.next` | `8` | `sum(8, size(driver), size(result))` | 0 × 2/test | Container copying, scans and delegated collection work scale with operands and output. |
-| `ts.array.from` | `8` | `sum(8, deep(args), size(result))` | 3 × 2/test | Dynamic or shrinking traversal pays 2 per test; formula covers the remaining work. |
+| `ts.array.from` | `8` | `sum(8, deep(args), size(result))` | 4 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
 | `ts.boolean.convert` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.to_string` | `8` | `sum(8, deep(value), size(result))` | 0 × 2/test | Coercion traverses collections even on raise. |
 | `ts.to_property_key` | `8` | `sum(8, deep(key), size(result))` | 0 × 2/test | Primitive conversion and stringification traverse the operand. |
-| `ts.iterate` | `sum(4, size(target))` | `sum(4, size(target))` | 2 × 2/test | Dynamic or shrinking traversal pays 2 per test; formula covers the remaining work. |
-| `ts.set` | `sum(12, deep(key))` | `sum(12, deep(key))` | 3 × 2/test | Dynamic or shrinking traversal pays 2 per test; formula covers the remaining work. |
+| `ts.iterate` | `sum(4, size(target))` | `sum(4, size(target))` | 3 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
+| `ts.set` | `sum(12, deep(key))` | `sum(12, deep(key))` | 4 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
 | `ts.keys` | `sum(4, size(target))` | `sum(4, product(size(target), size(target)))` | 0 × 2/test | Numeric record keys use insertion sorting. |
 | `ts.assign` | `sum(4, size(source))` | `sum(4, product(size(source), size(source)))` | 0 × 2/test | Delegated source key ordering is quadratic. |
 | `ts.object_rest` | `sum(4, size(source), size(taken))` | `sum(4, product(size(source), size(source)), size(taken))` | 0 × 2/test | Source key ordering is quadratic before exclusions. |
 | `ts.boundary` | `sum(4, deep(value))` | `sum(4, deep(value))` | 1 × 2/test | Dynamic or shrinking traversal pays 2 per test; formula covers the remaining work. |
-| `ts.date.utc` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
+| `ts.date.utc` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
 | `ts.date.construct` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.date.parse` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.date.UTC` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
@@ -123,7 +123,7 @@ or constant schedules.
 | `ts.date.setSeconds` | `sum(8, deep(result))` | `sum(8, deep(this), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.date.setMilliseconds` | `sum(8, deep(result))` | `sum(8, deep(this), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.error.name` | `sum(8, deep(result))` | `sum(8, deep(value), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
-| `ts.error.construct` | `sum(8, deep(result))` | `sum(8, size(name), deep(args), size(aggregate), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
+| `ts.error.construct` | `sum(8, deep(result))` | `sum(8, size(name), deep(args), size(aggregate), deep(result))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
 | `ts.error.new_Error` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.error.new_TypeError` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.error.is_TypeError` | `sum(8, deep(result))` | `sum(8, deep(value), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
@@ -145,15 +145,15 @@ or constant schedules.
 | `ts.function.bind` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.function.toString` | `sum(8, deep(result))` | `sum(8, deep(this), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.json.parse` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
-| `ts.json.stringify_generic` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
+| `ts.json.stringify_generic` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
 | `ts.json.stringify` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
-| `ts.map.construct` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
+| `ts.map.construct` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
 | `ts.map.clear` | `sum(8, deep(result))` | `sum(8, deep(this), deep(result))` | 1 × 2/test | Dynamic or shrinking traversal pays 2 per test; formula covers the remaining work. |
 | `ts.map.keys` | `sum(8, deep(result))` | `sum(8, deep(this), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.map.values` | `sum(8, deep(result))` | `sum(8, deep(this), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.map.entries` | `sum(8, deep(result))` | `sum(8, deep(this), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.map.forEach` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 1 × 2/test | Dynamic or shrinking traversal pays 2 per test; formula covers the remaining work. |
-| `ts.map.groupBy` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
+| `ts.map.groupBy` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
 | `ts.math.abs` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.math.floor` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.math.ceil` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
@@ -182,9 +182,9 @@ or constant schedules.
 | `ts.math.round` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.math.atan2` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.math.pow` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
-| `ts.math.max` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
-| `ts.math.min` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
-| `ts.math.hypot` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
+| `ts.math.max` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
+| `ts.math.min` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
+| `ts.math.hypot` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 2 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
 | `ts.math.imul` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.math.clz32` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.math.fround` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
@@ -210,15 +210,15 @@ or constant schedules.
 | `ts.object.keys` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.object.values` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.object.entries` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
-| `ts.object.fromEntries` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
+| `ts.object.fromEntries` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
 | `ts.object.assign` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.object.hasOwn` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.object.is` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
-| `ts.object.groupBy` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
-| `ts.promise.members` | `sum(8, size(items))` | `sum(8, size(items), size(result))` | 0 × 2/test | A materialized iterator can produce more members than its descriptor size. |
+| `ts.object.groupBy` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
+| `ts.promise.members` | `sum(8, size(items))` | `sum(8, size(items), size(result))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
 | `ts.promise.all` | `48` | `sum(48, deep(args))` | 0 × 2/test | Eager member/reaction preparation scales with the iterable input. |
 | `ts.promise.all_settled` | `48` | `sum(48, deep(args))` | 0 × 2/test | Eager member/reaction preparation scales with the iterable input. |
-| `ts.promise.reactions` | `sum(8, size(items))` | `sum(8, size(items), size(result))` | 0 × 2/test | A materialized iterator can produce more members than its descriptor size. |
+| `ts.promise.reactions` | `sum(8, size(items))` | `sum(8, size(items), size(result))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
 | `ts.promise.race` | `48` | `sum(48, deep(args))` | 0 × 2/test | Eager member/reaction preparation scales with the iterable input. |
 | `ts.promise.any` | `48` | `sum(48, deep(args))` | 0 × 2/test | Eager member/reaction preparation scales with the iterable input. |
 | `ts.regexp.require` | `sum(8, deep(result))` | `sum(8, deep(this), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
@@ -238,16 +238,16 @@ or constant schedules.
 | `ts.regexp.source` | `sum(8, deep(result))` | `sum(8, deep(this), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.regexp.toString` | `sum(8, deep(result))` | `sum(8, deep(this), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.regexp.argument` | `sum(8, deep(result))` | `sum(8, deep(value), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
-| `ts.string.match` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
+| `ts.string.match` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
 | `ts.string.search` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
-| `ts.string.matchAll` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
-| `ts.string.split_generic` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
+| `ts.string.matchAll` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
+| `ts.string.split_generic` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 2 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
 | `ts.string.split` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.string.substitute` | `sum(8, deep(result))` | `sum(8, size(replacement), size(text), size(needle), size(position), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
-| `ts.string.replace_value` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), size(replace_every), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
+| `ts.string.replace_value` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), size(replace_every), deep(result))` | 4 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
 | `ts.string.replace` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.string.replaceAll` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
-| `ts.set.construct` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
+| `ts.set.construct` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
 | `ts.set.add` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.set.has` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.set.delete` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
@@ -281,15 +281,15 @@ or constant schedules.
 | `ts.string.substring` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.string.indexOf_generic` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.string.indexOf` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
-| `ts.string.lastIndexOf` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
+| `ts.string.lastIndexOf` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
 | `ts.string.includes_generic` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.string.startsWith_generic` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.string.endsWith_generic` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.string.includes` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.string.startsWith` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.string.endsWith` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
-| `ts.string.concat` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
-| `ts.string.normalize` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
+| `ts.string.concat` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
+| `ts.string.normalize` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
 | `ts.string.toLowerCase` | `sum(8, deep(result))` | `sum(8, deep(this), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.string.toUpperCase` | `sum(8, deep(result))` | `sum(8, deep(this), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.string.trim` | `sum(8, deep(result))` | `sum(8, deep(this), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
@@ -298,8 +298,8 @@ or constant schedules.
 | `ts.string.repeat` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.string.padStart` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.string.padEnd` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
-| `ts.string.fromCharCode` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
-| `ts.string.fromCodePoint` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
+| `ts.string.fromCharCode` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
+| `ts.string.fromCodePoint` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
 | `ts.string.raw` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 1 × 2/test | Dynamic or shrinking traversal pays 2 per test; formula covers the remaining work. |
 | `ts.string.apply_arguments` | `sum(8, deep(result))` | `sum(8, deep(value), deep(result))` | 1 × 2/test | Dynamic or shrinking traversal pays 2 per test; formula covers the remaining work. |
 | `ts.uri.escape` | `sum(8, deep(result))` | `sum(8, size(octet), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
@@ -312,11 +312,11 @@ or constant schedules.
 | `ts.url.construct` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.url.canParse` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.url_search_params.refresh` | `sum(8, deep(result))` | `sum(8, deep(params), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
-| `ts.url_search_params.construct` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
+| `ts.url_search_params.construct` | `sum(8, deep(result))` | `sum(8, deep(args), deep(result))` | 3 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
 | `ts.url_search_params.toString` | `sum(8, deep(result))` | `sum(8, deep(this), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
-| `ts.url_search_params.get` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
-| `ts.url_search_params.getAll` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
-| `ts.url_search_params.has` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
+| `ts.url_search_params.get` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
+| `ts.url_search_params.getAll` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
+| `ts.url_search_params.has` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
 | `ts.url_search_params.append` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.url_search_params.set` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 1 × 2/test | Dynamic or shrinking traversal pays 2 per test; formula covers the remaining work. |
 | `ts.url_search_params.delete` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 1 × 2/test | Dynamic or shrinking traversal pays 2 per test; formula covers the remaining work. |
@@ -324,9 +324,20 @@ or constant schedules.
 | `ts.url_search_params.keys` | `sum(8, deep(result))` | `sum(8, deep(this), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.url_search_params.values` | `sum(8, deep(result))` | `sum(8, deep(this), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
 | `ts.url_search_params.entries` | `sum(8, deep(result))` | `sum(8, deep(this), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
-| `ts.url_search_params.forEach` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 0 × 2/test | Input traversal and delegated conversions must be covered on success and raise. |
+| `ts.url_search_params.forEach` | `sum(8, deep(result))` | `sum(8, deep(this), deep(args), deep(result))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
 
-Kernel collection schedules retain their completion formulas. `list.clear`,
+Kernel collection schedules retain their completion formulas. `collection.map`, `filter`, `reduce`,
+`find`, `any`, `all`, `for_each` and `group_by` apply a guest callback that
+can grow the live input and detach or clear it before completion, so each
+declares two units per traversal test, and `tasks.wait_all` and
+`tasks.cancel_all` declare them for each round's result and cancellation
+loops, whose earlier rounds a later failure can discard (FIG-6971). The
+same rule covers every TypeScript and Python body whose extent can reach
+guest code through a callback, a coercion or a task join, including loops
+that run before the guest code: `ts.read` and `ts.in` meter their member
+scans too. `ts.number.ratio` raises `RangeError` at entry for a non-finite
+number, so its doubling loop is bounded by binary64 within its constant
+formula. `list.clear`,
 `map.clear`, `set.clear` and `record.clear` declare two units per shrinking
 traversal test. `list.sort` declares two units per merge/copy test because a
 comparator may shrink the original while the merge walks a captured copy.
@@ -400,6 +411,12 @@ is covered when there is no result. Raises use result size zero, as before.
 | `ts.uri.decode` | `sum(8, size(input), size(preserve), deep(result))` | `sum(32, product(64, size(input)), size(preserve), deep(result))` |
 | `ts.uri.decodeURI`, `ts.uri.decodeURIComponent` | `sum(8, deep(args), deep(result))` | `sum(32, product(64, deep(args)), deep(result))` |
 | `ts.uri.flush` | `sum(8, deep(result))` | `sum(8, size(octets), deep(result))` |
+| `py.gather` | `sum(6, size(tasks), size(result))` | `sum(6, size(tasks), size(result))` | 2 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
+| `ts.console.log` | `sum(4, deep(args))` | `sum(4, deep(args))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
+| `ts.has` | `sum(12, deep(key))` | `sum(12, deep(key))` | 3 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
+| `ts.has_own` | `sum(12, deep(key))` | `sum(12, deep(key))` | 4 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
+| `ts.object.propertyIsEnumerable` | `sum(12, size(this), deep(args))` | `sum(12, size(this), deep(args))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
+| `ts.pad` | `sum(2, size(items), magnitude(count))` | `sum(2, size(items), magnitude(count))` | 1 × 2/test | The append loop's trip count is count's value, which magnitude(count) does not measure, so it pays 2 per test (FIG-6971); the copy loop is bounded by size(items). |
 
 `helper_plans::uri_decode_completion_price_bounds_delegated_work_on_return_and_raise`
 pins K-URI-WORK: delegated calls plus heap-accounting changes and

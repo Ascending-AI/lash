@@ -408,7 +408,7 @@ errors "type_error", "RangeError"
 charge sum(8, deep(args), deep(result))
 body {
   let output = -inf
-  for arg in args {
+  for arg in args metered 2 {
     let value = invoke ts.to_number(arg)
     set output = num.max(output, value)
   }
@@ -421,7 +421,7 @@ errors "type_error", "RangeError"
 charge sum(8, deep(args), deep(result))
 body {
   let output = inf
-  for arg in args {
+  for arg in args metered 2 {
     let value = invoke ts.to_number(arg)
     set output = num.min(output, value)
   }
@@ -437,7 +437,7 @@ body {
   let infinite = false
   let invalid = false
   let scale = 0.0
-  for arg in args {
+  for arg in args metered 2 {
     let value = invoke ts.to_number(arg)
     set value = num.abs(value)
     if eq(value, inf) { set infinite = true }
@@ -449,7 +449,7 @@ body {
   if invalid { return nan }
   if eq(scale, 0) { return 0.0 }
   let sum = 0.0
-  for value in values {
+  for value in values metered 2 {
     let scaled = num.div(value, scale)
     set sum = num.add(sum, num.mul(scaled, scaled))
   }

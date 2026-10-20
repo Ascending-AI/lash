@@ -504,7 +504,7 @@ body {
   set position = invoke ts.string.clamp(n, length)
   let found = -1
   let next = 0
-  while num.le(next, position) {
+  while num.le(next, position) metered 2 {
     let at = text.utf16_find(text, needle, next)
     if num.lt(at, 0) { break }
     if num.lt(position, at) { break }
@@ -687,7 +687,7 @@ charge sum(8, deep(this), deep(args), deep(result))
 body {
   let text = invoke ts.string.receiver(this)
   let pieces = [text]
-  for value in args {
+  for value in args metered 2 {
     let piece = invoke ts.to_string(value)
     set pieces[list.len(pieces)] = piece
   }
@@ -708,7 +708,7 @@ body {
     set form = invoke ts.to_string(argument)
   }
   let valid = false
-  for name in ["NFC", "NFD", "NFKC", "NFKD"] {
+  for name in ["NFC", "NFD", "NFKC", "NFKD"] metered 2 {
     if same(form, name) { set valid = true }
   }
   if valid {} else { throw error.new("RangeError", "Invalid normalization form", null) }
@@ -843,7 +843,7 @@ errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, deep(args), deep(result))
 body {
   let units = []
-  for value in args {
+  for value in args metered 2 {
     let n = invoke ts.string.uint32(value)
     set units[list.len(units)] = int.rem_floor(n, 65536)
   }
@@ -858,7 +858,7 @@ errors "type_error", "RangeError", "TS_LONE_SURROGATE_UNSUPPORTED"
 charge sum(8, deep(args), deep(result))
 body {
   let units = []
-  for value in args {
+  for value in args metered 2 {
     let n = invoke ts.to_number(value)
     if num.is_finite(n) {} else { throw error.new("RangeError", "Invalid code point", null) }
     if eq(num.floor(n), n) {} else { throw error.new("RangeError", "Invalid code point", null) }

@@ -99,43 +99,43 @@ pub(super) fn functions() -> Vec<(&'static str, &'static str, &'static str, &'st
         ),
         (
             "collection.map(xs: Any, f: Fn(x: Any) -> Any) -> List(Any)",
-            "do invoke collection.function_check(f) let out = [] for x in xs { let y = apply f(x) set out[list.len(out)] = y } return out",
+            "do invoke collection.function_check(f) let out = [] for x in xs metered 2 { let y = apply f(x) set out[list.len(out)] = y } return out",
             "sum(1, size(xs), size(result))",
             "",
         ),
         (
             "collection.filter(xs: Any, f: Fn(x: Any) -> Bool) -> List(Any)",
-            "do invoke collection.function_check(f) let out = [] for x in xs { let keep = apply f(x) if keep { set out[list.len(out)] = x } } return out",
+            "do invoke collection.function_check(f) let out = [] for x in xs metered 2 { let keep = apply f(x) if keep { set out[list.len(out)] = x } } return out",
             "sum(1, size(xs), size(result))",
             "",
         ),
         (
             "collection.reduce(xs: Any, f: Fn(acc: Any, x: Any) -> Any, initial: Any) -> Any",
-            "do invoke collection.function_check(f) let acc = initial for x in xs { let next = apply f(acc, x) set acc = next } return acc",
+            "do invoke collection.function_check(f) let acc = initial for x in xs metered 2 { let next = apply f(acc, x) set acc = next } return acc",
             "sum(1, size(xs))",
             "",
         ),
         (
             "collection.find(xs: Any, f: Fn(x: Any) -> Bool) -> Any",
-            "do invoke collection.function_check(f) for x in xs { let found = apply f(x) if found { return x } } return absent",
+            "do invoke collection.function_check(f) for x in xs metered 2 { let found = apply f(x) if found { return x } } return absent",
             "sum(1, size(xs))",
             "",
         ),
         (
             "collection.any(xs: Any, f: Fn(x: Any) -> Bool) -> Bool",
-            "do invoke collection.function_check(f) for x in xs { let found = apply f(x) if found { return true } } return false",
+            "do invoke collection.function_check(f) for x in xs metered 2 { let found = apply f(x) if found { return true } } return false",
             "sum(1, size(xs))",
             "",
         ),
         (
             "collection.all(xs: Any, f: Fn(x: Any) -> Bool) -> Bool",
-            "do invoke collection.function_check(f) for x in xs { let found = apply f(x) if found { } else { return false } } return true",
+            "do invoke collection.function_check(f) for x in xs metered 2 { let found = apply f(x) if found { } else { return false } } return true",
             "sum(1, size(xs))",
             "",
         ),
         (
             "collection.for_each(xs: Any, f: Fn(x: Any) -> Any) -> Null",
-            "do invoke collection.function_check(f) for x in xs { do apply f(x) } return null",
+            "do invoke collection.function_check(f) for x in xs metered 2 { do apply f(x) } return null",
             "sum(1, size(xs))",
             "",
         ),
@@ -175,7 +175,7 @@ pub(super) fn functions() -> Vec<(&'static str, &'static str, &'static str, &'st
         ),
         (
             "collection.group_by(xs: Any, f: Fn(x: Any) -> Any) -> Map(Any, Any)",
-            "do invoke collection.function_check(f) let out = map{} for x in xs { let key = apply f(x) \
+            "do invoke collection.function_check(f) let out = map{} for x in xs metered 2 { let key = apply f(x) \
              if map.contains(out, key) { let group = out[key] set group[list.len(group)] = x } \
              else { set out[key] = [x] } } return out",
             "sum(1, size(xs), deep(result))",
@@ -209,15 +209,15 @@ pub(super) fn functions() -> Vec<(&'static str, &'static str, &'static str, &'st
         (
             "tasks.wait_all() -> List(Any)",
             "let out = [] while true metered 2 { let handles = tasks.unfinished() if eq(list.len(handles), 0) { break } \
-             let values = join all handles for value in values { set out[list.len(out)] = value } } return out",
+             let values = join all handles for value in values metered 2 { set out[list.len(out)] = value } } return out",
             "sum(1, size(result))",
             "",
         ),
         (
             "tasks.cancel_all() -> List(Any)",
             "let out = [] while true metered 2 { let handles = tasks.unfinished() if eq(list.len(handles), 0) { break } \
-             for handle in handles { do cancel handle } let outcomes = join settled handles \
-             for outcome in outcomes { set out[list.len(out)] = outcome } } return out",
+             for handle in handles metered 2 { do cancel handle } let outcomes = join settled handles \
+             for outcome in outcomes metered 2 { set out[list.len(out)] = outcome } } return out",
             "sum(1, size(result))",
             "",
         ),
