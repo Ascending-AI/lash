@@ -242,13 +242,13 @@ fn main() -> Outcome<()> {
 
     let counter = Counter::open()?;
     let (instructions, result) = counter.once(|| -> Outcome<lash_kernel_doc::Datum> {
-        let (library, closure) = embedding
-            .library_for(
-                &document,
-                &definitions,
-                lash_kernel_doc::KernelDataLimits::standard(),
-            )?
-            .map_err(|refusal| refusal.to_string())?;
+        let (library, closure) = lash_vm_worker::core_support::library_for(
+            &embedding,
+            &document,
+            &definitions,
+            lash_kernel_doc::KernelDataLimits::standard(),
+        )?
+        .map_err(|refusal| refusal.to_string())?;
         let program = lash_kernel_vm::Program {
             closure: PageId(closure.reference().0),
             document: Arc::clone(&document),

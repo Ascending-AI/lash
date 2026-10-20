@@ -572,8 +572,7 @@ fn a_run_from_stored_definitions_charges_exactly_as_the_writers_build() {
         .collect();
     let limits = lash_kernel_doc::KernelDataLimits::standard();
     let library = |embedding: &lash_vm_worker::Embedding, definitions| {
-        embedding
-            .library_for(&document, definitions, limits)
+        lash_vm_worker::core_support::library_for(embedding, &document, definitions, limits)
             .expect("a prepared frame")
             .expect("the run's library assembles")
     };

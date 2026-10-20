@@ -151,63 +151,6 @@ impl Embedding {
             .ok_or_else(|| EmbedError::Registry("unprepared frame".into()))
     }
 
-    /// The library `document` runs on, and its execution closure, which
-    /// the run's roots pin (FIG-6985): the frame's own when it holds every
-    /// function the document reaches; otherwise one assembled from the
-    /// frame's functions and `definitions`, the stored definitions of those
-    /// it lacks, each checked, with the frame's natives and plans bound by
-    /// identity. A run whose closure is incomplete, whose stored definition
-    /// is refused, or that needs a native this worker lacks is refused
-    /// alone, naming the function.
-    ///
-    /// # Errors
-    ///
-    /// [`EmbedError`] for an unprepared frame; the loader's refusal.
-    pub fn library_for(
-        &self,
-        document: &lash_kernel_doc::Document,
-        definitions: &[(FunctionId, &[u8])],
-        limits: lash_kernel_doc::KernelDataLimits,
-    ) -> Result<
-        Result<
-            (PreparedLibrary, lash_vm_broker::kernel::closure::Closure),
-            lash_vm_broker::kernel::loader::LoadRefusal,
-        >,
-        EmbedError,
-    > {
-        use lash_vm_broker::kernel::loader;
-        let frame = self.prepared_library()?;
-        let stored = match definitions
-            .iter()
-            .map(|(function, body)| {
-                self.stored
-                    .decode(*function, body, limits)
-                    .map(|definition| (*function, definition))
-            })
-            .collect::<Result<BTreeMap<_, _>, _>>()
-        {
-            Ok(stored) => stored,
-            Err(refusal) => return Ok(Err(refusal)),
-        };
-        let assembled = match loader::assemble(document, frame.registry(), &stored) {
-            Ok(assembled) => assembled,
-            Err(refusal) => return Ok(Err(refusal)),
-        };
-        if assembled.held {
-            return Ok(Ok((frame.clone(), assembled.closure)));
-        }
-        let library = self
-            .loaded
-            .get_or_try::<std::convert::Infallible>(assembled.closure.reference(), || {
-                Ok(PreparedLibrary::with_charge(
-                    Arc::clone(&assembled.registry),
-                    lash_kernel_vm::Charge::Exact,
-                ))
-            })
-            .unwrap_or_else(|never| match never {});
-        Ok(Ok((library, assembled.closure)))
-    }
-
     /// Lowers `source` as the installed dialect `dialect` does in `mode`:
     /// against `environment`'s library, offered effects and namespace
     /// roots, and, for a cell, its session bindings and saved functions.
@@ -309,6 +252,64 @@ impl Embedding {
         )
         .map_err(Namespaces::Refused)
     }
+}
+
+/// The library `document` runs on, and its execution closure, which
+/// the run's roots pin (FIG-6985): the frame's own when it holds every
+/// function the document reaches; otherwise one assembled from the
+/// frame's functions and `definitions`, the stored definitions of those
+/// it lacks, each checked, with the frame's natives and plans bound by
+/// identity. A run whose closure is incomplete, whose stored definition
+/// is refused, or that needs a native this worker lacks is refused
+/// alone, naming the function.
+///
+/// # Errors
+///
+/// [`EmbedError`] for an unprepared frame; the loader's refusal.
+pub fn library_for(
+    embedding: &Embedding,
+    document: &lash_kernel_doc::Document,
+    definitions: &[(FunctionId, &[u8])],
+    limits: lash_kernel_doc::KernelDataLimits,
+) -> Result<
+    Result<
+        (PreparedLibrary, lash_vm_broker::kernel::closure::Closure),
+        lash_vm_broker::kernel::loader::LoadRefusal,
+    >,
+    EmbedError,
+> {
+    use lash_vm_broker::kernel::loader;
+    let frame = embedding.prepared_library()?;
+    let stored = match definitions
+        .iter()
+        .map(|(function, body)| {
+            embedding
+                .stored
+                .decode(*function, body, limits)
+                .map(|definition| (*function, definition))
+        })
+        .collect::<Result<BTreeMap<_, _>, _>>()
+    {
+        Ok(stored) => stored,
+        Err(refusal) => return Ok(Err(refusal)),
+    };
+    let assembled = match loader::assemble(document, frame.registry(), &stored) {
+        Ok(assembled) => assembled,
+        Err(refusal) => return Ok(Err(refusal)),
+    };
+    if assembled.held {
+        return Ok(Ok((frame.clone(), assembled.closure)));
+    }
+    let library = embedding
+        .loaded
+        .get_or_try::<std::convert::Infallible>(assembled.closure.reference(), || {
+            Ok(PreparedLibrary::with_charge(
+                Arc::clone(&assembled.registry),
+                lash_kernel_vm::Charge::Exact,
+            ))
+        })
+        .unwrap_or_else(|never| match never {});
+    Ok(Ok((library, assembled.closure)))
 }
 
 /// Why an embedding composed no namespaces for a cell.

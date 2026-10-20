@@ -8,6 +8,14 @@
 //! Pool failures fence the checkout and never retry guest execution locally.
 
 mod embedding;
+
+/// Internal worker loading for runtime laws and measurement tools.
+/// Hosts submit runs through the worker service.
+#[doc(hidden)]
+pub mod core_support {
+    pub use crate::embedding::library_for;
+}
+
 #[cfg(feature = "dhat-heap")]
 mod heap_profile;
 #[cfg(all(unix, feature = "testing"))]

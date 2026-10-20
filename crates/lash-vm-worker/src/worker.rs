@@ -650,7 +650,7 @@ impl<'embedding> Server<'embedding> {
     /// same Arc also reuses PreparedLibrary's admission and code; eviction
     /// lets its weak document entries be reclaimed on admission. A miss
     /// decodes the body once, under the worker's data limits, and takes
-    /// the library the document runs on ([`Embedding::library_for`]): the
+    /// the library the document runs on ([`crate::embedding::library_for`]): the
     /// frame's when it holds every function the document reaches, and
     /// otherwise one assembled with `definitions`, the stored definitions
     /// of the others (FIG-6985). A `fresh` start whose library is refused
@@ -688,22 +688,25 @@ impl<'embedding> Server<'embedding> {
                 )
             })
             .collect();
-        let (library, closure) = self
-            .embedding
-            .library_for(&document, &supplied, self.bootstrap.tuning.kernel_data)
-            .map_err(|error| {
-                PoolError::breach(ProtocolBreach::Machine {
-                    detail: Detail::new(error),
-                })
-            })?
-            .map_err(|refusal| match fresh {
-                true => PoolError::refused(RunRefusal::Start {
-                    detail: Detail::new(refusal),
-                }),
-                false => PoolError::refused(RunRefusal::Restore {
-                    refusal: refusal.into(),
-                }),
-            })?;
+        let (library, closure) = crate::embedding::library_for(
+            self.embedding,
+            &document,
+            &supplied,
+            self.bootstrap.tuning.kernel_data,
+        )
+        .map_err(|error| {
+            PoolError::breach(ProtocolBreach::Machine {
+                detail: Detail::new(error),
+            })
+        })?
+        .map_err(|refusal| match fresh {
+            true => PoolError::refused(RunRefusal::Start {
+                detail: Detail::new(refusal),
+            }),
+            false => PoolError::refused(RunRefusal::Restore {
+                refusal: refusal.into(),
+            }),
+        })?;
         // Admitted by identity: one validated before, in lowering or an
         // earlier decode, is not validated again (FIG-6931). A refusal is
         // the start's, which admits it again.
