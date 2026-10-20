@@ -591,14 +591,13 @@ pub(crate) fn lower(
     if !lowerer.saved_used.is_empty() {
         // The saved functions the source names are declared in the cell's
         // own document, with what they require.
-        let catalog: &dyn FunctionCatalog = environment.library;
         lash_kernel_dialect::install(
             &mut document,
             cell.functions,
             &lowerer.saved_used,
             &crate::function_values(),
             environment.namespaces,
-            &|function| catalog.header(function).is_some(),
+            environment.library,
         )
         .map_err(|unusable| {
             Diagnostic::new(

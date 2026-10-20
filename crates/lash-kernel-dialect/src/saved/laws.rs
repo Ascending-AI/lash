@@ -191,7 +191,7 @@ fn installing_loads_no_capture_payload() {
         &BTreeSet::from([Name::new("read")]),
         &lash_kernel_doc::FunctionRepresentation::Bare,
         &crate::Namespaces::default(),
-        &|_| true,
+        &crate::NamedLibrary::new(),
     )
     .expect("install");
     assert_eq!(declarations.len(), 1);
@@ -551,7 +551,7 @@ fn installing_refuses_a_second_requirement_of_one_effect() {
                 &BTreeMap::new(),
             )
             .expect("an operation"),
-            &|_| true,
+            &crate::NamedLibrary::new(),
         )
         .map(|_| document.manifest.effects)
     };

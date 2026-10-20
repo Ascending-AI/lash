@@ -252,6 +252,10 @@ pub(crate) enum CellObservation {
     },
     /// A value no `catch` took ended the cell.
     Uncaught(Datum),
+    /// A package value another release of its package built ended the
+    /// cell at its first member call: the message names both releases by
+    /// their labels (§2.4, C3).
+    StaleValue { message: String },
     /// The cell ended with tasks unfinished, or failed unobserved
     /// (`K-TASK-018`).
     TasksOutstanding {
@@ -275,7 +279,24 @@ impl CellObservation {
     /// How a run's error ended the cell. An uncaught unbound-variable error
     /// that names a binding the session lost to `K-SES-003` is that rule's
     /// refusal.
-    pub(crate) fn of_run_error(error: RunError, not_carried: &BTreeMap<Name, String>) -> Self {
+    /// A `package.stale_value` names the two artifacts it compares by the
+    /// release labels `held` holds for them.
+    pub(crate) fn of_run_error(
+        error: RunError,
+        not_carried: &BTreeMap<Name, String>,
+        held: Option<&lash_kernel_package::HeldPackages>,
+    ) -> Self {
+        if let RunError::Uncaught {
+            error: Datum::Error(error),
+            ..
+        } = &error
+            && let Some(held) = held
+            && let Some(stale) = lash_kernel_package::StaleValue::of(error)
+        {
+            return Self::StaleValue {
+                message: stale.message(held),
+            };
+        }
         match error {
             RunError::Uncaught { error: value, .. } => {
                 if let Datum::Error(error) = &value
@@ -312,6 +333,7 @@ impl CellObservation {
             Self::BindingNotCarried { .. } => SESSION_BINDING_NOT_CARRIED.to_owned(),
             Self::Uncaught(Datum::Error(error)) => error.kind.clone(),
             Self::Uncaught(_) => "uncaught".to_owned(),
+            Self::StaleValue { .. } => lash_kernel_package::STALE_VALUE.to_owned(),
             Self::TasksOutstanding { .. } => CELL_TASKS_OUTSTANDING.to_owned(),
             Self::Deadlock { .. } => CELL_DEADLOCK.to_owned(),
             Self::Bound(_) => CELL_BOUND_EXCEEDED.to_owned(),
@@ -388,6 +410,10 @@ impl CellObservation {
             Self::Uncaught(value) => CellFailure::new(
                 CellFailureKind::Program,
                 format!("uncaught {}", datum_text(value)),
+            ),
+            Self::StaleValue { message } => CellFailure::new(
+                CellFailureKind::Program,
+                format!("uncaught {}: {message}", lash_kernel_package::STALE_VALUE),
             ),
             Self::TasksOutstanding {
                 unfinished,
@@ -771,7 +797,7 @@ mod tests {
             let End::Error(error) = end else {
                 panic!("bound error");
             };
-            let observation = CellObservation::of_run_error(error, &BTreeMap::new());
+            let observation = CellObservation::of_run_error(error, &BTreeMap::new(), None);
             let prompts = crate::CellDialect::typescript().prompts();
             let failure =
                 observation.failure("", None, crate::plugin::RlmChannel::Cell, prompts.as_ref());

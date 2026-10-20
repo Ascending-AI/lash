@@ -29,9 +29,9 @@ pub(crate) fn perform(
                 Ok(library) => library,
                 Err(not_held) => return respond(&not_held),
             };
-            let namespaces = match embedding.namespaces(operations) {
+            let namespaces = match embedding.namespaces(operations, &packages) {
                 Ok(namespaces) => namespaces,
-                Err(refused) => return respond(&namespace_refused(&refused)),
+                Err(refused) => return respond(&namespace_refused(refused)),
             };
             match embedding.dialects.get(&dialect) {
                 None => Response::UnknownDialect { dialect },
@@ -60,10 +60,10 @@ pub(crate) fn perform(
             packages,
         } => match (
             library_of(embedding, &packages)?,
-            embedding.namespaces(operations),
+            embedding.namespaces(operations, &packages),
         ) {
             (Err(not_held), _) => not_held,
-            (Ok(_), Err(refused)) => namespace_refused(&refused),
+            (Ok(_), Err(refused)) => namespace_refused(refused),
             (Ok(library), Ok(namespaces)) => match embedding.lower(
                 &dialect,
                 &source,
@@ -116,9 +116,9 @@ pub(crate) fn perform(
                 Ok(library) => library,
                 Err(not_held) => return respond(&not_held),
             };
-            let namespaces = match embedding.namespaces(operations) {
+            let namespaces = match embedding.namespaces(operations, &packages) {
                 Ok(namespaces) => namespaces,
-                Err(refused) => return respond(&namespace_refused(&refused)),
+                Err(refused) => return respond(&namespace_refused(refused)),
             };
             let environment = lash_kernel_dialect::Environment::new(library, &namespaces);
             match import_module(embedding, language, &source, &environment, limits) {
@@ -187,7 +187,13 @@ fn respond(response: &Response) -> Result<EncodedPayload, PoolError> {
 
 /// A namespace tree the offered operations could not compose, as the
 /// dialect refusal of the source lowered against it.
-fn namespace_refused(refused: &lash_kernel_dialect::NamespaceRefusal) -> Response {
+fn namespace_refused(refused: crate::embedding::Namespaces) -> Response {
+    let refused = match refused {
+        crate::embedding::Namespaces::PackagesNotHeld { packages } => {
+            return Response::PackagesNotHeld { packages };
+        }
+        crate::embedding::Namespaces::Refused(refused) => refused,
+    };
     Response::DialectRefused(DialectRefusal {
         code: "NAMESPACE_REFUSED".to_owned(),
         message: refused.to_string(),

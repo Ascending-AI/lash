@@ -216,6 +216,7 @@ pub(crate) fn projected_request_with_facts(
         ),
         bound_variables: Arc::from("- `scratch_note` = \"saved\""),
         read_only_variables: None,
+        packages: None,
         globals: Default::default(),
     };
     let config = projection_test_config("test-model", Default::default(), None);

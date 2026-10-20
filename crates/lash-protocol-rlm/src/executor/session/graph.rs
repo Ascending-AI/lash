@@ -5,7 +5,7 @@ use lash_kernel_doc::graph_tokens::{TokenCodec, TokenReader, TokenWriter, encode
 use lash_kernel_doc::heap::{HeapFault, PageRef};
 use std::collections::BTreeSet;
 
-use lash_kernel_doc::{FunctionId, NumberPolicy};
+use lash_kernel_doc::{FunctionId, NumberPolicy, PackageSetDigest};
 use lash_kernel_state::paged::session::SessionNotes;
 use lash_kernel_state::paged::{PageBody, PageKind, PageSource, SessionRoot};
 
@@ -20,10 +20,13 @@ pub(super) struct SessionDescriptor {
     /// The library functions the session's saved functions pin, together
     /// (FIG-5799): bounded by the build's library, never by the session.
     pub pins: BTreeSet<FunctionId>,
+    /// The package set every saved function is linked to: the last cell's
+    /// (K-LIB-009). A cell of that set relinks and re-saves nothing.
+    pub linked: Option<PackageSetDigest>,
 }
 impl TokenCodec for SessionDescriptor {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(7);
+        out.seq(8);
         self.dialect.encode(out);
         self.numbers.encode(out);
         self.kernel.encode(out);
@@ -31,11 +34,12 @@ impl TokenCodec for SessionDescriptor {
         self.session.encode(out);
         self.notes.encode(out);
         self.pins.encode(out);
+        self.linked.encode(out);
     }
     fn decode(
         input: &mut TokenReader<'_>,
     ) -> Result<Self, lash_kernel_doc::graph_tokens::TokenError> {
-        input.expect_struct(7)?;
+        input.expect_struct(8)?;
         Ok(Self {
             dialect: String::decode(input)?,
             numbers: NumberPolicy::decode(input)?,
@@ -44,6 +48,7 @@ impl TokenCodec for SessionDescriptor {
             session: SessionRoot::decode(input)?,
             notes: SessionNotes::decode(input)?,
             pins: BTreeSet::decode(input)?,
+            linked: Option::decode(input)?,
         })
     }
 }

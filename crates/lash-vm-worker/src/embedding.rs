@@ -164,17 +164,27 @@ impl Embedding {
         Some(dialect.front_end.lower(source, environment, mode))
     }
 
-    /// The namespaces `operations` compose with this embedding's packages,
-    /// under the roots its installed dialects reserve: what a cell, a
-    /// workflow import and discovery all resolve through.
+    /// The namespaces `operations` compose with the package set
+    /// `packages`, under the roots its packages and this embedding's
+    /// installed dialects reserve: what a cell, a workflow import and
+    /// discovery all resolve through (P3).
     ///
     /// # Errors
     ///
-    /// [`lash_kernel_dialect::NamespaceRefusal`], naming both sides.
-    pub fn namespaces(
+    /// [`Namespaces::PackagesNotHeld`] for a set the embedding does not
+    /// hold, and [`Namespaces::Refused`] naming both sides of a refused
+    /// composition.
+    pub(crate) fn namespaces(
         &self,
         operations: lash_kernel_dialect::Operations,
-    ) -> Result<lash_kernel_dialect::Namespaces, lash_kernel_dialect::NamespaceRefusal> {
+        packages: &PackageSetDigest,
+    ) -> Result<lash_kernel_dialect::Namespaces, Namespaces> {
+        let view = self
+            .held
+            .view(packages)
+            .map_err(|refusal| Namespaces::PackagesNotHeld {
+                packages: refusal.packages,
+            })?;
         let reserves = |root: &str| {
             self.dialects
                 .values()
@@ -182,12 +192,23 @@ impl Embedding {
         };
         lash_kernel_dialect::Namespaces::build(
             &lash_kernel_dialect::Reserving {
-                view: &lash_kernel_dialect::NoPackages,
+                view: &view,
                 reserves: &reserves,
             },
             operations,
         )
+        .map_err(Namespaces::Refused)
     }
+}
+
+/// Why an embedding composed no namespaces for a cell.
+#[derive(Debug)]
+pub(crate) enum Namespaces {
+    /// The cell's package set is not one the embedding holds.
+    PackagesNotHeld {
+        packages: PackageSetDigest,
+    },
+    Refused(lash_kernel_dialect::NamespaceRefusal),
 }
 
 /// A worker's configuration while it is assembled: the natives the host
@@ -314,11 +335,7 @@ fn set_library(
         .map_err(|refusal| EmbedError::PackagesNotHeld {
             packages: refusal.packages,
         })?;
-    let functions: std::collections::BTreeSet<FunctionId> = view
-        .packages()
-        .flat_map(|package| package.code().ids().iter().copied())
-        .collect();
-    NamedLibrary::resolving(registry, |function| functions.contains(function))
+    view.library(registry)
         .map_err(|error| EmbedError::Registry(error.to_string()))
 }
 

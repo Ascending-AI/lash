@@ -35,8 +35,8 @@ use crate::graph_tokens::{
 };
 use crate::{
     Bytes, Datum, DocumentId, EffectIdentity, ErrorDatum, Float, FunctionId, Handle, Integer,
-    JoinMode, LoopIteration, Name, NumberPolicy, NumberToken, QualifiedName, Site, SpawnIdentity,
-    TaskId, TaskIdentity, Timestamp, Unit,
+    JoinMode, LoopIteration, Name, NumberPolicy, NumberToken, PackageSetDigest, QualifiedName,
+    Site, SpawnIdentity, TaskId, TaskIdentity, Timestamp, Unit,
 };
 
 /// The deepest a decoded value, form or type may nest, in recursive
@@ -301,7 +301,7 @@ macro_rules! digest_codec {
     )*};
 }
 
-digest_codec!(FunctionId, DocumentId);
+digest_codec!(FunctionId, DocumentId, PackageSetDigest);
 
 macro_rules! handle_codec {
     ($($name:ident),*) => {$(

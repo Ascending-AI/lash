@@ -254,6 +254,55 @@ impl SessionEditor {
         Ok(functions)
     }
 
+    /// Rewrites the saved function `name` as relinked to its next cell's
+    /// package set (K-LIB-009): its description, now `description`, and
+    /// the execution closure its code calls into, now `closure`. Its
+    /// captures, token and binding stay as they are. Answers whether the
+    /// session held it.
+    ///
+    /// # Errors
+    ///
+    /// The heap's faults.
+    pub fn relink_function(
+        &mut self,
+        name: &Name,
+        description: &[u8],
+        closure: lash_kernel_doc::heap::PageRef,
+    ) -> Result<bool, HeapFault> {
+        let mut functions = Tree::<FunctionRecord>::of_keyed(&self.functions);
+        let key = metadata_key(name);
+        let Some(mut record) = functions.get(&key, self.heap.pages())? else {
+            return Ok(false);
+        };
+        record.meta = PageValue::Bytes(self.heap.bytes(description)?);
+        record.closure = closure;
+        functions.write(key, record, self.heap.pages())?;
+        self.functions = sealed(functions, &mut self.heap)?;
+        self.changed = true;
+        Ok(true)
+    }
+
+    /// Drops the saved function `name` and the binding of its name: what a
+    /// cell start does with one its package set cannot serve
+    /// (RELINK-CLOSURE). Answers whether the session held it.
+    ///
+    /// # Errors
+    ///
+    /// The heap's faults.
+    pub fn drop_function(&mut self, name: &Name) -> Result<bool, HeapFault> {
+        let mut functions = Tree::<FunctionRecord>::of_keyed(&self.functions);
+        if functions
+            .remove(&metadata_key(name), self.heap.pages())?
+            .is_none()
+        {
+            return Ok(false);
+        }
+        self.functions = sealed(functions, &mut self.heap)?;
+        self.remove(name)?;
+        self.changed = true;
+        Ok(true)
+    }
+
     /// Whether an edit changed the session.
     #[must_use]
     pub fn edited(&self) -> bool {
@@ -279,6 +328,18 @@ impl SessionEditor {
             functions: self.functions,
         })
     }
+}
+
+/// `tree` sealed, as the root a session names.
+fn sealed(mut tree: Tree<FunctionRecord>, heap: &mut PagedHeap) -> Result<KeyedRoot, HeapFault> {
+    let mut work = lash_kernel_state::kernel_internals::tree::SealWork::new(
+        lash_kernel_state::paged::SealBudget {
+            pages: u64::MAX,
+            bytes: u64::MAX,
+        },
+    );
+    tree.seal(heap.pages(), &mut work)?;
+    tree.keyed_root()
 }
 
 fn write_fault(error: HeapWriteError) -> HeapFault {

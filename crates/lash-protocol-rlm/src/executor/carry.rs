@@ -18,6 +18,7 @@ use lash_core_store::checkpoint_graph::bodies::{ExecRoot, ExecStatus};
 use lash_core_store::checkpoint_graph::{GraphDecoder, NodeKind};
 use lash_kernel_dialect::SavedFunction;
 use lash_kernel_doc::{FunctionId, FunctionRegistry, KERNEL_VERSION, KernelVersion};
+use lash_kernel_package::HeldPackages;
 use lash_vm_runtime::{
     KernelMigrationRefusal, ParkedRefusal, migrate_saved_function, plan_migration,
 };
@@ -28,38 +29,63 @@ use super::envelope::CellEnvelope;
 /// with: the library its workers hold and the kernel version it writes.
 #[derive(Clone)]
 pub(crate) struct KernelCarry {
-    /// The library the workers were assembled with; `None` is lash's own.
-    functions: Option<Arc<FunctionRegistry>>,
+    library: Held,
     writes: KernelVersion,
+}
+
+/// What a carry reads library functions from.
+#[derive(Clone)]
+enum Held {
+    /// The packages the host registered: what its workers were assembled
+    /// with, and whose sets a cell runs on.
+    Packages(Arc<HeldPackages>),
+    /// A registry alone: what a survey of stored cells reads.
+    Registry(Arc<FunctionRegistry>),
+    /// lash's own packages.
+    Lash,
 }
 
 impl Default for KernelCarry {
     fn default() -> Self {
-        Self::new(None, None)
+        Self::holding(None, None)
     }
 }
 
 impl KernelCarry {
-    /// A carry to `writes`, the newest version when `None`, against
-    /// `functions`.
-    pub(crate) fn new(
-        functions: Option<Arc<FunctionRegistry>>,
+    /// A carry to `writes`, the newest version when `None`, against the
+    /// host's `packages`, lash's own when `None`.
+    pub(crate) fn holding(
+        packages: Option<Arc<HeldPackages>>,
         writes: Option<KernelVersion>,
     ) -> Self {
         Self {
-            functions,
+            library: packages.map_or(Held::Lash, Held::Packages),
             writes: writes.unwrap_or(KernelVersion::NEWEST),
         }
     }
 
     pub(crate) fn library(&self) -> Result<Arc<FunctionRegistry>, KernelMigrationRefusal> {
-        match &self.functions {
-            Some(functions) => Ok(Arc::clone(functions)),
-            None => lash_vm_runtime::lash_packages()
-                .map(|packages| std::sync::Arc::clone(packages.functions()))
-                .map_err(|error| KernelMigrationRefusal::State {
-                    message: format!("the build's library does not assemble: {error}"),
-                }),
+        match &self.library {
+            Held::Registry(functions) => Ok(Arc::clone(functions)),
+            Held::Packages(_) | Held::Lash => self
+                .packages()
+                .map(|packages| Arc::clone(packages.functions()))
+                .map_err(|message| KernelMigrationRefusal::State { message }),
+        }
+    }
+
+    /// The packages a cell's set is viewed in.
+    ///
+    /// # Errors
+    ///
+    /// lash's packages do not assemble, or the carry reads a registry
+    /// alone.
+    pub(crate) fn packages(&self) -> Result<Arc<HeldPackages>, String> {
+        match &self.library {
+            Held::Packages(packages) => Ok(Arc::clone(packages)),
+            Held::Lash => lash_vm_runtime::lash_packages()
+                .map_err(|error| format!("the build's library does not assemble: {error}")),
+            Held::Registry(_) => Err("a survey's carry holds no packages".to_owned()),
         }
     }
 
@@ -141,9 +167,12 @@ pub fn cell_migration_refusal(
     cell: &StoredCell,
     functions: Arc<FunctionRegistry>,
 ) -> Option<KernelMigrationRefusal> {
-    KernelCarry::new(Some(functions), None)
-        .cell_snapshot(cell)
-        .err()
+    KernelCarry {
+        library: Held::Registry(functions),
+        writes: KernelVersion::NEWEST,
+    }
+    .cell_snapshot(cell)
+    .err()
 }
 
 /// The library functions the cell `cell`, a cell's stored root, pins:

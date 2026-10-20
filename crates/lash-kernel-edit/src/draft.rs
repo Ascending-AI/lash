@@ -64,10 +64,12 @@ impl Draft {
         &self.since_open
     }
 
-    /// Re-links library references by their manifest names against `registry`
-    /// and derives the full manifest closure, including transitive callees.
-    /// Each directly referenced name must select exactly one registered identity.
-    /// Old transitive listings are replaced by the selected definitions' closure.
+    /// Re-links library references by their manifest names to the package
+    /// set `view` shows and derives the full manifest closure, including
+    /// transitive callees (K-LIB-009). Each directly referenced name must
+    /// select exactly one of the set's definitions; a retained set's
+    /// definition of the same name is never one. Old transitive listings
+    /// are replaced by the selected definitions' closure.
     ///
     /// This is an atomic linking operation, separate from canvas authoring.
     /// It checks the resulting document's types and scope, but hosts must still
@@ -75,9 +77,9 @@ impl Draft {
     /// A refusal leaves the document, identity and correspondence unchanged.
     pub fn relink(
         &mut self,
-        registry: &lash_kernel_doc::FunctionRegistry,
+        view: &lash_kernel_package::PackageView<'_>,
     ) -> Result<Correspondence, crate::RelinkRefusal> {
-        let (document, edited) = crate::relink::relink(&self.document, registry)?;
+        let (document, edited) = crate::relink::relink(&self.document, view)?;
         let identity = document.identity();
         let correspondence = Correspondence::of(
             self.identity,

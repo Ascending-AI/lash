@@ -117,6 +117,7 @@ impl RlmRuntimeState {
             ),
             bound_variables,
             read_only_variables,
+            packages: self.dialect.package_surface().await,
             globals: Arc::new(globals),
         })
     }

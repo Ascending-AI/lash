@@ -1,22 +1,29 @@
 //! Library re-linking is independent of the closed canvas vocabulary.
+//!
+//! A document is re-linked to one package set's view (K-LIB-009): each
+//! library reference takes the identity the set defines under its name,
+//! never a retained set's, so a node that still holds an earlier release
+//! of a package re-links to the set it was asked for alone.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::{Document, FunctionId, FunctionName, FunctionRegistry, InvalidReason, Site};
+use lash_kernel_doc::{Document, FunctionId, FunctionName, InvalidReason, Site};
+use lash_kernel_package::PackageView;
 
 use crate::EditRefusal;
 use crate::refusal::refused;
 
-/// A registry cannot unambiguously re-link a document, or the result fails checking.
+/// A package set's view cannot unambiguously re-link a document, or the
+/// result fails checking.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum RelinkRefusal {
-    #[error("no registered library function is named `{name}` (formerly {function})")]
+    #[error("the package set defines no library function named `{name}` (formerly {function})")]
     MissingFunction {
         function: FunctionId,
         name: FunctionName,
     },
-    #[error("more than one registered library function is named `{name}`: {functions:?}")]
+    #[error("the package set defines more than one library function named `{name}`: {functions:?}")]
     AmbiguousFunction {
         name: FunctionName,
         functions: Vec<FunctionId>,
@@ -27,15 +34,13 @@ pub enum RelinkRefusal {
 
 pub(crate) fn relink(
     original: &Document,
-    registry: &FunctionRegistry,
+    view: &PackageView<'_>,
 ) -> Result<(Document, BTreeSet<Site>), RelinkRefusal> {
-    let mut named: BTreeMap<&FunctionName, Vec<FunctionId>> = BTreeMap::new();
-    for (identity, registered) in registry.iter() {
-        named
-            .entry(&registered.definition().name)
-            .or_default()
-            .push(*identity);
+    let mut named: BTreeMap<&str, Vec<FunctionId>> = BTreeMap::new();
+    for (name, identity) in view.definitions() {
+        named.entry(name).or_default().push(identity);
     }
+    let registry = view.catalog().as_ref();
     let mut resolved = BTreeMap::new();
     let mut replace = |identity: &mut FunctionId| -> Result<bool, RelinkRefusal> {
         let replacement = if let Some(replacement) = resolved.get(identity) {
@@ -54,7 +59,11 @@ pub(crate) fn relink(
                     }],
                 })
             })?;
-            let replacement = match named.get(name).map(Vec::as_slice).unwrap_or_default() {
+            let replacement = match named
+                .get(name.as_str())
+                .map(Vec::as_slice)
+                .unwrap_or_default()
+            {
                 [] => {
                     return Err(RelinkRefusal::MissingFunction {
                         function: *identity,

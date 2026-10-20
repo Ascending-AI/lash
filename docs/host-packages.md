@@ -271,16 +271,26 @@ does not adopt an already-running process. The
 A new cell lowers against the package set selected for that cell. A parked
 cell keeps its exact execution closure until it completes.
 
-Today a top-level function binding is saved as a self-contained document
-when its cell succeeds. Captures freeze at cell end; installation in the
-next cell checks that its library identities and operation signatures are
-available. An unusable saved function is reported with its typed reason.
+A top-level function binding is saved as a self-contained document when
+its cell succeeds, with its captures frozen at cell end. At the start of
+each later cell, the session relinks every saved function by name to the
+cell's package set (`relink_saved`). Each package function it calls takes
+the identity that set defines under the same name, even while the node
+still holds an earlier release. Each package operation it performs takes
+the set's requirement, so a changed contract under an unchanged signature is
+taken. A saved function whose callee the set no longer defines, or defines
+or offers under another signature, is dropped at the cell's start. The
+session lists it as not carried with `Unusable::Relink`, naming the function,
+the callee and the `RelinkGap`. The session records the set it is linked to
+(`linked`); a cell under that set rewrites nothing. Installing a saved
+function into a cell checks that every function it lists is the cell's
+set's.
+
 Functions nested inside carried data are refused as
 `NotSaved::FunctionInData`. In particular, a dataframe plan retaining its
 user callback cannot yet carry between cells. Tasks, functions made by
 library code and functions performing control operations also prevent
-saving. Relinking saved functions to the selected package set and saving
-functions nested in data are in progress.
+saving. Saving functions nested in data is in progress.
 
 Package values have the brand `(package, type)` and the digest of the
 artifact that built them. Only declared members are accessible. A member

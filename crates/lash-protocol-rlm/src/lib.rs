@@ -26,6 +26,7 @@ pub mod host_graph {
 }
 mod feedback;
 mod native;
+mod package_surface;
 mod plugin;
 pub use native::NATIVE_EXECUTE_TOOL_NAME;
 mod projection;

@@ -60,6 +60,7 @@ fn facts() -> RlmPromptFacts {
             &crate::dialect::TypescriptPrompts,
         )
         .expect("presentable fixture"),
+        packages: None,
         globals: Default::default(),
     }
 }
@@ -292,6 +293,7 @@ fn bound_variables_render_late_in_name_order() {
                 history_binding: Arc::from(""),
                 bound_variables,
                 read_only_variables: None,
+                packages: None,
                 globals: Default::default(),
             }),
             ..Call::default()
@@ -503,6 +505,7 @@ fn the_initial_instructions_are_stable_while_globals_change() {
                     history_binding: Arc::from(""),
                     bound_variables,
                     read_only_variables: None,
+                    packages: None,
                     globals: Default::default(),
                 }),
                 iteration,

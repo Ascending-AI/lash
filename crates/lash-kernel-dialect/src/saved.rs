@@ -11,8 +11,8 @@ use lash_kernel_doc::snapshot::{
     freeze_token, gather, members, text_is, text_of, token_closure,
 };
 use lash_kernel_doc::{
-    Action, Callee, Document, EffectName, Expr, Function, FunctionCatalog, FunctionId,
-    FunctionRepresentation, Name, OperationRequirement, Rhs, Site, Stmt, Unit,
+    Action, Callee, Document, EffectName, Expr, Function, FunctionCatalog, FunctionRepresentation,
+    Name, OperationRequirement, Rhs, Site, Stmt, Unit,
 };
 use lash_kernel_state::kernel_internals::PagedHeap;
 use lash_kernel_state::paged::{FrozenRef, HeapLifecycle, HeapWriteError, SemanticHeap};
@@ -21,10 +21,14 @@ use std::collections::{BTreeMap, BTreeSet};
 mod graph;
 #[cfg(test)]
 mod laws;
+mod relink;
+#[cfg(test)]
+mod relink_laws;
 pub use graph::{
     Bundle, BundleBody, BundleRefusal, DOCUMENT_NODE_KIND, FUNCTION_BUNDLE_NODE_KIND, MemberBody,
 };
 pub use lash_kernel_doc::snapshot::CaptureRefusal;
+pub use relink::{RelinkGap, relink_saved};
 
 #[derive(Clone, Debug)]
 pub struct SavedFunction {
@@ -261,11 +265,15 @@ pub enum Unusable {
     /// It performs an effect the environment does not offer.
     #[error("the saved function `{function}` calls `{effect}`, which this session does not offer")]
     EffectMissing { function: Name, effect: EffectName },
-    /// The environment offers the effect under another signature.
-    #[error(
-        "the saved function `{function}` calls `{effect}` under a signature this session does not offer it under"
-    )]
-    EffectSignature { function: Name, effect: EffectName },
+    /// The cell's package set, or its offer, does not serve one of its
+    /// callees: a library function or an operation (RELINK-CLOSURE). The
+    /// function is dropped at the cell's start, named.
+    #[error("the saved function `{function}` calls `{callee}`, which {gap}")]
+    Relink {
+        function: Name,
+        callee: String,
+        gap: RelinkGap,
+    },
     /// It requires an effect under another requirement than the document
     /// or another saved function does (`ADM-REQUIREMENT`).
     #[error(
@@ -284,11 +292,6 @@ pub enum Unusable {
         "the saved function `{function}` calls `{effect}`, which now ends the turn; a function cannot end it"
     )]
     EffectControls { function: Name, effect: EffectName },
-    /// It calls a library function the environment has not installed.
-    #[error(
-        "the saved function `{function}` needs the library function `{library}`, which is not installed"
-    )]
-    LibraryMissing { function: Name, library: String },
     /// It was written under another number policy than the document's.
     #[error("the saved function `{function}` decodes numbers by another policy than this session")]
     Numbers { function: Name },
@@ -686,7 +689,7 @@ pub fn install(
     roots: &BTreeSet<Name>,
     values: &FunctionRepresentation,
     namespaces: &crate::Namespaces,
-    installed: &dyn Fn(&FunctionId) -> bool,
+    library: &dyn crate::Library,
 ) -> Result<BTreeMap<Name, InstalledFunction>, Unusable> {
     let mut declarations = BTreeMap::new();
     // One effect name is one requirement across the document and every
@@ -718,9 +721,10 @@ pub fn install(
                     });
                 }
                 Some((_, offered)) if offered.requirement.signature != requirement.signature => {
-                    return Err(Unusable::EffectSignature {
+                    return Err(Unusable::Relink {
                         function: name,
-                        effect: effect.clone(),
+                        callee: effect.to_string(),
+                        gap: RelinkGap::Signature,
                     });
                 }
                 _ => (),
@@ -737,12 +741,23 @@ pub fn install(
                 });
             }
         }
-        for (library, listed) in &function.document.manifest.functions {
-            if !installed(library) {
-                return Err(Unusable::LibraryMissing {
-                    function: name,
-                    library: listed.to_string(),
-                });
+        // Everything one cell runs comes from its one package set
+        // (CURRENT-RELEASE): each function the saved one lists is the
+        // set's of its name, as relinking at the cell's start left it.
+        for (function, listed) in &function.document.manifest.functions {
+            match library.resolve(listed.as_str()) {
+                Some(held) if held == *function => {}
+                held => {
+                    return Err(Unusable::Relink {
+                        function: name,
+                        callee: listed.to_string(),
+                        gap: if held.is_some() {
+                            RelinkGap::Unlinked
+                        } else {
+                            RelinkGap::Removed
+                        },
+                    });
+                }
             }
         }
         if document.functions.contains_key(&name) {

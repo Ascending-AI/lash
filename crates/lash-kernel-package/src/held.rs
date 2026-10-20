@@ -210,6 +210,45 @@ impl<'a> PackageView<'a> {
             .filter_map(move |key| held.artifacts.get(&key).map(AsRef::as_ref))
     }
 
+    /// Every definition of the set's packages, by name with its identity:
+    /// the one name table relink and lowering resolve the cell's library
+    /// references in. A retained artifact of another set is never in it.
+    pub fn definitions(&self) -> impl Iterator<Item = (&'a str, FunctionId)> + 'a {
+        self.packages().flat_map(|package| {
+            let code = package.code();
+            code.ids()
+                .iter()
+                .enumerate()
+                .map(move |(at, function)| (code.name(at), *function))
+        })
+    }
+
+    /// Every held function by identity, the set's and the retained ones:
+    /// the catalog a document written under any held set is read in.
+    pub fn catalog(&self) -> &'a Arc<FunctionRegistry> {
+        &self.held.functions
+    }
+
+    /// The set's functions by name over `registry`'s by identity: what a
+    /// front end lowers a cell of this set against and what a carried
+    /// saved function relinks to (K-LIB-009).
+    ///
+    /// # Errors
+    ///
+    /// Two of the set's definitions under one name.
+    pub fn library(
+        &self,
+        registry: &FunctionRegistry,
+    ) -> Result<lash_kernel_dialect::NamedLibrary, lash_kernel_dialect::LibraryError> {
+        let functions: BTreeSet<FunctionId> = self
+            .packages()
+            .flat_map(|package| package.code().ids().iter().copied())
+            .collect();
+        lash_kernel_dialect::NamedLibrary::resolving(registry, |function| {
+            functions.contains(function)
+        })
+    }
+
     /// The set's package at `path`.
     pub fn package(&self, path: &PackagePath) -> Option<&'a Package> {
         let digest = self.set.members().get(path)?;

@@ -382,9 +382,6 @@ async fn link_cell(
         .prepare_cell(ctx.session_pages())
         .await
         .map_err(|error| host_failure(format!("the session's state is not readable: {error}")))?;
-    let mut names = state.names();
-    names.extend(projected.keys().map(|name| Name::new(name.as_str())));
-
     // A cell is written under the first package set every live serving
     // node holds (FIG-6918, FLEET-SET).
     let packages = match &services.packages {
@@ -402,6 +399,32 @@ async fn link_cell(
                 .own(),
         ),
     };
+    // Every carried saved function is relinked by name to that set, or
+    // dropped naming it (RELINK-CLOSURE): what the cell lowers and what it
+    // calls of the session come from the one set (CURRENT-RELEASE).
+    let held = services.kernel.packages().map_err(host_failure)?;
+    state
+        .relink(packages.digest(), &held)
+        .await
+        .map_err(|error| match error {
+            session::RelinkError::NotHeld(not_held) => lash_core::CellFailure::new(
+                lash_core::CellFailureKind::PackagesNotHeld {
+                    packages: not_held.packages,
+                },
+                format!(
+                    "this cell is written under package set {}, and this node does not hold it",
+                    not_held.packages
+                ),
+            )
+            .into(),
+            other => host_failure(format!(
+                "the session's saved functions are not relinked: {other}"
+            )),
+        })?;
+    // What the cell is lowered against: the session's names as relinking
+    // left them, and the host's read-only ones.
+    let mut names = state.names();
+    names.extend(projected.keys().map(|name| Name::new(name.as_str())));
 
     // gather → decide → offer: the run's deferred provider matches the
     // paths no surface tool answers, and the matches commit before the cell
@@ -1199,7 +1222,11 @@ async fn run_linked_cell(
                 ),
             ),
             End::Error(error) => {
-                let observation = CellObservation::of_run_error(error, &state.not_carried());
+                let observation = CellObservation::of_run_error(
+                    error,
+                    &state.not_carried(),
+                    services.kernel.packages().ok().as_deref(),
+                );
                 respond(lash_core::CellOutcome::Failed(observation.failure(
                     code,
                     source_map.as_ref().filter(|map| {

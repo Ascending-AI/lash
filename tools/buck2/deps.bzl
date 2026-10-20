@@ -818,6 +818,7 @@ PACKAGE_DEPS = {
             "lash_core": "//crates/lash-core:lash-core",
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
             "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
+            "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "lash_llm_transport": "//crates/lash-llm-transport:lash-llm-transport",
             "lash_protocol_types": "//crates/lash-protocol-types:lash-protocol-types",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
@@ -1462,6 +1463,7 @@ PACKAGE_DEPS = {
         "normal": {
             "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "schemars": "//third-party/rust:p0309",
             "serde": "//third-party/rust:p0317",
             "serde_json": "//third-party/rust:p0322",

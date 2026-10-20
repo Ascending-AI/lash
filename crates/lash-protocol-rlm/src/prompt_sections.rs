@@ -41,6 +41,8 @@ pub struct RlmPromptFacts {
     pub(crate) bound_variables: Arc<str>,
     /// The declaration of the session's read-only variables.
     pub(crate) read_only_variables: Option<String>,
+    /// The code the packages of the next cell's set export.
+    pub(crate) packages: Option<String>,
     /// The globals the bound-variables view lists.
     pub(crate) globals: Arc<crate::session_globals::SessionGlobals>,
 }
@@ -75,6 +77,9 @@ pub(crate) fn history_binding(
     }
     Ok(binding)
 }
+
+/// The heading the code of the cell's package set is listed under.
+pub(crate) const PACKAGES_TITLE: &str = "Packages";
 
 /// The session behaviour every section renders under, fixed when the
 /// session's plugin was built.
@@ -179,6 +184,12 @@ fn declarations(
     let declarations = declarations.trim();
     if !declarations.is_empty() {
         parts.push(declarations.to_string());
+    }
+    if let Some(packages) = input
+        .protocol_facts::<RlmPromptFacts>()
+        .and_then(|facts| facts.packages.as_deref())
+    {
+        parts.push(format!("### {PACKAGES_TITLE}\n\n{}", packages.trim()));
     }
     if let Some(variables) = input
         .protocol_facts::<RlmPromptFacts>()

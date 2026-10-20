@@ -387,14 +387,13 @@ pub(crate) fn lower_with_calls(
     document.manifest.effects = lowerer.performed;
     lash_kernel_dialect::require_through_bodies(&mut document.manifest, environment.library);
     if !lowerer.saved_used.is_empty() {
-        let catalog: &dyn FunctionCatalog = environment.library;
         lash_kernel_dialect::install(
             &mut document,
             cell.functions,
             &lowerer.saved_used,
             &lash_kernel_doc::FunctionRepresentation::Bare,
             environment.namespaces,
-            &|function| catalog.definition(function).is_some(),
+            environment.library,
         ).map_err(|unusable| {
             let mut error = diagnostics::unplaced(Code::SavedFunctionUnusable, unusable.to_string());
             error.repairs.push("provide the saved function's required tools and library functions, or define a function using this session's tools".to_owned());

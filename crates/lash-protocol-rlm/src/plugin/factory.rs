@@ -343,10 +343,8 @@ impl PluginFactory for RlmProtocolPluginFactory {
                         code_renderer: config.code_renderer.clone(),
                         execution_bounds: config.execution_bounds(),
                         channel: config.channel,
-                        kernel: crate::executor::KernelCarry::new(
-                            self.packages
-                                .as_ref()
-                                .map(|packages| Arc::clone(packages.functions())),
+                        kernel: crate::executor::KernelCarry::holding(
+                            self.packages.clone(),
                             writes,
                         ),
                         packages: Some(match &self.gate {

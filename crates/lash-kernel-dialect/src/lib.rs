@@ -61,7 +61,8 @@ pub use namespaces::{
 pub use notes::{Note, SiteLayers, SiteLayersRefusal, site_layers};
 pub use saved::{
     Bundle, BundleBody, BundleRefusal, CaptureRefusal, DOCUMENT_NODE_KIND,
-    FUNCTION_BUNDLE_NODE_KIND, Kept, Left, NotSaved, Unusable, closure_of, install,
+    FUNCTION_BUNDLE_NODE_KIND, Kept, Left, NotSaved, RelinkGap, Unusable, closure_of, install,
+    relink_saved,
 };
 /// A saved function as the kernel holds it: its captures and token are
 /// frozen heap values, which only the kernel crates read (FIG-6688). A

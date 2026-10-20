@@ -9,6 +9,7 @@ use lash_kernel_doc::{
     Handle, Integer, InvalidReason, Literal, Name, Node, NodeMut, Param, Signature, Site, Stmt,
     Timestamp, Type, Unit, parse_document, print_document,
 };
+use lash_kernel_package::{HeldPackages, Package, PackageSet};
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, KernelMachine, Machine, Outcome, Program, Request, Step, Target,
@@ -87,45 +88,101 @@ fn insert(base: DocumentId, at: Position, binding: &str) -> Operation {
     }
 }
 
-fn relink_library(value: &str) -> (FunctionRegistry, lash_kernel_doc::FunctionId) {
-    let mut registry = FunctionRegistry::new();
-    let g = registry
-        .register(
-            lash_kernel_doc::parse_definition(&format!(
-                "function helper.g() -> Any\nkernel 1\ncharge 1\nbody {{ return {value} }}"
-            ))
-            .unwrap(),
-            None,
-        )
-        .unwrap();
-    let f = registry.register(lash_kernel_doc::parse_definition(&format!(
-        "function helper.f() -> Any\nkernel 1\ncharge 1\nuse helper.g = @{g}\nbody {{ let y = invoke helper.g() return y }}"
-    )).unwrap(), None).unwrap();
-    (registry, f)
+/// `definitions` as the code of a package at `path` whose one root is
+/// `root`, at `release`.
+fn package(
+    path: &str,
+    root: &str,
+    release: &str,
+    definitions: &dyn Fn(&mut FunctionRegistry) -> Vec<lash_kernel_doc::FunctionDefinition>,
+) -> Package {
+    Package::lash(
+        lash_kernel_package::PackagePath::parse(path).unwrap(),
+        release,
+        [lash_kernel_package::Root::new(root)],
+        &[],
+        false,
+        |registry| Ok(definitions(registry)),
+    )
+    .unwrap()
 }
 
-fn relink_document(registry: &FunctionRegistry, f: lash_kernel_doc::FunctionId) -> Document {
+/// A node holding every one of `releases` as a set of its own, the last
+/// its own set, with each set's digest.
+fn hold(releases: Vec<Vec<Package>>) -> (HeldPackages, Vec<lash_kernel_doc::PackageSetDigest>) {
+    let sets: Vec<PackageSet> = releases
+        .iter()
+        .map(|release| PackageSet::new(release.iter()).unwrap())
+        .collect();
+    let digests: Vec<_> = sets.iter().map(PackageSet::digest).collect();
+    let own = *digests.last().unwrap();
+    let held = HeldPackages::new(releases.into_iter().flatten().map(Arc::new), sets, own).unwrap();
+    (held, digests)
+}
+
+fn register(registry: &mut FunctionRegistry, text: &str) -> lash_kernel_doc::FunctionId {
+    registry
+        .register(lash_kernel_doc::parse_definition(text).unwrap(), None)
+        .unwrap()
+}
+
+/// `helper.g` returning `value` and `helper.f` calling it, as one release
+/// of the package `helper`.
+fn relink_package(release: &str, value: &str) -> Package {
+    relink_package_at("helper", release, value)
+}
+
+/// [`relink_package`]'s definitions as the package at `path`, rooted at
+/// `helper`.
+fn relink_package_at(path: &str, release: &str, value: &str) -> Package {
+    let value = value.to_owned();
+    package(path, "helper", release, &move |registry| {
+        let g = register(
+            registry,
+            &format!("function helper.g() -> Any\nkernel 1\ncharge 1\nbody {{ return {value} }}"),
+        );
+        register(
+            registry,
+            &format!(
+                "function helper.f() -> Any\nkernel 1\ncharge 1\nuse helper.g = @{g}\nbody {{ let y = invoke helper.g() return y }}"
+            ),
+        );
+        registry
+            .iter()
+            .map(|(_, function)| lash_kernel_doc::FunctionDefinition::clone(function.definition()))
+            .collect()
+    })
+}
+
+fn relink_document(held: &HeldPackages, f: lash_kernel_doc::FunctionId) -> Document {
     let mut document = parse_document(&format!(
         "kernel 1\nnumbers float\nuse helper.f = @{f}\nentry run() -> Any\nfn run() {{ let y = invoke helper.f() return y }}\nmain {{}}"
     )).unwrap();
-    document.manifest.functions = lash_kernel_check::requirements(&document, registry).functions;
+    document.manifest.functions =
+        lash_kernel_check::requirements(&document, held.functions().as_ref()).functions;
     document
 }
 
-/// RELINK-CLOSURE (FIG-6550): a stored entry -> f -> g is linked in one
-/// transaction, including g even though no document node calls it directly.
+/// RELINK-CLOSURE (FIG-6550, FIG-6926): a stored entry -> f -> g is
+/// linked in one transaction, including g even though no document node
+/// calls it directly, to the identities of the set it is asked for alone:
+/// the node still holds the earlier release under the same names, and no
+/// name is ambiguous.
 #[test]
 fn relink_transitive_manifest_closure() {
-    let (old, old_f) = relink_library("null");
-    let original = relink_document(&old, old_f);
+    let old = relink_package("1", "null");
+    let current = relink_package("2", "true");
+    let old_f = old.function("helper.f").unwrap();
+    let current_f = current.function("helper.f").unwrap();
+    let (held, sets) = hold(vec![vec![old], vec![current]]);
+    let original = relink_document(&held, old_f);
     let stored = Document::from_json(&original.to_json().unwrap()).unwrap();
     let mut draft = Draft::open(stored).unwrap();
-    let (current, current_f) = relink_library("true");
-    let expected = relink_document(&current, current_f);
+    let expected = relink_document(&held, current_f);
     assert_ne!(original.manifest.functions, expected.manifest.functions);
     assert_eq!(expected.manifest.functions.len(), 2);
 
-    let correspondence = draft.relink(&current).unwrap();
+    let correspondence = draft.relink(&held.view(&sets[1]).unwrap()).unwrap();
     assert_eq!(correspondence.base, original.identity());
     assert_eq!(correspondence.result, expected.identity());
     assert!(correspondence.entries().iter().all(|s| s.from == s.to));
@@ -136,31 +193,44 @@ fn relink_transitive_manifest_closure() {
     assert_eq!(draft.identity(), expected.identity());
     assert_eq!(
         draft.document().manifest.functions,
-        lash_kernel_check::requirements(draft.document(), &current).functions
+        lash_kernel_check::requirements(draft.document(), held.functions().as_ref()).functions
     );
+
+    // Back to the earlier set: its identities alone, again.
+    draft.relink(&held.view(&sets[0]).unwrap()).unwrap();
+    assert_eq!(draft.document(), &original);
 }
 
 /// The helpers a document holds outside its calls: a returning policy and
-/// a cleanup, each returning `value`.
-fn slot_library(value: &str) -> (FunctionRegistry, String) {
-    let mut registry = FunctionRegistry::new();
-    let mut header = String::new();
-    for (name, params) in [("helper.policy", "x: Any"), ("helper.cleanup", "")] {
-        let function = registry
-            .register(
-                lash_kernel_doc::parse_definition(&format!(
+/// a cleanup, each returning `value`, as one release of `helper`, and the
+/// document header that uses them.
+fn slot_package(release: &str, value: &str) -> (Package, String) {
+    let value = value.to_owned();
+    let package = package("helper", "helper", release, &move |registry| {
+        for (name, params) in [("helper.policy", "x: Any"), ("helper.cleanup", "")] {
+            register(
+                registry,
+                &format!(
                     "function {name}({params}) -> Any\nkernel 1\ncharge 1\nbody {{ return {value} }}"
-                ))
-                .unwrap(),
-                None,
-            )
-            .unwrap();
-        header.push_str(&format!("use {name} = @{function}\n"));
+                ),
+            );
+        }
+        registry
+            .iter()
+            .map(|(_, function)| lash_kernel_doc::FunctionDefinition::clone(function.definition()))
+            .collect()
+    });
+    let mut header = String::new();
+    for name in ["helper.policy", "helper.cleanup"] {
+        header.push_str(&format!(
+            "use {name} = @{}\n",
+            package.function(name).unwrap()
+        ));
     }
-    (registry, header)
+    (package, header)
 }
 
-fn slot_document(registry: &FunctionRegistry, header: &str) -> Document {
+fn slot_document(held: &HeldPackages, header: &str) -> Document {
     let mut document = parse_document(&format!(
         "kernel 1\nnumbers float\n{header}\
          entry run(x: Any) -> Any py_direct(helper.cleanup)\n\
@@ -169,7 +239,8 @@ fn slot_document(registry: &FunctionRegistry, header: &str) -> Document {
          main {{ let f = fn(a) start (a: Any) -> Any bare py_direct(helper.cleanup) {{ return a }} }}"
     ))
     .unwrap();
-    document.manifest.functions = lash_kernel_check::requirements(&document, registry).functions;
+    document.manifest.functions =
+        lash_kernel_check::requirements(&document, held.functions().as_ref()).functions;
     document
 }
 
@@ -178,12 +249,13 @@ fn slot_document(registry: &FunctionRegistry, header: &str) -> Document {
 /// convention and the start adapters of a declared function and a closure.
 #[test]
 fn relink_rebinds_every_library_reference_slot() {
-    let (old, old_header) = slot_library("null");
-    let original = slot_document(&old, &old_header);
-    let (current, current_header) = slot_library("true");
-    let expected = slot_document(&current, &current_header);
+    let (old, old_header) = slot_package("1", "null");
+    let (current, current_header) = slot_package("2", "true");
+    let (held, sets) = hold(vec![vec![old], vec![current]]);
+    let original = slot_document(&held, &old_header);
+    let expected = slot_document(&held, &current_header);
     let mut draft = Draft::open(original.clone()).unwrap();
-    let correspondence = draft.relink(&current).unwrap();
+    let correspondence = draft.relink(&held.view(&sets[1]).unwrap()).unwrap();
     assert_eq!(draft.document(), &expected);
     let json = draft.document().to_json().unwrap();
     for function in original.manifest.functions.keys() {
@@ -211,36 +283,35 @@ fn relink_rebinds_every_library_reference_slot() {
 /// refuse without publishing any part of a re-link.
 #[test]
 fn relink_refusals_leave_the_draft_unchanged() {
-    let (old, old_f) = relink_library("null");
-    let original = relink_document(&old, old_f);
+    let old = relink_package("1", "null");
+    let old_f = old.function("helper.f").unwrap();
+    // Two packages of one set whose roots both hold `helper.f`.
+    let twin = relink_package_at("twin", "1", "false");
+    let invalid = package("helper", "helper", "3", &|registry| {
+        register(
+            registry,
+            "function helper.f(x: Any) -> Any\nkernel 1\ncharge 1\nbody { return x }",
+        );
+        registry
+            .iter()
+            .map(|(_, function)| lash_kernel_doc::FunctionDefinition::clone(function.definition()))
+            .collect()
+    });
+    let (held, sets) = hold(vec![
+        vec![],
+        vec![relink_package("2", "true"), twin],
+        vec![invalid],
+        vec![old],
+    ]);
+    let original = relink_document(&held, old_f);
     let mut draft = Draft::open(original.clone()).unwrap();
     let correspondence = draft.correspondence_since_open().clone();
-    let missing = FunctionRegistry::new();
-    let (mut ambiguous, _) = relink_library("true");
-    for (_, registered) in old.iter().filter(|(id, _)| **id != old_f) {
-        ambiguous
-            .register(registered.definition().as_ref().clone(), None)
-            .unwrap();
-    }
-    ambiguous
-        .register(old.get(&old_f).unwrap().definition().as_ref().clone(), None)
-        .unwrap();
-    let mut invalid = FunctionRegistry::new();
-    invalid
-        .register(
-            lash_kernel_doc::parse_definition(
-                "function helper.f(x: Any) -> Any\nkernel 1\ncharge 1\nbody { return x }",
-            )
-            .unwrap(),
-            None,
-        )
-        .unwrap();
-    for (registry, expected) in [
-        (&missing, "missing"),
-        (&ambiguous, "ambiguous"),
-        (&invalid, "invalid"),
+    for (set, expected) in [
+        (sets[0], "missing"),
+        (sets[1], "ambiguous"),
+        (sets[2], "invalid"),
     ] {
-        let error = draft.relink(registry).unwrap_err();
+        let error = draft.relink(&held.view(&set).unwrap()).unwrap_err();
         match (expected, error) {
             ("missing", crate::RelinkRefusal::MissingFunction { function, name }) => {
                 assert_eq!(function, old_f);

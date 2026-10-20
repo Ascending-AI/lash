@@ -85,9 +85,9 @@ closure containing its exact function identities.
   with Cargo pass the dialect features.
 - A worker must hold the run's recorded dialect and exact code identities.
   Code-only packages and user-visible package surfaces share installation.
-- New cells lower against the selected set. Saved-function relinking is
-  in progress; changing the set does not relink a parked run or a published
-  workflow.
+- New cells lower against the selected set, and a session relinks its
+  saved functions to it at each cell start; changing the set does not
+  relink a parked run or a published workflow.
 
 ## Executable evidence
 

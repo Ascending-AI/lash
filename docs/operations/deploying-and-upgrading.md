@@ -216,10 +216,10 @@ fall back to an older set when a node rejoins.
 
 Parked runs and published workflows keep their exact function identities.
 Resume requires those definitions and any native-only implementations;
-changing the installed set does not adopt them. Saved functions currently
-retain their library identities and report an unavailable identity or
-incompatible operation signature on install. Relinking them at cell start
-is in progress. A value with an incompatible representation raises
+changing the installed set does not adopt them. A session relinks its
+saved functions by name to each cell's package set at the cell's start, and
+drops one whose callee that set removed or re-signed, naming both. A value
+with an incompatible representation raises
 `package.stale_value` when used. Document adoption refuses a changed operation
 requirement with `operation_contract_changed`; parked adoption refuses
 `state_not_carried`.

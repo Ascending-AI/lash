@@ -361,6 +361,20 @@ pub(crate) struct SessionDialect {
 }
 
 impl SessionDialect {
+    /// The code exports of the package set the session's next cell is
+    /// written under, in its dialect's spelling (§2.3, P3): `None` when
+    /// the gate cannot answer now, or the set exports no code.
+    pub(crate) async fn package_surface(&self) -> Option<String> {
+        let packages = match &self.services.packages {
+            Some(gate) => gate.writable().await.ok()?.digest(),
+            None => lash_vm_runtime::lash_packages().ok()?.own(),
+        };
+        let held = self.services.kernel.packages().ok()?;
+        let view = held.view(&packages).ok()?;
+        let surface = crate::package_surface::render(&view, self.language().spelling());
+        (!surface.is_empty()).then_some(surface)
+    }
+
     pub(crate) fn read_only_variables_prompt(
         &self,
         bindings: &crate::projection::CodeModeProjectedBindings,

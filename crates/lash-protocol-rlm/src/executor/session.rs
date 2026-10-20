@@ -60,6 +60,8 @@ struct Version {
     /// The library functions the session's saved functions pin, together
     /// (FIG-5799): bounded by the build's library, never by the session.
     pins: BTreeSet<FunctionId>,
+    /// The package set the saved functions are linked to (K-LIB-009).
+    linked: Option<lash_kernel_doc::PackageSetDigest>,
 }
 
 impl Default for Version {
@@ -80,6 +82,7 @@ impl Version {
             cells: 0,
             notes: SessionNotes::EMPTY,
             pins: BTreeSet::new(),
+            linked: None,
         }
     }
 }
@@ -123,6 +126,17 @@ struct Pending {
     runs: usize,
     /// The package stamp the capture's commit writes, when it changes it.
     stamp: Option<Option<lash_kernel_doc::PackageSetDigest>>,
+}
+
+/// Why a cell's saved functions could not be relinked to its package set.
+#[derive(Debug, thiserror::Error)]
+pub(super) enum RelinkError {
+    #[error(transparent)]
+    NotHeld(lash_kernel_package::SetNotHeld),
+    #[error("the cell's package set does not assemble: {0}")]
+    Library(String),
+    #[error(transparent)]
+    Pages(#[from] PageAccessError),
 }
 
 /// What a finished cell changed in the session's bindings.
@@ -473,6 +487,7 @@ impl CodeModeExecutionState {
                 session,
                 notes: version.notes,
                 pins: version.pins.clone(),
+                linked: version.linked,
             },
         )?;
         let id = NodeId(page.id.0);
@@ -541,6 +556,144 @@ impl CodeModeExecutionState {
             }),
             Err(refusal) => Err(refusal.to_string()),
         }
+    }
+
+    /// Relinks every carried saved function by name to `packages`, the
+    /// package set the cell runs on (K-LIB-009, RELINK-CLOSURE), as `held`
+    /// shows it. Each relinked function is re-saved with its new
+    /// execution closure, which the capture that names it stages. One the
+    /// set does not serve is dropped with its binding and listed as not
+    /// carried, naming it and the callee. The session then records
+    /// `packages` as the set its functions are linked to: a cell of the
+    /// same set relinks and re-saves nothing.
+    ///
+    /// # Errors
+    ///
+    /// A set `held` does not hold, a library that does not assemble, and
+    /// the pages' faults.
+    pub(super) async fn relink(
+        &mut self,
+        packages: lash_kernel_doc::PackageSetDigest,
+        held: &lash_kernel_package::HeldPackages,
+    ) -> Result<(), RelinkError> {
+        if self.current.linked == Some(packages) {
+            return Ok(());
+        }
+        let view = held.view(&packages).map_err(RelinkError::NotHeld)?;
+        let library = view
+            .library(held.functions())
+            .map_err(|error| RelinkError::Library(error.to_string()))?;
+        let mut functions = self.view.functions.clone().unwrap_or_default();
+        let mut rewritten = Vec::new();
+        let mut dropped = Vec::new();
+        for (name, function) in &mut functions {
+            match lash_kernel_dialect::relink_saved(&function.clone().into_saved(), &library, &view)
+            {
+                Ok(relinked) if relinked.document.identity() == function.document.id() => {}
+                Ok(relinked) => {
+                    let closure = lash_vm_broker::kernel::closure::derive(
+                        relinked.document.manifest.functions.keys().copied(),
+                        held.functions(),
+                        lash_vm_broker::kernel::closure::Natives::Declared,
+                    )
+                    .map_err(|refusal| RelinkError::Library(refusal.to_string()))?;
+                    function.document = lash_kernel_doc::IdentifiedDocument::new(relinked.document);
+                    rewritten.push((name.clone(), function.description(), closure));
+                }
+                Err(unusable) => dropped.push((name.clone(), unusable.to_string())),
+            }
+        }
+        for (name, _) in &dropped {
+            functions.remove(name);
+        }
+        // A relinked record names its new closure, which the cell's run
+        // then names unread: it is staged in the turn's spool beside the
+        // pages that name it, and published with them.
+        let mut spool = self.turn_spool()?;
+        for (_, _, closure) in &rewritten {
+            for node in closure.nodes().values() {
+                let node = lash_core_store::checkpoint_graph::node::VerifiedNode::check(
+                    node.clone(),
+                    &lash_core_store::checkpoint_graph::DecodeLimits::within_total(u64::MAX),
+                )
+                .map_err(|refusal| RelinkError::Library(refusal.to_string()))?;
+                spool
+                    .seal(node, &|_| true)
+                    .map_err(|fault| RelinkError::Pages(PageAccessError::Staging(fault)))?;
+            }
+        }
+        let mut next = self.current.clone();
+        next.linked = Some(packages);
+        next.pins = functions
+            .values()
+            .flat_map(|function| function.document.manifest.functions.keys().copied())
+            .collect();
+        if let Some(session) = self.current.session
+            && (!rewritten.is_empty() || !dropped.is_empty())
+        {
+            let edits: Vec<(Name, Vec<u8>, PageRef)> = rewritten
+                .iter()
+                .map(|(name, description, closure)| {
+                    (
+                        name.clone(),
+                        description.clone(),
+                        PageRef {
+                            id: PageId(closure.reference().0),
+                            grant: PageGrant::NONE,
+                        },
+                    )
+                })
+                .collect();
+            let drops: Vec<Name> = dropped.iter().map(|(name, _)| name.clone()).collect();
+            next.session = Some(
+                self.pages
+                    .read(move |source| {
+                        let mut editor = SessionEditor::open(Some(&session), source)?;
+                        for (name, description, closure) in &edits {
+                            editor.relink_function(name, description, *closure)?;
+                        }
+                        for name in &drops {
+                            editor.drop_function(name)?;
+                        }
+                        editor.seal()
+                    })
+                    .await?,
+            );
+            if !dropped.is_empty() {
+                let root = self.current.notes;
+                let notes = dropped.clone();
+                next.notes = self
+                    .pages
+                    .read(move |source| {
+                        edit_notes(&root, source, |edit| {
+                            for (name, why) in &notes {
+                                edit.not_carried(name, why)?;
+                                edit.saved(name, None)?;
+                            }
+                            Ok(())
+                        })
+                    })
+                    .await?;
+            }
+        }
+        for (name, why) in &dropped {
+            if let Some(names) = &mut self.view.names {
+                names.remove(name);
+            }
+            self.view.values.remove(name);
+            if let Some(notes) = &mut self.view.notes {
+                let note = notes.entry(name.clone()).or_default();
+                note.not_carried = Some(why.clone());
+                note.saved = None;
+            }
+        }
+        self.view.functions = Some(functions);
+        self.current = if next.session.is_some() {
+            self.seal_descriptor(next, spool)?
+        } else {
+            next
+        };
+        Ok(())
     }
 
     /// Marks the start of a cell: the session as it stands is what a
@@ -990,6 +1143,7 @@ impl CodeModeExecutionState {
             cells: read.cells,
             notes: read.notes,
             pins: read.pins,
+            linked: read.linked,
         };
         self.installed = Some(graph.root);
         self.final_owed = purpose == ExecutionGraphPurpose::Working;

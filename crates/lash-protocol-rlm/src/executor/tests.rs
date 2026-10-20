@@ -6,6 +6,7 @@ mod crossing;
 mod document_trips;
 mod finish_value;
 mod graph;
+mod packages;
 mod python;
 mod tool_input;
 
@@ -1428,6 +1429,7 @@ async fn an_unrelated_error_keeps_its_cause_after_a_binding_is_dropped() {
                 site: None,
             },
             &dropped,
+            None,
         );
         if expected {
             assert_eq!(
