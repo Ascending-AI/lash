@@ -64,6 +64,7 @@ use lash_kernel_state::paged::{
 };
 use limits::Limiters;
 use loops::Cursor;
+pub(crate) use plan_regions::Regions as PlanRegions;
 use project::SharedArena;
 use session::{keyed, open_tree};
 pub(crate) use tasks::Occurrences;

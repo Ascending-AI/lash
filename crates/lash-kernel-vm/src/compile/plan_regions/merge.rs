@@ -49,11 +49,13 @@
 use lash_kernel_doc::Value;
 
 use super::{Block, Node, NodeKind, Step, StepKind};
-use crate::compile::{Entry, Lib, LibId};
+use crate::compile::{Lib, LibId};
 
 /// A recognised merge pass: the plan variables it reads and writes, and
-/// the forms it runs as the region's own.
-pub(crate) struct Merge {
+/// the forms it runs as the region's own, each a value `N` and each
+/// element write a `P`: as recognised, the plan's nodes and statements;
+/// as the machine walks it, their compiled forms ([`Self::map`]).
+pub(crate) struct Merge<N = Node, P = Step> {
     pub(crate) sorted: u32,
     pub(crate) out: u32,
     pub(crate) n: u32,
@@ -67,25 +69,54 @@ pub(crate) struct Merge {
     /// The comparator's operands, the left item and the right.
     pub(crate) operands: [u32; 2],
     /// The two item reads of the comparison, left then right.
-    pub(crate) items: [Node; 2],
+    pub(crate) items: [N; 2],
     /// The statement applying the comparator: its register span, the
     /// variable it binds and its `Apply` node.
-    pub(crate) apply: (u32, u32, Node),
+    pub(crate) apply: (u32, u32, N),
     /// The statement coercing the comparator's answer: its register span,
     /// the variable it binds and its `Invoke` node.
-    pub(crate) coerce: (u32, u32, Node),
-    /// The coercion's prepared entry, where it may answer the plan's offer
-    /// as the machine's answer takes it first: a call of its one
-    /// parameter, whose admission, if it is an operation, makes no cell.
-    /// With whether it is one.
-    pub(crate) coerced: Option<(Entry, bool)>,
+    pub(crate) coerce: (u32, u32, N),
     /// The test of the coerced order: `num.lt(0, order)`.
-    pub(crate) positive: Node,
+    pub(crate) positive: N,
     /// The two element writes into `out`: from the right run, then from
     /// the left.
-    pub(crate) places: [Step; 2],
+    pub(crate) places: [P; 2],
     /// What the comparison's block declares, and the body's.
     pub(crate) declared: (Box<[u32]>, Box<[u32]>),
+}
+
+impl<N, P> Merge<N, P> {
+    /// The same merge, its values by `value` and its element writes by
+    /// `place`; `None` where `place` declines one.
+    pub(crate) fn map<M, Q>(
+        self,
+        mut value: impl FnMut(N) -> M,
+        mut place: impl FnMut(P) -> Option<Q>,
+    ) -> Option<Merge<M, Q>> {
+        let [right, left] = self.places;
+        let [first, second] = self.items;
+        let (apply_span, output, applied) = self.apply;
+        let (coerce_span, order, invoked) = self.coerce;
+        Some(Merge {
+            sorted: self.sorted,
+            out: self.out,
+            n: self.n,
+            width: self.width,
+            mid: self.mid,
+            end: self.end,
+            left: self.left,
+            right: self.right,
+            dest: self.dest,
+            from_right: self.from_right,
+            operands: self.operands,
+            items: [value(first), value(second)],
+            apply: (apply_span, output, value(applied)),
+            coerce: (coerce_span, order, value(invoked)),
+            positive: value(self.positive),
+            places: [place(right)?, place(left)?],
+            declared: self.declared,
+        })
+    }
 }
 
 /// The kernel library function names a merge's integer forms call.
@@ -189,7 +220,6 @@ impl Recognise<'_, '_> {
             items: compared.items,
             apply: compared.apply,
             coerce: compared.coerce,
-            coerced: compared.coerced,
             positive: compared.positive,
             places: [take_right.clone(), take_left.clone()],
             declared: (compared.declared, body.declares.clone()),
@@ -244,9 +274,7 @@ impl Recognise<'_, '_> {
             return None;
         };
         let NodeKind::Invoke {
-            lib,
-            args: coerced_args,
-            ..
+            args: coerced_args, ..
         } = &invoked.kind
         else {
             return None;
@@ -255,17 +283,6 @@ impl Recognise<'_, '_> {
             return None;
         };
         (local(coerced_arg)? == *output).then_some(())?;
-        let function = (self.lib)(*lib)?;
-        let coerced = function
-            .prepared
-            .as_ref()
-            .map(|(entry, _)| entry)
-            .filter(|entry| {
-                function.arity == 1
-                    && !function.shares_params
-                    && (function.operation() || entry.depth() == 0)
-            })
-            .map(|entry| (entry.clone(), function.operation()));
         // if num.lt(0, order) { set from_right = true }
         let (positive, then, otherwise) = self.branch(test)?;
         let [zero, ordered] = self.call_args(positive, LT)?;
@@ -279,7 +296,6 @@ impl Recognise<'_, '_> {
             items: [items[0].clone(), items[1].clone()],
             apply: (apply.span, *output, applied.clone()),
             coerce: (coerce.span, *order, invoked.clone()),
-            coerced,
             positive: positive.clone(),
             declared: block.declares.clone(),
         })
@@ -387,7 +403,6 @@ struct Compared {
     items: [Node; 2],
     apply: (u32, u32, Node),
     coerce: (u32, u32, Node),
-    coerced: Option<(Entry, bool)>,
     positive: Node,
     declared: Box<[u32]>,
 }

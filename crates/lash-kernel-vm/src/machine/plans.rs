@@ -47,11 +47,13 @@ pub(super) struct Walk {
 
 /// The callback a region's steady callback site applies while the region
 /// walks its loop (`super::plan_regions`): the closure in its variable,
-/// and the code and cells that closure calls.
+/// the code and cells that closure calls, and its island.
 pub(super) struct Steady {
     pub(super) closure: ArenaHandle,
     pub(super) code: crate::compile::CodeId,
     pub(super) cells: Vec<ArenaHandle>,
+    /// The island the callback runs as under the walk's gate, if any.
+    pub(super) island: Option<u32>,
 }
 
 /// One running plan: the machine, the caller's arguments and the plan's
@@ -87,6 +89,9 @@ pub(super) struct PlanRun<'m, const SHARED: bool> {
     /// The gate its callbacks enter their islands under, decided at its
     /// first callback (FIG-6945).
     pub(super) gate: Option<super::islands::Gate>,
+    /// The call depth the running region's walk stands at, once read
+    /// (`super::plan_regions`).
+    pub(super) depth: Option<u64>,
 }
 
 impl<const SHARED: bool> PlanRun<'_, SHARED> {
@@ -106,6 +111,7 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
         }
     }
 
+    #[inline(always)]
     pub(super) fn bind_value(&mut self, slot: u32, value: Value) -> Result<Value, PlanExit> {
         let holding = if self.shared(slot) {
             Value::ObjectRef(self.machine.new_cell(value))
@@ -144,6 +150,7 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
 
     /// Ends the open statement, if any: its operands are emptied, and its
     /// pins and write credit released.
+    #[inline]
     fn end_statement(&mut self) -> Result<(), Halt> {
         let Some(mark) = self.statement.take() else {
             return Ok(());
@@ -338,8 +345,7 @@ impl<const SHARED: bool> PlanContext for PlanRun<'_, SHARED> {
     }
 
     fn unbind(&mut self, slot: u32) {
-        let at = self.slots + slot as usize;
-        self.machine.regs.clear_range(at..at + 1);
+        self.machine.regs.clear_one(self.slots + slot as usize);
     }
 
     fn closure(&mut self, closure: u32, dst: u32) -> Result<(), PlanExit> {
@@ -661,6 +667,7 @@ impl KernelMachine {
             halt: None,
             steady: None,
             gate: None,
+            depth: None,
         };
         let outcome = (plan.plan.run)(&mut run, 0);
         // The statement the body leaves by stays open: the caller's goes on

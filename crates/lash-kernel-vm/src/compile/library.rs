@@ -120,8 +120,9 @@ pub(crate) struct PreparedPlan {
     /// A segment's sites where its body's frame stands at them (FIG-6709).
     pub(crate) segment: Option<segments::Segment>,
     /// The loops of its body it runs as regions over their cursors, by
-    /// the variable that holds what each walks (FIG-6780).
-    pub(crate) regions: Vec<plan_regions::PlanRegion>,
+    /// the variable that holds what each walks (FIG-6780), compiled
+    /// (FIG-6947).
+    pub(crate) regions: crate::machine::PlanRegions,
 }
 
 impl PreparedPlan {
@@ -129,10 +130,7 @@ impl PreparedPlan {
     /// holds, by its index.
     #[inline]
     pub(crate) fn region(&self, walked: u32) -> Option<u32> {
-        self.regions
-            .iter()
-            .position(|region| region.walked == walked)
-            .map(|at| at as u32)
+        self.regions.position(walked)
     }
 
     #[expect(
@@ -198,7 +196,7 @@ impl PreparedPlan {
                 shared: None,
                 closures: Vec::new(),
                 segment: None,
-                regions: Vec::new(),
+                regions: Default::default(),
             });
         };
         let code = &tables.codes[(body.0 - base.codes) as usize];
@@ -239,11 +237,21 @@ impl PreparedPlan {
         let segment = (!plan.sites.is_empty())
             .then(|| segments::Segment::resolve(plan, &locals, body, tables, base))
             .transpose()?;
+        let shared: Option<Box<[bool]>> = locals
+            .iter()
+            .any(|local| local.is_some_and(|local| local.shared))
+            .then(|| {
+                locals
+                    .iter()
+                    .map(|local| local.is_some_and(|local| local.shared))
+                    .collect()
+            });
         let regions = match &segment {
-            Some(segment) if layout.regions() => {
-                plan_regions::form(plan, &locals, segment, tables, base, lib)
-            }
-            _ => Vec::new(),
+            Some(segment) if layout.regions() => crate::machine::PlanRegions::new(
+                plan_regions::form(plan, &locals, segment, tables, base, lib),
+                shared.is_some(),
+            ),
+            _ => Default::default(),
         };
         Ok(Self {
             arity,
@@ -252,15 +260,7 @@ impl PreparedPlan {
             callees,
             literals,
             fields,
-            shared: locals
-                .iter()
-                .any(|local| local.is_some_and(|local| local.shared))
-                .then(|| {
-                    locals
-                        .iter()
-                        .map(|local| local.is_some_and(|local| local.shared))
-                        .collect()
-                }),
+            shared,
             locals,
             closures,
             segment,

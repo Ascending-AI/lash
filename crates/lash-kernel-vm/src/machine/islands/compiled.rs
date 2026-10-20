@@ -106,8 +106,12 @@ impl Layout {
     ) {
         let given = args.len().min(self.arity);
         if self.leading {
-            for (slot, value) in slots[..given].iter_mut().zip(args) {
-                *slot = Some(*value);
+            // Over `args`, whose length a call site fixes, so the copy
+            // unrolls there rather than becoming a call of `memcpy`.
+            for (index, value) in args.iter().enumerate() {
+                if index < given {
+                    slots[index] = Some(*value);
+                }
             }
             for slot in &mut slots[given..self.arity] {
                 *slot = Some(Value::Absent);

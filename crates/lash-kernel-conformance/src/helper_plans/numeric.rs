@@ -60,6 +60,7 @@ fn generated_scalar_templates_agree_with_their_bodies() {
                 "ts.ge",
                 "ts.number.to_string",
                 "ts.to_string",
+                "ts.to_number",
             ][..],
         ),
     ] {

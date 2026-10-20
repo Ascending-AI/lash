@@ -271,17 +271,18 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
         Err(PlanExit::Yield)
     }
 
-    /// [`Self::apply_at`] at a region's steady site (`super::plan_regions`):
-    /// the callback its variable holds for the whole walk is resolved once,
-    /// at the walk's first call of a closure, as [`Self::apply_at`]
-    /// resolves it.
+    /// [`Self::apply_at`] of `callee` at a region's steady site
+    /// (`super::plan_regions`), which would take it from `at`: the callback
+    /// its variable holds for the whole walk is resolved once, at the
+    /// walk's first call of a closure, as [`Self::apply_at`] resolves it,
+    /// with the island it enters under the walk's gate.
     pub(super) fn apply_steady(
         &mut self,
         site: u32,
         at: Reg,
         count: usize,
+        callee: Value,
     ) -> Result<(), PlanExit> {
-        let callee = self.machine.take(at);
         let Value::Closure(closure) = callee else {
             self.machine.put(at, callee);
             return self.apply_at(site, at, count);
@@ -293,21 +294,28 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
                 let Target::Code(code, cells) = self.check(target)? else {
                     return Err(self.lost("a closure resolved to no code"));
                 };
+                let island = self
+                    .machine
+                    .callback_plan(&mut self.gate, self.task, self.exe, code);
                 Steady {
                     closure,
                     code,
                     cells,
+                    island: self.check(island)?,
                 }
             }
         };
-        let ran = self.machine.callback_island(
-            &mut self.gate,
-            self.task,
-            self.exe,
-            (steady.code, &steady.cells),
-            at + 1,
-            count,
-        );
+        let ran = match (steady.island, self.gate.as_ref()) {
+            (Some(island), Some(gate)) => self.machine.callback_entry(
+                gate,
+                self.task,
+                self.exe,
+                (island, &steady.cells),
+                at + 1,
+                count,
+            ),
+            _ => Ok(None),
+        };
         match self.check(ran)? {
             Some(Ran::Returned(value)) => {
                 self.steady = Some(steady);
@@ -819,6 +827,7 @@ impl KernelMachine {
             halt: None,
             steady: None,
             gate: None,
+            depth: None,
         };
         let opened = run.open_statement();
         let outcome = match opened {

@@ -126,6 +126,27 @@ impl KernelMachine {
         self.memory_pressure(0)
     }
 
+    /// The verdict points of a native call that builds nothing, once its
+    /// value is held: its reservation of no bytes ([`Self::reserve`]),
+    /// then [`Self::capacity_check`]. Where the run holds no more than its
+    /// bound and has not reached the capacity mark, neither decides
+    /// anything, which one read of the arena tells.
+    #[inline(always)]
+    pub(super) fn verdict_points(&mut self) -> Result<(), Halt> {
+        let quiet = {
+            let arena = self.arena.borrow();
+            let held = arena.held();
+            !arena.capacity_due()
+                && (self.bounds.memory_meter == crate::MemoryMeter::Off
+                    || held.max(self.capacity_floor) <= self.bounds.memory)
+        };
+        if quiet {
+            return Ok(());
+        }
+        self.reserve(0)?;
+        self.capacity_check()
+    }
+
     /// The memory decision, at a verdict point, with `bytes` about to be
     /// allocated. What the run holds and `bytes` that fit the bound pass;
     /// otherwise the run sweeps what nothing holds and recounts: first

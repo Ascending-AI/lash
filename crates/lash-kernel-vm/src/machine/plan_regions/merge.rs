@@ -1,25 +1,59 @@
 //! A merge pass's step, walked natively (FIG-6948): the region's body as
-//! [`crate::compile::plan_regions::merge`] recognised it.
+//! [`crate::compile::plan_regions::merge`] recognised it, its forms
+//! compiled with the region's (FIG-6947).
 //!
 //! The step opens each statement the region's pass opens, in its order,
 //! and writes each variable it writes. Its integer bookkeeping and its
 //! decisions run here; its item reads and writes, the comparator's
 //! application and the coercion of its answer run as the region's own
-//! forms, on the plan's registers. A coercion its prepared entry answers
-//! is answered as the plan's offer answers it there. So the plan stands,
-//! raises and halts exactly where the region's pass would.
+//! compiled forms, on the plan's registers: a coercion its prepared entry
+//! answers is answered as the plan's offer answers it there. So the plan
+//! stands, raises and halts exactly where the region's pass would.
 
 use lash_kernel_doc::Value;
 use lash_kernel_doc::plan::{PlanContext, PlanExit};
 
-use super::Went;
+use super::{Operand, Went, operand};
 use crate::compile::plan_regions::merge::Merge;
-use crate::compile::plan_regions::{NodeKind, Step, StepKind};
+use crate::compile::plan_regions::{Step, StepKind};
 use crate::machine::plans::PlanRun;
 
 /// The largest index or length a step keeps native: far from where an
 /// integer sum leaves a word.
 const NATIVE: i64 = 1 << 48;
+
+/// A merge's element write, `set out[dest] = list.get(sorted, at)`,
+/// compiled as the region's member write: its three operands in the plan's
+/// order, the target's register, the value's, and whether its operands go
+/// to their registers as they are evaluated.
+pub(super) struct Placed<const S: bool> {
+    order: [Operand<S>; 3],
+    target: u32,
+    src: u32,
+    placed: bool,
+}
+
+/// A merge pass compiled for the plan's variant.
+pub(super) type Merged<const S: bool> = Merge<Operand<S>, Placed<S>>;
+
+/// `merge`'s forms compiled: `None` where an element write is no member
+/// write, for the region's pass to run.
+pub(super) fn compiled<const S: bool>(merge: Merge) -> Option<Merged<S>> {
+    merge.map(operand::<S>, |step: Step| match step.kind {
+        StepKind::Store {
+            order,
+            target,
+            src,
+            placed,
+        } => Some(Placed {
+            order: order.map(operand::<S>),
+            target,
+            src,
+            placed,
+        }),
+        _ => None,
+    })
+}
 
 /// The merge's integer variables, as the step reads them on entry.
 struct Counters {
@@ -36,7 +70,7 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
     /// One step of `merge`'s loop, the element already bound: `None`,
     /// having done nothing, when its variables are not what the native
     /// step takes, for the region's pass to run it.
-    pub(super) fn merge_step(&mut self, merge: &Merge) -> Result<Option<Went>, PlanExit> {
+    pub(super) fn merge_step(&mut self, merge: &Merged<SHARED>) -> Result<Option<Went>, PlanExit> {
         let Some(mut at) = self.counters(merge) else {
             return Ok(None);
         };
@@ -45,16 +79,16 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
         if at.dest == at.end {
             at.mid = (at.dest + at.width).min(at.n);
             self.open_statement_of(0)?;
-            self.write_int(merge.mid, at.mid)?;
+            self.write_int(merge.mid, at.mid);
             at.end = (at.mid + at.width).min(at.n);
             self.open_statement_of(0)?;
-            self.write_int(merge.end, at.end)?;
+            self.write_int(merge.end, at.end);
             at.left = at.dest;
             self.open_statement_of(0)?;
-            self.write_int(merge.left, at.left)?;
+            self.write_int(merge.left, at.left);
             at.right = at.mid;
             self.open_statement_of(0)?;
-            self.write_int(merge.right, at.right)?;
+            self.write_int(merge.right, at.right);
         }
         // let from_right = false
         self.open_statement_of(0)?;
@@ -86,10 +120,10 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
         *index += 1;
         let next = *index;
         self.open_statement_of(0)?;
-        self.write_int(slot, next)?;
+        self.write_int(slot, next);
         // set dest = num.add(dest, 1)
         self.open_statement_of(0)?;
-        self.write_int(merge.dest, at.dest + 1)?;
+        self.write_int(merge.dest, at.dest + 1);
         for slot in merge.declared.1.iter().rev() {
             self.unbind(*slot);
         }
@@ -99,35 +133,35 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
     /// The comparison: the two items, the comparator's application, the
     /// coercion of its answer and the test of the order. Whether the right
     /// item goes first.
-    fn compare(&mut self, merge: &Merge, reads: [i64; 2]) -> Result<bool, PlanExit> {
+    fn compare(&mut self, merge: &Merged<SHARED>, reads: [i64; 2]) -> Result<bool, PlanExit> {
         // let first = list.get(sorted, left); let second = ... right
         for ((slot, item), read) in merge.operands.into_iter().zip(&merge.items).zip(reads) {
             self.open_statement_of(0)?;
             let value = match self.read(merge.sorted, read)? {
                 Some(value) => value,
-                None => self.value(item)?,
+                None => item.get(self)?,
             };
             self.bind_value(slot, value)?;
         }
         // let output = apply callback(context, <operands>)
         let (span, output, applied) = &merge.apply;
         self.open_statement_of(*span)?;
-        let answer = self.value(applied)?;
+        let answer = applied.get(self)?;
         self.bind_value(*output, answer)?;
         // let order = invoke coerce(output)
         let (span, order, invoked) = &merge.coerce;
         self.open_statement_of(*span)?;
-        let order_value = match self.coerced(merge, invoked, answer)? {
-            Some(value) => value,
-            None => self.value(invoked)?,
-        };
+        let order_value = invoked.get(self)?;
         self.bind_value(*order, order_value)?;
         // if num.lt(0, order) { set from_right = true }
         self.open_statement_of(0)?;
         let positive = match order_value {
             Value::Float(order) => 0.0 < order.get(),
             Value::Int(order) => 0 < order,
-            _ => self.truth(&merge.positive)?,
+            _ => match merge.positive.get(self)? {
+                Value::Bool(holds) => holds,
+                other => return Err(self.not_bool(merge.positive.reg, other)),
+            },
         };
         if positive {
             self.open_statement_of(0)?;
@@ -140,72 +174,24 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
         Ok(positive)
     }
 
-    /// The coercion of `answer` that its prepared entry answers, as the
-    /// plan's offer of `invoked` answers it: its operand in its register,
-    /// the value pinned and in the call's register. `None`, having done
-    /// nothing, where the entry declines.
-    fn coerced(
-        &mut self,
-        merge: &Merge,
-        invoked: &crate::compile::plan_regions::Node,
-        answer: Value,
-    ) -> Result<Option<Value>, PlanExit> {
-        let (Some((entry, operation)), NodeKind::Invoke { args, .. }) =
-            (&merge.coerced, &invoked.kind)
-        else {
-            return Ok(None);
-        };
-        // An operation's admission checks its depth unit first; a refusal
-        // is the offer's to raise.
-        if *operation {
-            let Ok((_, headroom)) = self.machine.call_depth_headroom(self.task) else {
-                return Ok(None);
-            };
-            if entry.depth() > 1 && entry.depth() > headroom {
-                return Ok(None);
-            }
-        }
-        let Some(answered) = entry.answer(&[answer], false) else {
-            return Ok(None);
-        };
-        let [arg] = &args[..] else {
-            return Ok(None);
-        };
-        self.machine.put(self.base + arg.reg as usize, answer);
-        let pinned = self.machine.pin_value(&answered.value);
-        self.held(pinned)?;
-        self.machine
-            .put(self.base + invoked.reg as usize, answered.value);
-        Ok(Some(answered.value))
-    }
-
-    /// The member write `step` of the merge, `set target[index] =
+    /// The element write `place` of the merge, `set target[index] =
     /// list.get(source, at)`, as the region's pass writes it: the item
     /// read from the arena at the read's verdict points, and written in
     /// place where the target is a resident list with that position or
     /// the next; otherwise by the region's own form.
     fn place(
         &mut self,
-        step: &Step,
+        place: &Placed<SHARED>,
         (target, index): (u32, i64),
         (source, at): (u32, i64),
     ) -> Result<(), PlanExit> {
-        let StepKind::Store {
-            order,
-            target: target_reg,
-            src,
-            placed,
-        } = &step.kind
-        else {
-            return Err(self.lost_form("a merge places by no member write"));
-        };
         let written = self.machine.regs[self.slots + target as usize];
         if let Some(item) = self.read(source, at)?
             && self.write_list(written, Value::Int(index), item)?
         {
             return Ok(());
         }
-        self.store(order, (*target_reg, *src), *placed)
+        self.store(&place.order, (place.target, place.src), place.placed)
     }
 
     /// `list.get(source, at)` of the list in plan variable `source` where
@@ -225,25 +211,21 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
             .ok()
             .flatten();
         if item.is_some() {
-            let verdicts = self
-                .machine
-                .reserve(0)
-                .and_then(|()| self.machine.capacity_check());
+            let verdicts = self.machine.verdict_points();
             self.held(verdicts)?;
         }
         Ok(item)
     }
 
     /// Writes integer `value` to plan variable `slot`.
-    fn write_int(&mut self, slot: u32, value: i64) -> Result<(), PlanExit> {
+    fn write_int(&mut self, slot: u32, value: i64) {
         self.machine
             .put(self.slots + slot as usize, Value::Int(value));
-        Ok(())
     }
 
     /// The merge's integer variables, when each is one the native step
     /// keeps and its lists are lists.
-    fn counters(&self, merge: &Merge) -> Option<Counters> {
+    fn counters(&self, merge: &Merged<SHARED>) -> Option<Counters> {
         let regs = &self.machine.regs;
         let int = |slot: u32| match regs[self.slots + slot as usize] {
             Value::Int(value) if (0..NATIVE).contains(&value) => Some(value),

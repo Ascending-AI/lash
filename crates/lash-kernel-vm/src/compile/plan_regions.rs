@@ -157,12 +157,25 @@ pub(crate) enum NodeKind {
     },
     /// A call of `lib` its plan offers at site `site`, which may run its
     /// body in a frame: the statement's root action, or a call nested in
-    /// its expression that the plan invokes there.
+    /// its expression that the plan invokes there. Where the called
+    /// function takes one parameter and has a prepared entry (`forward`),
+    /// a call that entry answers goes to no register.
     Invoke {
         site: u32,
         lib: LibId,
         args: Box<[Node]>,
+        forward: Option<Forward>,
     },
+}
+
+/// What the general call of a one-parameter function needs to answer by
+/// its prepared entry, as the general call answers it: the entry, and
+/// whether the function is an operation, whose admission checks the
+/// caller's depth first.
+#[derive(Clone)]
+pub(crate) struct Forward {
+    pub(crate) entry: Entry,
+    pub(crate) operation: bool,
 }
 
 /// The most operands a fused call holds in place.
@@ -199,6 +212,11 @@ impl Node {
             NodeKind::Call {
                 args,
                 direct: Some(_),
+                ..
+            }
+            | NodeKind::Invoke {
+                args,
+                forward: Some(_),
                 ..
             } => args.iter().map(Node::fused).max().unwrap_or(0),
             NodeKind::Unit
@@ -549,10 +567,12 @@ impl Former<'_, '_> {
                     SiteCall::Invoke(_)
                 ) =>
             {
+                let args = shifted(args)?;
                 NodeKind::Invoke {
                     site,
                     lib: *lib,
-                    args: shifted(args)?,
+                    forward: self.forward(*lib, &args),
+                    args,
                 }
             }
             (Callee::Library(lib), None) => self.called(*lib, shifted(args)?)?,
@@ -767,7 +787,28 @@ impl Former<'_, '_> {
             return None;
         }
         let args = self.nodes(id, args)?;
-        Some(NodeKind::Invoke { site, lib, args })
+        Some(NodeKind::Invoke {
+            site,
+            lib,
+            forward: self.forward(lib, &args),
+            args,
+        })
+    }
+
+    /// How the general call of `lib` on `args` answers by its prepared
+    /// entry, where it has one: a call of its one parameter whose
+    /// admission makes no cell.
+    fn forward(&self, lib: LibId, args: &[Node]) -> Option<Forward> {
+        let function = (self.lib)(lib)?;
+        let (entry, _) = function.prepared.as_ref()?;
+        (args.len() == 1
+            && function.arity == 1
+            && !function.shares_params
+            && !args.iter().any(Node::stands))
+        .then(|| Forward {
+            entry: entry.clone(),
+            operation: function.operation(),
+        })
     }
 
     fn nodes(&self, id: StmtId, args: Box<[Expr]>) -> Option<Box<[Node]>> {

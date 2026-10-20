@@ -165,6 +165,28 @@ impl KernelMachine {
         args: usize,
         count: usize,
     ) -> Eval<Option<Ran>> {
+        let Some(plan) = self.callback_plan(gate, task, exe, code)? else {
+            return Ok(None);
+        };
+        let Some(gate) = gate.as_ref() else {
+            return Ok(None);
+        };
+        self.callback_entry(gate, task, exe, (plan, cells), args, count)
+    }
+
+    /// The island plan the callback of code `code`, applied at a callback
+    /// site of a plan's walk of `task`, runs as under the walk's gate
+    /// `gate`, decided at its first callback: `None` when the gate is shut
+    /// or the code runs as no island, and the plan stands at its site
+    /// while the reference runs the callback.
+    #[inline]
+    pub(in crate::machine) fn callback_plan(
+        &mut self,
+        gate: &mut Option<Gate>,
+        task: TaskId,
+        exe: &Executable,
+        code: CodeId,
+    ) -> Eval<Option<u32>> {
         let gate = match gate {
             Some(gate) => gate,
             None => gate.insert(self.gate(task, !self.islands.quiet)?),
@@ -174,7 +196,7 @@ impl KernelMachine {
         }
         // The callee's island, resolved once for each code the walk
         // applies: a code that runs neither charged nor paced has none.
-        let plan = match gate.callee {
+        Ok(match gate.callee {
             Some((resolved, plan)) if resolved == code => plan,
             _ => {
                 let callee = exe.code(code);
@@ -184,13 +206,26 @@ impl KernelMachine {
                 gate.callee = Some((code, plan));
                 plan
             }
-        };
-        let Some(plan) = plan else {
-            return Ok(None);
-        };
-        let gate = *gate;
+        })
+    }
+
+    /// Runs the callback island `plan`, closed over the cells `cells`, of a
+    /// plan's walk of `task`, under the walk's open gate `gate` that
+    /// resolved it ([`Self::callback_plan`]), on the `count` arguments from
+    /// `args`. `None`: nothing changed, and the plan stands at its site
+    /// while the reference runs the callback.
+    #[inline]
+    pub(in crate::machine) fn callback_entry(
+        &mut self,
+        gate: &Gate,
+        task: TaskId,
+        exe: &Executable,
+        (plan, cells): (u32, &[ArenaHandle]),
+        args: usize,
+        count: usize,
+    ) -> Eval<Option<Ran>> {
         self.enter_under(
-            &gate,
+            gate,
             task,
             exe,
             Target::Code(plan, cells),
