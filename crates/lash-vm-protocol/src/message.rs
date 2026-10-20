@@ -453,25 +453,58 @@ pub struct RunMeters {
     pub live_tasks: u32,
 }
 
-/// The parent's immutable holdings, sent once after protocol admission and
-/// before any checkout. Definitions use the zero-copy release-image encoding;
-/// metadata names artifacts and package sets, referring to those definitions
-/// by identity. Neither payload contains host authority.
+/// One part of the parent's immutable holdings, which cross once after
+/// protocol admission and before any checkout, in order, each part within
+/// one frame ([`crate::FrameCodec::encode_pool_start`]). Definitions use the
+/// zero-copy release-image encoding; metadata names artifacts and package
+/// sets, referring to those definitions by identity. Neither payload
+/// contains host authority.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PoolStart {
-    #[serde(with = "pool_frame_bytes")]
-    pub frame: std::sync::Arc<[u8]>,
+    /// The whole holdings' length, the same on every part.
+    pub length: u64,
+    #[serde(with = "serde_bytes")]
+    pub part: Vec<u8>,
 }
 
-mod pool_frame_bytes {
-    use serde::{Deserialize, Deserializer, Serializer};
-    use std::sync::Arc;
-    pub fn serialize<S: Serializer>(bytes: &Arc<[u8]>, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_bytes(bytes)
-    }
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Arc<[u8]>, D::Error> {
-        serde_bytes::ByteBuf::deserialize(deserializer).map(|bytes| bytes.into_vec().into())
+/// The holdings' parts as they arrive, joined in order.
+#[derive(Debug, Default)]
+pub struct PoolStartParts {
+    holdings: Option<(u64, Vec<u8>)>,
+}
+
+impl PoolStartParts {
+    /// Adds the next part: the whole holdings once the last has arrived.
+    ///
+    /// # Errors
+    ///
+    /// A part names another length than the first, carries nothing before
+    /// the holdings are whole, or passes their length.
+    pub fn push(
+        &mut self,
+        part: PoolStart,
+    ) -> Result<Option<std::sync::Arc<[u8]>>, crate::CodecRefusal> {
+        let refused = |reason: &str| crate::CodecRefusal::Malformed {
+            reason: crate::Detail::new(reason),
+        };
+        let (length, bytes) = self
+            .holdings
+            .get_or_insert_with(|| (part.length, Vec::new()));
+        if *length != part.length {
+            return Err(refused("pool-start parts name two lengths"));
+        }
+        if part.part.is_empty() && (bytes.len() as u64) < *length {
+            return Err(refused("an empty pool-start part before the last"));
+        }
+        if (bytes.len() + part.part.len()) as u64 > *length {
+            return Err(refused("pool-start parts pass their length"));
+        }
+        bytes.extend_from_slice(&part.part);
+        if (bytes.len() as u64) < *length {
+            return Ok(None);
+        }
+        Ok(self.holdings.take().map(|(_, bytes)| bytes.into()))
     }
 }
 

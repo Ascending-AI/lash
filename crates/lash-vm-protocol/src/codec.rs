@@ -162,9 +162,35 @@ impl FrameCodec {
         Ok(frame)
     }
 
-    /// Encodes the one pool-start frame, under the transport's normal bounds.
-    pub fn encode_pool_start(&self, frame: &crate::PoolStart) -> Result<Vec<u8>, CodecRefusal> {
-        self.encode(frame)
+    /// Encodes `holdings` as the pool start's frames, in order: each part
+    /// as long as one frame under the transport's normal bounds carries.
+    pub fn encode_pool_start(&self, holdings: &[u8]) -> Result<Vec<Vec<u8>>, CodecRefusal> {
+        /// [`crate::PoolStart`], borrowing its part.
+        #[derive(Serialize)]
+        struct Part<'a> {
+            length: u64,
+            #[serde(with = "serde_bytes")]
+            part: &'a [u8],
+        }
+        let length = holdings.len() as u64;
+        let empty = self.encode(&Part { length, part: &[] })?;
+        if holdings.is_empty() {
+            return Ok(vec![empty]);
+        }
+        // An empty part's byte string has a two-byte header; the widest
+        // header is five.
+        let envelope = empty.len() + 3;
+        let room = (self.limits.max_frame_bytes as usize).saturating_sub(envelope);
+        if room == 0 {
+            return Err(CodecRefusal::FrameTooLarge {
+                limit: u64::from(self.limits.max_frame_bytes),
+                declared: envelope as u64 + 1,
+            });
+        }
+        holdings
+            .chunks(room)
+            .map(|part| self.encode(&Part { length, part }))
+            .collect()
     }
 
     pub fn decode_pool_start(&self, bytes: &[u8]) -> Result<crate::PoolStart, CodecRefusal> {

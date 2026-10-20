@@ -428,16 +428,13 @@ impl RlmProtocolPluginFactory {
             self.process_factory_preparations
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             // The processes a session's cells start run documents written in
-            // the session's dialect.
+            // the session's dialect, on the cells' own pool: `workers`
+            // already binds this host's packages.
             let factory = lash_vm_runtime::KernelProcessPluginFactory::new(
                 self.workers.clone(),
                 self.creation_dialect().name(),
                 self.process_bounds(),
             );
-            let factory = match &self.packages {
-                Some(packages) => factory.with_packages(Arc::clone(packages)),
-                None => factory,
-            };
             #[cfg(feature = "synthetic-next")]
             let factory = match self.kernel_writes {
                 Some(writes) => factory.writing_kernel(writes),

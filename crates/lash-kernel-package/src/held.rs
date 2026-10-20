@@ -92,9 +92,9 @@ impl HeldPackages {
                     message,
                 })?;
         }
-        let functions = Arc::new(
-            interpreted(written).map_err(|message| PackageRefusal::Interpretation { message })?,
-        );
+        let (functions, roots) =
+            interpreted(written).map_err(|message| PackageRefusal::Interpretation { message })?;
+        let functions = Arc::new(functions);
         let mut held = Self {
             artifacts,
             sets,
@@ -105,7 +105,7 @@ impl HeldPackages {
             frame: Arc::from([]),
             live_frame: OnceLock::new(),
         };
-        held.frame = crate::frame::build(&held)?;
+        held.frame = crate::frame::build(&held, &roots)?;
         Ok(held)
     }
 
@@ -446,14 +446,22 @@ fn registration_order(artifacts: &BTreeMap<ArtifactKey, Arc<Package>>) -> Vec<&A
 }
 
 /// `written` with each function redeclared for every successor kernel
-/// version the build interprets.
-fn interpreted(written: FunctionRegistry) -> Result<FunctionRegistry, String> {
+/// version the build interprets, and each redeclaration's root: the
+/// function as written, whose native it holds.
+fn interpreted(
+    written: FunctionRegistry,
+) -> Result<(FunctionRegistry, BTreeMap<FunctionId, FunctionId>), String> {
     let mut registry = written;
+    let mut roots = BTreeMap::new();
     for version in lash_kernel_doc::KernelVersion::ALL {
         if let Some(migration) = lash_kernel_migrate::migration_from(*version) {
-            lash_kernel_migrate::migrate_registry(&mut registry, migration)
-                .map_err(|error| error.to_string())?;
+            for (from, to) in lash_kernel_migrate::migrate_registry(&mut registry, migration)
+                .map_err(|error| error.to_string())?
+            {
+                let root = roots.get(&from).copied().unwrap_or(from);
+                roots.insert(to, root);
+            }
         }
     }
-    Ok(registry)
+    Ok((registry, roots))
 }

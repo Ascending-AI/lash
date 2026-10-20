@@ -98,12 +98,15 @@ fn worker_entry_inner(
         },
     })?;
     write_frame(&mut pipe, &ready, Instant::now() + bootstrap.serialization)?;
-    let bytes = read_frame(
-        &mut pipe,
-        &codec,
-        Instant::now() + bootstrap.tuning.parent_wait,
-    )?;
-    let held = lash_vm_client::packages::read(codec.decode_pool_start(&bytes)?, &codec);
+    let deadline = Instant::now() + bootstrap.tuning.parent_wait;
+    let mut parts = PoolStartParts::default();
+    let holdings = loop {
+        let bytes = read_frame(&mut pipe, &codec, deadline)?;
+        if let Some(holdings) = parts.push(codec.decode_pool_start(&bytes)?)? {
+            break holdings;
+        }
+    };
+    let held = lash_vm_client::packages::read(holdings);
     let embedding = held.and_then(|held| {
         embedder.finish(&held).map_err(|error| match error {
             EmbedError::Package(refusal) => PoolError::Package(refusal),

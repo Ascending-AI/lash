@@ -179,14 +179,16 @@ impl Worker {
 
     pub(crate) fn install_packages(
         &mut self,
-        bytes: &[u8],
+        frames: &[Vec<u8>],
         deadline: Instant,
     ) -> Result<(), PoolError> {
-        self.send_encoded(
-            bytes,
-            crate::IpcTraffic::POOL_START_KIND,
-            deadline.saturating_duration_since(Instant::now()),
-        )?;
+        for bytes in frames {
+            self.send_encoded(
+                bytes,
+                crate::IpcTraffic::POOL_START_KIND,
+                deadline.saturating_duration_since(Instant::now()),
+            )?;
+        }
         let observed = self.phases.as_ref().map(|scope| scope.recorder.now());
         let started = Instant::now();
         let bytes = match self

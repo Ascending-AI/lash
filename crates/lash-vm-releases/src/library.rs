@@ -20,7 +20,8 @@ use lash_kernel_doc::{FunctionId, FunctionRegistry};
 )]
 pub(crate) const RELEASE: &str = "1.0";
 
-/// How many compiled patterns the regular-expression extension keeps.
+/// How many compiled patterns one regular-expression engine keeps. A worker
+/// gives each regex native it constructs its own engine.
 #[cfg(feature = "dialect-typescript")]
 const CACHED_PATTERNS: usize = 256;
 
@@ -139,7 +140,11 @@ pub(crate) fn native(
     let native = match package {
         "kernel" => lash_kernel_lib::native(name).or_else(|| lash_kernel_vm::machine_native(name)),
         #[cfg(feature = "dialect-typescript")]
-        "regex.ecma" => lash_ext_regex_ecma::native(name, function),
+        "regex.ecma" => lash_ext_regex_ecma::native(
+            name,
+            &std::sync::Arc::new(lash_ext_regex_ecma::Engine::new(CACHED_PATTERNS)),
+            function,
+        ),
         #[cfg(feature = "dialect-typescript")]
         "date.ecma" => lash_ext_date_ecma::native(name, function),
         #[cfg(feature = "dialect-typescript")]

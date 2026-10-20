@@ -30,11 +30,16 @@ fn refuse(message: impl std::fmt::Display) -> PackageRefusal {
     }
 }
 
-pub(crate) fn build(held: &HeldPackages) -> Result<Arc<[u8]>, PackageRefusal> {
+/// Freezes `held`, whose redeclared functions hold the natives of their
+/// `roots`.
+pub(crate) fn build(
+    held: &HeldPackages,
+    roots: &BTreeMap<lash_kernel_doc::FunctionId, lash_kernel_doc::FunctionId>,
+) -> Result<Arc<[u8]>, PackageRefusal> {
     let registry = held.functions();
     let image = registry.to_image_with_census(&lash_kernel_vm::body_census);
     let library = PreparedLibrary::frame_index(registry);
-    let positions = registry.frame_positions();
+    let positions = registry.frame_positions(roots).map_err(refuse)?;
     let artifacts = held
         .artifacts()
         .values()

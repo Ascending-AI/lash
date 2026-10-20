@@ -352,8 +352,16 @@ impl Service {
 
     /// Gives every worker the same package holdings the parent uses. Select
     /// packages before cloning or starting the service so a live pool's frame
-    /// cannot diverge from its configuration.
+    /// cannot diverge from its configuration. Selecting the holdings this
+    /// service already binds keeps its pool, which its clones share.
     pub fn with_packages(mut self, packages: Arc<lash_kernel_package::HeldPackages>) -> Self {
+        if self
+            .config
+            .held_packages()
+            .is_ok_and(|held| Arc::ptr_eq(&held, &packages))
+        {
+            return self;
+        }
         self.config = Arc::new(PoolConfig {
             packages: Some(packages),
             ..self.config.as_ref().clone()

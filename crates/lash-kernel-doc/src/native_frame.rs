@@ -16,6 +16,9 @@ pub(super) struct RegistryFrame {
 enum Binding {
     Constructor(NativeCtor),
     Native(Arc<dyn NativeFunction>),
+    /// The native the function at this position holds: a redeclaration's
+    /// root.
+    Root(usize),
 }
 impl fmt::Debug for RegistryFrame {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -47,9 +50,10 @@ impl RegistryFrame {
     fn entry<'a>(&'a self, registry: &FunctionRegistry, at: usize) -> &'a RegisteredFunction {
         self.entries[at].get_or_init(|| {
             let mut registered = RegisteredFunction::from_image(&self.set, at);
-            registered.native = self.natives[at].as_ref().map(|binding| match binding {
-                Binding::Constructor(make) => make(registry),
-                Binding::Native(native) => native.clone(),
+            registered.native = self.natives[at].as_ref().and_then(|binding| match binding {
+                Binding::Constructor(make) => Some(make(registry)),
+                Binding::Native(native) => Some(native.clone()),
+                Binding::Root(root) => self.entry(registry, *root).native.clone(),
             });
             registered.plan = self.plans[at];
             registered
@@ -85,22 +89,40 @@ impl FunctionRegistry {
     }
 
     /// Position indexes projected once from installed function facts:
-    /// native positions, the body-plan domain, and identity bucket boundaries.
-    pub fn frame_positions(&self) -> Vec<u8> {
+    /// native positions, the body-plan domain, each native's root position
+    /// and identity bucket boundaries. `roots` names the function each
+    /// redeclared one was redeclared from as written: its native is the
+    /// root's. Every other native is its own root.
+    ///
+    /// # Errors
+    ///
+    /// [`RegistryError::Frame`] when a root is not registered here.
+    pub fn frame_positions(
+        &self,
+        roots: &BTreeMap<FunctionId, FunctionId>,
+    ) -> Result<Vec<u8>, RegistryError> {
         let mut natives = Vec::new();
         let mut plans = Vec::new();
-        for (at, (_, registered)) in self.iter().enumerate() {
+        let mut rooted = Vec::new();
+        for (at, (function, registered)) in self.iter().enumerate() {
             if registered.states_native() {
                 natives.push(at as u32);
+                let root = match roots.get(function) {
+                    Some(root) => self.position(root).ok_or_else(|| RegistryError::Frame {
+                        message: format!("the root {root} of {function} is not registered"),
+                    })?,
+                    None => at,
+                };
+                rooted.push(root as u32);
             }
             if registered.has_body() {
                 plans.push(at as u32);
             }
         }
-        let mut bytes = Vec::with_capacity(8 + 4 * (natives.len() + plans.len()));
+        let mut bytes = Vec::with_capacity(8 + 4 * (2 * natives.len() + plans.len()));
         bytes.extend((natives.len() as u32).to_le_bytes());
         bytes.extend((plans.len() as u32).to_le_bytes());
-        for position in natives.into_iter().chain(plans) {
+        for position in natives.into_iter().chain(plans).chain(rooted) {
             bytes.extend(position.to_le_bytes());
         }
         let generated;
@@ -113,7 +135,7 @@ impl FunctionRegistry {
         for start in buckets {
             bytes.extend(start.to_le_bytes());
         }
-        bytes
+        Ok(bytes)
     }
 
     /// Binds a build's sorted constructor tables to frame positions, without
@@ -203,12 +225,28 @@ impl FunctionRegistry {
             }
             frame.natives[at] = Some(Binding::Native(native.clone()));
         }
-        for at in positions_of(positions, false) {
-            if !image.has_body(at) && frame.natives[at].is_none() {
-                return Err(RegistryError::FrameNativeMissing {
+        // A root is refused before any function redeclared from it.
+        let missing = |natives: &FrameArray<Option<Binding>>, at: usize| {
+            (!image.has_body(at) && natives[at].is_none()).then(|| {
+                RegistryError::FrameNativeMissing {
                     function: image.id(at),
                     name: frame_name(image, at),
-                });
+                }
+            })
+        };
+        for (at, root) in positions_of(positions, false).zip(roots_of(positions)) {
+            if at == root
+                && let Some(refusal) = missing(&frame.natives, at)
+            {
+                return Err(refusal);
+            }
+        }
+        for (at, root) in positions_of(positions, false).zip(roots_of(positions)) {
+            if at != root && frame.natives[at].is_none() && frame.natives[root].is_some() {
+                frame.natives[at] = Some(Binding::Root(root));
+            }
+            if let Some(refusal) = missing(&frame.natives, at) {
+                return Err(refusal);
             }
         }
         self.declarations = false;
@@ -301,6 +339,24 @@ impl FunctionRegistry {
 
 fn frame_name(image: ReleasedFunctions, at: usize) -> FunctionName {
     FunctionName::new(image.name(at)).unwrap_or_else(|_| unreachable!("validated frame name"))
+}
+
+/// Each native position's root, in the order of the native positions.
+fn roots_of(bytes: &[u8]) -> impl Iterator<Item = usize> + '_ {
+    let word = |at| {
+        u32::from_le_bytes(
+            bytes[at..at + 4]
+                .try_into()
+                .unwrap_or_else(|_| unreachable!("position word")),
+        ) as usize
+    };
+    let natives = word(0);
+    let start = 8 + (natives + word(4)) * 4;
+    bytes[start..start + natives * 4]
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|word| u32::from_le_bytes(*word) as usize)
 }
 
 /// Both lists are in identity order, because their positions come from the

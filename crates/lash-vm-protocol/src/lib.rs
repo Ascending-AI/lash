@@ -43,7 +43,7 @@ pub use message::{
     BorrowedParentFrame, BorrowedParentMessage, BoundReached, Charge, CheckpointStart, Delivery,
     EncodedPayload, ExecutionLease, FrameEpoch, HeaderRefusal, HostReadId, HostReadKind,
     LimitDecision, LimitedBound, MemoryMeter, MessageFence, MessageHeader, OwnerEpoch, ParentFrame,
-    ParentMessage, PoolStart, PoolStarted, RunBounds, RunMeters, Start, StartFrom,
+    ParentMessage, PoolStart, PoolStartParts, PoolStarted, RunBounds, RunMeters, Start, StartFrom,
     TransportSequence, WorkerFrame, WorkerMessage, WorkerPhase, WorkerWork,
 };
 pub use outcome::{

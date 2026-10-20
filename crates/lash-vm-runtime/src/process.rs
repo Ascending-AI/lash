@@ -425,7 +425,7 @@ impl KernelProcessEngine {
         &self,
         performed: &lash_execution_contracts::process::PerformedEffects,
     ) -> lash_execution_contracts::process::OwnedOperations {
-        let Some(held) = self.workers.config().packages.as_deref() else {
+        let Ok(held) = self.workers.config().held_packages() else {
             return Default::default();
         };
         let Ok(view) = held.view(&held.own()) else {
@@ -438,9 +438,10 @@ impl KernelProcessEngine {
     }
 
     /// The engine that runs the documents in `documents`, written in
-    /// `dialect`, on `workers`, holding each new process to `bounds`, for
-    /// workers that hold the library of the dialects this build was built
-    /// with.
+    /// `dialect`, on `workers`, holding each new process to `bounds`. The
+    /// engine links and admits against the packages `workers` bind, and
+    /// shares their pool: a host selects packages on the service before it
+    /// shares it.
     ///
     /// # Errors
     ///
@@ -451,38 +452,21 @@ impl KernelProcessEngine {
         workers: lash_vm_client::service::Service,
         bounds: lash_kernel_vm::Bounds,
     ) -> Result<Self, lash_vm_releases::LibraryError> {
-        let packages = workers
-            .config()
-            .packages
-            .clone()
-            .map_or_else(lash_vm_releases::lash_packages, Ok)?;
-        Ok(Self::with_packages(
-            documents, dialect, packages, workers, bounds,
-        ))
-    }
-
-    /// The engine and its workers share the same installed package holdings.
-    pub fn with_packages(
-        documents: KernelDocuments,
-        dialect: &str,
-        packages: Arc<lash_kernel_package::HeldPackages>,
-        workers: lash_vm_client::service::Service,
-        bounds: lash_kernel_vm::Bounds,
-    ) -> Self {
-        Self {
+        let packages = workers.config().held_packages()?;
+        Ok(Self {
             documents,
             effect_preparations: Arc::new(std::sync::Mutex::new(
                 documents::EffectPreparations::default(),
             )),
             functions: Arc::clone(packages.functions()),
-            workers: workers.with_packages(packages),
+            workers,
             dialect: dialect.to_owned(),
             bounds,
             writes: lash_kernel_doc::KernelVersion::NEWEST,
             policy: KernelRunPolicy::standard(),
             random: Arc::new(process_random),
             trace_runtime: None,
-        }
+        })
     }
 
     /// This engine as the previous build's: it writes kernel version

@@ -353,6 +353,21 @@ pub struct PoolConfig {
 }
 
 impl PoolConfig {
+    /// The holdings this configuration's workers bind: the selected
+    /// packages, or the parent's shipped ones.
+    ///
+    /// # Errors
+    ///
+    /// The shipped packages do not assemble: a defect of the build.
+    pub fn held_packages(
+        &self,
+    ) -> Result<std::sync::Arc<lash_kernel_package::HeldPackages>, lash_vm_releases::LibraryError>
+    {
+        self.packages
+            .clone()
+            .map_or_else(lash_vm_releases::lash_packages, Ok)
+    }
+
     /// Prewarm one process, admit at most four, and bound waiting input to
     /// two items and eight MiB. Protocol bounds use `ProtocolBounds::standard`;
     /// run bounds are 50 million charge units, 64 MiB, 1,024 nested calls,

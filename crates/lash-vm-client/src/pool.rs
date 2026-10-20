@@ -40,8 +40,9 @@ struct Pool {
     epoch: u64,
     measurements: SharedMeasurements,
     config: PoolConfig,
-    /// Encoded once from the parent, shared by prewarm and replacement workers.
-    packages: Vec<u8>,
+    /// The pool start's frames, encoded once from the parent and shared by
+    /// prewarm and replacement workers.
+    packages: Vec<Vec<u8>>,
     /// The most workers the pool runs at once, within its memory budget.
     capacity: usize,
     state: Mutex<State>,
@@ -64,17 +65,14 @@ impl WorkerPool {
         if let Some(cgroup) = &config.cgroup {
             cgroup.probe().map_err(PoolError::cgroup)?;
         }
-        let held = match &config.packages {
-            Some(packages) => packages.clone(),
-            None => lash_vm_releases::lash_packages().map_err(|error| {
-                PoolError::breach(ProtocolBreach::Machine {
-                    detail: Detail::new(error),
-                })
-            })?,
-        };
+        let held = config.held_packages().map_err(|error| {
+            PoolError::breach(ProtocolBreach::Machine {
+                detail: Detail::new(error),
+            })
+        })?;
         let codec = FrameCodec::new(config.protocol.decode)
             .with_detail_limit(config.tuning.diagnostic_bytes);
-        let packages = codec.encode_pool_start(&crate::packages::frame(&held))?;
+        let packages = codec.encode_pool_start(&held.frame())?;
         static NEXT_EPOCH: AtomicU64 = AtomicU64::new(1);
         let pool = Self(Arc::new(Pool {
             phases,

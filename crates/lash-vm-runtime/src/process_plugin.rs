@@ -13,7 +13,6 @@ pub struct KernelProcessPluginFactory {
     workers: Service,
     dialect: String,
     bounds: RunBounds,
-    packages: Option<Arc<lash_kernel_package::HeldPackages>>,
     /// Content preparation survives per-activation engine construction; it
     /// carries no backend, execution context, recorded settings or authority.
     preparations: crate::process::ProcessPreparations,
@@ -31,17 +30,17 @@ impl KernelProcessPluginFactory {
             workers,
             dialect: dialect.into(),
             bounds,
-            packages: None,
             preparations: crate::process::ProcessPreparations::default(),
             #[cfg(feature = "synthetic-next")]
             writes: None,
         }
     }
 
-    /// The package holdings shared by admission and worker pools.
+    /// The package holdings shared by admission and worker pools, selected
+    /// on this factory's service before any engine shares its pool.
     #[must_use]
     pub fn with_packages(mut self, packages: Arc<lash_kernel_package::HeldPackages>) -> Self {
-        self.packages = Some(packages);
+        self.workers = self.workers.with_packages(packages);
         self
     }
 
@@ -114,22 +113,9 @@ impl KernelProcessPluginFactory {
             join_members: self.bounds.join_members,
             // A process is saved at every park and resumed on any worker.
         };
-        let engine = match &self.packages {
-            Some(packages) => crate::KernelProcessEngine::with_packages(
-                documents,
-                &self.dialect,
-                Arc::clone(packages),
-                self.workers.clone(),
-                bounds,
-            ),
-            None => crate::KernelProcessEngine::new(
-                documents,
-                &self.dialect,
-                self.workers.clone(),
-                bounds,
-            )
-            .map_err(|error| PluginError::Registration(error.to_string()))?,
-        };
+        let engine =
+            crate::KernelProcessEngine::new(documents, &self.dialect, self.workers.clone(), bounds)
+                .map_err(|error| PluginError::Registration(error.to_string()))?;
         Ok(self.preparations.bind(engine))
     }
 }

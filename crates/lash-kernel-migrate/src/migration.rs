@@ -145,18 +145,21 @@ pub fn migration_from(version: KernelVersion) -> Option<&'static Migration> {
 /// same native implementation. An embedder that interprets both versions
 /// assembles its library for the older one and calls this once.
 ///
-/// Returns how many functions it redeclared.
+/// Returns each function it redeclared, as its `(from, to)` identities.
 pub fn migrate_registry(
     registry: &mut FunctionRegistry,
     migration: &Migration,
-) -> Result<usize, MigrateRegistryError> {
+) -> Result<Vec<(FunctionId, FunctionId)>, MigrateRegistryError> {
     let written: Vec<FunctionId> = registry
         .iter()
         .filter(|(_, function)| function.definition().kernel == migration.from.number())
         .map(|(id, _)| *id)
         .collect();
     let redeclared = crate::rewrite::redeclare(migration.definition, written, &*registry)?;
-    let count = redeclared.len();
+    let pairs = redeclared
+        .iter()
+        .map(|function| (function.from, function.to))
+        .collect();
     // A function is redeclared after every function its body calls: the
     // order `register` validates in.
     for function in redeclared {
@@ -168,7 +171,7 @@ pub fn migrate_registry(
             Err(error) => return Err(error.into()),
         }
     }
-    Ok(count)
+    Ok(pairs)
 }
 
 /// Why a library could not be redeclared for the next version.

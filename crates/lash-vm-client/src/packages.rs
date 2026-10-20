@@ -2,18 +2,13 @@
 //! stored artifact format: packages and set identities are recomputed on read.
 use crate::PoolError;
 use lash_kernel_package::{HeldPackages, PackageRefusal};
-use lash_vm_protocol::{EncodedPayload, FrameCodec, PoolStart, PoolStarted};
+use lash_vm_protocol::{EncodedPayload, FrameCodec, PoolStarted};
 
-pub(crate) fn frame(packages: &HeldPackages) -> PoolStart {
-    PoolStart {
-        frame: packages.frame(),
-    }
-}
-
-/// Reconstructs metadata over the parent's trusted image. Installation did all
-/// definition validation, sorting and reservation work before this worker ran.
-pub fn read(frame: PoolStart, _codec: &FrameCodec) -> Result<HeldPackages, PoolError> {
-    HeldPackages::from_frame(frame.frame).map_err(PoolError::Package)
+/// Reconstructs metadata over the parent's trusted image, its pool-start
+/// parts joined. Installation did all definition validation, sorting and
+/// reservation work before this worker ran.
+pub fn read(holdings: std::sync::Arc<[u8]>) -> Result<HeldPackages, PoolError> {
+    HeldPackages::from_frame(holdings).map_err(PoolError::Package)
 }
 
 /// The refusal remains a package refusal at the parent boundary.
