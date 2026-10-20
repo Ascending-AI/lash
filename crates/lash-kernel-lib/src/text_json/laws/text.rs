@@ -367,7 +367,13 @@ fn k_ltxt_011_trim_set_bounds_scan_copy_and_reserves_output() {
 /// and its shallow formula bounds both scans and the reserved output copy.
 #[test]
 fn k_ltxt_012_join_admission_bounds_scan_copy_and_first_mismatch() {
-    for pieces in [vec![], vec![""], vec!["", "😀", "é", ""], vec!["x"; 32]] {
+    for pieces in [
+        vec![],
+        vec![""],
+        vec!["", "😀", "é", ""],
+        vec!["x"; 32],
+        vec!["\0é😀é😀x", "é😀é😀é😀", "", "row-499"],
+    ] {
         for separator in ["", "|", "😀"] {
             let mut lab = Lab::new();
             let input = list(pieces.iter().map(|piece| t(piece)).collect());

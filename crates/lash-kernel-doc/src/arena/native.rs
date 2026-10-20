@@ -509,7 +509,7 @@ impl<'call> TextView<'call> {
     /// The text's length in UTF-8 bytes.
     pub fn len(&self) -> u64 {
         match self {
-            Self::Short(short) => short.as_str().len() as u64,
+            Self::Short(short) => short.as_bytes().len() as u64,
             Self::Long { text, .. } => text.summary.utf8_bytes,
         }
     }

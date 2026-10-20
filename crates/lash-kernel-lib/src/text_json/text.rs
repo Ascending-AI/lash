@@ -745,7 +745,7 @@ fn join_or_index(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
                 return Ok(int(count));
             };
             count += 1;
-            bytes = bytes.and_then(|bytes| bytes.checked_add(text.summary().utf8_bytes as usize));
+            bytes = bytes.and_then(|bytes| bytes.checked_add(text.len() as usize));
         }
     }
     let separator = materialized_text(&call.args, call.new, 1)?;
@@ -756,21 +756,31 @@ fn join_or_index(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
         .checked_mul(count.saturating_sub(1))
         .and_then(|separators| bytes.and_then(|bytes| separators.checked_add(bytes)))
         .ok_or_else(crate::exhausted)?;
-    let mut out = text_buffer(call.new, size)?;
+    // ShortText already owns UTF-8 bytes admitted by its str constructor.
+    // Copy them without decoding each part; validate the completed buffer once
+    // to recover a str in safe code. Long-text chunks are already str.
+    let mut out = text_buffer(call.new, size)?.into_bytes();
     let mut first = true;
     for chunk in items.chunks() {
         for item in chunk? {
             if !first {
-                out.push_str(&separator);
+                out.extend_from_slice(separator.as_bytes());
             }
             first = false;
             if let Some(text) = call.args.text(item)? {
-                for piece in text.chunks() {
-                    out.push_str(piece?);
+                match text {
+                    TextView::Short(short) => out.extend_from_slice(short.as_bytes()),
+                    text => {
+                        for piece in text.chunks() {
+                            out.extend_from_slice(piece?.as_bytes());
+                        }
+                    }
                 }
             }
         }
     }
+    let out =
+        String::from_utf8(out).map_err(|_| NativeError::Malformed("joined text is not UTF-8"))?;
     Ok(call.new.text(&out))
 }
 
