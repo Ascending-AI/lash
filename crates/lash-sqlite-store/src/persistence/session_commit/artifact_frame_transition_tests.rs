@@ -49,14 +49,19 @@ fn first_commit_may_end_its_own_appended_frame_open() {
     }
     let ended = FrameEnvironmentId::new(session.clone(), first);
     let ended_referrer = ArtifactReferrer::FrameEnvironment(ended.clone());
+    let blob = [0_u8];
+    let blob_hash = BlobRef::digest_for_content(&blob);
     conn.execute(
-        "INSERT INTO blobs (hash, content, encoding) VALUES ('blob', X'00', 0)",
-        [],
+        "INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 0)",
+        params![blob_hash.as_slice(), blob.as_slice()],
     )
     .expect("artifact blob");
     conn.execute(
-        "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref) VALUES (?1, 'module', 'blob')",
-        params![crate::artifact_store::MODULE_ARTIFACT_NAMESPACE],
+        "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref) VALUES (?1, 'module', ?2)",
+        params![
+            crate::artifact_store::MODULE_ARTIFACT_NAMESPACE,
+            blob_hash.as_slice()
+        ],
     )
     .expect("artifact pointer");
     conn.execute(
@@ -137,14 +142,20 @@ fn frame_transition_carries_then_fences_and_records_gated_cleanup() {
     );
     let next = FrameEnvironmentId::new(session, FrameNodeId::new("next-frame").expect("frame id"));
     let source = ArtifactReferrer::FrameEnvironment(old.clone());
+    let blob = [0_u8];
+    let blob_hash = BlobRef::digest_for_content(&blob);
     conn.execute(
-        "INSERT INTO blobs (hash, content, encoding) VALUES ('blob', X'00', 0)",
-        [],
+        "INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 0)",
+        params![blob_hash.as_slice(), blob.as_slice()],
     )
     .expect("artifact blob");
     conn.execute(
-        "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref) VALUES (?1, ?2, 'blob')",
-        params![crate::artifact_store::MODULE_ARTIFACT_NAMESPACE, "carried"],
+        "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref) VALUES (?1, ?2, ?3)",
+        params![
+            crate::artifact_store::MODULE_ARTIFACT_NAMESPACE,
+            "carried",
+            blob_hash.as_slice()
+        ],
     )
     .expect("artifact pointer");
     conn.execute(

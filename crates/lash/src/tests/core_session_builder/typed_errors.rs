@@ -73,7 +73,7 @@ async fn a_cold_open_refuses_a_head_without_identity_even_for_root() {
     for node in staging.nodes().values() {
         tx.execute(
             "INSERT OR IGNORE INTO blobs (hash, content, encoding) VALUES (?1, ?2, 1)",
-            rusqlite::params![node.id.to_hex(), node.bytes.as_ref()],
+            rusqlite::params![node.id.0.as_slice(), node.bytes.as_ref()],
         )
         .expect("install config node");
     }
@@ -81,7 +81,7 @@ async fn a_cold_open_refuses_a_head_without_identity_even_for_root() {
         for child in node.children().expect("canonical children") {
             tx.execute(
                 "INSERT OR IGNORE INTO blob_edges (parent_hash, child_hash) VALUES (?1, ?2)",
-                rusqlite::params![node.id.to_hex(), child.to_hex()],
+                rusqlite::params![node.id.0.as_slice(), child.0.as_slice()],
             )
             .expect("install config edge");
         }
@@ -90,7 +90,7 @@ async fn a_cold_open_refuses_a_head_without_identity_even_for_root() {
         assert_eq!(
             tx.execute(
                 "UPDATE session_revisions SET config_ref = ?1 WHERE session_id = ?2",
-                rusqlite::params![root.to_hex(), id],
+                rusqlite::params![root.0.as_slice(), id],
             )
             .expect("replace only the stored identity"),
             1,
