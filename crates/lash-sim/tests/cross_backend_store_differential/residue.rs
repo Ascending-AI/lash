@@ -95,7 +95,7 @@ const SCOPED_READS: &[(&str, &str, &str, &str)] = &[
              SELECT checkpoint_ref FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision)
              WHERE session_id = $1 AND checkpoint_ref IS NOT NULL
              UNION SELECT e.child_hash FROM lash_blob_edges e JOIN reach r ON e.parent_hash = r.hash)
-         SELECT parent_hash || ':' || child_hash FROM lash_blob_edges WHERE parent_hash IN (SELECT hash FROM reach)",
+         SELECT encode(parent_hash, 'hex') || ':' || encode(child_hash, 'hex') FROM lash_blob_edges WHERE parent_hash IN (SELECT hash FROM reach)",
     ),
     // The checkpoint manifest and every node it reaches from this session's
     // head: a corrupted body is visible here and nowhere else.
@@ -111,7 +111,7 @@ const SCOPED_READS: &[(&str, &str, &str, &str)] = &[
              SELECT checkpoint_ref FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision)
              WHERE session_id = $1 AND checkpoint_ref IS NOT NULL
              UNION SELECT e.child_hash FROM lash_blob_edges e JOIN reach r ON e.parent_hash = r.hash)
-         SELECT hash || ':' || encode(content, 'hex') || ':' || encoding FROM lash_blobs WHERE hash IN (SELECT hash FROM reach)",
+         SELECT encode(hash, 'hex') || ':' || encode(content, 'hex') || ':' || encoding FROM lash_blobs WHERE hash IN (SELECT hash FROM reach)",
     ),
 ];
 

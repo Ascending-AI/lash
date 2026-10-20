@@ -93,30 +93,14 @@ lash_store_sql::statements! {
                  ORDER BY session_id
              ) AS ordered";
 
-        /// Take the transaction-scoped advisory lock of every distinct text
-        /// in `?1` under seed `?2`, in text order.
-        ///
-        /// One statement in one order for the same deadlock argument as
-        /// [`Self::lock_xact_session_history_batch`]: two holders of
-        /// overlapping sets acquire the shared members in the same order.
-        lock_xact_by_text_batch_seeded =
-            "SELECT pg_advisory_xact_lock(hashtextextended(ordered.text_key, ?2))
-             FROM (
-                 SELECT DISTINCT text_key
-                 FROM unnest(?1::TEXT[]) AS target(text_key)
-                 ORDER BY text_key
-             ) AS ordered";
-
-        /// The batch lock, shared: holders of the shared form never wait for
-        /// each other, only for a holder of
-        /// [`Self::lock_xact_by_text_batch_seeded`], which waits for them.
-        lock_xact_shared_by_text_batch_seeded =
-            "SELECT pg_advisory_xact_lock_shared(hashtextextended(ordered.text_key, ?2))
-             FROM (
-                 SELECT DISTINCT text_key
-                 FROM unnest(?1::TEXT[]) AS target(text_key)
-                 ORDER BY text_key
-             ) AS ordered";
+        /// Content-address locks preserve the same seed and hexadecimal lock
+        /// identity while binding and sorting the raw digest keys.
+        lock_xact_by_keys_seeded =
+            "SELECT pg_advisory_xact_lock(hashtextextended(encode(ordered.key, 'hex'), ?2))
+             FROM (SELECT DISTINCT key FROM unnest(?1::BYTEA[]) AS target(key) ORDER BY key) AS ordered";
+        lock_xact_shared_by_keys_seeded =
+            "SELECT pg_advisory_xact_lock_shared(hashtextextended(encode(ordered.key, 'hex'), ?2))
+             FROM (SELECT DISTINCT key FROM unnest(?1::BYTEA[]) AS target(key) ORDER BY key) AS ordered";
 
         /// Lock the pair `(?1, ?2)` in the general key space, length-prefixing
         /// each part so that `("ab", "c")` and `("a", "bc")` are two locks

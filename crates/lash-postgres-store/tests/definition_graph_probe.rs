@@ -18,7 +18,7 @@ impl PostgresDefinitionGraphProbe {
 impl lash_conformance::DefinitionGraphProbe for PostgresDefinitionGraphProbe {
     async fn module_row(&self, artifact_ref: &str) -> lash_conformance::ModuleRow {
         let row: Option<(i16, Option<String>)> = sqlx::query_as(
-            "SELECT storage_kind, graph_ref FROM lash_lash_vm_artifacts
+            "SELECT storage_kind, encode(graph_ref, 'hex') FROM lash_lash_vm_artifacts
              WHERE namespace = 'kernel_document' AND artifact_ref = $1",
         )
         .bind(artifact_ref)
@@ -33,12 +33,14 @@ impl lash_conformance::DefinitionGraphProbe for PostgresDefinitionGraphProbe {
     }
 
     async fn graph_nodes(&self) -> std::collections::BTreeSet<String> {
-        sqlx::query_scalar::<_, String>("SELECT hash FROM lash_blobs WHERE encoding = 1")
-            .fetch_all(self.storage.pool())
-            .await
-            .expect("read the Postgres graph nodes")
-            .into_iter()
-            .collect()
+        sqlx::query_scalar::<_, String>(
+            "SELECT encode(hash, 'hex') FROM lash_blobs WHERE encoding = 1",
+        )
+        .fetch_all(self.storage.pool())
+        .await
+        .expect("read the Postgres graph nodes")
+        .into_iter()
+        .collect()
     }
 
     async fn cut(&self, cut: lash_conformance::DefinitionGraphCut) {

@@ -18,13 +18,13 @@ pub(super) async fn apply(
         .bind(write.key.call.owner_column())
         .bind(write.key.call.call_column())
         .bind(&write.call_id.0)
-        .bind(write.record.to_hex())
+        .bind(crate::keys::key(write.record.to_hex()))
         .bind(commit.now.0)
         .bind(commit.epoch.0)
         .execute(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
-    let retained: String = crate::observed_sql::query_scalar(SQL.root.sql())
+    let retained: String = crate::keys::query_scalar(SQL.root.sql())
         .bind(write.key.session.as_str())
         .bind(write.key.call.owner_column())
         .bind(write.key.call.call_column())
@@ -54,7 +54,7 @@ pub(super) async fn delete_session(
         .bind(session.as_str())
         .execute(crate::observed_sql::executor(&mut *tx))
         .await?;
-    crate::observed_sql::query_scalar(SQL.delete_session.sql())
+    crate::keys::query_scalar(SQL.delete_session.sql())
         .bind(session.as_str())
         .fetch_all(crate::observed_sql::executor(tx))
         .await
@@ -72,7 +72,7 @@ impl super::PostgresDurableStore {
         self.read(|connection| {
             Box::pin(async move {
                 let mut snapshot = super::snapshot(connection).await?;
-                let rows: Vec<(String, String, i64)> =
+                let rows: Vec<(String, crate::keys::Key, i64)> =
                     crate::observed_sql::query_as(SQL.read.sql())
                         .bind(session.as_str())
                         .bind(owner)

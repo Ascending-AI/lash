@@ -145,8 +145,8 @@ DECLARE
     v_body jsonb;
     item jsonb;
     held record;
-    v_frontier TEXT[];
-    v_locked TEXT[];
+    v_frontier BYTEA[];
+    v_locked BYTEA[];
     v_rows BIGINT;
 BEGIN
     IF p_gate IS NOT NULL THEN

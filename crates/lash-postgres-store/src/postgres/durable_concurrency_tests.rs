@@ -656,7 +656,7 @@ async fn a_record_racing_a_release_of_a_shared_text_keeps_it() {
         },
     };
     let text = |hash: &str| PromptText {
-        hash: hash.to_owned(),
+        hash: lash_core_store::store::BlobRef::for_content(hash.as_bytes()).0,
         text: format!("text of {hash}").into(),
         children: Vec::new(),
     };
@@ -692,7 +692,9 @@ async fn a_record_racing_a_release_of_a_shared_text_keeps_it() {
         async move {
             let mut held = pool.begin().await.expect("open the holding transaction");
             sqlx::query(super::prompts::LAW_SQL.hold_text.sql())
-                .bind(hash)
+                .bind(crate::keys::key(
+                    lash_core_store::store::BlobRef::for_content(hash.as_bytes()).as_str(),
+                ))
                 .fetch_one(&mut *held)
                 .await
                 .expect("hold the blocking text");
@@ -750,12 +752,12 @@ async fn a_record_racing_a_release_of_a_shared_text_keeps_it() {
             .await
             .expect("read the recorded root");
         assert!(
-            kept.is_some_and(|root| root.snapshot_texts == [shared]),
+            kept.is_some_and(|root| root.snapshot_texts == [text(shared).hash]),
             "round {round}: the recorded call lost its root"
         );
         assert_eq!(
             store
-                .prompt_texts(&[shared.to_owned()])
+                .prompt_texts(&[text(shared).hash])
                 .await
                 .expect("read"),
             [text(shared)],
@@ -805,7 +807,7 @@ async fn a_record_racing_a_release_of_a_shared_text_keeps_it() {
         );
         assert_eq!(
             store
-                .prompt_texts(&[shared.to_owned()])
+                .prompt_texts(&[text(shared).hash])
                 .await
                 .expect("read"),
             [text(shared)],
@@ -826,13 +828,18 @@ async fn a_record_racing_a_release_of_a_shared_text_keeps_it() {
         .unwrap_or_else(|error| panic!("release {name}: {error}"));
     }
     let used: Vec<String> = (0..20)
-        .flat_map(|round| [format!("shared-{round}"), format!("reshared-{round}")])
+        .flat_map(|round| {
+            [
+                text(&format!("shared-{round}")).hash,
+                text(&format!("reshared-{round}")).hash,
+            ]
+        })
         .collect();
     let left = store.prompt_texts(&used).await.expect("read");
     assert!(left.is_empty(), "released texts were left behind: {left:?}");
     assert_eq!(
         store
-            .prompt_texts(&["blocker".to_owned()])
+            .prompt_texts(&[text("blocker").hash])
             .await
             .expect("read"),
         [text("blocker")],

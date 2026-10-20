@@ -77,7 +77,7 @@ async fn conformance_resets_and_reopens_stay_in_the_laws_database() {
     assert_ne!(databases[0], databases[1]);
     for (storage, body) in [(&first, vec![1_u8]), (&second, vec![2_u8])] {
         sqlx::query("INSERT INTO lash_blobs (hash, content, encoding) VALUES ($1, $2, 0)")
-            .bind("same-law-fixture-key")
+            .bind(vec![42_u8; 32])
             .bind(body)
             .execute(storage.pool())
             .await
@@ -89,7 +89,7 @@ async fn conformance_resets_and_reopens_stay_in_the_laws_database() {
         .expect("reopen the first law on an independent pool");
     assert_eq!(reopened.catalog_id(), first.catalog_id());
     let body: Vec<u8> = sqlx::query_scalar("SELECT content FROM lash_blobs WHERE hash = $1")
-        .bind("same-law-fixture-key")
+        .bind(vec![42_u8; 32])
         .fetch_one(reopened.pool())
         .await
         .expect("companion reset must preserve the first law's durable row");

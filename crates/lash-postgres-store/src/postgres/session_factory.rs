@@ -332,14 +332,18 @@ impl lash_core_store::store::SessionCatalogStore for PostgresStore {
         // forked in its place.
         let retained = crate::observed_sql::query_as::<
             _,
-            (Option<String>, Option<String>, Option<String>),
+            (
+                Option<String>,
+                Option<crate::keys::Key>,
+                Option<crate::keys::Key>,
+            ),
         >(session_sql().revisions_postgres.select_for_share.sql())
         .bind(source_session_id.as_str())
         .bind(sql_revision)
         .fetch_optional(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
-        let Some((leaf_node_id, mut checkpoint_ref, _head_json)) = retained else {
+        let Some((leaf_node_id, checkpoint_ref, _head_json)) = retained else {
             let (source_exists, source_deleted) = crate::observed_sql::query_as::<_, (bool, bool)>(
                 session_sql()
                     .meta_postgres
@@ -362,6 +366,7 @@ impl lash_core_store::store::SessionCatalogStore for PostgresStore {
                 }
             });
         };
+        let mut checkpoint_ref = checkpoint_ref.map(|key| key.0);
         if let Some(checkpoint_ref) = checkpoint_ref.as_deref() {
             crate::support::lock_checkpoint_blob_tx(&mut tx, checkpoint_ref, None).await?;
         }
@@ -948,6 +953,18 @@ async fn session_texts(
         .map_err(store_sqlx_error)
 }
 
+async fn session_keys(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    statement: &str,
+    session_id: &SessionId,
+) -> Result<Vec<String>, StoreError> {
+    crate::keys::query_scalar(statement)
+        .bind(session_id.as_str())
+        .fetch_all(crate::observed_sql::executor(&mut **tx))
+        .await
+        .map_err(store_sqlx_error)
+}
+
 /// Delete `session_id`'s rows in `tx`: the deleted session's terminal
 /// record, when it was materialized, is the caller's to sequence at the
 /// transaction's tail.
@@ -984,7 +1001,7 @@ pub(crate) async fn delete_session_tx(
     // Attachment intents are released before the rest of the session store so
     // a failed transaction cannot leave live-looking state without its owner.
     // The session advisory fence stabilizes this head read.
-    let head = crate::observed_sql::query_as::<_, (Option<String>, Option<String>)>(
+    let head = crate::observed_sql::query_as::<_, (Option<String>, Option<crate::keys::Key>)>(
         session_sql().head.select_reclaim.sql(),
     )
     .bind(session_id.as_str())
@@ -997,14 +1014,14 @@ pub(crate) async fn delete_session_tx(
     // its admission base. Its pins, revisions, runs and metadata go with it, so
     // each root they held is retired here and held below.
     let runs = &crate::session_runs::session_runs_sql().runs;
-    let mut checkpoint_refs: std::collections::BTreeSet<String> = session_texts(
+    let mut checkpoint_refs: std::collections::BTreeSet<String> = session_keys(
         tx,
         session_sql().revisions.select_session_checkpoints.sql(),
         session_id,
     )
     .await?
     .into_iter()
-    .chain(session_texts(tx, runs.select_session_transcripts.sql(), session_id).await?)
+    .chain(session_keys(tx, runs.select_session_transcripts.sql(), session_id).await?)
     .collect();
     let mut retained_leaves: std::collections::BTreeSet<String> = session_texts(
         tx,
@@ -1014,16 +1031,14 @@ pub(crate) async fn delete_session_tx(
     .await?
     .into_iter()
     .collect();
-    checkpoint_refs.extend(checkpoint_ref);
+    checkpoint_refs.extend(checkpoint_ref.map(|key| key.0));
     checkpoint_refs.extend(
-        crate::observed_sql::query_scalar::<_, Option<String>>(
-            session_sql().meta.select_admission_base.sql(),
-        )
-        .bind(session_id.as_str())
-        .fetch_optional(crate::observed_sql::executor(&mut **tx))
-        .await
-        .map_err(store_sqlx_error)?
-        .flatten(),
+        crate::keys::query_scalar::<Option<String>>(session_sql().meta.select_admission_base.sql())
+            .bind(session_id.as_str())
+            .fetch_optional(crate::observed_sql::executor(&mut **tx))
+            .await
+            .map_err(store_sqlx_error)?
+            .flatten(),
     );
     retained_leaves.extend(leaf_node_id);
     for statement in [

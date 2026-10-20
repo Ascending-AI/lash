@@ -162,7 +162,7 @@ impl FenceIntegrityInjector for PostgresFenceIntegrityInjector {
                     Option<String>,
                     Option<String>,
                 ) = sqlx::query_as(
-                    "SELECT head.head_revision, revision.config_ref, revision.leaf_node_id, revision.checkpoint_ref
+                    "SELECT head.head_revision, encode(revision.config_ref, 'hex'), revision.leaf_node_id, encode(revision.checkpoint_ref, 'hex')
                      FROM lash_session_head AS head JOIN lash_session_revisions AS revision USING (session_id)
                      WHERE head.session_id = $1 ORDER BY revision.head_revision DESC LIMIT 1",
                 )

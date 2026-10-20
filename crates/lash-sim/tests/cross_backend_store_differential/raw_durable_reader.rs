@@ -68,7 +68,7 @@ impl RawDurableReader {
                     .as_ref()
                     .expect("Postgres reader is attached to a store");
                 let head: Option<(i64, Option<String>, Option<String>)> = sqlx::query_as(
-                    "SELECT head_revision, leaf_node_id, checkpoint_ref
+                    "SELECT head_revision, leaf_node_id, encode(checkpoint_ref, 'hex')
                      FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision)
                      WHERE session_id = $1",
                 )
@@ -160,7 +160,7 @@ impl RawDurableReader {
                     )
                     .collect();
                 let revision_rows: Vec<(i64, Option<String>, Option<String>)> = sqlx::query_as(
-                    "SELECT head_revision, leaf_node_id, checkpoint_ref
+                    "SELECT head_revision, leaf_node_id, encode(checkpoint_ref, 'hex')
                      FROM lash_session_revisions
                      WHERE session_id = $1
                      ORDER BY head_revision ASC",

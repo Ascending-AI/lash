@@ -40,16 +40,16 @@ fn conflict(
 /// The exec-root statements an owner commit runs as steps.
 pub(super) static PUT_FIRST: Entry = Entry::new(
     || &SQL.put_first,
-    &[Ty::Text, Ty::Text, Ty::Bytes, Ty::Int],
+    &[Ty::Text, Ty::Key, Ty::Bytes, Ty::Int],
     Shape::Returning,
 );
 pub(super) static PUT_NEXT: Entry = Entry::new(
     || &SQL.put_next,
-    &[Ty::Text, Ty::Int, Ty::Text, Ty::Bytes, Ty::Int, Ty::Text],
+    &[Ty::Text, Ty::Int, Ty::Key, Ty::Bytes, Ty::Int, Ty::Key],
     Shape::Returning,
 );
 pub(super) static RETIRE: Entry =
-    Entry::new(|| &SQL.retire, &[Ty::Text, Ty::Text], Shape::Returning);
+    Entry::new(|| &SQL.retire, &[Ty::Text, Ty::Key], Shape::Returning);
 /// Every root of the executions under a key: a terminal's cells.
 pub(super) static CLEAR_UNDER: Entry =
     Entry::new(|| &SQL.clear_under, &[Ty::Text], Shape::Returning).retiring("root_ref");
@@ -77,7 +77,7 @@ pub(super) fn steps(
                 &PUT_FIRST,
                 vec![
                     Value::text(exec.stored()),
-                    Value::text(root.to_hex()),
+                    Value::key(root.to_hex()),
                     Value::Bytes(Some(commit_id.0.to_vec())),
                     Value::int(epoch.0),
                 ],
@@ -88,10 +88,10 @@ pub(super) fn steps(
                     vec![
                         Value::text(exec.stored()),
                         Value::int(integer::<i64>(rev.0)?),
-                        Value::text(root.to_hex()),
+                        Value::key(root.to_hex()),
                         Value::Bytes(Some(commit_id.0.to_vec())),
                         Value::int(epoch.0),
-                        Value::text(expected_root.to_hex()),
+                        Value::key(expected_root.to_hex()),
                     ],
                 )
                 .retiring([expected_root.to_hex()]),
@@ -102,7 +102,7 @@ pub(super) fn steps(
             let mut program = vec![
                 Step::one(
                     &RETIRE,
-                    vec![Value::text(exec.stored()), Value::text(expected.to_hex())],
+                    vec![Value::text(exec.stored()), Value::key(expected.to_hex())],
                 )
                 .retiring([expected.to_hex()]),
             ];
@@ -184,7 +184,7 @@ pub(super) async fn read(
     else {
         return Ok(None);
     };
-    let root: String = row.try_get(1).map_err(sqlx_failure)?;
+    let root: String = crate::keys::get(&row, 1).map_err(sqlx_failure)?;
     let commit_id: Vec<u8> = row.try_get(3).map_err(sqlx_failure)?;
     row_of(
         exec.clone(),
@@ -234,7 +234,7 @@ pub(super) async fn under_limited(
     rows.iter()
         .map(|row| {
             let key: String = row.try_get(0).map_err(sqlx_failure)?;
-            let root: String = row.try_get(2).map_err(sqlx_failure)?;
+            let root: String = crate::keys::get(row, 2).map_err(sqlx_failure)?;
             let commit_id: Vec<u8> = row.try_get(4).map_err(sqlx_failure)?;
             row_of(
                 ExecKey::parse(&key).map_err(|error| corrupt("execution key", &error.0))?,
@@ -255,7 +255,7 @@ pub(super) async fn retire_under(
     tx: &mut PgConnection,
     prefix: &str,
 ) -> Result<Vec<String>, sqlx::Error> {
-    let mut roots: Vec<String> = crate::observed_sql::query_scalar(SQL.clear_under.sql())
+    let mut roots: Vec<String> = crate::keys::query_scalar(SQL.clear_under.sql())
         .bind(prefix)
         .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await?;

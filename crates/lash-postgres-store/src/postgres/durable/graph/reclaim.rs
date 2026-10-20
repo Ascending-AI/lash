@@ -35,23 +35,23 @@ async fn peel_level(
     frontier: &BTreeSet<String>,
 ) -> Answer<(usize, BTreeSet<String>)> {
     let level: Vec<&str> = frontier.iter().map(String::as_str).collect();
-    let level: Vec<String> = crate::observed_sql::query_scalar(SQL.postgres.peel_lock.sql())
-        .bind(&level)
+    let level: Vec<String> = crate::keys::query_scalar(SQL.postgres.peel_lock.sql())
+        .bind(crate::keys::keys(&level))
         .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(db)?;
     if level.is_empty() {
         return Ok((0, BTreeSet::new()));
     }
-    let (gone, children): (i64, Vec<String>) =
+    let (gone, children): (i64, Vec<crate::keys::Key>) =
         crate::observed_sql::query_as(SQL.postgres.peel_level.sql())
-            .bind(&level)
+            .bind(crate::keys::keys(&level))
             .fetch_one(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(db)?;
     Ok((
         usize::try_from(gone).unwrap_or_default(),
-        children.into_iter().collect(),
+        children.into_iter().map(|key| key.0).collect(),
     ))
 }
 
@@ -80,15 +80,18 @@ pub(crate) async fn audit_page(
     after: &str,
     limit: i64,
 ) -> Answer<(Option<String>, usize)> {
-    let orphans: BTreeSet<String> =
-        crate::observed_sql::query_scalar(SQL.graph.orphans_after.sql())
-            .bind(after)
-            .bind(limit)
-            .fetch_all(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(db)?
-            .into_iter()
-            .collect();
+    let orphans: BTreeSet<String> = crate::keys::query_scalar(SQL.graph.orphans_after.sql())
+        .bind(if after.is_empty() {
+            Vec::new()
+        } else {
+            super::node_of(after)?.0.to_vec()
+        })
+        .bind(limit)
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(db)?
+        .into_iter()
+        .collect();
     let last = orphans.last().cloned();
     Ok((last, peel(tx, orphans).await?))
 }

@@ -78,7 +78,7 @@ lash_store_sql::statements! {
         upsert_namespaces = "INSERT INTO turn_namespaces
                  (session_id, run, plugin, entry, graph_root_ref)
              SELECT ?1, ?2, written.plugin, written.entry, written.root
-             FROM UNNEST(?3::text[], ?4::text[], ?5::text[], ?6::boolean[])
+             FROM UNNEST(?3::text[], ?4::text[], ?5::bytea[], ?6::boolean[])
                  AS written(plugin, entry, root, held)
              ON CONFLICT (session_id, run, plugin)
              DO UPDATE SET entry = excluded.entry,
@@ -126,7 +126,7 @@ pub(super) static INSERT_PHASE: Entry = Entry::new(
         Ty::Text,
         Ty::Int,
         Ty::Int,
-        Ty::Text,
+        Ty::Key,
         Ty::Text,
         Ty::Int,
         Ty::Int,
@@ -142,7 +142,7 @@ pub(super) static ADVANCE_PHASE: Entry = Entry::new(
         Ty::Text,
         Ty::Int,
         Ty::Int,
-        Ty::Text,
+        Ty::Key,
         Ty::Text,
         Ty::Int,
         Ty::Int,
@@ -158,7 +158,7 @@ pub(super) static ADD_TOOL_CALLS: Entry = Entry::new(
 );
 pub(super) static ANSWER_SET: Entry = Entry::new(
     || &SQL.answer_set,
-    &[Ty::Text, Ty::Text, Ty::Text, Ty::Int],
+    &[Ty::Text, Ty::Text, Ty::Key, Ty::Int],
     Shape::Returning,
 );
 pub(super) static OPEN_NAMED_RUN: Entry =
@@ -170,14 +170,14 @@ pub(super) static UPSERT_NAMESPACES: Entry = Entry::new(
         Ty::Text,
         Ty::Texts,
         Ty::Texts,
-        Ty::Texts,
+        Ty::Keys,
         Ty::Bools,
     ],
     Shape::Exec,
 );
 pub(super) static WORKING_SET: Entry = Entry::new(
     || &SQL.working_set,
-    &[Ty::Text, Ty::Text, Ty::Text, Ty::Text, Ty::Int],
+    &[Ty::Text, Ty::Text, Ty::Key, Ty::Key, Ty::Int],
     Shape::Returning,
 );
 /// The PhaseRoot an advance replaces and the receipt it consumes: retired
@@ -210,7 +210,7 @@ pub(super) static END_RUN: Entry = Entry::new(
         Ty::Text,
         Ty::Int,
         Ty::Now,
-        Ty::Text,
+        Ty::Key,
     ],
     Shape::Returning,
 );
@@ -320,7 +320,7 @@ fn terminal_steps(
         Value::text(cause.to_stored().map_err(|error| encoding(&error))?),
         Value::Int(head_revision.map(integer::<i64>).transpose()?),
         Value::Now,
-        Value::Text(transcript.map(|transcript| transcript.to_hex())),
+        Value::Key(transcript.map(|transcript| transcript.to_hex())),
     ]);
     let mut program = vec![Step::one(&END_RUN, ended)];
     if let Some(revision) = head_revision {
@@ -423,7 +423,7 @@ pub(super) fn steps(epoch: Epoch, write: &TurnWrite) -> Result<Option<Vec<Step>>
                 Value::text(phase),
                 Value::Int(argument.map(integer::<i64>).transpose()?),
                 Value::int(0),
-                Value::Text(None),
+                Value::Key(None),
                 Value::Text(None),
                 Value::Int(None),
                 Value::Int(turn_deadline.map(|deadline| deadline.0)),
@@ -447,7 +447,7 @@ pub(super) fn steps(epoch: Epoch, write: &TurnWrite) -> Result<Option<Vec<Step>>
                 Value::text(stored),
                 Value::Int(argument.map(integer::<i64>).transpose()?),
                 Value::int(i64::from(*iteration)),
-                Value::text(phase.checkpoint().to_hex()),
+                Value::key(phase.checkpoint().to_hex()),
                 Value::Text(pin.map(|pin| pin.request_ref.clone())),
                 Value::Int(pin.map(|pin| pin.deadline.0)),
                 Value::int(epoch.0),
@@ -474,7 +474,7 @@ pub(super) fn steps(epoch: Epoch, write: &TurnWrite) -> Result<Option<Vec<Step>>
             answer,
         } => {
             let mut values = turn(session, run);
-            values.extend([Value::text(answer.to_hex()), Value::int(epoch.0)]);
+            values.extend([Value::key(answer.to_hex()), Value::int(epoch.0)]);
             vec![Step::one(&ANSWER_SET, values)]
         }
         TurnWrite::Namespaces {
@@ -516,7 +516,7 @@ pub(super) fn steps(epoch: Epoch, write: &TurnWrite) -> Result<Option<Vec<Step>>
                             .map(|(_, entry, ..)| Some(entry.clone()))
                             .collect(),
                     ),
-                    Value::Texts(written.iter().map(|(_, _, root, _)| root.clone()).collect()),
+                    Value::Keys(written.iter().map(|(_, _, root, _)| root.clone()).collect()),
                     Value::Bools(written.iter().map(|(.., held)| *held).collect()),
                 ]);
                 program.push(Step::any(
@@ -544,8 +544,8 @@ pub(super) fn steps(epoch: Epoch, write: &TurnWrite) -> Result<Option<Vec<Step>>
         } => {
             let mut values = turn(session, run);
             values.extend([
-                Value::Text(working.map(|working| working.to_hex())),
-                Value::Text(expected.map(|expected| expected.to_hex())),
+                Value::Key(working.map(|working| working.to_hex())),
+                Value::Key(expected.map(|expected| expected.to_hex())),
                 Value::int(epoch.0),
             ]);
             vec![
@@ -858,7 +858,7 @@ pub(super) async fn turn_namespaces(
     for row in rows {
         let plugin: String = row.try_get(0).map_err(sqlx_failure)?;
         let entry: String = row.try_get(1).map_err(sqlx_failure)?;
-        let root: Option<String> = row.try_get(2).map_err(sqlx_failure)?;
+        let root: Option<String> = crate::keys::get(&row, 2).map_err(sqlx_failure)?;
         let entry =
             serde_json::from_str(&entry).map_err(|_| corrupt("turn namespace entry", &plugin))?;
         let body = match root {
@@ -896,11 +896,11 @@ pub(super) async fn turn(
     let stored_phase: String = row.try_get(2).map_err(decode)?;
     let argument: Option<i64> = row.try_get(3).map_err(decode)?;
     let argument = argument.map(integer::<u64>).transpose()?;
-    let checkpoint: Option<String> = row.try_get(5).map_err(decode)?;
+    let checkpoint: Option<String> = crate::keys::get(&row, 5).map_err(decode)?;
     let checkpoint = checkpoint.as_deref().map(node_ref).transpose()?;
-    let working: Option<String> = row.try_get(12).map_err(decode)?;
+    let working: Option<String> = crate::keys::get(&row, 12).map_err(decode)?;
     let working = working.as_deref().map(node_ref).transpose()?;
-    let answer: Option<String> = row.try_get(13).map_err(decode)?;
+    let answer: Option<String> = crate::keys::get(&row, 13).map_err(decode)?;
     let answer = answer.as_deref().map(node_ref).transpose()?;
     let request: Option<String> = row.try_get(6).map_err(decode)?;
     let deadline: Option<i64> = row.try_get(7).map_err(decode)?;
@@ -949,6 +949,7 @@ pub(super) async fn turn(
 #[cfg(test)]
 mod ddl_tests {
     use sqlx::Connection as _;
+    const CHECKPOINT: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
     use crate::testing::IsolatedDatabase;
 
@@ -965,7 +966,7 @@ mod ddl_tests {
             .await
             .expect("connect to the isolated store");
         crate::observed_sql::query(
-            "INSERT INTO lash_blobs (hash, content, encoding) VALUES ('{}', '\\x00', 1)",
+            "INSERT INTO lash_blobs (hash, content, encoding) VALUES (decode(repeat('00', 32), 'hex'), '\\x00', 1)",
         )
         .execute(&mut connection)
         .await
@@ -1001,7 +1002,7 @@ mod ddl_tests {
         .bind(run)
         .bind(phase)
         .bind(argument)
-        .bind(checkpoint)
+        .bind(checkpoint.map(crate::keys::key))
         .bind(pin.map(|(request, _)| request))
         .bind(pin.map(|(_, deadline)| deadline))
         .bind(pin.map(|_| "stream-cursor"))
@@ -1015,7 +1016,15 @@ mod ddl_tests {
             return;
         };
         assert!(refused(
-            phase(&mut conn, "unpinned", "model", Some(1), Some("{}"), None).await
+            phase(
+                &mut conn,
+                "unpinned",
+                "model",
+                Some(1),
+                Some(CHECKPOINT),
+                None
+            )
+            .await
         ));
         assert!(refused(
             phase(
@@ -1023,7 +1032,7 @@ mod ddl_tests {
                 "tools-pinned",
                 "tools",
                 Some(1),
-                Some("{}"),
+                Some(CHECKPOINT),
                 Some(("r", 5))
             )
             .await
@@ -1033,7 +1042,7 @@ mod ddl_tests {
             "pinned",
             "model",
             Some(1),
-            Some("{}"),
+            Some(CHECKPOINT),
             Some(("r", 5)),
         )
         .await
@@ -1057,7 +1066,7 @@ mod ddl_tests {
                 "admitted-checkpoint",
                 "admitted",
                 None,
-                Some("{}"),
+                Some(CHECKPOINT),
                 None
             )
             .await
@@ -1065,9 +1074,16 @@ mod ddl_tests {
         phase(&mut conn, "admitted", "admitted", None, None, None)
             .await
             .expect("an admitted phase");
-        phase(&mut conn, "tools-ok", "tools", Some(1), Some("{}"), None)
-            .await
-            .expect("a tools phase");
+        phase(
+            &mut conn,
+            "tools-ok",
+            "tools",
+            Some(1),
+            Some(CHECKPOINT),
+            None,
+        )
+        .await
+        .expect("a tools phase");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

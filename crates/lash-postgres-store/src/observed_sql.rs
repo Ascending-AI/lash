@@ -906,7 +906,7 @@ mod tests {
 }
 
 #[path = "observed_sql/bindings.rs"]
-mod bindings;
+pub(crate) mod bindings;
 pub(crate) use bindings::{Query, query, query_as, query_scalar};
 
 /// Carry the execution token to SQLx's argument extraction, wherever its

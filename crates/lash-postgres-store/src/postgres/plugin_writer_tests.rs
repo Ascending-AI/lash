@@ -110,7 +110,7 @@ async fn published(storage: &PostgresStorage) -> (i64, i64, i64, Vec<(String, St
             .expect("count rows")
     };
     let heads = sqlx::query_as(
-        "SELECT head.session_id, revision.config_ref FROM lash_session_head AS head JOIN lash_session_revisions AS revision USING (session_id, head_revision) ORDER BY session_id",
+        "SELECT head.session_id, encode(revision.config_ref, 'hex') FROM lash_session_head AS head JOIN lash_session_revisions AS revision USING (session_id, head_revision) ORDER BY session_id",
     )
     .fetch_all(storage.pool())
     .await

@@ -50,6 +50,33 @@ fn the_published_ddl_is_creation_only_and_unqualified() {
     );
 }
 
+/// Content addresses use the same 32-byte key space on both stores. Follow
+/// foreign keys from the content tables so every referrer is part of this law.
+#[test]
+fn content_address_columns_are_binary_keys() {
+    let ddl = crate::PostgresStorage::schema_ddl();
+    let mut table = "";
+    for line in ddl.lines() {
+        let line = line.trim();
+        if let Some(name) = line.strip_prefix("CREATE TABLE IF NOT EXISTS ") {
+            table = name.split_whitespace().next().expect("table name");
+        }
+        let references_content = line.split_once("REFERENCES ").is_some_and(|(_, target)| {
+            target.starts_with("lash_blobs(hash)") || target.starts_with("lash_prompt_texts(hash)")
+        });
+        let content_key = references_content
+            || (matches!(table, "lash_blobs" | "lash_prompt_texts") && line.starts_with("hash "))
+            || (table == "lash_retirement_frontier" && line.starts_with("node_ref "));
+        if content_key {
+            assert_eq!(
+                line.split_whitespace().nth(1),
+                Some("BYTEA"),
+                "{table}: content addresses must be binary keys: {line}"
+            );
+        }
+    }
+}
+
 /// The teardown artifact is the same contract the other way: it must be the
 /// exact bytes this build executes, and its statement list must be generated
 /// from the object list `schema.sql` declares — never maintained by hand,

@@ -117,7 +117,7 @@ async fn a_widened_nullability_is_rejected() {
         "ALTER TABLE lash_session_revisions ALTER COLUMN config_ref DROP NOT NULL",
         &[
             "COLUMN DRIFT",
-            "lash_session_revisions.config_ref: expected text not-null, found text nullable",
+            "lash_session_revisions.config_ref: expected bytea not-null, found bytea nullable",
         ],
         |finding| {
             matches!(

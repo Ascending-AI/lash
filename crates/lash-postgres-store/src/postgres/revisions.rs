@@ -42,7 +42,7 @@ pub(crate) async fn record_revision_tx(
     )?;
     let config_ref = root.blob_ref();
     let held: Option<String> =
-        crate::observed_sql::query_scalar(session_sql().revisions.select_config_ref.sql())
+        crate::keys::query_scalar(session_sql().revisions.select_config_ref.sql())
             .bind(session_id.as_str())
             .fetch_optional(crate::observed_sql::executor(&mut **tx))
             .await
@@ -56,8 +56,8 @@ pub(crate) async fn record_revision_tx(
         .bind(session_id.as_str())
         .bind(head_revision)
         .bind(leaf_node_id)
-        .bind(checkpoint_ref)
-        .bind(config_ref.as_str())
+        .bind(checkpoint_ref.map(crate::keys::key))
+        .bind(crate::keys::key(config_ref.as_str()))
         .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;
@@ -138,7 +138,16 @@ pub(crate) async fn release_unretained_tx(
     }
     let roots: std::collections::BTreeSet<String> = released
         .iter()
-        .flat_map(|row| [row.get::<Option<String>, _>(2), row.get(3)])
+        .map(|row| {
+            Ok([
+                crate::keys::get::<Option<String>>(row, 2)?,
+                crate::keys::get(row, 3)?,
+            ])
+        })
+        .collect::<Result<Vec<_>, sqlx::Error>>()
+        .map_err(store_sqlx_error)?
+        .into_iter()
+        .flatten()
         .flatten()
         .collect();
     crate::durable::retire_roots(tx, &roots, now)
@@ -373,7 +382,11 @@ impl PostgresStore {
         let row = match i64::try_from(revision) {
             Ok(sql_revision) => crate::observed_sql::query_as::<
                 _,
-                (Option<String>, Option<String>, Option<String>),
+                (
+                    Option<String>,
+                    Option<crate::keys::Key>,
+                    Option<crate::keys::Key>,
+                ),
             >(session_sql().revisions.select.sql())
             .bind(session_id.as_str())
             .bind(sql_revision)
@@ -395,8 +408,8 @@ impl PostgresStore {
             RevisionRow {
                 head_revision: revision,
                 leaf_node_id,
-                checkpoint_ref,
-                config_ref: head_json,
+                checkpoint_ref: checkpoint_ref.map(|key| key.0),
+                config_ref: head_json.map(|key| key.0),
             },
             head_revision,
             &pins,
@@ -418,7 +431,12 @@ impl PostgresStore {
         require_session_tx(&mut tx, session_id).await?;
         let rows = crate::observed_sql::query_as::<
             _,
-            (i64, Option<String>, Option<String>, Option<String>),
+            (
+                i64,
+                Option<String>,
+                Option<crate::keys::Key>,
+                Option<crate::keys::Key>,
+            ),
         >(session_sql().revisions.select_by_session.sql())
         .bind(session_id.as_str())
         .fetch_all(crate::observed_sql::executor(&mut *tx))
@@ -429,8 +447,8 @@ impl PostgresStore {
             stored.push(RevisionRow {
                 head_revision: u64_from_sql("SessionRevision", "head_revision", head_revision)?,
                 leaf_node_id,
-                checkpoint_ref,
-                config_ref: head_json,
+                checkpoint_ref: checkpoint_ref.map(|key| key.0),
+                config_ref: head_json.map(|key| key.0),
             });
         }
         let head_revision = head_revision_tx(&mut tx, session_id).await?;

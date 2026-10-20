@@ -70,6 +70,8 @@ fn param(index: usize, ty: Ty) -> String {
         )
     };
     match ty {
+        Ty::Key => format!("decode(v_p->>{index}, 'hex')"),
+        Ty::Keys => array("decode(element, 'hex')"),
         Ty::Text => format!("v_p->>{index}"),
         Ty::Int => format!("(v_p->>{index})::BIGINT"),
         Ty::Bool => format!("(v_p->>{index})::BOOLEAN"),
@@ -99,7 +101,7 @@ fn gather(collect: Collect) -> String {
     let into = match collect {
         Collect::Closure(_) => "v_retired",
         Collect::Closures(_) => {
-            return format!("v_retired := v_retired || COALESCE({column}, '{{}}'::TEXT[]);");
+            return format!("v_retired := v_retired || COALESCE({column}, '{{}}'::BYTEA[]);");
         }
         Collect::PhaseEnd(_) => "v_phase_ends",
         Collect::Ancestry(_) => "v_leaves",
@@ -107,7 +109,11 @@ fn gather(collect: Collect) -> String {
         Collect::Text(_) => "v_texts",
         Collect::Protect(_) => "v_protect",
     };
-    format!("IF {column} IS NOT NULL THEN {into} := {into} || {column}::TEXT; END IF;")
+    let ty = match collect {
+        Collect::Ancestry(_) | Collect::Wake(_) => "TEXT",
+        _ => "BYTEA",
+    };
+    format!("IF {column} IS NOT NULL THEN {into} := {into} || {column}::{ty}; END IF;")
 }
 
 /// The reclaim of the prompt texts the steps released (`v_texts`), keeping
@@ -117,7 +123,7 @@ fn gather(collect: Collect) -> String {
 fn text_reclaim() -> String {
     let closure = inline(prompts::closure().sql(), &["v_tfront", "v_protect"]);
     let lock = perform(&inline(
-        connection_sql().lock_xact_by_text_batch_seeded.sql(),
+        connection_sql().lock_xact_by_keys_seeded.sql(),
         &["v_closure", &prompts::TEXT_LOCK_SEED.to_string()],
     ));
     let children = inline(prompts::read_children().sql(), &["level.hash"]);
@@ -254,7 +260,7 @@ fn perform(sql: &str) -> String {
 /// A function's peel of `v_frontier` (FIG-5949): each level locks what of
 /// it no other transaction holds, then deletes what of that no root names
 /// and no edge reaches, and the children those reached are the next level.
-/// It needs `v_frontier` and `v_locked` (`TEXT[]`) and `v_rows` (`BIGINT`).
+/// It needs `v_frontier` and `v_locked` (`BYTEA[]`) and `v_rows` (`BIGINT`).
 pub(crate) fn peel_loop() -> String {
     let peel_lock = inline(graph::peel_lock().sql(), &["v_frontier"]);
     let peel_level = inline(graph::peel_level().sql(), &["v_locked"]);
@@ -294,8 +300,8 @@ pub(crate) fn function_ddl() -> String {
     let lock_held = perform(&inline(
         graph::stored_nodes().sql(),
         &[
-            "ARRAY(SELECT encode(staged.digest, 'hex') FROM unnest(p_digests) AS staged(digest) \
-           WHERE NOT (encode(staged.digest, 'hex') = ANY(v_inserted)))",
+            "ARRAY(SELECT staged.digest FROM unnest(p_digests) AS staged(digest) \
+           WHERE NOT (staged.digest = ANY(v_inserted)))",
         ],
     ));
     let (hold_lock, hold) = pages::hold_statements();
@@ -353,8 +359,8 @@ pub(crate) fn function_ddl() -> String {
     p_registry TEXT, p_actor TEXT, p_epoch BIGINT, p_session TEXT,
     p_fleet_low INTEGER, p_fleet_high INTEGER, p_token TEXT,
     p_lock_timeout TEXT, p_statement_ms BIGINT,
-    p_body_hashes TEXT[], p_bodies BYTEA[],
-    p_named TEXT[], p_roots TEXT[], p_digests BYTEA[], p_contents BYTEA[],
+    p_body_hashes BYTEA[], p_bodies BYTEA[],
+    p_named BYTEA[], p_roots BYTEA[], p_digests BYTEA[], p_contents BYTEA[],
     p_parents BYTEA[], p_children BYTEA[], p_steps JSONB,
     p_formats TEXT, p_ack BIGINT, p_release TEXT, p_due BIGINT, p_now BIGINT)
 RETURNS TABLE (o_revision BIGINT, o_now BIGINT, o_fleet INTEGER, o_state TEXT,
@@ -375,7 +381,7 @@ DECLARE
     v_cancel_disposition TEXT;
     v_cancel_mode TEXT;
     v_clock BIGINT;
-    v_inserted TEXT[] := '{{}}';
+    v_inserted BYTEA[] := '{{}}';
     v_parents BYTEA[];
     v_children BYTEA[];
     v_installed BIGINT := 0;
@@ -384,9 +390,9 @@ DECLARE
     v_step JSONB;
     v_p JSONB;
     v_state TEXT := 'owned';
-    v_retired TEXT[] := '{{}}';
-    v_phase_ends TEXT[] := '{{}}';
-    v_held TEXT[];
+    v_retired BYTEA[] := '{{}}';
+    v_phase_ends BYTEA[] := '{{}}';
+    v_held BYTEA[];
     v_row RECORD;
     v_first JSONB;
     v_slots JSONB := '{{}}';
@@ -398,12 +404,12 @@ DECLARE
     v_wakes TEXT[] := '{{}}';
     v_owner TEXT;
     v_woken BIGINT;
-    v_texts TEXT[] := '{{}}';
-    v_protect TEXT[] := '{{}}';
-    v_tfront TEXT[];
-    v_closure TEXT[];
-    v_tparents TEXT[];
-    v_tchildren TEXT[];
+    v_texts BYTEA[] := '{{}}';
+    v_protect BYTEA[] := '{{}}';
+    v_tfront BYTEA[];
+    v_closure BYTEA[];
+    v_tparents BYTEA[];
+    v_tchildren BYTEA[];
     v_answer JSONB;
     v_frame TEXT;
 BEGIN
@@ -453,7 +459,7 @@ BEGIN
         SELECT COALESCE(array_agg(staged.parent), '{{}}'), COALESCE(array_agg(staged.child), '{{}}')
         INTO v_parents, v_children
         FROM unnest(p_parents, p_children) AS staged(parent, child)
-        WHERE encode(staged.parent, 'hex') = ANY(v_inserted);
+        WHERE staged.parent = ANY(v_inserted);
         IF cardinality(v_parents) > 0 THEN
             {insert_edges};
         END IF;
@@ -490,7 +496,7 @@ BEGIN
             RAISE EXCEPTION 'canceling statement due to statement timeout' USING ERRCODE = '57014';
         END IF;
         IF v_step ? 'r' THEN
-            v_retired := v_retired || ARRAY(SELECT jsonb_array_elements_text(v_step->'r'));
+            v_retired := v_retired || ARRAY(SELECT decode(jsonb_array_elements_text(v_step->'r'), 'hex'));
         END IF;
         IF v_step ? 'a' THEN
             v_leaves := v_leaves || ARRAY(SELECT jsonb_array_elements_text(v_step->'a'));

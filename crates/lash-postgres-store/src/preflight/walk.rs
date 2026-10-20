@@ -315,11 +315,11 @@ async fn fetch_sessions(
     // the whole table.
     let sql = crate::session_sql::session_sql();
     let query = match scan.after.as_deref() {
-        None => crate::observed_sql::query_as::<_, (String, String)>(
+        None => crate::observed_sql::query_as::<_, (String, crate::keys::Key)>(
             sql.head_postgres.scan_checkpoints_first_page.sql(),
         )
         .bind(row_limit(scan)),
-        Some(after) => crate::observed_sql::query_as::<_, (String, String)>(
+        Some(after) => crate::observed_sql::query_as::<_, (String, crate::keys::Key)>(
             sql.head_postgres.scan_checkpoints_after.sql(),
         )
         .bind(after.to_string())
@@ -332,7 +332,7 @@ async fn fetch_sessions(
         .into_iter()
         .map(|(session_key, checkpoint_ref)| SessionCheckpointRow {
             session_key,
-            checkpoint_ref,
+            checkpoint_ref: checkpoint_ref.0,
         })
         .collect())
 }
@@ -351,16 +351,19 @@ async fn fetch_blobs(
     // One statement per session would turn a hundred-session page into a
     // hundred round trips against a server the host has not decided to depend
     // on yet.
-    let rows = crate::observed_sql::query_as::<_, (String, Vec<u8>)>(
+    let rows = crate::observed_sql::query_as::<_, (crate::keys::Key, Vec<u8>)>(
         crate::blobs::blob_sql()
             .postgres
             .select_bodies_by_hash
             .sql(),
     )
-    .bind(hashes)
+    .bind(crate::keys::keys(hashes))
     .fetch_all(crate::observed_sql::executor(&mut **snapshot))
     .await?;
-    Ok(rows.into_iter().collect())
+    Ok(rows
+        .into_iter()
+        .map(|(hash, bytes)| (hash.0, bytes))
+        .collect())
 }
 
 /// Begin a transaction that the server itself will refuse to let write.

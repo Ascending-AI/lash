@@ -116,15 +116,15 @@ table lash_attachment_uploads
   column written_at_ms bigint not-null
   primary-key (attachment_id)
 table lash_blob_edges
-  column child_hash text not-null
-  column parent_hash text not-null
+  column child_hash bytea not-null
+  column parent_hash bytea not-null
   primary-key (parent_hash, child_hash)
   foreign-key (child_hash) references lash_blobs (hash) on delete restrict
   foreign-key (parent_hash) references lash_blobs (hash) on delete cascade
 table lash_blobs
   column content bytea not-null
   column encoding smallint not-null
-  column hash text not-null
+  column hash bytea not-null
   primary-key (hash)
 table lash_catalog_identity
   column catalog_id text not-null
@@ -149,7 +149,7 @@ table lash_deleted_sessions
   column session_id text not-null
   primary-key (session_id)
 table lash_effect_admissions
-  column admission_ref text not-null
+  column admission_ref bytea not-null
   column effect_id bytea not-null
   column exec_key text not-null
   column member_ordinal bigint nullable
@@ -163,7 +163,7 @@ table lash_exec_snapshots
   column commit_id bytea not-null
   column exec_key text not-null
   column rev bigint not-null
-  column root_ref text not-null
+  column root_ref bytea not-null
   column written_epoch bigint not-null
   primary-key (exec_key)
   foreign-key (root_ref) references lash_blobs (hash) on delete restrict
@@ -202,13 +202,13 @@ table lash_graph_nodes
   primary-key (node_id)
 table lash_graph_release_pins
   column release_key text not-null
-  column root_ref text not-null
+  column root_ref bytea not-null
   primary-key (release_key)
   foreign-key (root_ref) references lash_blobs (hash) on delete restrict
 table lash_lash_vm_artifacts
   column artifact_bytes bytea nullable
   column artifact_ref text not-null
-  column graph_ref text nullable
+  column graph_ref bytea nullable
   column namespace text not-null
   column storage_kind smallint not-null
   primary-key (namespace, artifact_ref)
@@ -241,7 +241,7 @@ table lash_model_call_records
   column call text not-null
   column call_id text not-null
   column ended_at_ms bigint not-null
-  column record_ref text not-null
+  column record_ref bytea not-null
   column run text not-null
   column session_id text not-null
   column written_epoch bigint not-null
@@ -354,13 +354,13 @@ table lash_processes
   unique (start_key) where start_key is not null
   primary-key (process_id)
 table lash_prompt_prefixes
-  column hash text not-null
+  column hash bytea not-null
   column session_id text not-null
   primary-key (session_id)
   foreign-key (hash) references lash_prompt_texts (hash) on delete no action
 table lash_prompt_snapshot_texts
   column call text not-null
-  column hash text not-null
+  column hash bytea not-null
   column owner text not-null
   column part text not-null
   column session_id text not-null
@@ -376,13 +376,13 @@ table lash_prompt_snapshots
   column written_epoch bigint not-null
   primary-key (session_id, owner, call)
 table lash_prompt_text_edges
-  column child text not-null
-  column parent text not-null
+  column child bytea not-null
+  column parent bytea not-null
   primary-key (parent, child)
   foreign-key (child) references lash_prompt_texts (hash) on delete no action
   foreign-key (parent) references lash_prompt_texts (hash) on delete cascade
 table lash_prompt_texts
-  column hash text not-null
+  column hash bytea not-null
   column text text not-null
   primary-key (hash)
 table lash_queued_work_batches
@@ -420,13 +420,13 @@ table lash_release_stamp
   primary-key (singleton)
 table lash_retirement_frontier
   column closure boolean not-null
-  column node_ref text not-null
+  column node_ref bytea not-null
   column queued_at_ms bigint not-null
   primary-key (node_ref)
 table lash_retirement_holds
   column closure boolean not-null
   column queued_at_ms bigint not-null
-  column root_ref text not-null
+  column root_ref bytea not-null
   primary-key (root_ref)
   foreign-key (root_ref) references lash_blobs (hash) on delete restrict
 table lash_root_leases
@@ -435,7 +435,7 @@ table lash_root_leases
   column expires_at_ms bigint not-null
   column lease_id bigint not-null identity-always
   column owner_key bytea not-null
-  column root_ref text not-null
+  column root_ref bytea not-null
   column ttl_ms bigint not-null
   primary-key (lease_id)
   foreign-key (root_ref) references lash_blobs (hash) on delete restrict
@@ -444,7 +444,7 @@ table lash_run_records
   column kind text not-null
   column ordinal bigint not-null
   column owner_key text not-null
-  column record_ref text not-null
+  column record_ref bytea not-null
   column run_seq bigint not-null
   column written_epoch bigint not-null
   unique (owner_key, run_seq, call_id) where (kind = 'x_outcome'::text) and (call_id is not null)
@@ -489,7 +489,7 @@ table lash_session_ingress_sequence
   column session_id text not-null
   primary-key (session_id)
 table lash_session_meta
-  column admission_base_checkpoint_ref text nullable
+  column admission_base_checkpoint_ref bytea nullable
   column caused_by_call_id text nullable
   column caused_by_effect_id text nullable
   column caused_by_kind text nullable
@@ -522,8 +522,8 @@ table lash_session_meta_pending_observer_intents
   primary-key (session_id, process_id)
   foreign-key (session_id) references lash_session_meta (session_id) on delete cascade
 table lash_session_revisions
-  column checkpoint_ref text nullable
-  column config_ref text not-null
+  column checkpoint_ref bytea nullable
+  column config_ref bytea not-null
   column head_revision bigint not-null
   column leaf_node_id text nullable
   column session_id text not-null
@@ -545,7 +545,7 @@ table lash_session_runs
   column terminal_cause_json text nullable
   column terminal_head_revision bigint nullable
   column terminal_kind text nullable
-  column terminal_transcript_ref text nullable
+  column terminal_transcript_ref bytea nullable
   column terminal_window_revision bigint nullable
   unique (session_id) where (admission_json is not null) and (terminal_kind is null)
   primary-key (session_id, run)
@@ -598,15 +598,15 @@ table lash_turn_change_clock
   primary-key (singleton)
 table lash_turn_namespaces
   column entry text not-null
-  column graph_root_ref text nullable
+  column graph_root_ref bytea nullable
   column plugin text not-null
   column run text not-null
   column session_id text not-null
   primary-key (session_id, run, plugin)
   foreign-key (graph_root_ref) references lash_blobs (hash) on delete restrict
 table lash_turn_phases
-  column answer_ref text nullable
-  column checkpoint_ref text nullable
+  column answer_ref bytea nullable
+  column checkpoint_ref bytea nullable
   column iteration bigint not-null
   column model_calls bigint not-null default
   column model_deadline_ms bigint nullable
@@ -618,7 +618,7 @@ table lash_turn_phases
   column session_id text not-null
   column tool_calls bigint not-null default
   column turn_deadline_ms bigint nullable
-  column working_execution_ref text nullable
+  column working_execution_ref bytea nullable
   column written_epoch bigint not-null
   primary-key (session_id, run)
   foreign-key (answer_ref) references lash_blobs (hash) on delete restrict
@@ -643,4 +643,4 @@ table lash_waits
   column wait_id text not-null
   primary-key (wait_id)
 function lash_artifact_end_local (p_kind text, p_id text, p_gate text, p_pattern text, p_now bigint, p_namespaces text[]) -> jsonb
-function lash_owner_commit (p_registry text, p_actor text, p_epoch bigint, p_session text, p_fleet_low integer, p_fleet_high integer, p_token text, p_lock_timeout text, p_statement_ms bigint, p_body_hashes text[], p_bodies bytea[], p_named text[], p_roots text[], p_digests bytea[], p_contents bytea[], p_parents bytea[], p_children bytea[], p_steps jsonb, p_formats text, p_ack bigint, p_release text, p_due bigint, p_now bigint) -> TABLE(o_revision bigint, o_now bigint, o_fleet integer, o_state text, o_installed bigint, o_cancel_turn text, o_cancel_request text, o_cancel_origin text, o_cancel_reason text, o_cancel_disposition text, o_cancel_mode text)
+function lash_owner_commit (p_registry text, p_actor text, p_epoch bigint, p_session text, p_fleet_low integer, p_fleet_high integer, p_token text, p_lock_timeout text, p_statement_ms bigint, p_body_hashes bytea[], p_bodies bytea[], p_named bytea[], p_roots bytea[], p_digests bytea[], p_contents bytea[], p_parents bytea[], p_children bytea[], p_steps jsonb, p_formats text, p_ack bigint, p_release text, p_due bigint, p_now bigint) -> TABLE(o_revision bigint, o_now bigint, o_fleet integer, o_state text, o_installed bigint, o_cancel_turn text, o_cancel_request text, o_cancel_origin text, o_cancel_reason text, o_cancel_disposition text, o_cancel_mode text)

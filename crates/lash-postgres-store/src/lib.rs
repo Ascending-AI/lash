@@ -43,6 +43,8 @@
 pub use sqlx;
 
 use lash_protocol_types::SessionId;
+#[path = "postgres/keys.rs"]
+mod keys;
 mod namespace;
 mod observed_sql;
 

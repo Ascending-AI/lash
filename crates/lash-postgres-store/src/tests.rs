@@ -127,7 +127,7 @@ async fn postgres_persisted_record_decode_classification_checkpoint_when_configu
 
     let (checkpoint_session_id, checkpoint_store) =
         persisted_record_decode_store(&storage, "checkpoint").await;
-    let checkpoint_ref: String =
+    let checkpoint_ref: Vec<u8> =
         sqlx::query_scalar("SELECT checkpoint_ref FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision) WHERE session_id = $1")
             .bind(checkpoint_session_id.as_str())
             .fetch_one(storage.pool())

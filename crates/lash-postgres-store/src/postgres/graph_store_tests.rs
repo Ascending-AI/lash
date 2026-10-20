@@ -115,7 +115,7 @@ impl GraphTier for Tier {
     async fn blob(&self, hash: &str) -> Option<(Vec<u8>, u8)> {
         let row: Option<(Vec<u8>, i16)> =
             sqlx::query_as("SELECT content, encoding FROM lash_blobs WHERE hash = $1")
-                .bind(hash)
+                .bind(crate::keys::key(hash))
                 .fetch_optional(&self.pool)
                 .await
                 .expect("a blob read");
@@ -124,9 +124,9 @@ impl GraphTier for Tier {
 
     async fn edges(&self, parent: &NodeId) -> Vec<NodeId> {
         let children: Vec<String> = sqlx::query_scalar(
-            "SELECT child_hash FROM lash_blob_edges WHERE parent_hash = $1 ORDER BY child_hash",
+            "SELECT encode(child_hash, 'hex') FROM lash_blob_edges WHERE parent_hash = $1 ORDER BY child_hash",
         )
-        .bind(hex(parent))
+        .bind(crate::keys::key(hex(parent)))
         .fetch_all(&self.pool)
         .await
         .expect("an edge read");
@@ -137,7 +137,7 @@ impl GraphTier for Tier {
     }
 
     async fn blobs(&self) -> BTreeSet<String> {
-        sqlx::query_scalar("SELECT hash FROM lash_blobs")
+        sqlx::query_scalar("SELECT encode(hash, 'hex') FROM lash_blobs")
             .fetch_all(&self.pool)
             .await
             .expect("a blob listing")
@@ -146,7 +146,7 @@ impl GraphTier for Tier {
     }
 
     async fn roots(&self) -> Vec<String> {
-        sqlx::query_scalar("SELECT root_ref FROM lash_graph_root_catalog")
+        sqlx::query_scalar("SELECT encode(root_ref, 'hex') FROM lash_graph_root_catalog")
             .fetch_all(&self.pool)
             .await
             .expect("a root listing")
@@ -170,12 +170,12 @@ impl GraphTier for Tier {
             }
             ForeignWrite::OpaqueBlob { hash, bytes } => {
                 sqlx::query("INSERT INTO lash_blobs (hash, content, encoding) VALUES ($1, $2, 0)")
-                    .bind(hash.clone())
+                    .bind(crate::keys::key(hash))
                     .bind(bytes.clone())
             }
             ForeignWrite::OverwriteBlob { node, bytes } => {
                 sqlx::query("UPDATE lash_blobs SET content = $2 WHERE hash = $1")
-                    .bind(hex(node))
+                    .bind(crate::keys::key(hex(node)))
                     .bind(bytes.clone())
             }
             ForeignWrite::RevisionRoot {
@@ -190,8 +190,12 @@ impl GraphTier for Tier {
             )
             .bind(session.as_str().to_owned())
             .bind(i64::try_from(*revision).expect("a small revision"))
-            .bind(if *config { None } else { Some(hex(root)) })
-            .bind(hex(root)),
+            .bind(if *config {
+                None
+            } else {
+                Some(crate::keys::key(hex(root)))
+            })
+            .bind(crate::keys::key(hex(root))),
             ForeignWrite::RevisionRoot {
                 config: _,
                 session,
@@ -211,7 +215,7 @@ impl GraphTier for Tier {
                  VALUES ($1, 'root', 'until_gc', $2)",
             )
             .bind(session.as_str().to_owned())
-            .bind(hex(root)),
+            .bind(crate::keys::key(hex(root))),
             ForeignWrite::AdmissionBase {
                 session,
                 root: None,
@@ -228,7 +232,7 @@ impl GraphTier for Tier {
             )
             .bind(namespace.clone())
             .bind(artifact.clone())
-            .bind(hex(root)),
+            .bind(crate::keys::key(hex(root))),
             ForeignWrite::ArtifactBridge {
                 namespace,
                 artifact,
@@ -250,7 +254,7 @@ impl GraphTier for Tier {
             )
             .bind(session.as_str().to_owned())
             .bind(run.as_str().to_owned())
-            .bind(hex(root)),
+            .bind(crate::keys::key(hex(root))),
             ForeignWrite::TerminalTranscript {
                 session,
                 run,
@@ -305,10 +309,10 @@ impl Tier {
     /// Locks blob `hash` in `mode` in a transaction of its own.
     async fn lock_blob(&self, hash: &str, mode: &str) -> Box<dyn LockHold> {
         let mut tx = self.pool.begin().await.expect("a lock holder");
-        let locked: Option<(String, i32)> = sqlx::query_as(&format!(
+        let locked: Option<(crate::keys::Key, i32)> = sqlx::query_as(&format!(
             "SELECT hash, pg_backend_pid() FROM lash_blobs WHERE hash = $1 FOR {mode}"
         ))
-        .bind(hash)
+        .bind(crate::keys::key(hash))
         .fetch_optional(&mut *tx)
         .await
         .expect("the blob is locked");
@@ -424,18 +428,20 @@ impl PageTier for Tier {
     }
 
     async fn edge_rows(&self) -> BTreeSet<(NodeId, NodeId)> {
-        sqlx::query_as::<_, (String, String)>("SELECT parent_hash, child_hash FROM lash_blob_edges")
-            .fetch_all(&self.pool)
-            .await
-            .expect("a raw read")
-            .iter()
-            .map(|(parent, child)| {
-                (
-                    NodeId::from_hex(parent).expect("a stored parent"),
-                    NodeId::from_hex(child).expect("a stored child"),
-                )
-            })
-            .collect()
+        sqlx::query_as::<_, (String, String)>(
+            "SELECT encode(parent_hash, 'hex'), encode(child_hash, 'hex') FROM lash_blob_edges",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .expect("a raw read")
+        .iter()
+        .map(|(parent, child)| {
+            (
+                NodeId::from_hex(parent).expect("a stored parent"),
+                NodeId::from_hex(child).expect("a stored child"),
+            )
+        })
+        .collect()
     }
 
     /// Runs past the schema's foreign keys: foreign damage does not ask
@@ -451,7 +457,7 @@ impl PageTier for Tier {
             "DELETE FROM lash_blobs WHERE hash = $1",
         ] {
             sqlx::query(sql)
-                .bind(hex(node))
+                .bind(crate::keys::key(hex(node)))
                 .execute(&mut *tx)
                 .await
                 .expect("a foreign delete");

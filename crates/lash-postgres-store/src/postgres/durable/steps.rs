@@ -73,6 +73,8 @@ impl Failure {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Ty {
     Text,
+    Key,
+    Keys,
     Int,
     Bool,
     Bytes,
@@ -210,6 +212,8 @@ impl Entry {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Value {
     Text(Option<String>),
+    Key(Option<String>),
+    Keys(Vec<Option<String>>),
     Int(Option<i64>),
     Bool(bool),
     Bytes(Option<Vec<u8>>),
@@ -228,6 +232,8 @@ impl Value {
     fn ty(&self) -> Ty {
         match self {
             Self::Text(_) => Ty::Text,
+            Self::Key(_) => Ty::Key,
+            Self::Keys(_) => Ty::Keys,
             Self::Int(_) => Ty::Int,
             Self::Bool(_) => Ty::Bool,
             Self::Bytes(_) => Ty::Bytes,
@@ -240,6 +246,10 @@ impl Value {
 
     pub(super) fn text(value: impl Into<String>) -> Self {
         Self::Text(Some(value.into()))
+    }
+
+    pub(super) fn key(value: impl Into<String>) -> Self {
+        Self::Key(Some(value.into()))
     }
 
     pub(super) fn int(value: i64) -> Self {
@@ -260,13 +270,13 @@ impl Value {
     pub(super) fn json(&self) -> serde_json::Value {
         use serde_json::Value as Json;
         match self {
-            Self::Text(text) => text.clone().map_or(Json::Null, Json::String),
+            Self::Text(text) | Self::Key(text) => text.clone().map_or(Json::Null, Json::String),
             Self::Int(int) => int.map_or(Json::Null, Json::from),
             Self::Bool(flag) => Json::Bool(*flag),
             Self::Bytes(bytes) => bytes
                 .as_deref()
                 .map_or(Json::Null, |bytes| hex(bytes).into()),
-            Self::Texts(texts) => texts
+            Self::Texts(texts) | Self::Keys(texts) => texts
                 .iter()
                 .map(|text| text.clone().map_or(Json::Null, Json::String))
                 .collect(),
@@ -402,6 +412,12 @@ impl Step {
         for value in &self.values[..bound] {
             query = match value {
                 Value::Text(text) => query.bind(text.clone()),
+                Value::Key(key) => query.bind(key.as_ref().map(crate::keys::key)),
+                Value::Keys(keys) => query.bind(
+                    keys.iter()
+                        .map(|key| key.as_ref().map(crate::keys::key))
+                        .collect::<Vec<_>>(),
+                ),
                 Value::Int(int) => query.bind(*int),
                 Value::Bool(flag) => query.bind(*flag),
                 Value::Bytes(bytes) => query.bind(bytes.clone()),
@@ -551,13 +567,17 @@ pub(super) async fn run_capturing(
             let column = collect.column();
             for row in &rows {
                 if let Collect::Closures(_) = collect {
-                    let roots: Option<Vec<String>> = row.try_get(column)?;
+                    let roots: Option<Vec<String>> = crate::keys::get(row, column)?;
                     for root in roots.unwrap_or_default() {
                         context.retired.stored(root);
                     }
                     continue;
                 }
-                let Some(value) = row.try_get::<Option<String>, _>(column)? else {
+                let value: Option<String> = match collect {
+                    Collect::Ancestry(_) | Collect::Wake(_) => row.try_get(column)?,
+                    _ => crate::keys::get(row, column)?,
+                };
+                let Some(value) = value else {
                     continue;
                 };
                 match collect {

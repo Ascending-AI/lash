@@ -48,26 +48,26 @@ lash_store_sql::statements! {
     /// list.
     struct PostgresPromptStatements @ "durable_prompt_postgres" {
         /// Every content address in `?1` already stored.
-        held_texts = "SELECT hash FROM prompt_texts WHERE hash = ANY(?1::TEXT[])";
+        held_texts = "SELECT hash FROM prompt_texts WHERE hash = ANY(?1::BYTEA[])";
 
         /// Store each text `?2[i]` at content address `?1[i]`, skipping every
         /// address a concurrent record stored first: the address names the
         /// bytes, so a conflict is the same text.
         insert_texts = "INSERT INTO prompt_texts (hash, text)
-             SELECT hash, text FROM unnest(?1::TEXT[], ?2::TEXT[]) AS batch(hash, text)
+             SELECT hash, text FROM unnest(?1::BYTEA[], ?2::TEXT[]) AS batch(hash, text)
              ON CONFLICT (hash) DO NOTHING";
 
         /// Of the addresses `?1`, every one sent without its body (`?2[i]`
         /// null) that is not stored: a one-call record's texts are locked
         /// first, so one it finds stays until it commits.
         unsent_absent = "SELECT batch.hash
-             FROM unnest(?1::TEXT[], ?2::TEXT[]) AS batch(hash, text)
+             FROM unnest(?1::BYTEA[], ?2::TEXT[]) AS batch(hash, text)
              WHERE batch.text IS NULL
                AND NOT EXISTS (SELECT 1 FROM prompt_texts AS stored WHERE stored.hash = batch.hash)";
 
         /// [`Self::insert_texts`] of the texts sent with their bodies.
         insert_sent_texts = "INSERT INTO prompt_texts (hash, text)
-             SELECT hash, text FROM unnest(?1::TEXT[], ?2::TEXT[]) AS batch(hash, text)
+             SELECT hash, text FROM unnest(?1::BYTEA[], ?2::TEXT[]) AS batch(hash, text)
              WHERE batch.text IS NOT NULL
              ON CONFLICT (hash) DO NOTHING";
 
@@ -75,11 +75,11 @@ lash_store_sql::statements! {
         /// in session `?1`, for every `i`.
         insert_edges = "INSERT INTO prompt_snapshot_texts (session_id, owner, call, part, hash)
              SELECT ?1, ?2, ?3, part, hash
-               FROM unnest(?4::TEXT[], ?5::TEXT[]) AS batch(part, hash)";
+               FROM unnest(?4::TEXT[], ?5::BYTEA[]) AS batch(part, hash)";
 
         /// Install each new immutable node's child edges once.
         insert_index_edges = "INSERT INTO prompt_text_edges (parent, child)
-             SELECT parent, child FROM unnest(?1::TEXT[], ?2::TEXT[]) AS batch(parent, child)
+             SELECT parent, child FROM unnest(?1::BYTEA[], ?2::BYTEA[]) AS batch(parent, child)
              ON CONFLICT (parent, child) DO NOTHING";
 
         /// Anchor the session's current prefix until settlement commits.
@@ -91,12 +91,12 @@ lash_store_sql::statements! {
         /// this publication protects stop traversal; a concurrent prefix
         /// release cannot invalidate that protection.
         closure = "WITH RECURSIVE closure AS (
-                 SELECT unnest(?1::TEXT[]) AS hash
+                 SELECT unnest(?1::BYTEA[]) AS hash
                  UNION
                  SELECT edge.child FROM closure
                    JOIN prompt_text_edges AS edge ON edge.parent = closure.hash
-                  WHERE NOT (closure.hash = ANY(?2::TEXT[]))
-             ) SELECT hash FROM closure WHERE NOT (hash = ANY(?2::TEXT[])) ORDER BY hash";
+                  WHERE NOT (closure.hash = ANY(?2::BYTEA[]))
+             ) SELECT hash FROM closure WHERE NOT (hash = ANY(?2::BYTEA[])) ORDER BY hash";
 
         /// Settle every call of owner `?2` in session `?1` but call `?3`
         /// (none when `?3` is null): release its request edges, its root
@@ -153,7 +153,7 @@ lash_store_sql::statements! {
 
         /// Reclaim every text in `?1` no root references any more.
         reclaim_texts = "DELETE FROM prompt_texts AS stored
-             WHERE stored.hash = ANY(?1::TEXT[])
+             WHERE stored.hash = ANY(?1::BYTEA[])
                AND NOT EXISTS (
                    SELECT 1 FROM prompt_snapshot_texts AS edge WHERE edge.hash = stored.hash
                ) AND NOT EXISTS (
@@ -202,23 +202,23 @@ pub(super) static INSERT_SNAPSHOT: Entry = Entry::new(
     Shape::Returning,
 );
 pub(super) static LOCK_TEXTS: Entry = Entry::new(
-    || &connection_sql().lock_xact_shared_by_text_batch_seeded,
-    &[Ty::Texts, Ty::Int],
+    || &connection_sql().lock_xact_shared_by_keys_seeded,
+    &[Ty::Keys, Ty::Int],
     Shape::Select,
 );
 pub(super) static UNSENT_ABSENT: Entry = Entry::new(
     || &POSTGRES_SQL.unsent_absent,
-    &[Ty::Texts, Ty::Texts],
+    &[Ty::Keys, Ty::Texts],
     Shape::Select,
 );
 pub(super) static INSERT_SENT_TEXTS: Entry = Entry::new(
     || &POSTGRES_SQL.insert_sent_texts,
-    &[Ty::Texts, Ty::Texts],
+    &[Ty::Keys, Ty::Texts],
     Shape::Exec,
 );
 pub(super) static INSERT_EDGES: Entry = Entry::new(
     || &POSTGRES_SQL.insert_edges,
-    &[Ty::Text, Ty::Text, Ty::Text, Ty::Texts, Ty::Texts],
+    &[Ty::Text, Ty::Text, Ty::Text, Ty::Texts, Ty::Keys],
     Shape::Exec,
 );
 
@@ -267,7 +267,7 @@ pub(crate) async fn release_unretained(
         .map_or(Ok(0), |row| row.try_get::<i64, _>("released_count"))?;
     let roots = rows
         .iter()
-        .map(|row| row.try_get::<Option<String>, _>("hash"))
+        .map(|row| crate::keys::get::<Option<String>>(row, "hash"))
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
         .flatten()
@@ -376,16 +376,16 @@ pub(super) fn steps(epoch: Epoch, write: &PromptWrite, held: &HeldTexts) -> Opti
     program.extend([
         Step::any(
             &LOCK_TEXTS,
-            vec![Value::Texts(hashes.clone()), Value::int(TEXT_LOCK_SEED)],
+            vec![Value::Keys(hashes.clone()), Value::int(TEXT_LOCK_SEED)],
         ),
         Step::new(
             &UNSENT_ABSENT,
-            vec![Value::Texts(hashes.clone()), Value::Texts(bodies.clone())],
+            vec![Value::Keys(hashes.clone()), Value::Texts(bodies.clone())],
             Some(0),
         ),
         Step::any(
             &INSERT_SENT_TEXTS,
-            vec![Value::Texts(hashes), Value::Texts(bodies)],
+            vec![Value::Keys(hashes), Value::Texts(bodies)],
         ),
         Step::any(
             &INSERT_EDGES,
@@ -394,7 +394,7 @@ pub(super) fn steps(epoch: Epoch, write: &PromptWrite, held: &HeldTexts) -> Opti
                 Value::text(call.call.owner_column()),
                 Value::text(call.call.call_column()),
                 Value::Texts(parts),
-                Value::Texts(edges),
+                Value::Keys(edges),
             ],
         ),
     ]);
@@ -449,17 +449,15 @@ pub(super) async fn apply(
             let mut protected = BTreeSet::new();
             while !frontier.is_empty() {
                 let hashes: Vec<_> = frontier.iter().copied().collect();
-                crate::observed_sql::query(
-                    connection_sql().lock_xact_shared_by_text_batch_seeded.sql(),
-                )
-                .bind(&hashes)
-                .bind(TEXT_LOCK_SEED)
-                .execute(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?;
+                crate::observed_sql::query(connection_sql().lock_xact_shared_by_keys_seeded.sql())
+                    .bind(crate::keys::keys(&hashes))
+                    .bind(TEXT_LOCK_SEED)
+                    .execute(crate::observed_sql::executor(&mut *tx))
+                    .await
+                    .map_err(sqlx_failure)?;
                 let held: BTreeSet<String> =
-                    crate::observed_sql::query_scalar(POSTGRES_SQL.held_texts.sql())
-                        .bind(&hashes)
+                    crate::keys::query_scalar(POSTGRES_SQL.held_texts.sql())
+                        .bind(crate::keys::keys(&hashes))
                         .fetch_all(crate::observed_sql::executor(&mut *tx))
                         .await
                         .map_err(sqlx_failure)?
@@ -487,7 +485,7 @@ pub(super) async fn apply(
                     .map(|(hash, text)| (*hash, &*text.text))
                     .unzip();
                 crate::observed_sql::query(POSTGRES_SQL.insert_texts.sql())
-                    .bind(&hashes)
+                    .bind(crate::keys::keys(&hashes))
                     .bind(&bodies)
                     .execute(crate::observed_sql::executor(&mut *tx))
                     .await
@@ -502,8 +500,8 @@ pub(super) async fn apply(
                     .collect();
                 let (parents, children): (Vec<_>, Vec<_>) = paths.into_iter().unzip();
                 crate::observed_sql::query(POSTGRES_SQL.insert_index_edges.sql())
-                    .bind(&parents)
-                    .bind(&children)
+                    .bind(crate::keys::keys(&parents))
+                    .bind(crate::keys::keys(&children))
                     .execute(crate::observed_sql::executor(&mut *tx))
                     .await
                     .map_err(sqlx_failure)?;
@@ -515,12 +513,12 @@ pub(super) async fn apply(
                 .bind(call.call.owner_column())
                 .bind(call.call.call_column())
                 .bind(&parts)
-                .bind(&edges)
+                .bind(crate::keys::keys(&edges))
                 .execute(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?;
             if matches!(call.call, ModelCallId::Turn { .. }) {
-                let old: Vec<String> = crate::observed_sql::query_scalar(SQL.release_prefix.sql())
+                let old: Vec<String> = crate::keys::query_scalar(SQL.release_prefix.sql())
                     .bind(call.session.as_str())
                     .fetch_all(crate::observed_sql::executor(&mut *tx))
                     .await
@@ -528,7 +526,7 @@ pub(super) async fn apply(
                 if let Some(prefix) = prefix {
                     crate::observed_sql::query(SQL.set_prefix.sql())
                         .bind(call.session.as_str())
-                        .bind(prefix)
+                        .bind(crate::keys::key(prefix))
                         .execute(crate::observed_sql::executor(&mut *tx))
                         .await
                         .map_err(sqlx_failure)?;
@@ -583,7 +581,7 @@ pub(crate) async fn release(
 ) -> Result<(), sqlx::Error> {
     let mut released: Vec<String> = match run {
         None => {
-            let hashes = crate::observed_sql::query_scalar(SQL.release_session_edges.sql())
+            let hashes = crate::keys::query_scalar(SQL.release_session_edges.sql())
                 .bind(session.as_str())
                 .fetch_all(crate::observed_sql::executor(&mut *tx))
                 .await?;
@@ -594,7 +592,7 @@ pub(crate) async fn release(
             hashes
         }
         Some(run) => {
-            let hashes = crate::observed_sql::query_scalar(SQL.release_run_edges.sql())
+            let hashes = crate::keys::query_scalar(SQL.release_run_edges.sql())
                 .bind(session.as_str())
                 .bind(ModelCallId::turn_owner(run))
                 .fetch_all(crate::observed_sql::executor(&mut *tx))
@@ -609,7 +607,7 @@ pub(crate) async fn release(
     };
     if run.is_none() {
         released.extend(
-            crate::observed_sql::query_scalar::<_, String>(SQL.release_prefix.sql())
+            crate::keys::query_scalar::<String>(SQL.release_prefix.sql())
                 .bind(session.as_str())
                 .fetch_all(crate::observed_sql::executor(&mut *tx))
                 .await?,
@@ -639,13 +637,13 @@ pub(super) async fn reclaim_with_protection(
     // Gather before locking, then use fresh statements after the locks.
     // Publication of an existing node locks that node and stops there;
     // its closure therefore remains protected throughout publication.
-    let closure: Vec<String> = crate::observed_sql::query_scalar(POSTGRES_SQL.closure.sql())
-        .bind(&released)
-        .bind(protected.iter().collect::<Vec<_>>())
+    let closure: Vec<String> = crate::keys::query_scalar(POSTGRES_SQL.closure.sql())
+        .bind(crate::keys::keys(&released))
+        .bind(crate::keys::keys(protected))
         .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await?;
-    crate::observed_sql::query(connection_sql().lock_xact_by_text_batch_seeded.sql())
-        .bind(&closure)
+    crate::observed_sql::query(connection_sql().lock_xact_by_keys_seeded.sql())
+        .bind(crate::keys::keys(&closure))
         .bind(TEXT_LOCK_SEED)
         .execute(crate::observed_sql::executor(&mut *tx))
         .await?;
@@ -656,17 +654,16 @@ pub(super) async fn reclaim_with_protection(
     while !frontier.is_empty() {
         let mut children = BTreeMap::new();
         for hash in &frontier {
-            let found: Vec<String> = crate::observed_sql::query_scalar(SQL.read_children.sql())
-                .bind(hash)
+            let found: Vec<String> = crate::keys::query_scalar(SQL.read_children.sql())
+                .bind(crate::keys::key(hash))
                 .fetch_all(crate::observed_sql::executor(&mut *tx))
                 .await?;
             children.insert(hash.clone(), found);
         }
-        let removed: Vec<String> =
-            crate::observed_sql::query_scalar(POSTGRES_SQL.reclaim_texts.sql())
-                .bind(&frontier)
-                .fetch_all(crate::observed_sql::executor(&mut *tx))
-                .await?;
+        let removed: Vec<String> = crate::keys::query_scalar(POSTGRES_SQL.reclaim_texts.sql())
+            .bind(crate::keys::keys(&frontier))
+            .fetch_all(crate::observed_sql::executor(&mut *tx))
+            .await?;
         frontier = removed
             .iter()
             .flat_map(|hash| children[hash].iter().cloned())
@@ -697,17 +694,20 @@ pub(super) async fn snapshot(
             call: call.clone(),
         }));
     }
-    let edges: Vec<(String, String)> = crate::observed_sql::query_as(SQL.read_edges.sql())
-        .bind(call.session.as_str())
-        .bind(call.call.owner_column())
-        .bind(call.call.call_column())
-        .fetch_all(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(sqlx_failure)?;
+    let edges: Vec<(String, crate::keys::Key)> =
+        crate::observed_sql::query_as(SQL.read_edges.sql())
+            .bind(call.session.as_str())
+            .bind(call.call.owner_column())
+            .bind(call.call.call_column())
+            .fetch_all(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(sqlx_failure)?;
     let (request_texts, snapshot_texts): (Vec<_>, Vec<_>) = edges
         .into_iter()
         .partition(|(part, _)| part == REQUEST_PART);
-    let hashes = |edges: Vec<(String, String)>| edges.into_iter().map(|(_, hash)| hash).collect();
+    let hashes = |edges: Vec<(String, crate::keys::Key)>| {
+        edges.into_iter().map(|(_, hash)| hash.0).collect()
+    };
     Ok(Some(PromptSnapshotRow {
         call: call.clone(),
         snapshot: get(&row, 0)?,
@@ -725,15 +725,15 @@ pub(super) async fn texts(
     let mut found = Vec::with_capacity(hashes.len());
     for hash in hashes {
         let text: Option<String> = crate::observed_sql::query_scalar(SQL.read_text.sql())
-            .bind(hash)
+            .bind(crate::keys::lookup(hash))
             .fetch_optional(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(sqlx_failure)?;
         if let Some(text) = text {
             found.push(PromptText {
                 hash: hash.clone(),
-                children: crate::observed_sql::query_scalar(SQL.read_children.sql())
-                    .bind(hash)
+                children: crate::keys::query_scalar(SQL.read_children.sql())
+                    .bind(crate::keys::key(hash))
                     .fetch_all(crate::observed_sql::executor(&mut *tx))
                     .await
                     .map_err(sqlx_failure)?,
@@ -776,7 +776,7 @@ mod tests {
             },
         };
         let text = |hash: &str| PromptText {
-            hash: hash.to_owned(),
+            hash: lash_core_store::store::BlobRef::for_content(hash.as_bytes()).0,
             text: hash.to_owned().into(),
             children: Vec::new(),
         };
@@ -788,7 +788,7 @@ mod tests {
                 request: format!("exact-request-{ordinal}"),
                 snapshot_texts: vec![text("shared"), text(&format!("unique-{ordinal}"))],
                 request_texts: vec![text("request"), text("prefix")].into(),
-                prefix: Some("prefix".to_owned()),
+                prefix: Some(text("prefix").hash),
             }));
         }
         tx.write(DomainWrite::Prompt(PromptWrite::Settle {
@@ -805,9 +805,9 @@ mod tests {
         // release: recovery owns its request and snapshot until settlement.
         let mut tx = storage.pool().begin().await.unwrap();
         for sql in [
-            "INSERT INTO lash_blobs (hash, content, encoding) VALUES ('config', decode('00', 'hex'), 0)",
+            "INSERT INTO lash_blobs (hash, content, encoding) VALUES (decode(repeat('00', 32), 'hex'), decode('00', 'hex'), 0)",
             "INSERT INTO lash_session_meta (session_id, relation_kind, retention_kind) VALUES ('sql-work-owner', 'root', 'head_only')",
-            "INSERT INTO lash_session_revisions (session_id, head_revision, config_ref) VALUES ('sql-work-owner', 1, 'config'), ('sql-work-owner', 2, 'config')",
+            "INSERT INTO lash_session_revisions (session_id, head_revision, config_ref) VALUES ('sql-work-owner', 1, decode(repeat('00', 32), 'hex')), ('sql-work-owner', 2, decode(repeat('00', 32), 'hex'))",
             "INSERT INTO lash_session_head (session_id, head_revision) VALUES ('sql-work-owner', 2)",
             "INSERT INTO lash_session_runs (session_id, run, terminal_kind, terminal_cause_json,
                 terminal_at_ms, terminal_head_revision, terminal_window_revision)
@@ -884,14 +884,14 @@ mod tests {
             "request",
             "prefix",
         ]
-        .map(str::to_owned);
+        .map(|name| text(name).hash);
         let found = store.prompt_texts(&hashes).await.unwrap();
         assert_eq!(
             found
                 .iter()
-                .map(|text| text.hash.as_str())
+                .map(|text| text.hash.clone())
                 .collect::<Vec<_>>(),
-            ["shared", "unique-131", "request", "prefix"]
+            ["shared", "unique-131", "request", "prefix"].map(|name| text(name).hash)
         );
         // FIG-6607/6611: exercise the real owner program with a second
         // page of ingress, rather than inferring input release from audits.

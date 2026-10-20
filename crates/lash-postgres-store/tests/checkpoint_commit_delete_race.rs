@@ -132,7 +132,7 @@ async fn commit_waits_for_delete(branch: ReuseBranch) {
         .begin()
         .await
         .expect("begin controlled delete transaction");
-    sqlx::query("SELECT hash FROM lash_blobs WHERE hash = $1 FOR UPDATE")
+    sqlx::query("SELECT hash FROM lash_blobs WHERE hash = decode($1, 'hex') FOR UPDATE")
         .bind(held_ref.as_str())
         .fetch_one(&mut *deleting)
         .await
@@ -207,7 +207,7 @@ async fn commit_waits_for_delete(branch: ReuseBranch) {
         .execute(&mut *deleting)
         .await
         .expect("release victim revision inside controlled delete");
-    sqlx::query("DELETE FROM lash_blobs WHERE hash = $1")
+    sqlx::query("DELETE FROM lash_blobs WHERE hash = decode($1, 'hex')")
         .bind(victim_receipt.checkpoint_ref.as_str())
         .execute(&mut *deleting)
         .await
@@ -218,14 +218,14 @@ async fn commit_waits_for_delete(branch: ReuseBranch) {
         sqlx::query(
             "DELETE FROM lash_blobs AS leaf WHERE EXISTS (
                  SELECT 1 FROM lash_blob_edges
-                 WHERE parent_hash = leaf.hash AND child_hash = $1
+                 WHERE parent_hash = leaf.hash AND child_hash = decode($1, 'hex')
              )",
         )
         .bind(shared.blob_ref.as_str())
         .execute(&mut *deleting)
         .await
         .expect("delete the shared component's leaf");
-        sqlx::query("DELETE FROM lash_blobs WHERE hash = $1")
+        sqlx::query("DELETE FROM lash_blobs WHERE hash = decode($1, 'hex')")
             .bind(shared.blob_ref.as_str())
             .execute(&mut *deleting)
             .await
@@ -247,12 +247,12 @@ async fn commit_waits_for_delete(branch: ReuseBranch) {
         assert_eq!(receipt.checkpoint_ref, victim_receipt.checkpoint_ref);
         let reached: Vec<(String, bool)> = sqlx::query_as(
             "WITH RECURSIVE reach AS (
-                 SELECT $1::text AS hash
+                 SELECT decode($1, 'hex') AS hash
                  UNION
                  SELECT edge.child_hash FROM lash_blob_edges AS edge
                  JOIN reach ON edge.parent_hash = reach.hash
              )
-             SELECT reach.hash, EXISTS (SELECT 1 FROM lash_blobs WHERE hash = reach.hash)
+             SELECT encode(reach.hash, 'hex'), EXISTS (SELECT 1 FROM lash_blobs WHERE hash = reach.hash)
              FROM reach",
         )
         .bind(receipt.checkpoint_ref.as_str())

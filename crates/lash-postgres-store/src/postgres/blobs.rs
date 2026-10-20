@@ -27,7 +27,7 @@ lash_store_sql::statements! {
         /// installed only by the graph commit.
         insert_chunk = "INSERT INTO blobs (hash, content, encoding)
              SELECT hash, content, 0
-               FROM unnest(?1::text[], ?2::bytea[]) AS blob(hash, content)
+               FROM unnest(?1::bytea[], ?2::bytea[]) AS blob(hash, content)
               ORDER BY hash
              ON CONFLICT (hash) DO NOTHING";
 
@@ -42,14 +42,14 @@ lash_store_sql::statements! {
         /// the global hash order. Same `FOR KEY SHARE` fork as
         /// [`BlobPostgresStatements::lock_one`], over a chunk.
         lock_existing_hashes = "SELECT hash FROM blobs
-             WHERE hash = ANY(?1::text[])
+             WHERE hash = ANY(?1::bytea[])
              ORDER BY hash
              FOR KEY SHARE";
 
         /// The stored bytes for every content address in `?1`, in one round
-        /// trip. The text-array bind is the fork; SQLite binds a JSON array
+        /// trip. The bytea-array bind is the fork; SQLite binds a JSON array
         /// and unpacks it with `json_each`.
-        select_bodies_by_hash = "SELECT hash, content FROM blobs WHERE hash = ANY(?1::text[])";
+        select_bodies_by_hash = "SELECT hash, content FROM blobs WHERE hash = ANY(?1::bytea[])";
     }
 }
 

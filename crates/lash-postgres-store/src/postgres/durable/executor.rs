@@ -56,18 +56,18 @@ lash_store_sql::statements! {
     pub(crate) struct ExecutorStatements @ "durable_executor" {
         /// How many of the named blobs `?1` are not stored, or are among
         /// the roots `?2` and not stored as graph nodes.
-        external_absent = "SELECT count(*) FROM unnest(?1::text[]) AS named(hash)
+        external_absent = "SELECT count(*) FROM unnest(?1::bytea[]) AS named(hash)
              LEFT JOIN blobs AS stored ON stored.hash = named.hash
              WHERE stored.hash IS NULL
-                OR (named.hash = ANY(?2::text[]) AND stored.encoding <> 1)";
+                OR (named.hash = ANY(?2::bytea[]) AND stored.encoding <> 1)";
 
         /// How many staged nodes `?1` (raw digests) with bytes `?2` the
         /// install left out (not among `?3`) whose stored blob is not the
         /// same graph node.
         held_conflicts = "SELECT count(*)
              FROM unnest(?1::bytea[], ?2::bytea[]) AS staged(digest, content)
-             LEFT JOIN blobs AS stored ON stored.hash = encode(staged.digest, 'hex')
-             WHERE NOT (encode(staged.digest, 'hex') = ANY(?3::text[]))
+             LEFT JOIN blobs AS stored ON stored.hash = staged.digest
+             WHERE NOT (staged.digest = ANY(?3::bytea[]))
                AND (stored.hash IS NULL OR stored.encoding <> 1
                     OR stored.content <> staged.content)";
 
@@ -75,7 +75,7 @@ lash_store_sql::statements! {
         /// the install inserted (among `?3`).
         installed_bytes = "SELECT COALESCE(sum(octet_length(staged.content)), 0)::bigint
              FROM unnest(?1::bytea[], ?2::bytea[]) AS staged(digest, content)
-             WHERE encode(staged.digest, 'hex') = ANY(?3::text[])";
+             WHERE staged.digest = ANY(?3::bytea[])";
 
         /// Record the answer `?3` of call `?1` at `?2`: the call's last
         /// write.
@@ -338,7 +338,7 @@ fn mechanics() -> Vec<&'static str> {
         session_sql().graph_postgres.retire.sql(),
         SQL.actor.wake.sql(),
         prompts::closure().sql(),
-        connection_sql().lock_xact_by_text_batch_seeded.sql(),
+        connection_sql().lock_xact_by_keys_seeded.sql(),
         prompts::read_children().sql(),
         super::pages::hold_statements().0.sql(),
         super::pages::hold_statements().1.sql(),
@@ -358,10 +358,10 @@ fn mechanics() -> Vec<&'static str> {
 pub(super) struct Call {
     pub(super) steps: serde_json::Value,
     /// The checkpoint bodies a head commit supplies, by content address.
-    pub(super) body_hashes: Vec<String>,
+    pub(super) body_hashes: Vec<crate::keys::Key>,
     pub(super) bodies: Vec<Vec<u8>>,
-    pub(super) named: Vec<String>,
-    pub(super) roots: Vec<String>,
+    pub(super) named: Vec<crate::keys::Key>,
+    pub(super) roots: Vec<crate::keys::Key>,
     pub(super) digests: Vec<Vec<u8>>,
     pub(super) contents: Vec<Vec<u8>>,
     pub(super) parents: Vec<Vec<u8>>,
@@ -459,7 +459,7 @@ impl Call {
                     )
                     .ok()??;
                     for (hash, body) in &program.checkpoint.supplied {
-                        call.body_hashes.push(hash.clone());
+                        call.body_hashes.push(crate::keys::key(hash));
                         call.bodies.push(body.to_vec());
                     }
                     checkpoint_nodes = program.checkpoint.nodes;
@@ -509,11 +509,14 @@ impl Call {
                 .iter()
                 .chain(checked.external_roots.iter())
                 .collect();
-            call.named = named.iter().map(|node| node.to_hex()).collect();
+            call.named = named
+                .iter()
+                .map(|node| crate::keys::key(node.to_hex()))
+                .collect();
             call.roots = checked
                 .external_roots
                 .iter()
-                .map(|node| node.to_hex())
+                .map(|node| crate::keys::key(node.to_hex()))
                 .collect();
             for node in &checked.nodes {
                 for child in &node.children {

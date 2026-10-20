@@ -256,7 +256,7 @@ async fn put_checkpoint_blobs_tx(
             .map(|(_, content)| &content[..])
             .collect::<Vec<_>>();
         crate::observed_sql::query(crate::blobs::blob_sql().postgres.insert_chunk.sql())
-            .bind(hashes)
+            .bind(crate::keys::keys(hashes))
             .bind(contents)
             .execute(crate::observed_sql::executor(&mut **tx))
             .await
@@ -273,7 +273,7 @@ pub(crate) async fn lock_checkpoint_blob_tx(
     let exists = crate::observed_sql::query_scalar::<_, bool>(
         crate::blobs::blob_sql().postgres.lock_one.sql(),
     )
-    .bind(blob_ref)
+    .bind(crate::keys::lookup(blob_ref))
     .fetch_optional(crate::observed_sql::executor(&mut **tx))
     .await
     .map_err(store_sqlx_error)?;
@@ -298,16 +298,19 @@ async fn lock_checkpoint_blobs_tx(
     let blob_refs = acquisition_order
         .iter()
         .map(|(blob_ref, _)| blob_ref.as_str())
+        // Invalid keys remain absent in `locked`, so the ordered domain
+        // refusal below still identifies the first missing component.
+        .filter(|blob_ref| crate::keys::lookup(blob_ref).is_some())
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
     let mut locked = std::collections::HashSet::with_capacity(blob_refs.len());
     for chunk in blob_refs.chunks(chunk_size) {
         locked.extend(
-            crate::observed_sql::query_scalar::<_, String>(
+            crate::keys::query_scalar::<String>(
                 crate::blobs::blob_sql().postgres.lock_existing_hashes.sql(),
             )
-            .bind(chunk)
+            .bind(crate::keys::keys(chunk))
             .fetch_all(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?,
@@ -349,13 +352,13 @@ async fn checkpoint_component_bodies_tx(
                 .select_bodies_by_hash
                 .sql(),
         )
-        .bind(chunk)
+        .bind(crate::keys::keys(chunk))
         .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
         for row in rows {
             bodies.insert(
-                row.get::<String, _>(0),
+                crate::keys::get::<String>(&row, 0).map_err(store_sqlx_error)?,
                 std::sync::Arc::from(row.get::<Vec<u8>, _>(1)),
             );
         }
@@ -700,7 +703,7 @@ async fn decode_session_head_meta_row(
         return Ok(None);
     };
     let head_revision = u64_from_sql("SessionHeadMeta", "head_revision", row.get(1))?;
-    let config_ref: Option<String> = row.get(0);
+    let config_ref: Option<String> = crate::keys::get(&row, 0).map_err(store_sqlx_error)?;
     let payload = load_config_tx(tx, config_ref.as_deref(), fleet, configs).await?;
     let current_frame_node_id = row
         .try_get::<Option<String>, _>(4)
@@ -723,7 +726,7 @@ async fn decode_session_head_meta_row(
             message: error.to_string(),
         })?;
     let leaf_node_id: Option<String> = row.get(2);
-    let checkpoint_ref: Option<String> = row.get(3);
+    let checkpoint_ref: Option<String> = crate::keys::get(&row, 3).map_err(store_sqlx_error)?;
     Ok(Some(SessionHeadMeta::assemble(
         session_id,
         payload,

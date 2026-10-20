@@ -51,7 +51,7 @@ impl lash_conformance::SessionDeleteBlobProbe for PostgresBlobProbe {
         session_id: &lash_protocol_types::SessionId,
     ) -> lash_core_store::store::BlobRef {
         let config_ref: String = sqlx::query_scalar(
-            "SELECT revision.config_ref FROM lash_session_head AS head
+            "SELECT encode(revision.config_ref, 'hex') FROM lash_session_head AS head
              JOIN lash_session_revisions AS revision USING (session_id, head_revision)
              WHERE head.session_id = $1",
         )
@@ -63,7 +63,7 @@ impl lash_conformance::SessionDeleteBlobProbe for PostgresBlobProbe {
     }
 
     async fn blob_exists(&self, blob_ref: &lash_core_store::store::BlobRef) -> bool {
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM lash_blobs WHERE hash = $1)")
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM lash_blobs WHERE hash = decode($1, 'hex'))")
             .bind(blob_ref.as_str())
             .fetch_one(self.storage.pool())
             .await
@@ -114,7 +114,7 @@ impl lash_conformance::SessionDeleteBlobProbe for PostgresBlobProbe {
             sqlx::query_scalar(
                 "SELECT EXISTS(
                      SELECT 1 FROM lash_blob_edges
-                     WHERE parent_hash = $1 AND child_hash = $2
+                     WHERE parent_hash = decode($1, 'hex') AND child_hash = decode($2, 'hex')
                  )",
             )
             .bind(checkpoint_ref.as_str())

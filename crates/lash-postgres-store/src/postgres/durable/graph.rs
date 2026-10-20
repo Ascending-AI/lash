@@ -82,17 +82,17 @@ lash_store_sql::statements! {
         /// names), key-share locked in digest order against a peel, with
         /// the bytes of each supplied one: what the commit compares instead
         /// of supplying it again.
-        lock_nodes = "SELECT hash, encoding, CASE WHEN hash = ANY(?1::text[]) THEN NULL ELSE content END
+        lock_nodes = "SELECT hash, encoding, CASE WHEN hash = ANY(?1::bytea[]) THEN NULL ELSE content END
              FROM blobs
-             WHERE hash = ANY(?1::text[])
-                OR hash = ANY(ARRAY(SELECT encode(digest, 'hex') FROM UNNEST(?2::bytea[]) AS digest))
+             WHERE hash = ANY(?1::bytea[])
+                OR hash = ANY(ARRAY(SELECT digest FROM UNNEST(?2::bytea[]) AS digest))
              ORDER BY hash FOR KEY SHARE";
 
         /// Installs every graph node `?1` (raw digests) with its bytes `?2`,
         /// in digest order, and returns the digests it inserted: a node
         /// already stored is left as it is.
         insert_nodes = "INSERT INTO blobs (hash, content, encoding)
-             SELECT encode(staged.digest, 'hex'), staged.content, 1
+             SELECT staged.digest, staged.content, 1
              FROM UNNEST(?1::bytea[], ?2::bytea[]) AS staged(digest, content)
              ORDER BY staged.digest
              ON CONFLICT (hash) DO NOTHING
@@ -101,13 +101,13 @@ lash_store_sql::statements! {
         /// The bytes and encoding of every stored blob in `?1`, key-share
         /// locked in digest order: a staged node another writer stored is
         /// held against a peel until the commit ends.
-        stored_nodes = "SELECT hash, content, encoding FROM blobs WHERE hash = ANY(?1::text[])
+        stored_nodes = "SELECT hash, content, encoding FROM blobs WHERE hash = ANY(?1::bytea[])
              ORDER BY hash FOR KEY SHARE";
 
         /// Every edge of freshly installed parents `?1` to children `?2`
         /// (raw digests).
         insert_edges = "INSERT INTO blob_edges (parent_hash, child_hash)
-             SELECT encode(parent, 'hex'), encode(child, 'hex')
+             SELECT parent, child
              FROM UNNEST(?1::bytea[], ?2::bytea[]) AS staged(parent, child)";
 
         /// Every blob the roots `?1` reach along stored edges, the roots
@@ -117,13 +117,13 @@ lash_store_sql::statements! {
         /// nothing under a persistent-heap page (envelope kind 1000 to 1999,
         /// a two-byte varint after the magic): the page is a leaf.
         walk_reach = "WITH RECURSIVE reach AS (
-                 SELECT UNNEST(?1::text[]) AS hash
+                 SELECT UNNEST(?1::bytea[]) AS hash
                  UNION
                  SELECT edge.child_hash FROM blob_edges AS edge
                  JOIN reach ON edge.parent_hash = reach.hash
                  JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?2::text[]))
-                   AND NOT (edge.child_hash = ANY(?2::text[]))
+                 WHERE NOT (reach.hash = ANY(?2::bytea[]))
+                   AND NOT (edge.child_hash = ANY(?2::bytea[]))
                    AND CASE
                        WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
                        WHEN get_byte(parent.content, 4) < 128
@@ -138,13 +138,13 @@ lash_store_sql::statements! {
         /// [`Self::walk_reach`] without any opaque blob's bytes but the
         /// roots' bytes: what a reader of the graph alone reads.
         walk_reach_graph = "WITH RECURSIVE reach AS (
-                 SELECT UNNEST(?1::text[]) AS hash
+                 SELECT UNNEST(?1::bytea[]) AS hash
                  UNION
                  SELECT edge.child_hash FROM blob_edges AS edge
                  JOIN reach ON edge.parent_hash = reach.hash
                  JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?2::text[]))
-                   AND NOT (edge.child_hash = ANY(?2::text[]))
+                 WHERE NOT (reach.hash = ANY(?2::bytea[]))
+                   AND NOT (edge.child_hash = ANY(?2::bytea[]))
                    AND CASE
                        WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
                        WHEN get_byte(parent.content, 4) < 128
@@ -154,21 +154,21 @@ lash_store_sql::statements! {
                    END
              )
              SELECT blobs.hash, blobs.encoding,
-                    CASE WHEN blobs.encoding = 1 OR blobs.hash = ANY(?1::text[]) THEN blobs.content END
+                    CASE WHEN blobs.encoding = 1 OR blobs.hash = ANY(?1::bytea[]) THEN blobs.content END
              FROM blobs JOIN reach ON blobs.hash = reach.hash";
 
         /// One level of a walk: every blob in `?1`. A graph-only walk
         /// (`?3`) omits opaque children's bytes, but includes roots `?2`.
         walk_level = "SELECT hash, encoding,
-                    CASE WHEN NOT ?3::boolean OR encoding = 1 OR hash = ANY(?2::text[]) THEN content END
-             FROM blobs WHERE hash = ANY(?1::text[])";
+                    CASE WHEN NOT ?3::boolean OR encoding = 1 OR hash = ANY(?2::bytea[]) THEN content END
+             FROM blobs WHERE hash = ANY(?1::bytea[])";
 
         /// Lock for its delete every candidate of a peel's level `?1` that
         /// no other transaction holds, in digest order, and answer them as
         /// one list. A peel never waits: a node a writer holds key-share
         /// locked is one it is about to name, and one a rolled-back writer
         /// leaves is the orphan audit's.
-        peel_lock = "SELECT ARRAY(SELECT hash FROM blobs WHERE hash = ANY(?1::text[])
+        peel_lock = "SELECT ARRAY(SELECT hash FROM blobs WHERE hash = ANY(?1::bytea[])
              ORDER BY hash FOR UPDATE SKIP LOCKED)";
 
         /// One level of a peel: delete every blob in `?1` no root names and
@@ -177,7 +177,7 @@ lash_store_sql::statements! {
         /// as one row.
         peel_level = "WITH dead AS (
                  DELETE FROM blobs AS candidate
-                 WHERE candidate.hash = ANY(?1::text[])
+                 WHERE candidate.hash = ANY(?1::bytea[])
                    AND NOT EXISTS (
                        SELECT 1 FROM graph_root_catalog AS root
                        WHERE root.root_ref = candidate.hash
@@ -202,7 +202,7 @@ lash_store_sql::statements! {
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
                  SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
                  JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?1::text[])) AND NOT (edge.child_hash = ANY(?1::text[]))
+                 WHERE NOT (reach.hash = ANY(?1::bytea[])) AND NOT (edge.child_hash = ANY(?1::bytea[]))
                    AND CASE
                        WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
                        WHEN get_byte(parent.content, 4) < 128
@@ -217,7 +217,7 @@ lash_store_sql::statements! {
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
                  SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
                  JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?1::text[])) AND NOT (edge.child_hash = ANY(?1::text[]))
+                 WHERE NOT (reach.hash = ANY(?1::bytea[])) AND NOT (edge.child_hash = ANY(?1::bytea[]))
                    AND CASE
                        WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
                        WHEN get_byte(parent.content, 4) < 128
@@ -231,7 +231,7 @@ lash_store_sql::statements! {
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
                  SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
                  JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?1::text[])) AND NOT (edge.child_hash = ANY(?1::text[]))
+                 WHERE NOT (reach.hash = ANY(?1::bytea[])) AND NOT (edge.child_hash = ANY(?1::bytea[]))
                    AND CASE
                        WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
                        WHEN get_byte(parent.content, 4) < 128
@@ -246,7 +246,7 @@ lash_store_sql::statements! {
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
                  SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
                  JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?1::text[])) AND NOT (edge.child_hash = ANY(?1::text[]))
+                 WHERE NOT (reach.hash = ANY(?1::bytea[])) AND NOT (edge.child_hash = ANY(?1::bytea[]))
                    AND CASE
                        WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
                        WHEN get_byte(parent.content, 4) < 128
@@ -261,7 +261,7 @@ lash_store_sql::statements! {
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
                  SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
                  JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?1::text[])) AND NOT (edge.child_hash = ANY(?1::text[]))
+                 WHERE NOT (reach.hash = ANY(?1::bytea[])) AND NOT (edge.child_hash = ANY(?1::bytea[]))
                    AND CASE
                        WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
                        WHEN get_byte(parent.content, 4) < 128
@@ -276,7 +276,7 @@ lash_store_sql::statements! {
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
                  SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
                  JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?1::text[])) AND NOT (edge.child_hash = ANY(?1::text[]))
+                 WHERE NOT (reach.hash = ANY(?1::bytea[])) AND NOT (edge.child_hash = ANY(?1::bytea[]))
                    AND CASE
                        WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
                        WHEN get_byte(parent.content, 4) < 128
@@ -290,14 +290,14 @@ lash_store_sql::statements! {
         hydrate_answer = "WITH RECURSIVE root AS (SELECT answer_ref AS hash FROM turn_phases WHERE session_id = ?2 AND run = ?3),
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
                  SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?1::text[])) AND NOT (edge.child_hash = ANY(?1::text[])))
+                 WHERE NOT (reach.hash = ANY(?1::bytea[])) AND NOT (edge.child_hash = ANY(?1::bytea[])))
              SELECT root.hash, blob.hash, blob.encoding, blob.content
              FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
         /// Run `?3` of session `?2`'s transcript, as [`Self::hydrate_exec`] reads an execution's.
         hydrate_transcript = "WITH RECURSIVE root AS (SELECT terminal_transcript_ref AS hash FROM session_runs WHERE session_id = ?2 AND run = ?3),
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
                  SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?1::text[])) AND NOT (edge.child_hash = ANY(?1::text[])))
+                 WHERE NOT (reach.hash = ANY(?1::bytea[])) AND NOT (edge.child_hash = ANY(?1::bytea[])))
              SELECT root.hash, blob.hash, blob.encoding, blob.content
              FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
         /// Plugin `?4`'s namespace values for run `?3` of session `?2`, as [`Self::hydrate_exec`] reads an execution's.
@@ -305,7 +305,7 @@ lash_store_sql::statements! {
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
                  SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
                  JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?1::text[])) AND NOT (edge.child_hash = ANY(?1::text[]))
+                 WHERE NOT (reach.hash = ANY(?1::bytea[])) AND NOT (edge.child_hash = ANY(?1::bytea[]))
                    AND CASE
                        WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
                        WHEN get_byte(parent.content, 4) < 128
@@ -320,7 +320,7 @@ lash_store_sql::statements! {
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
                  SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
                  JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?1::text[])) AND NOT (edge.child_hash = ANY(?1::text[]))
+                 WHERE NOT (reach.hash = ANY(?1::bytea[])) AND NOT (edge.child_hash = ANY(?1::bytea[]))
                    AND CASE
                        WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
                        WHEN get_byte(parent.content, 4) < 128
@@ -335,7 +335,7 @@ lash_store_sql::statements! {
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
                  SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
                  JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?1::text[])) AND NOT (edge.child_hash = ANY(?1::text[]))
+                 WHERE NOT (reach.hash = ANY(?1::bytea[])) AND NOT (edge.child_hash = ANY(?1::bytea[]))
                    AND CASE
                        WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
                        WHEN get_byte(parent.content, 4) < 128
@@ -350,7 +350,7 @@ lash_store_sql::statements! {
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
                  SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
                  JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?1::text[])) AND NOT (edge.child_hash = ANY(?1::text[]))
+                 WHERE NOT (reach.hash = ANY(?1::bytea[])) AND NOT (edge.child_hash = ANY(?1::bytea[]))
                    AND CASE
                        WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
                        WHEN get_byte(parent.content, 4) < 128
@@ -365,7 +365,7 @@ lash_store_sql::statements! {
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
                  SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
                  JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?1::text[])) AND NOT (edge.child_hash = ANY(?1::text[]))
+                 WHERE NOT (reach.hash = ANY(?1::bytea[])) AND NOT (edge.child_hash = ANY(?1::bytea[]))
                    AND CASE
                        WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
                        WHEN get_byte(parent.content, 4) < 128
@@ -548,12 +548,13 @@ pub(super) async fn walk_within(
     let mut total = 0_u64;
     let mut count = 0_u64;
     {
-        let mut rows = crate::observed_sql::query_as::<_, (String, i16, Option<Vec<u8>>)>(reach)
-            .bind(&roots_hex)
-            .bind(&heads)
-            .fetch(crate::observed_sql::executor(&mut *tx));
+        let mut rows =
+            crate::observed_sql::query_as::<_, (crate::keys::Key, i16, Option<Vec<u8>>)>(reach)
+                .bind(crate::keys::keys(&roots_hex))
+                .bind(crate::keys::keys(&heads))
+                .fetch(crate::observed_sql::executor(&mut *tx));
         while let Some((hash, encoding, bytes)) = rows.try_next().await.map_err(db)? {
-            let id = node_of(&hash)?;
+            let id = node_of(&hash.0)?;
             let encoding = encoding_of(encoding)?;
             if let Some(bytes) = &bytes {
                 charge_node(limits, &mut count, &mut total, bytes.len())?;
@@ -629,15 +630,16 @@ async fn walk_found(
         {
             // A malformed edge table must not hide a child named in the
             // checked envelope. Read the missing level within the same budget.
-            let mut rows = crate::observed_sql::query_as::<_, (String, i16, Option<Vec<u8>>)>(
-                SQL.postgres.walk_level.sql(),
-            )
-            .bind(&unread)
-            .bind(&roots_hex)
+            let mut rows = crate::observed_sql::query_as::<
+                _,
+                (crate::keys::Key, i16, Option<Vec<u8>>),
+            >(SQL.postgres.walk_level.sql())
+            .bind(crate::keys::keys(&unread))
+            .bind(crate::keys::keys(&roots_hex))
             .bind(skipped.is_some())
             .fetch(crate::observed_sql::executor(&mut *tx));
             while let Some((hash, encoding, bytes)) = rows.try_next().await.map_err(db)? {
-                let id = node_of(&hash)?;
+                let id = node_of(&hash.0)?;
                 let encoding = encoding_of(encoding)?;
                 if let Some(bytes) = &bytes {
                     charge_node(limits, &mut count, &mut total, bytes.len())?;
@@ -737,7 +739,12 @@ fn charge_node(
 
 /// One row of a hydration: the owner's root column, then one blob it
 /// reaches (none when it reaches none).
-type HydrateRow = (Option<String>, Option<String>, Option<i16>, Option<Vec<u8>>);
+type HydrateRow = (
+    Option<crate::keys::Key>,
+    Option<crate::keys::Key>,
+    Option<i16>,
+    Option<Vec<u8>>,
+);
 
 /// The one statement that hydrates `owner`'s root on `connection`: its root
 /// column and every blob it reaches.
@@ -748,7 +755,8 @@ async fn hydrate_rows(connection: &mut PgConnection, owner: &RootOwner) -> Answe
         .map(NodeId::to_hex)
         .collect();
     let query = |statement| {
-        crate::observed_sql::query_as::<sqlx::Postgres, HydrateRow>(statement).bind(heads.clone())
+        crate::observed_sql::query_as::<sqlx::Postgres, HydrateRow>(statement)
+            .bind(crate::keys::keys(&heads))
     };
     let bound = match owner {
         RootOwner::Exec(exec) => query(sql.hydrate_exec.sql()).bind(exec.stored()),
@@ -816,11 +824,10 @@ pub(super) async fn root_of(
     owner: &RootOwner,
 ) -> Answer<Option<NodeId>> {
     let sql = &*SQL;
-    let query =
-        |statement| crate::observed_sql::query_scalar::<sqlx::Postgres, Option<String>>(statement);
+    let query = |statement| crate::keys::query_scalar::<Option<String>>(statement);
     let bound = match owner {
         RootOwner::Exec(exec) => {
-            let row: Option<(i64, Option<String>)> =
+            let row: Option<(i64, Option<crate::keys::Key>)> =
                 crate::observed_sql::query_as(sql.snapshots.root.sql())
                     .bind(exec.stored())
                     .fetch_optional(crate::observed_sql::executor(&mut *connection))
@@ -917,7 +924,7 @@ pub(super) async fn hydrate_in(
             if let Some(bytes) = &bytes {
                 charge_node(limits, &mut count, &mut total, bytes.len())?;
             }
-            found.insert(node_of(&hash)?, (encoding_of(encoding)?, bytes));
+            found.insert(node_of(&hash.0)?, (encoding_of(encoding)?, bytes));
         }
     }
     let spent = Budget { count, total };
@@ -947,14 +954,14 @@ pub(super) static ADMISSION_PUT: Entry = Entry::new(
         Ty::Text,
         Ty::Int,
         Ty::Int,
-        Ty::Text,
+        Ty::Key,
         Ty::Int,
     ],
     Shape::Returning,
 );
 pub(super) static ADMISSION_REMOVE: Entry = Entry::new(
     || &SQL.graph.admission_remove,
-    &[Ty::Text, Ty::Bytes, Ty::Text],
+    &[Ty::Text, Ty::Bytes, Ty::Key],
     Shape::Returning,
 );
 
@@ -988,7 +995,7 @@ pub(super) fn admission_steps(
                         .map(|member| integer::<i64>(member.member))
                         .transpose()?,
                 ),
-                Value::text(admission.to_hex()),
+                Value::key(admission.to_hex()),
                 Value::int(epoch.0),
             ],
         )],
@@ -1002,7 +1009,7 @@ pub(super) fn admission_steps(
                 vec![
                     Value::text(exec.stored()),
                     Value::Bytes(Some(effect.0.to_vec())),
-                    Value::text(expected.to_hex()),
+                    Value::key(expected.to_hex()),
                 ],
             )
             .retiring([expected.to_hex()]),
@@ -1049,18 +1056,17 @@ pub(super) async fn apply_release_pin(
         ReleasePinWrite::Install { release, root } => {
             let installed = crate::observed_sql::query(SQL.graph.release_install.sql())
                 .bind(release.as_str())
-                .bind(root.to_hex())
+                .bind(crate::keys::key(root.to_hex()))
                 .execute(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(sqlx_failure)?
                 .rows_affected();
             if installed == 0 {
-                let pinned: String =
-                    crate::observed_sql::query_scalar(SQL.graph.release_root.sql())
-                        .bind(release.as_str())
-                        .fetch_one(crate::observed_sql::executor(&mut *tx))
-                        .await
-                        .map_err(sqlx_failure)?;
+                let pinned: String = crate::keys::query_scalar(SQL.graph.release_root.sql())
+                    .bind(release.as_str())
+                    .fetch_one(crate::observed_sql::executor(&mut *tx))
+                    .await
+                    .map_err(sqlx_failure)?;
                 if pinned != root.to_hex() {
                     return Err(graph_refused(GraphRefusal::RevisionConflict));
                 }
@@ -1072,7 +1078,7 @@ pub(super) async fn apply_release_pin(
                 tx,
                 crate::observed_sql::query(SQL.graph.release_retire.sql())
                     .bind(release.as_str())
-                    .bind(expected.to_hex()),
+                    .bind(crate::keys::key(expected.to_hex())),
             )
             .await
             .map_err(graph_refused)?;
@@ -1112,15 +1118,15 @@ pub(crate) async fn install(
     let mut present = BTreeMap::new();
     if !named.is_empty() {
         let digests: Vec<&[u8]> = graph.nodes.iter().map(|node| &node.id.0[..]).collect();
-        let rows: Vec<(String, i16, Option<Vec<u8>>)> =
+        let rows: Vec<(crate::keys::Key, i16, Option<Vec<u8>>)> =
             crate::observed_sql::query_as(SQL.postgres.lock_nodes.sql())
-                .bind(&named)
+                .bind(crate::keys::keys(&named))
                 .bind(&digests)
                 .fetch_all(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(db)?;
         for (hash, encoding, bytes) in rows {
-            present.insert(hash, (encoding_of(encoding)?, bytes));
+            present.insert(hash.0, (encoding_of(encoding)?, bytes));
         }
     }
     for node in &graph.external {
@@ -1187,30 +1193,29 @@ pub(super) async fn insert_absent(
 ) -> Answer<BTreeSet<String>> {
     let digests: Vec<&[u8]> = absent.iter().map(|(node, _)| &node.id.0[..]).collect();
     let contents: Vec<&[u8]> = absent.iter().map(|(node, _)| &node.bytes[..]).collect();
-    let mut inserted: BTreeSet<String> =
-        crate::observed_sql::query_scalar(SQL.postgres.insert_nodes.sql())
-            .bind(&digests)
-            .bind(&contents)
-            .fetch_all(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(db)?
-            .into_iter()
-            .collect();
+    let mut inserted: BTreeSet<String> = crate::keys::query_scalar(SQL.postgres.insert_nodes.sql())
+        .bind(&digests)
+        .bind(&contents)
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(db)?
+        .into_iter()
+        .collect();
     let mut held: Vec<&str> = absent
         .iter()
         .map(|(_, hash)| hash.as_str())
         .filter(|hash| !inserted.contains(*hash))
         .collect();
     while !held.is_empty() {
-        let rows: Vec<(String, Vec<u8>, i16)> =
+        let rows: Vec<(crate::keys::Key, Vec<u8>, i16)> =
             crate::observed_sql::query_as(SQL.postgres.stored_nodes.sql())
-                .bind(&held)
+                .bind(crate::keys::keys(&held))
                 .fetch_all(crate::observed_sql::executor(&mut *tx))
                 .await
                 .map_err(db)?;
         let stored: BTreeMap<String, (Vec<u8>, i16)> = rows
             .into_iter()
-            .map(|(hash, bytes, encoding)| (hash, (bytes, encoding)))
+            .map(|(hash, bytes, encoding)| (hash.0, (bytes, encoding)))
             .collect();
         let mut peeled = Vec::new();
         for (node, hash) in absent {
@@ -1229,15 +1234,14 @@ pub(super) async fn insert_absent(
         }
         let digests: Vec<&[u8]> = peeled.iter().map(|(node, _)| &node.id.0[..]).collect();
         let contents: Vec<&[u8]> = peeled.iter().map(|(node, _)| &node.bytes[..]).collect();
-        let fresh: BTreeSet<String> =
-            crate::observed_sql::query_scalar(SQL.postgres.insert_nodes.sql())
-                .bind(&digests)
-                .bind(&contents)
-                .fetch_all(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(db)?
-                .into_iter()
-                .collect();
+        let fresh: BTreeSet<String> = crate::keys::query_scalar(SQL.postgres.insert_nodes.sql())
+            .bind(&digests)
+            .bind(&contents)
+            .fetch_all(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(db)?
+            .into_iter()
+            .collect();
         held = peeled
             .iter()
             .map(|(_, hash)| *hash)
@@ -1413,182 +1417,11 @@ pub(super) async fn clear_admissions_under(
     tx: &mut PgConnection,
     key: &str,
 ) -> Result<Vec<String>, sqlx::Error> {
-    crate::observed_sql::query_scalar(SQL.graph.admissions_clear_under.sql())
+    crate::keys::query_scalar(SQL.graph.admissions_clear_under.sql())
         .bind(key)
         .fetch_all(crate::observed_sql::executor(tx))
         .await
 }
 
 #[cfg(test)]
-mod run_fact_tests {
-    use super::*;
-    use lash_core_store::checkpoint_graph::{
-        EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TokenWriter, TypedBody,
-    };
-    use lash_durable::DurableReads;
-    use lash_durable::domain::{OwnerKey, RunSeq};
-
-    /// RUN-READ: the fact walk reads all selected roots and their shared
-    /// descendants in one PostgreSQL round trip, for either read shape.
-    #[tokio::test]
-    async fn a_run_scoped_fact_walk_takes_one_round_trip() {
-        let url = crate::postgres_test_support::database_url().expect("hermetic PostgreSQL");
-        let database = crate::testing::IsolatedDatabase::create(&url).await;
-        let storage = crate::testing::connect(database.url())
-            .await
-            .expect("store");
-        let store = storage.durable_store();
-        let owner = OwnerKey::Turn("fact-walk-session".into(), "fact-walk-turn".into());
-        let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
-        let mut body = TokenWriter::new();
-        body.text("shared");
-        let shared = staging
-            .encode(NodeKind::FROZEN_VALUE, TypedBody::logical(body.as_bytes()))
-            .expect("shared");
-        let mut roots = Vec::new();
-        for run in 1..=8 {
-            for ordinal in 0..2 {
-                let mut body = TokenWriter::new();
-                body.seq(2);
-                body.text(&format!("round {run} fact {ordinal}"));
-                body.child(shared.child_ref());
-                let root = staging
-                    .encode(NodeKind::ROUND_FACT, TypedBody::logical(body.as_bytes()))
-                    .expect("fact");
-                roots.push((run, ordinal, root));
-            }
-        }
-        let mut connection = store.reader().await.expect("connection");
-        install_staged(&mut connection, staging.nodes())
-            .await
-            .expect("install");
-        let facts =
-            lash_store_sql::durable::run_records::RunRecordStatements::render(Dialect::postgres());
-        for (run, ordinal, root) in roots {
-            sqlx::query(facts.append.sql())
-                .bind(owner.stored())
-                .bind(run as i64)
-                .bind(ordinal as i64)
-                .bind("admit")
-                .bind(Option::<String>::None)
-                .bind(root.to_hex())
-                .bind(1_i64)
-                .execute(&mut *connection)
-                .await
-                .expect("fact row");
-        }
-        drop(connection);
-        for run in [Some(RunSeq(8)), None] {
-            let work = async {
-                match run {
-                    Some(run) => store.run_facts_of(&owner, run).await,
-                    None => store.run_facts(&owner).await,
-                }
-            };
-            let (answer, receipt) =
-                lash_core_ids::operational_metrics::sql::collect("fact-walk", "postgres", work)
-                    .await;
-            let facts = answer.expect("read");
-            let expected_rows = if run.is_some() { 2 } else { 16 };
-            assert_eq!(facts.rows.len(), expected_rows);
-            assert_eq!(facts.nodes.len(), expected_rows + 1);
-            let walks: Vec<_> = receipt
-                .shapes
-                .iter()
-                .filter(|(sql, _)| sql.starts_with("with recursive reach"))
-                .collect();
-            assert_eq!(
-                walks.len(),
-                1,
-                "one recursive fact walk: {:?}",
-                receipt.shapes
-            );
-            assert_eq!(walks[0].1.statements, 1, "one round trip for the fact walk");
-            assert_eq!(walks[0].1.rows_returned, (expected_rows + 1) as u64);
-            eprintln!(
-                "{run:?}: fact-walk round_trips=1 rows={} nodes={}",
-                facts.rows.len(),
-                facts.nodes.len()
-            );
-            if let Some(run) = run {
-                assert!(facts.rows.iter().all(|row| row.run == run));
-                let mut connection = store.reader().await.expect("connection");
-                let roots: Vec<_> = facts.rows.iter().map(|row| row.record).collect();
-                let total: u64 = facts
-                    .nodes
-                    .values()
-                    .map(|node| node.bytes.len() as u64)
-                    .sum();
-                let mut limits = DecodeLimits::within_total(total);
-                limits.nodes = 3;
-                assert_eq!(
-                    walk_within(&mut connection, &roots, &limits, None)
-                        .await
-                        .expect("exact budget"),
-                    facts.nodes
-                );
-                limits.nodes = 2;
-                assert!(matches!(
-                    walk_within(&mut connection, &roots, &limits, None).await,
-                    Err(GraphRefusal::DecodeLimit {
-                        dimension: DecodeDimension::Nodes,
-                        actual: 3,
-                        limit: 2
-                    })
-                ));
-                limits.nodes = 3;
-                limits.total_bytes = total - 1;
-                assert!(matches!(
-                    walk_within(&mut connection, &roots, &limits, None).await,
-                    Err(GraphRefusal::DecodeLimit {
-                        dimension: DecodeDimension::TotalBytes,
-                        ..
-                    })
-                ));
-            }
-        }
-        // A missing stored edge must not hide an opaque child named by
-        // the envelope. Its fallback read shares the materialization budget.
-        let opaque = NodeId([0x88; 32]);
-        let opaque_bytes = b"opaque child";
-        let mut connection = store.reader().await.expect("connection");
-        sqlx::query("INSERT INTO lash_blobs (hash, content, encoding) VALUES ($1, $2, 0)")
-            .bind(opaque.to_hex())
-            .bind(opaque_bytes.as_slice())
-            .execute(&mut *connection)
-            .await
-            .expect("opaque child");
-        let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
-        let mut body = TokenWriter::new();
-        body.child(opaque.child_ref());
-        let root = staging
-            .encode(NodeKind::ROUND_FACT, TypedBody::logical(body.as_bytes()))
-            .expect("root");
-        install_staged(&mut connection, staging.nodes())
-            .await
-            .expect("install");
-        sqlx::query("DELETE FROM lash_blob_edges WHERE parent_hash = $1")
-            .bind(root.to_hex())
-            .execute(&mut *connection)
-            .await
-            .expect("missing stored edge");
-        let total =
-            staging.get(&root).expect("root").bytes.len() as u64 + opaque_bytes.len() as u64;
-        let mut limits = DecodeLimits::within_total(total);
-        limits.nodes = 2;
-        let nodes = walk_within(&mut connection, &[root], &limits, None)
-            .await
-            .expect("envelope child is hydrated");
-        assert_eq!(nodes.len(), 2);
-        assert_eq!(nodes[&opaque].bytes.as_ref(), opaque_bytes);
-        limits.nodes = 1;
-        assert!(matches!(
-            walk_within(&mut connection, &[root], &limits, None).await,
-            Err(GraphRefusal::DecodeLimit {
-                dimension: DecodeDimension::Nodes,
-                actual: 2,
-                limit: 1
-            })
-        ));
-    }
-}
+mod run_fact_tests;

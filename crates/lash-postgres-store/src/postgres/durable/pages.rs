@@ -89,7 +89,7 @@ lash_store_sql::statements! {
         /// order, and answer them: what a hold may name, locked against a
         /// peel before any hold row is written.
         hold_lock = "SELECT ARRAY(SELECT hash FROM blobs
-             WHERE hash = ANY(?1::text[]) OR hash = ANY(?2::text[])
+             WHERE hash = ANY(?1::bytea[]) OR hash = ANY(?2::bytea[])
              ORDER BY hash FOR KEY SHARE)";
 
         /// Hold every node of `?4` (locked by [`Self::hold_lock`]) that
@@ -98,9 +98,9 @@ lash_store_sql::statements! {
         /// its place in the queue.
         hold = "INSERT INTO retirement_holds AS held (root_ref, closure, queued_at_ms)
              SELECT node.hash, bool_or(node.closure), ?3::bigint
-             FROM (SELECT UNNEST(?1::text[]) AS hash, TRUE AS closure
-                   UNION ALL SELECT UNNEST(?2::text[]), FALSE) AS node
-             WHERE node.hash = ANY(?4::text[])
+             FROM (SELECT UNNEST(?1::bytea[]) AS hash, TRUE AS closure
+                   UNION ALL SELECT UNNEST(?2::bytea[]), FALSE) AS node
+             WHERE node.hash = ANY(?4::bytea[])
              GROUP BY node.hash
              ORDER BY node.hash
              ON CONFLICT (root_ref) DO UPDATE SET closure = held.closure OR excluded.closure";
@@ -114,7 +114,7 @@ lash_store_sql::statements! {
         /// peel and its place in the queue.
         frontier_put = "INSERT INTO retirement_frontier AS queued (node_ref, closure, queued_at_ms)
              SELECT node.hash, ?2::boolean, ?3::bigint
-             FROM UNNEST(?1::text[]) AS node(hash)
+             FROM UNNEST(?1::bytea[]) AS node(hash)
              ORDER BY node.hash
              ON CONFLICT (node_ref) DO UPDATE SET closure = queued.closure OR excluded.closure";
 
@@ -127,25 +127,25 @@ lash_store_sql::statements! {
         actor_fence = "SELECT epoch, state FROM actors WHERE actor_key = ?1 FOR SHARE";
 
         /// The bytes and encoding of every blob of `?1`.
-        pages = "SELECT hash, content, encoding FROM blobs WHERE hash = ANY(?1::text[])";
+        pages = "SELECT hash, content, encoding FROM blobs WHERE hash = ANY(?1::bytea[])";
 
         /// Every stored blob of `?1` with its encoding, key-share locked
         /// in digest order: a candidate's children, held against a peel.
-        lock_children = "SELECT hash, encoding FROM blobs WHERE hash = ANY(?1::text[])
+        lock_children = "SELECT hash, encoding FROM blobs WHERE hash = ANY(?1::bytea[])
              ORDER BY hash FOR KEY SHARE";
 
         /// Lock for its delete every blob of a step's level `?1` that no
         /// other transaction holds, in digest order, beside every blob of
         /// `?1` still stored: the step's peel lock, which never waits.
-        peel_claim = "SELECT ARRAY(SELECT hash FROM blobs WHERE hash = ANY(?1::text[])
+        peel_claim = "SELECT ARRAY(SELECT hash FROM blobs WHERE hash = ANY(?1::bytea[])
                  ORDER BY hash FOR UPDATE SKIP LOCKED),
-             ARRAY(SELECT hash FROM blobs WHERE hash = ANY(?1::text[]))";
+             ARRAY(SELECT hash FROM blobs WHERE hash = ANY(?1::bytea[]))";
 
         /// Every edge of parents `?1` to children `?2` (raw digests) not
         /// stored yet: a supplied node another commit installed already has
         /// its edges.
         insert_edges_once = "INSERT INTO blob_edges (parent_hash, child_hash)
-             SELECT encode(staged.parent, 'hex'), encode(staged.child, 'hex')
+             SELECT staged.parent, staged.child
              FROM UNNEST(?1::bytea[], ?2::bytea[]) AS staged(parent, child)
              ORDER BY 1, 2
              ON CONFLICT (parent_hash, child_hash) DO NOTHING";
@@ -242,19 +242,19 @@ async fn hold(
     }
     let closures: Vec<&str> = closures.iter().map(String::as_str).collect();
     let alone: Vec<&str> = alone.iter().map(String::as_str).collect();
-    let locked: Vec<String> = crate::observed_sql::query_scalar(SQL.postgres.hold_lock.sql())
-        .bind(&closures)
-        .bind(&alone)
+    let locked: Vec<String> = crate::keys::query_scalar(SQL.postgres.hold_lock.sql())
+        .bind(crate::keys::keys(&closures))
+        .bind(crate::keys::keys(&alone))
         .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await?;
     if locked.is_empty() {
         return Ok(0);
     }
     crate::observed_sql::query(SQL.postgres.hold.sql())
-        .bind(&closures)
-        .bind(&alone)
+        .bind(crate::keys::keys(&closures))
+        .bind(crate::keys::keys(&alone))
         .bind(now.0)
-        .bind(&locked)
+        .bind(crate::keys::keys(&locked))
         .execute(crate::observed_sql::executor(tx))
         .await?;
     Ok(locked.len())
@@ -302,7 +302,7 @@ async fn frontier_put(
     }
     let nodes: Vec<&str> = nodes.iter().map(String::as_str).collect();
     crate::observed_sql::query(SQL.postgres.frontier_put.sql())
-        .bind(&nodes)
+        .bind(crate::keys::keys(&nodes))
         .bind(closure)
         .bind(now.0)
         .execute(crate::observed_sql::executor(tx))
@@ -359,16 +359,16 @@ async fn install_nodes(
         }
     }
     let digests: Vec<&[u8]> = supplied.iter().map(|node| &node.id.0[..]).collect();
-    let rows: Vec<(String, i16, Option<Vec<u8>>)> =
+    let rows: Vec<(crate::keys::Key, i16, Option<Vec<u8>>)> =
         crate::observed_sql::query_as(graph::lock_nodes().sql())
-            .bind(&named)
+            .bind(crate::keys::keys(&named))
             .bind(&digests)
             .fetch_all(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(db)?;
     let mut present = BTreeMap::new();
     for (hash, encoding, bytes) in rows {
-        present.insert(hash, (graph::encoding_of(encoding)?, bytes));
+        present.insert(hash.0, (graph::encoding_of(encoding)?, bytes));
     }
     for entry in batch {
         if let InstallEntry::Named { id, root } = entry {
@@ -418,14 +418,14 @@ async fn install_edges(
         let wanted: Vec<String> = children.iter().map(NodeId::to_hex).collect();
         let present: BTreeSet<String> = crate::observed_sql::query_as::<
             sqlx::Postgres,
-            (String, i16),
+            (crate::keys::Key, i16),
         >(SQL.postgres.lock_children.sql())
-        .bind(&wanted)
+        .bind(crate::keys::keys(&wanted))
         .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(db)?
         .into_iter()
-        .map(|(hash, _)| hash)
+        .map(|(hash, _)| hash.0)
         .collect();
         if let Some(missing) = children
             .iter()
@@ -501,26 +501,27 @@ async fn peel(
     level: &BTreeSet<String>,
 ) -> Result<(u64, BTreeSet<String>, BTreeSet<String>), sqlx::Error> {
     let wanted: Vec<&str> = level.iter().map(String::as_str).collect();
-    let (locked, stored): (Vec<String>, Vec<String>) =
+    let (locked, stored): (Vec<crate::keys::Key>, Vec<crate::keys::Key>) =
         crate::observed_sql::query_as(SQL.postgres.peel_claim.sql())
-            .bind(&wanted)
+            .bind(crate::keys::keys(&wanted))
             .fetch_one(crate::observed_sql::executor(&mut *tx))
             .await?;
     let skipped: BTreeSet<String> = stored
         .into_iter()
         .filter(|node| !locked.contains(node))
+        .map(|key| key.0)
         .collect();
     if locked.is_empty() {
         return Ok((0, BTreeSet::new(), skipped));
     }
-    let (gone, children): (i64, Vec<String>) =
+    let (gone, children): (i64, Vec<crate::keys::Key>) =
         crate::observed_sql::query_as(graph::peel_level().sql())
-            .bind(&locked)
+            .bind(crate::keys::keys(&locked))
             .fetch_one(crate::observed_sql::executor(&mut *tx))
             .await?;
     Ok((
         u64::try_from(gone).unwrap_or_default(),
-        children.into_iter().collect(),
+        children.into_iter().map(|key| key.0).collect(),
         skipped,
     ))
 }
@@ -529,21 +530,21 @@ async fn peel(
 /// then the oldest hold no other transaction holds. Answers the node and
 /// whether its closure is peeled.
 async fn next_retired(tx: &mut PgConnection) -> Result<Option<(String, bool)>, sqlx::Error> {
-    let continued: Option<(String, bool)> =
+    let continued: Option<(crate::keys::Key, bool)> =
         crate::observed_sql::query_as(SQL.pages.frontier_take.sql())
             .fetch_optional(crate::observed_sql::executor(&mut *tx))
             .await?;
     if continued.is_some() {
-        return Ok(continued);
+        return Ok(continued.map(|(key, closure)| (key.0, closure)));
     }
-    let root: Option<String> = crate::observed_sql::query_scalar(SQL.postgres.hold_next.sql())
+    let root: Option<String> = crate::keys::query_scalar(SQL.postgres.hold_next.sql())
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await?;
     let Some(root) = root else {
         return Ok(None);
     };
     let closure: bool = crate::observed_sql::query_scalar(SQL.pages.hold_take.sql())
-        .bind(&root)
+        .bind(crate::keys::key(&root))
         .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await?;
     Ok(Some((root, closure)))
@@ -573,7 +574,7 @@ async fn retire_step_in(
         .await?;
     let mut reaped = BTreeSet::new();
     for lease in expired {
-        let root: Option<String> = crate::observed_sql::query_scalar(SQL.pages.lease_reap.sql())
+        let root: Option<String> = crate::keys::query_scalar(SQL.pages.lease_reap.sql())
             .bind(lease)
             .bind(now.0)
             .fetch_optional(crate::observed_sql::executor(&mut *tx))
@@ -695,7 +696,7 @@ impl PageStore for PostgresDurableStore {
                 }
                 let id: i64 = crate::observed_sql::query_scalar(SQL.pages.lease_insert.sql())
                     .bind(owner_bytes(&request.owner))
-                    .bind(request.expected.to_hex())
+                    .bind(crate::keys::key(request.expected.to_hex()))
                     .bind(fence_actor(&request.fence))
                     .bind(fence_epoch(&request.fence))
                     .bind(request.ttl_millis)
@@ -725,7 +726,7 @@ impl PageStore for PostgresDurableStore {
                 let renewed: Option<i64> =
                     crate::observed_sql::query_scalar(SQL.pages.lease_renew.sql())
                         .bind(lease.id.0.cast_signed())
-                        .bind(lease.root.to_hex())
+                        .bind(crate::keys::key(lease.root.to_hex()))
                         .bind(fence_epoch(&lease.fence))
                         .bind(now.0)
                         .fetch_optional(crate::observed_sql::executor(&mut ***tx))
@@ -746,12 +747,11 @@ impl PageStore for PostgresDurableStore {
     async fn release_root_lease(&self, lease: RootLeaseId) -> Result<(), DurableError> {
         self.page_write(PAGES_LEASE, move |tx, now| {
             Box::pin(async move {
-                let root: Option<String> =
-                    crate::observed_sql::query_scalar(SQL.pages.lease_release.sql())
-                        .bind(lease.0.cast_signed())
-                        .fetch_optional(crate::observed_sql::executor(&mut ***tx))
-                        .await
-                        .map_err(sqlx_failure)?;
+                let root: Option<String> = crate::keys::query_scalar(SQL.pages.lease_release.sql())
+                    .bind(lease.0.cast_signed())
+                    .fetch_optional(crate::observed_sql::executor(&mut ***tx))
+                    .await
+                    .map_err(sqlx_failure)?;
                 // What only the lease kept is peeled by a later step.
                 if let Some(root) = root {
                     hold(tx, &BTreeSet::from([root]), &BTreeSet::new(), now)
@@ -774,10 +774,10 @@ impl PageStore for PostgresDurableStore {
             Box::pin(async move {
                 let mut snapshot = super::snapshot(connection).await?;
                 let now = self.instant_on(&mut snapshot).await?;
-                let live: Option<String> =
+                let live: Option<crate::keys::Key> =
                     crate::observed_sql::query_scalar(SQL.pages.lease_live.sql())
                         .bind(id.0.cast_signed())
-                        .bind(root.to_hex())
+                        .bind(crate::keys::key(root.to_hex()))
                         .bind(now.0)
                         .fetch_optional(crate::observed_sql::executor(&mut *snapshot))
                         .await
@@ -786,9 +786,9 @@ impl PageStore for PostgresDurableStore {
                     return Err(DurableError::Graph(GraphRefusal::LeaseLost));
                 }
                 let wanted: Vec<String> = pages.iter().map(NodeId::to_hex).collect();
-                let rows: Vec<(String, Vec<u8>, i16)> =
+                let rows: Vec<(crate::keys::Key, Vec<u8>, i16)> =
                     crate::observed_sql::query_as(SQL.postgres.pages.sql())
-                        .bind(&wanted)
+                        .bind(crate::keys::keys(&wanted))
                         .fetch_all(crate::observed_sql::executor(&mut *snapshot))
                         .await
                         .map_err(sqlx_failure)?;

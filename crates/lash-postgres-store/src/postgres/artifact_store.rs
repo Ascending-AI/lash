@@ -523,7 +523,7 @@ impl PostgresLashVmArtifactStore {
         logical: &[u8],
         verified: bool,
     ) -> Result<(), ArtifactStoreError> {
-        let stored: Option<(Option<Vec<u8>>, Option<String>)> =
+        let stored: Option<(Option<Vec<u8>>, Option<crate::keys::Key>)> =
             crate::observed_sql::query_as(artifact_sql().lash_vm_artifacts.select_stored.sql())
                 .bind(MODULE_ARTIFACT_NAMESPACE)
                 .bind(artifact_ref)
@@ -550,7 +550,7 @@ impl PostgresLashVmArtifactStore {
                 crate::observed_sql::query(artifact_sql().lash_vm_artifacts.insert_node.sql())
                     .bind(MODULE_ARTIFACT_NAMESPACE)
                     .bind(artifact_ref)
-                    .bind(staged.root.to_hex())
+                    .bind(crate::keys::key(staged.root.to_hex()))
                     .execute(crate::observed_sql::executor(&mut *tx))
                     .await
                     .map_err(backend)?;
@@ -892,7 +892,7 @@ impl PostgresLashVmArtifactStore {
             return Ok(());
         }
         let bridged: Option<Option<String>> =
-            crate::observed_sql::query_scalar(artifact_sql().postgres.delete_unreferenced.sql())
+            crate::keys::query_scalar(artifact_sql().postgres.delete_unreferenced.sql())
                 .bind(namespace)
                 .bind(artifact_ref)
                 .fetch_optional(crate::observed_sql::executor(&mut *tx))
@@ -919,7 +919,7 @@ impl PostgresLashVmArtifactStore {
         for row in &edges {
             decode_edge_referrer(row)?;
         }
-        let stored: Option<(Option<Vec<u8>>, Option<String>)> =
+        let stored: Option<(Option<Vec<u8>>, Option<crate::keys::Key>)> =
             crate::observed_sql::query_as(artifact_sql().lash_vm_artifacts.select_stored.sql())
                 .bind(namespace)
                 .bind(artifact_ref)

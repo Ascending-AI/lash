@@ -149,7 +149,12 @@ async fn paging_a_surface_one_item_at_a_time_is_exact() {
         .collect();
     for session in &sessions {
         // Each root dangles: the walk still names its session as an item.
-        seed_session(&scratch, session.as_str(), &format!("collected-{session}")).await;
+        seed_session(
+            &scratch,
+            session.as_str(),
+            &BlobRef::for_content(session.as_str().as_bytes()).0,
+        )
+        .await;
     }
 
     let preflight = PostgresStorePreflight::from_pool(scratch.pool.clone());
@@ -197,7 +202,8 @@ async fn a_dangling_checkpoint_ref_is_reported_missing_rather_than_skipped() {
     seed_blob(&scratch, &component_ref, &component).await;
     seed_blob(&scratch, &manifest_ref, &manifest).await;
     seed_session(&scratch, "session-healthy", &manifest_ref).await;
-    seed_session(&scratch, "session-dangling", "hash-that-was-collected").await;
+    let missing = BlobRef::for_content(b"hash-that-was-collected");
+    seed_session(&scratch, "session-dangling", missing.as_str()).await;
 
     let preflight = PostgresStorePreflight::from_pool(scratch.pool.clone());
     let page = preflight
@@ -211,7 +217,7 @@ async fn a_dangling_checkpoint_ref_is_reported_missing_rather_than_skipped() {
     );
     match &page.items[0].payload {
         DurablePayload::Missing { reason } => assert!(
-            reason.contains("hash-that-was-collected"),
+            reason.contains(missing.as_str()),
             "the reason names the dangling reference: {reason}"
         ),
         other => panic!("a dangling checkpoint root is Missing, got {other:?}"),
@@ -401,7 +407,7 @@ async fn seed_session(scratch: &ScratchSchema, session_id: &str, checkpoint_ref:
              SET LOCAL session_replication_role = replica;
              WITH recorded AS (
                  INSERT INTO lash_session_revisions (session_id, head_revision, config_ref, checkpoint_ref)
-                 VALUES ('{session_id}', 1, '{{}}', '{checkpoint_ref}') RETURNING session_id, head_revision
+                 VALUES ('{session_id}', 1, decode(repeat('00', 32), 'hex'), decode('{checkpoint_ref}', 'hex')) RETURNING session_id, head_revision
              ) INSERT INTO lash_session_head (session_id, head_revision)
                  SELECT session_id, head_revision FROM recorded;
              COMMIT"
@@ -413,7 +419,7 @@ async fn seed_blob(scratch: &ScratchSchema, hash: &str, content: &[u8]) {
     let hex: String = content.iter().map(|byte| format!("{byte:02x}")).collect();
     scratch
         .apply(&format!(
-            "INSERT INTO lash_blobs (hash, content, encoding) VALUES ('{hash}', '\\x{hex}', 0)"
+            "INSERT INTO lash_blobs (hash, content, encoding) VALUES (decode('{hash}', 'hex'), '\\x{hex}', 0)"
         ))
         .await;
 }

@@ -134,7 +134,7 @@ pub(super) static NODES: Entry = Entry::new(
 );
 pub(super) static REVISION: Entry = Entry::new(
     || &session_sql().revisions.insert,
-    &[Ty::Text, Ty::Int, Ty::Text, Ty::Text, Ty::Text],
+    &[Ty::Text, Ty::Int, Ty::Text, Ty::Key, Ty::Key],
     Shape::Exec,
 );
 pub(super) static HEAD_CAS: Entry = Entry::new(
@@ -337,7 +337,7 @@ impl SessionFacts {
         };
         Some(Self {
             head: HeadFacts {
-                config_ref: row.try_get(first + 6).ok()?,
+                config_ref: crate::keys::get(row, first + 6).ok()?,
                 exists: revision.is_some(),
                 revision: u64::try_from(revision.unwrap_or(0)).ok()?,
                 leaf,
@@ -763,8 +763,8 @@ pub(super) fn program(
                 text(session),
                 Value::int(next),
                 Value::Text(meta.leaf_node_id.as_ref().map(ToString::to_string)),
-                text(program.checkpoint.checkpoint_ref.as_str()),
-                text(config_ref.as_str()),
+                Value::key(program.checkpoint.checkpoint_ref.as_str()),
+                Value::key(config_ref.as_str()),
             ],
         ),
         Refusal::Backstop,

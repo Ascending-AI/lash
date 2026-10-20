@@ -381,6 +381,7 @@ fn exact_rust_type(name: &str) -> bool {
             | "alloc::string::String"
             | "[u8]"
             | "alloc::vec::Vec<u8>"
+            | "lash_postgres_store::keys::Key"
             | "uuid::Uuid"
     )
 }

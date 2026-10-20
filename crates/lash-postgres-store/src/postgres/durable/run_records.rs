@@ -31,7 +31,7 @@ pub(super) static APPEND: Entry = Entry::new(
         Ty::Int,
         Ty::Text,
         Ty::Text,
-        Ty::Text,
+        Ty::Key,
         Ty::Int,
     ],
     Shape::Returning,
@@ -63,7 +63,7 @@ pub(super) fn steps(epoch: Epoch, write: &RunFactWrite) -> Result<Option<Vec<Ste
                 Value::int(integer::<i64>(ordinal.0)?),
                 Value::text(kind.as_str()),
                 Value::Text(call.as_ref().map(|call| call.as_str().to_owned())),
-                Value::text(record.to_hex()),
+                Value::key(record.to_hex()),
                 Value::int(epoch.0),
             ],
         )],
@@ -206,7 +206,7 @@ pub(super) async fn read_limited(
             let call = call
                 .map(|call| ToolCallId::parse(&call).map_err(|_| corrupt("tool call id", &call)))
                 .transpose()?;
-            let record: String = row.try_get(4).map_err(sqlx_failure)?;
+            let record: String = crate::keys::get(row, 4).map_err(sqlx_failure)?;
             Ok(RunFactRow {
                 owner: owner.clone(),
                 run: RunSeq(integer::<u64>(run)?),
@@ -226,7 +226,7 @@ pub(super) async fn delete_owner(
     tx: &mut PgConnection,
     key: &str,
 ) -> Result<Vec<String>, sqlx::Error> {
-    crate::observed_sql::query_scalar(SQL.delete_owner.sql())
+    crate::keys::query_scalar(SQL.delete_owner.sql())
         .bind(key)
         .fetch_all(crate::observed_sql::executor(tx))
         .await
@@ -238,7 +238,7 @@ pub(super) async fn delete_under(
     tx: &mut PgConnection,
     key: &str,
 ) -> Result<Vec<String>, sqlx::Error> {
-    crate::observed_sql::query_scalar(SQL.delete_under.sql())
+    crate::keys::query_scalar(SQL.delete_under.sql())
         .bind(key)
         .fetch_all(crate::observed_sql::executor(tx))
         .await

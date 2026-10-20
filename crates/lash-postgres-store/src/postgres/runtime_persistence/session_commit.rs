@@ -248,7 +248,7 @@ impl SessionCommitStore for PostgresStore {
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
         let checkpoint = base.checkpoint.as_ref().map(|blob_ref| blob_ref.as_str());
-        let replaced = crate::observed_sql::query_scalar::<_, Option<String>>(
+        let replaced = crate::keys::query_scalar::<Option<String>>(
             session_sql().meta.select_admission_base.sql(),
         )
         .bind(session_id.as_str())
@@ -259,7 +259,7 @@ impl SessionCommitStore for PostgresStore {
         .filter(|old| Some(old.as_str()) != checkpoint);
         crate::observed_sql::query(session_sql().meta.retain_admission_base.sql())
             .bind(session_id.as_str())
-            .bind(checkpoint)
+            .bind(checkpoint.map(crate::keys::key))
             .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
