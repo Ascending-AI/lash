@@ -47,6 +47,8 @@ use text.from_code_points
 use int.to_text
 use py.text.printable
 use text.starts_with
+use text.upper_u17_0_0
+use brand.of
 use list.len
 use list.slice
 use list.concat
@@ -196,6 +198,53 @@ body {
   return text.join(parts, "")
 }
 
+# `type(value).__name__`. A package value's class is its type, as Python
+# spells a class (`DataQuanta`); a record that holds a malformed brand is a
+# `record`. The result's size covers the letters a class name keeps, and
+# the loop's continuation charge each `_` it drops.
+function py.type(value: Any) -> Text
+kernel 1
+charge sum(8, size(result))
+native
+body {
+  let k = kind(value)
+  if same(k, "record") {
+    let brand = invoke brand.of(value)
+    if same(brand, absent) {
+      return k
+    }
+    let parts = []
+    for part in text.split(brand[1], "_") metered 2 {
+      let head = text.upper_u17_0_0(text.slice(part, 0, 1))
+      set parts[list.len(parts)] = text.concat(head, text.slice(part, 1, text.len(part)))
+    }
+    return text.join(parts, "")
+  }
+  if same(k, "null") {
+    return "NoneType"
+  }
+  if same(k, "integer") {
+    return "int"
+  }
+  if same(k, "text") {
+    return "str"
+  }
+  if same(k, "map") {
+    return "dict"
+  }
+  if same(k, "closure") {
+    return "function"
+  }
+  if same(k, "task") {
+    return "Task"
+  }
+  if same(k, "error") {
+    let name = invoke py.exc.name(value)
+    return name
+  }
+  return k
+}
+
 function py.repr(value: Any) -> Text
 kernel 1
 charge sum(8, deep(value), size(result))
@@ -275,6 +324,14 @@ body {
     if same(k, "task") {
       return "<Task>"
     }
+    # A package value shows its type, never its fields.
+    if same(k, "record") {
+      let brand = invoke brand.of(v)
+      if bool.not(same(brand, absent)) {
+        let name = invoke py.type(v)
+        return text.join(["<", brand[0], ".", name, ">"], "")
+      }
+    }
     return text.join(["<", k, ">"], "")
   }
   let shown = apply go(value)
@@ -298,38 +355,6 @@ body {
   }
   let shown = invoke py.repr(value)
   return shown
-}
-
-# `type(value).__name__`.
-function py.type(value: Any) -> Text
-kernel 1
-charge 8
-native
-body {
-  let k = kind(value)
-  if same(k, "null") {
-    return "NoneType"
-  }
-  if same(k, "integer") {
-    return "int"
-  }
-  if same(k, "text") {
-    return "str"
-  }
-  if same(k, "map") {
-    return "dict"
-  }
-  if same(k, "closure") {
-    return "function"
-  }
-  if same(k, "task") {
-    return "Task"
-  }
-  if same(k, "error") {
-    let name = invoke py.exc.name(value)
-    return name
-  }
-  return k
 }
 
 # Raises an exception of class `name` made with the one argument `message`.
@@ -601,7 +626,9 @@ body {
     return map.keys(value)
   }
   if same(k, "record") {
-    return record.keys(value)
+    if bool.not(record.contains(value, "__lash_brand")) {
+      return record.keys(value)
+    }
   }
   if same(k, "set") {
     return set.keys(value)
@@ -939,6 +966,11 @@ body {
     return map.contains(container, item)
   }
   if same(k, "record") {
+    if record.contains(container, "__lash_brand") {
+      let name = invoke py.type(container)
+      let sealed = text.join(["argument of type '", name, "' is not iterable"], "")
+      do invoke py.fail("TypeError", sealed)
+    }
     if same(kind(item), "text") {
       return record.contains(container, item)
     }
@@ -988,13 +1020,17 @@ body {
   return position
 }
 
+# A record is read as a dict, unless it holds a brand: a package value is
+# sealed, and only its type's members reach its fields.
 function py.getitem(target: Any, index: Any) -> Any
 kernel 1
 charge sum(6, deep(index))
 body {
   let k = kind(target)
   let mapping = same(k, "map")
-  if same(k, "record") { set mapping = true }
+  if same(k, "record") {
+    if record.contains(target, "__lash_brand") {} else { set mapping = true }
+  }
   if mapping {
     let present = false
     if same(k, "map") {
@@ -1208,7 +1244,9 @@ body {
     return map.len(value)
   }
   if same(k, "record") {
-    return record.len(value)
+    if bool.not(record.contains(value, "__lash_brand")) {
+      return record.len(value)
+    }
   }
   if same(k, "tuple") {
     return tuple.len(value)
@@ -1224,14 +1262,17 @@ body {
 
 # `for`'s protocol (`K-ITER-005`): what a loop walks of a value. A list, a
 # tuple, a dict, a set and a str are walked live by the loop's own cursor, a
-# str by code point; a record by a snapshot of its keys.
+# str by code point; a record by a snapshot of its keys, unless it holds a
+# brand: a package value is not iterable.
 function py.for_in.open(value: Any) -> Any
 kernel 1
 charge 4
 body {
   let k = kind(value)
   if same(k, "record") {
-    return record.keys(value)
+    if bool.not(record.contains(value, "__lash_brand")) {
+      return record.keys(value)
+    }
   }
   for walked in ["list", "tuple", "map", "set", "text"] {
     if same(k, walked) {
@@ -1301,7 +1342,8 @@ body {
   return out
 }
 
-# `dict(value)`: a copy of a dict, or a dict of key and value pairs.
+# `dict(value)`: a copy of a dict, or a dict of key and value pairs. A
+# package value is no dict and, by `py.to_list`, not iterable.
 function py.to_dict(value: Any) -> Map(Any, Any)
 kernel 1
 charge sum(4, size(value), size(result))
@@ -1331,7 +1373,11 @@ body {
   let go = absent
   set go = fn(v) {
     let k = kind(v)
+    # A package value stays one: sealed, it is no dict.
     if same(k, "record") {
+      if record.contains(v, "__lash_brand") {
+        return v
+      }
       let out = map{}
       let keys = record.keys(v)
       for key in keys {

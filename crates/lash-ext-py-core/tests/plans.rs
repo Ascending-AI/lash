@@ -46,13 +46,14 @@ fn closed_helpers_have_generated_plans() {
     }
 }
 
-/// What a heap path asked of the heap: its table lookups and its element
-/// reads, each a probe of a table.
+/// What a heap path asked of the heap: the keys its table lookups probed
+/// and its element reads, each a probe of a table.
 #[derive(Default)]
 struct Probes {
-    lookups: usize,
+    lookups: Vec<String>,
     reads: usize,
-    /// What a lookup finds: `None` where the table holds no key.
+    /// What a lookup finds: `None` where the table holds no key. No
+    /// record holds a brand.
     found: Option<lash_kernel_doc::Value>,
 }
 
@@ -98,17 +99,36 @@ impl lash_kernel_doc::plan::TemplateHeap for Probes {
         &mut self,
         _: lash_kernel_doc::plan::Table,
         _: lash_kernel_doc::Value,
-        _: lash_kernel_doc::Value,
+        key: lash_kernel_doc::Value,
     ) -> Option<Option<lash_kernel_doc::Value>> {
-        self.lookups += 1;
+        let key = text(key);
+        let branded = key == BRAND;
+        self.lookups.push(key);
+        if branded {
+            return Some(None);
+        }
         Some(self.found)
+    }
+}
+
+/// The key a package value holds its brand under.
+const BRAND: &str = "__lash_brand";
+
+/// A short text key, as its text.
+fn text(key: lash_kernel_doc::Value) -> String {
+    match key {
+        lash_kernel_doc::Value::Text(short) => {
+            String::from_utf8_lossy(short.as_bytes()).into_owned()
+        }
+        other => format!("{other:?}"),
     }
 }
 
 /// FIG-6846: each level of `tree["level"]["rows"]` looks its key up once.
 /// `py.getitem`'s heap path on a dict, or a record at a text key, takes
 /// the entry its one lookup found; at a missing key it declines, and the
-/// body raises the KeyError.
+/// body raises the KeyError. A record is probed for a brand first, since
+/// a package value is sealed (FIG-6922).
 #[test]
 fn a_subscript_looks_its_key_up_once() {
     use lash_kernel_doc::Value;
@@ -140,9 +160,13 @@ fn a_subscript_looks_its_key_up_once() {
                 },
                 "{target:?} at a key found: {found:?} answers {answer:?}"
             );
+            let probed = match target {
+                Value::Record(_) => vec![BRAND.to_owned(), text(key)],
+                _ => vec![text(key)],
+            };
             assert_eq!(
                 (probes.lookups, probes.reads),
-                (1, 0),
+                (probed, 0),
                 "{target:?} at a key found: {found:?}"
             );
         }

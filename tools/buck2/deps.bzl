@@ -115,8 +115,11 @@ PACKAGE_DEPS = {
             "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
             "lash_kernel_conformance": "//crates/lash-kernel-conformance:lash-kernel-conformance",
             "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
+            "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
-            "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm"
+            "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
+            "lash_vm_releases": "//crates/lash-vm-releases:lash-vm-releases",
+            "lash_vm_worker": "//crates/lash-vm-worker:lash-vm-worker"
         },
         "normal": {
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",

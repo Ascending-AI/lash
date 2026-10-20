@@ -1,8 +1,8 @@
 //! Calls: functions, tools, built-ins, methods and asyncio.
 
 use lash_kernel_doc::{
-    ActExpr, ActKind, Action, Atom, Callee, EffectName, Expr, Literal, Member, Name, Place,
-    RecordEntry, RecordType, Rhs, Signature, Stmt, Type,
+    ActExpr, ActKind, Action, Atom, Callee, EffectName, Expr, Literal, Name, RecordEntry,
+    RecordType, Rhs, Signature, Stmt, Type,
 };
 use ruff_python_ast::{self as ast, Expr as PyExpr};
 use ruff_text_size::{Ranged, TextRange};
@@ -102,75 +102,18 @@ pub(super) fn is_builtin(id: &str) -> bool {
     SUPPORTED.contains(&id) || UNSUPPORTED.contains(&id)
 }
 
-/// A method: its name, the fewest and the most arguments it takes, and the
-/// names its arguments may be passed under, in order.
-struct Method {
-    name: &'static str,
-    min: usize,
-    max: usize,
-    keywords: &'static [&'static str],
-    result: Ty,
+/// The names of a call's keywords, in order.
+pub(super) fn keyword_names(arguments: &ast::Arguments) -> impl Iterator<Item = String> + '_ {
+    arguments.keywords.iter().map(|keyword| {
+        keyword
+            .arg
+            .as_ref()
+            .map_or("", |name| name.id.as_str())
+            .to_owned()
+    })
 }
 
-const fn method(name: &'static str, min: usize, max: usize, result: Ty) -> Method {
-    Method {
-        name,
-        min,
-        max,
-        keywords: &[],
-        result,
-    }
-}
-
-const METHODS: &[Method] = &[
-    method("append", 1, 1, Ty::None),
-    method("extend", 1, 1, Ty::None),
-    method("insert", 2, 2, Ty::None),
-    method("pop", 0, 2, Ty::Unknown),
-    method("remove", 1, 1, Ty::None),
-    method("index", 1, 1, Ty::Int),
-    method("count", 1, 1, Ty::Int),
-    Method {
-        name: "sort",
-        min: 0,
-        max: 2,
-        keywords: &["key", "reverse"],
-        result: Ty::None,
-    },
-    method("reverse", 0, 0, Ty::None),
-    method("copy", 0, 0, Ty::Unknown),
-    method("clear", 0, 0, Ty::None),
-    method("get", 1, 2, Ty::Unknown),
-    method("keys", 0, 0, Ty::List),
-    method("values", 0, 0, Ty::List),
-    method("items", 0, 0, Ty::List),
-    method("setdefault", 1, 2, Ty::Unknown),
-    method("update", 1, 1, Ty::None),
-    method("add", 1, 1, Ty::None),
-    method("discard", 1, 1, Ty::None),
-    method("union", 1, 1, Ty::Set),
-    method("intersection", 1, 1, Ty::Set),
-    method("difference", 1, 1, Ty::Set),
-    method("join", 1, 1, Ty::Str),
-    method("split", 0, 1, Ty::List),
-    method("strip", 0, 0, Ty::Str),
-    method("lstrip", 0, 0, Ty::Str),
-    method("rstrip", 0, 0, Ty::Str),
-    method("upper", 0, 0, Ty::Str),
-    method("lower", 0, 0, Ty::Str),
-    method("startswith", 1, 1, Ty::Bool),
-    method("endswith", 1, 1, Ty::Bool),
-    method("replace", 2, 2, Ty::Str),
-    method("find", 1, 1, Ty::Int),
-    method("cancel", 0, 0, Ty::Bool),
-];
-
-/// The names of the methods the dialect has.
-fn method_names() -> Vec<&'static str> {
-    METHODS.iter().map(|method| method.name).collect()
-}
-
-fn absent() -> Operand {
+pub(super) fn absent() -> Operand {
     Operand::literal(Literal::Absent, Ty::Unknown)
 }
 
@@ -186,16 +129,20 @@ struct Prepared {
 /// arguments, then the keyword values. Where the call has keywords every
 /// value is pinned, so placing them by parameter never moves an
 /// evaluation.
-struct Given {
-    head: Operand,
-    positional: Vec<Operand>,
-    keywords: Vec<Operand>,
+pub(super) struct Given {
+    pub(super) head: Operand,
+    pub(super) positional: Vec<Operand>,
+    pub(super) keywords: Vec<Operand>,
 }
 
 impl Lowerer<'_> {
     /// Evaluates `head` and the arguments of `arguments` in source order,
     /// before keywords place any of them by parameter.
-    fn given(&mut self, head: Option<&PyExpr>, arguments: &ast::Arguments) -> Lowering<Given> {
+    pub(super) fn given(
+        &mut self,
+        head: Option<&PyExpr>,
+        arguments: &ast::Arguments,
+    ) -> Lowering<Given> {
         let mut exprs: Vec<&PyExpr> = head.into_iter().collect();
         exprs.extend(arguments.args.iter());
         exprs.extend(arguments.keywords.iter().map(|keyword| &keyword.value));
@@ -265,6 +212,16 @@ impl Lowerer<'_> {
         }
     }
 
+    /// Whether the free dotted `path` names package code, which no
+    /// deferred provider serves.
+    fn names_code(&self, path: &str) -> bool {
+        let written = path.split('.').collect::<Vec<_>>();
+        matches!(
+            self.namespaces.resolve(&written, Spelling::Python),
+            Resolution::Export { .. } | Resolution::Namespace
+        )
+    }
+
     /// `expr` as a dotted path whose root names no variable: a free
     /// candidate for the run's deferred provider.
     fn tool_path(&self, expr: &PyExpr) -> Option<String> {
@@ -275,7 +232,7 @@ impl Lowerer<'_> {
     /// `expr` as the segments of a dotted path, with whether its root is a
     /// variable. `getattr(path, "name")` is the qualified escape: the path
     /// with `name` after it, for a name Python cannot write as an attribute.
-    fn call_path(&self, expr: &PyExpr) -> Option<(Vec<String>, bool)> {
+    pub(super) fn call_path(&self, expr: &PyExpr) -> Option<(Vec<String>, bool)> {
         match expr {
             PyExpr::Name(name) => {
                 let id = name.id.as_str();
@@ -390,7 +347,7 @@ impl Lowerer<'_> {
     }
 
     /// Refuses `*args` and `**kwargs` at a call.
-    fn no_stars(&self, arguments: &ast::Arguments) -> Lowering<()> {
+    pub(super) fn no_stars(&self, arguments: &ast::Arguments) -> Lowering<()> {
         let starred = arguments
             .args
             .iter()
@@ -433,6 +390,7 @@ impl Lowerer<'_> {
         self.operation_refusal(call)?;
         if self.calls.is_some()
             && let Some(path) = self.tool_path(&call.func)
+            && !self.names_code(&path)
         {
             if let Some(candidate) = self.candidate(&path, call)?
                 && let Some(calls) = &mut self.calls
@@ -466,6 +424,15 @@ impl Lowerer<'_> {
         if let Some((effect, signature)) = self.effect(call) {
             return self.tool_call(&effect, &signature, call, awaited);
         }
+        if let Some(called) = self.call_package(call, awaited) {
+            return called;
+        }
+        // `getattr(dataframe, "lambda")`: the escape, read as a value.
+        if matches!(call.func.as_ref(), PyExpr::Name(name) if name.id.as_str() == "getattr")
+            && let Some(read) = self.read_package(&PyExpr::Call(call.clone()))
+        {
+            return read;
+        }
         match call.func.as_ref() {
             PyExpr::Name(name) => {
                 let id = name.id.as_str();
@@ -486,7 +453,7 @@ impl Lowerer<'_> {
                 }
                 Err(self.not_a_variable(id, name.range))
             }
-            PyExpr::Attribute(attribute) => self.method(attribute, call),
+            PyExpr::Attribute(attribute) => self.method(attribute, call, awaited),
             _ => self.call_function(call, awaited),
         }
     }
@@ -873,8 +840,13 @@ impl Lowerer<'_> {
             PyExpr::Attribute(_) if self.effect(call).is_some() => None,
             PyExpr::Attribute(_) => match self.asyncio_function(call) {
                 Some("sleep" | "gather") => None,
-                _ => Some("py.await"),
+                Some(_) => Some("py.await"),
+                // A method call awaits in its own lowering: a package
+                // member that waits gives its result where it stands.
+                None => None,
             },
+            // `await getattr(dataframe, "name")(...)`.
+            PyExpr::Call(_) if matches!(self.package_ref(&call.func), Ok(Some(_))) => None,
             _ => Some("py.await.result"),
         };
         let value = self.call(call, true)?;
@@ -885,7 +857,7 @@ impl Lowerer<'_> {
     }
 
     /// `await value via policy`.
-    fn await_via(&mut self, policy: &str, value: Operand) -> Lowering<Operand> {
+    pub(super) fn await_via(&mut self, policy: &str, value: Operand) -> Lowering<Operand> {
         let policy = self.function(policy)?;
         Ok(Operand::inline(
             Expr::Act(Box::new(ActExpr {
@@ -1162,89 +1134,6 @@ impl Lowerer<'_> {
         ))
     }
 
-    fn method(
-        &mut self,
-        attribute: &ast::ExprAttribute,
-        call: &ast::ExprCall,
-    ) -> Lowering<Operand> {
-        if let Some(refusal) = self.printed_receiver(&attribute.value) {
-            return Err(refusal);
-        }
-        let name = attribute.attr.id.as_str();
-        let Some(method) = METHODS.iter().find(|method| method.name == name) else {
-            let repair = match name {
-                "format" => self.format_repair(call),
-                _ => format!(
-                    "replace `{}` with a supported method of `{}`; the dialect's methods are: {}",
-                    self.text(attribute.range),
-                    self.text(attribute.value.range()),
-                    method_names().join(", ")
-                ),
-            };
-            return Err(diagnostics::with_repair(
-                Code::MethodUnsupported,
-                format!("the method `{name}` is not in the dialect"),
-                attribute.range,
-                &repair,
-            ));
-        };
-        let Given {
-            head: receiver,
-            positional,
-            keywords: keyword_values,
-        } = self.given(Some(&attribute.value), &call.arguments)?;
-        let mut slots: Vec<Option<Operand>> = positional.into_iter().map(Some).collect();
-        for (keyword, value) in call.arguments.keywords.iter().zip(keyword_values) {
-            let keyword_name = keyword.arg.as_ref().map_or("", |name| name.id.as_str());
-            let Some(index) = method
-                .keywords
-                .iter()
-                .position(|known| *known == keyword_name)
-            else {
-                return Err(arguments_error(
-                    format!("`{name}` takes no keyword argument `{keyword_name}`"),
-                    keyword.range,
-                ));
-            };
-            if slots.len() <= index {
-                slots.resize(index + 1, None);
-            }
-            if slots[index].is_some() {
-                return Err(arguments_error(
-                    format!("`{name}` got multiple values for `{keyword_name}`"),
-                    keyword.range,
-                ));
-            }
-            slots[index] = Some(value);
-        }
-        if slots.len() < method.min || slots.len() > method.max {
-            return Err(arguments_error(
-                format!(
-                    "`{name}` takes {} to {} arguments here, and {} were given",
-                    method.min,
-                    method.max,
-                    slots.len()
-                ),
-                call.range(),
-            ));
-        }
-        let list_local = matches!(attribute.value.as_ref(), PyExpr::Name(local)
-            if self.variable(local.id.as_str()).is_some_and(|found|
-                self.local_type(&found, local.id.as_str()) == Ty::List));
-        if name == "append" && receiver.ty == Ty::List && list_local {
-            let value = slots.remove(0).unwrap_or_else(absent);
-            let target = receiver.expr;
-            let end = self.native("list.len", vec![target.clone()])?;
-            // As in comprehension collection, evaluate the argument before
-            // reading the end: it may itself mutate the receiver or park.
-            self.store(Place::Member(Member::Index { target, index: end }), value);
-            return Ok(Operand::none());
-        }
-        let mut all = vec![receiver];
-        all.extend(slots.into_iter().map(|slot| slot.unwrap_or_else(absent)));
-        self.invoke(&format!("py.method.{name}"), &all, method.result)
-    }
-
     /// The positional arguments of a built-in that takes between `min`
     /// and `max` of them and no keywords.
     pub(super) fn positional(
@@ -1476,7 +1365,7 @@ impl Lowerer<'_> {
     }
 }
 
-fn arguments_error(
+pub(super) fn arguments_error(
     message: impl Into<String>,
     range: TextRange,
 ) -> lash_kernel_dialect::Diagnostic {

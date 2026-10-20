@@ -25,6 +25,9 @@ pub(crate) enum Ty {
     Tuple,
     Dict,
     Set,
+    /// A value of a package's value type: the brand at this position of
+    /// the lowerer's brands.
+    Package(usize),
 }
 
 impl Ty {

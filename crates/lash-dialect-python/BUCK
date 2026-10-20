@@ -48,8 +48,12 @@ lash_rust_unit_test(
     declared_features = [],
     exec_properties = sized_exec_properties("lash-dialect-python", "lash_dialect_python", "//crates/lash-dialect-python:lash-dialect-python__unit_test"),
     extra_compile_data = [],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
     manifest_dir = "crates/lash-dialect-python",
     package_name = "lash-dialect-python",
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
     tags = [],
     version = "0.0.0-dev",
 )

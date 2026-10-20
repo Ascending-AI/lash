@@ -1,7 +1,7 @@
 unit Main
 statement main/0 ordinal=1 depth=0 block=main Finish { value: Let { name: Name("t1"), value: Act(ActExpr { kind: Perform { effect: QualifiedName("control.finish"), result: Any, then_yield: false }, args: [Literal(Text("done"))] }), body: Literal(Null) } }
-statement main/1 ordinal=2 depth=0 block=main Do { value: Act(ActExpr { kind: Call(Library(FunctionId(80c16e15d72610c71deb233d25b5cf09e04451185028fa4a95843aabd600b448))), args: [Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Json, then_yield: false }, args: [Literal(Text("unreachable"))] })] }) }
+statement main/1 ordinal=2 depth=0 block=main Do { value: Act(ActExpr { kind: Call(Library(FunctionId(9069f1a97a82e155fe11114065351d42262bd0be81a4a8c41f522dfbb431d5d5))), args: [Act(ActExpr { kind: Perform { effect: QualifiedName("corpus.echo"), result: Json, then_yield: false }, args: [Literal(Text("unreachable"))] })] }) }
 scope main ordinal=0 depth=0 Entry
 action main/0/0/0 Some(Effect(QualifiedName("control.finish")))
-action main/1/0 library id=80c16e15d72610c71deb233d25b5cf09e04451185028fa4a95843aabd600b448 name=py.reply label="Python reply"
+action main/1/0 library id=9069f1a97a82e155fe11114065351d42262bd0be81a4a8c41f522dfbb431d5d5 name=py.reply label="Python reply"
 action main/1/0/0 Some(Effect(QualifiedName("corpus.echo")))

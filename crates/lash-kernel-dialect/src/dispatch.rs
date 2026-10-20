@@ -290,6 +290,100 @@ pub enum SlotRefusal {
     },
     #[error("`{member}` needs its argument `{slot}`, which the call leaves out")]
     Missing { member: String, slot: String },
+    #[error("`{member}` is given its argument `{slot}` both by position and by keyword")]
+    Twice { member: String, slot: String },
+}
+
+/// Why a call's keywords cannot fill a member's options slots.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum KeywordRefusal {
+    #[error("`{member}` has no option `{keyword}`")]
+    Unknown { member: String, keyword: String },
+    #[error(
+        "`{keyword}` names a field of more than one options slot of `{member}`: {}",
+        slots.iter().map(|slot| format!("`{slot}`")).collect::<Vec<_>>().join(" and ")
+    )]
+    Ambiguous {
+        member: String,
+        keyword: String,
+        slots: Vec<String>,
+    },
+    #[error("`{member}` is given the option `{keyword}` twice")]
+    Repeated { member: String, keyword: String },
+}
+
+/// The fields of a slot that takes options: a record of declared fields,
+/// or such a record or `absent`. A package value's slot takes none.
+pub fn options_fields(ty: &Type) -> Option<&[lash_kernel_doc::RecordTypeField]> {
+    match ty {
+        Type::Record(record) if Brand::of_type(ty).is_none() && !record.fields.is_empty() => {
+            Some(&record.fields)
+        }
+        Type::Union(members) => {
+            let mut kinds = members.iter().filter(|ty| **ty != Type::Absent);
+            match (kinds.next(), kinds.next()) {
+                (Some(only), None) => options_fields(only),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// The slot each keyword of a call fills a field of: its position among
+/// [`slots`]. Keywords are sugar for an options record, so each keyword
+/// names exactly one field of exactly one options slot. `name` is the
+/// member as the source spells it, for a refusal.
+///
+/// # Errors
+///
+/// A keyword that names no options field, one that names a field of more
+/// than one options slot, naming each, or one given twice.
+pub fn keyword_slots(
+    member: &Member,
+    receiver: bool,
+    name: &str,
+    keywords: &[&str],
+) -> Result<Vec<usize>, KeywordRefusal> {
+    let slots = slots(member, receiver);
+    let mut placed = Vec::with_capacity(keywords.len());
+    for (at, keyword) in keywords.iter().enumerate() {
+        if keywords[..at].contains(keyword) {
+            return Err(KeywordRefusal::Repeated {
+                member: name.to_owned(),
+                keyword: (*keyword).to_owned(),
+            });
+        }
+        let named: Vec<usize> = slots
+            .iter()
+            .enumerate()
+            .filter(|(_, slot)| {
+                options_fields(slot.ty)
+                    .is_some_and(|fields| fields.iter().any(|field| field.name == *keyword))
+            })
+            .map(|(index, _)| index)
+            .collect();
+        match named.as_slice() {
+            [only] => placed.push(*only),
+            [] => {
+                return Err(KeywordRefusal::Unknown {
+                    member: name.to_owned(),
+                    keyword: (*keyword).to_owned(),
+                });
+            }
+            many => {
+                return Err(KeywordRefusal::Ambiguous {
+                    member: name.to_owned(),
+                    keyword: (*keyword).to_owned(),
+                    slots: many
+                        .iter()
+                        .map(|index| slots[*index].name.to_owned())
+                        .collect(),
+                });
+            }
+        }
+    }
+    Ok(placed)
 }
 
 /// Whether a slot of this type may be left out.
@@ -342,6 +436,29 @@ pub fn fill<T>(
     name: &str,
     args: Vec<T>,
 ) -> Result<Vec<Filled<T>>, SlotRefusal> {
+    fill_placed(
+        member,
+        receiver,
+        name,
+        args,
+        std::collections::BTreeMap::new(),
+    )
+}
+
+/// [`fill`], with `placed` already holding the value of some slots, by
+/// their position among [`slots`]: the options records a call's keywords
+/// build ([`keyword_slots`]).
+///
+/// # Errors
+///
+/// As [`fill`], and a slot given both by position and in `placed`.
+pub fn fill_placed<T>(
+    member: &Member,
+    receiver: bool,
+    name: &str,
+    args: Vec<T>,
+    mut placed: std::collections::BTreeMap<usize, T>,
+) -> Result<Vec<Filled<T>>, SlotRefusal> {
     let slots = slots(member, receiver);
     let given = args.len();
     let fixed = slots.len().saturating_sub(usize::from(member.rest));
@@ -354,11 +471,18 @@ pub fn fill<T>(
     }
     let mut args = args.into_iter();
     let mut filled = Vec::with_capacity(slots.len());
-    for slot in &slots[..fixed] {
-        match args.next() {
-            Some(arg) => filled.push(Filled::One(arg)),
-            None if admits_absent(slot.ty) => filled.push(Filled::Absent),
-            None => {
+    for (index, slot) in slots[..fixed].iter().enumerate() {
+        let value = placed.remove(&index);
+        match (args.next(), value) {
+            (Some(_), Some(_)) => {
+                return Err(SlotRefusal::Twice {
+                    member: name.to_owned(),
+                    slot: slot.name.to_owned(),
+                });
+            }
+            (Some(arg), None) | (None, Some(arg)) => filled.push(Filled::One(arg)),
+            (None, None) if admits_absent(slot.ty) => filled.push(Filled::Absent),
+            (None, None) => {
                 return Err(SlotRefusal::Missing {
                     member: name.to_owned(),
                     slot: slot.name.to_owned(),

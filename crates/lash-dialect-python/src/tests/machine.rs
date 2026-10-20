@@ -40,6 +40,8 @@ pub(super) fn installed() -> &'static Installed {
             .unwrap_or_else(|error| panic!("{error}"));
         lash_kernel_lib::register_text_json(&mut registry)
             .unwrap_or_else(|error| panic!("{error}"));
+        // A package value's brand, which the helpers read to seal one.
+        lash_kernel_lib::register_brands(&mut registry).unwrap_or_else(|error| panic!("{error}"));
         let mut library =
             NamedLibrary::from_registry(&registry).unwrap_or_else(|error| panic!("{error}"));
         let mut helpers = Vec::new();

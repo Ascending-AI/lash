@@ -4,7 +4,8 @@
 -effect corpus.echo(input?: Json) -> Json
 -use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 -use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
--use py.reply = @80c16e15d72610c71deb233d25b5cf09e04451185028fa4a95843aabd600b448
+-use py.reply = @9069f1a97a82e155fe11114065351d42262bd0be81a4a8c41f522dfbb431d5d5
+-use record.contains = @c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c
 -use record.keys = @3048431a57b64b680843cd96770d99536bab12b83c3c7788856614e555b4985c
 -use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
 -entry demo() -> Any
@@ -22,7 +23,8 @@
 +effect corpus.echo(input?: Json) -> Json
 +use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
 +use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
-+use py.reply = @80c16e15d72610c71deb233d25b5cf09e04451185028fa4a95843aabd600b448
++use py.reply = @9069f1a97a82e155fe11114065351d42262bd0be81a4a8c41f522dfbb431d5d5
++use record.contains = @c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c
 +use record.keys = @3048431a57b64b680843cd96770d99536bab12b83c3c7788856614e555b4985c
 +use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
 +entry demo() -> Any
@@ -37,8 +39,8 @@
 
 Correspondence:
 {
-  "base": "5338ce2c42630d0dd2cccdca7c63abaf611df0bee8b0a23772c7af029c578e02",
-  "result": "a0f9665601d8d2a7192b1e66e9424ea48934bd38a9d3e24d24ec34c863c7fff7",
+  "base": "3b77ec99e3285ade47c2c62aa1c766fffd451eee85b2086442828eb4756f60c1",
+  "result": "eb407098d86bdb7102e2254a624885e9cca83d6369a4b4fc31d466ee597d8930",
   "entries": [
     {
       "from": {

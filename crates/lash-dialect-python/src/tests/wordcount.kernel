@@ -1,0 +1,210 @@
+kernel 1
+numbers by_spelling
+effect dataframe.explain(plan: Any) -> Text contract "dataframe.explain/1"
+effect dataframe.run(plan: Any) -> List(Any) contract "dataframe.run/1"
+use abs = @627d3fa925484d12b13ecfa198a1a07f3d88fb6f75df2c907ff4b9373105ead9
+use add = @7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537
+use bool.not = @740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d
+use brand.of = @bd9a21264286394a5cd731fecaa03951fb50517689667675c0788623eb529dc1
+use dataframe.__built = @73a0f5d77c35a7c915693b66b6a17ef85d2d9a549b7b43c36f0d9acc95b05b80
+use dataframe.col = @a43b5d3c0b070c1ab17b58b7d177b38640865a6a0d03c51b7131431b72fc2fde
+use dataframe.count = @d15ac5de13f9358486b3e38e58b23d2c4fee56011314495034f2648a3bb239cf
+use dataframe.data_quanta.check_shape = @ad1968cef1eaa4f43ada6d5707a49aeb3624b159442c3bdb46c21be5d72e3387
+use dataframe.data_quanta.collect_rows = @89253e4efbc198e8bedee607745bcb1efc09bbc9b9bafbf2a531d20dad95f9f0
+use dataframe.data_quanta.explain = @e2725967ec88c9e9f9a8d17a74248de654edfc7b6b3c7b41f781a54cf2281164
+use dataframe.data_quanta.filter = @d8c4b606551b16352fc73f9eeaa110a0d0291498badd817051b6c8ebd401aed9
+use dataframe.data_quanta.flat_map = @378462f96c3a71ca5c8c22bf42bc1a4929bb29330e8357d9ca4d1d0328e519ed
+use dataframe.data_quanta.limit = @64fe3708a2225814bf16fbe8f393a846b7fd248a13493096fa6fb9724d193ebd
+use dataframe.data_quanta.read_text = @b4121b88a9b7088580d57b32c1ef1c7a0a9f5e65ef3cb726299bce3f7f97b6d4
+use dataframe.data_quanta.reduce_by_key = @3b37ccc0b49b429d7ebfa8ea907bae77c6c2dd903320a717d9e36d4ff5468a7d
+use dataframe.data_quanta.sort = @60ddc70d39cf948af9f2eb65ad58aae5c7df0eab09433a6d5f86ce68b340ad4d
+use dataframe.data_quanta.then = @d80ed081c36e7d537594a8f424352099058f30730bd71287a6ca72b067f72a73
+use dataframe.expr.alias = @1edd56cdbbb0e95bc547bcd4cda5b9bf43bd5b87aa70469ab473a6ad12384a50
+use dataframe.expr.check_shape = @1b18efe6b66dfc51c689921996dc904eb2394ac8398049b7d44403258da2fe8f
+use dataframe.expr.neq = @7563fb10c05ef1215e5b74264ceed8a4368d0bca04155faa95e9b45def1b08ad
+use dataframe.expr.sort = @7d5aa06d4ee020eeda6cd4a687863631334b0d018415f0025c99d6f4d1269d83
+use dataframe.lit = @c6108282bad47bc93f44479015231ceaab2ebcf9c84a775e1cc81a4e0328fddd
+use dataframe.make_expr = @911844b3a7d6dffc69f6c24b0eaa7ba22039def741d119fca61aa45f7c302b45
+use dataframe.make_quanta = @1607f871fd7c143d21aa1d60c808b00fb0f342e0251a310adc867fe84274a0d8
+use div_floor = @e6cd29e23878b70c30d6243e68ec3cd427006b152f6d63b42d7fc9dee624c9eb
+use eq = @b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954
+use error.new = @94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064
+use format.decimal_parts = @deca028ad69c6201e1bd21f8e4e8a06f04f569de81bf874d0dea167f9c6d43f0
+use int.to_text = @6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29
+use kind = @3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7
+use le = @7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169
+use list.concat = @3da975dd77f0c49e6cc2b4066a44091d1807247dfe97e1f524a79709ad92f9f5
+use list.copy = @9582e9497de80ffe91797c946b2d48fc9e1621735e02d33bf53c8c828a41d63a
+use list.len = @70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b
+use lt = @a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0
+use map.contains = @5a66ffea6554dc3cceb26c77fe239e0ab2ecd7dbbb0654104ab865df84ec75d3
+use map.keys = @c0ca090ea752577550298c1dc3ea7697df5676465337d814ffe3b4c265b5dc16
+use map.len = @eca67654cffa061303e34a549e20bb70b7668a3e655709d36fd1c2fdd6b2956d
+use num.neg = @56b094872b8ca6408c2131c289eb04021b8a02d1151f834f22d7f45fe0ea6ea9
+use num.to_text = @8d546dfc65b783924003ce02bde5f212533c8196845edf7caff51e44aafee0f7
+use py.add = @ed414085bf1e69a6fd9d099e3e6bf23069e67cf6b190488a8c33a033f4a2012f
+use py.arg_missing = @c9577269a338e9de71987d8f4aa60455693ac5af4eb2774138e6958d05790ce9
+use py.exc.args = @737dfacb5f36f56833d4516dea274ae918a7a50bb7e25c06c2ef81e9261619a8
+use py.exc.name = @fc83b0ea9d71ee72309df257cff6e29f5f6183d497225973d0b49a30a2a63d8e
+use py.fail = @da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078
+use py.float_text = @adb78c2f89919421fa42883ceea9b15408fe24e45cd0f210c06cb09a4b35fe8c
+use py.for_in.check = @9c19a00e95592dd7c0bb299ea5df5908af7176c5e66457c782dd81d954b58830
+use py.for_in.open = @6493a17d666515acdb0be8f73eef0f455873f1508f8bd296c11773152a7b7e3f
+use py.method.lower = @c0224244dcfff26a94979cc0d8c97da20c223ecf6c20d855032f52567d3bebf3
+use py.method.split = @137812e25d81cafb3c8f88f9f37468eeae3092cc77c27c7371f10dc93e906fec
+use py.no_attribute = @12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376
+use py.operand_error = @c0e26c1c4cb4e647cd9d7d7ae906cedde64578296dc7de7603856bc2f10bfee7
+use py.repr = @e54f3de12c265c41fcd8093a6b56ffd0b33000e40e222deb91514539b13e10fb
+use py.str = @4f44999108a453c71f7c0f89f8e74f0aaf863362a69f04b6282d623836599667
+use py.text.printable = @01878cd4854f27491d88ce96898abd21b4fc2fee18220ff44d09a29f0bf629fe
+use py.text.whitespace = @af1d40cacc4443a07b1d50b3945c910de40d8fb37a9a80e7ab1542043a044974
+use py.text_of = @de94bd34e6de6022e201ab8f62f0a4a30fe21db52bc77e757d7029e0300b855c
+use py.text_repr = @a5473618f0e9fd2726bf23653f6a1a1553d9779addd065432d53dd6187668fe2
+use py.to_list = @06faa35183e7d3cf9672082edef24b054a0a038c8322eba3e9cf90e709c86ef5
+use py.type = @7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98
+use py.unpack = @87d71eb34e0b8509d2b84ddc54d419c82834470b8556e073c5da1afdd32eacc8
+use record.contains = @c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c
+use record.get = @c8cd42a6c8b72c445a4630822f01c7f7bb67060b28aaaf1e5141f326765448b8
+use record.keys = @3048431a57b64b680843cd96770d99536bab12b83c3c7788856614e555b4985c
+use record.len = @5866a6b77ba3e738a556e617baf8cc6570e9417d9df1f641ad49b4b0a77cd7ba
+use same = @1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578
+use set.keys = @aa084b5d26e265b6f2ebbcb088dccbe68dc6c6b52b97b987914d08192529bc4c
+use set.len = @3b70dd4bec191dc3c00a32a3aee61fa82e4e4b7256aac2668f25739b0b7a4d38
+use sub = @59b9d484a581bca4a1909189b23b1f4363670e1af545c6b28c6110f6ee95b01a
+use text.concat = @ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb
+use text.find = @d6a03b25b47babadb575f8207e993332ab6a8f7b53e8dd5257e8b45c6ad17451
+use text.from_code_points = @15ee852f242cc41febea71421a0af456926ad0f91429c4c96f1217c5b8732e43
+use text.join = @79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f
+use text.len = @a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716
+use text.lower_u17_0_0 = @bdbb1f114c807cbc58923711d0ac8e83e42afa20b0d2e5de58d50de54bc8d276
+use text.repeat = @ca62f99d0b5b81be587148f931be7dcd29cae182ebc2ab6452b239cc50ead43a
+use text.slice = @649f38eba0f5c8ce04da0c9ad8cf52c7fd5189fd9301d6ee3a7c65026bad5e81
+use text.split = @acfd50807c41e73f1bb1c4811459ba182f363914657804e6c7b4583a08241c0a
+use text.to_code_points = @f8e1c771241bcf79d4e804e35177d17075d8bafa331fd4d14446f4aa4538c2dc
+use text.upper_u17_0_0 = @a9d412b1ecfed3de7a78d9aa17829cae8396a1180adf0f3f681bc56d4d44170e
+use tuple.concat = @cb471f6847d41251a688fd3703cc1461b95db6cae5f54601979e8c6947953be9
+use tuple.len = @2eced051afe955ac8dbeed3762acd4b8ce74b7a4ed15763ea47dfd01e5cc5f71
+use tuple.values = @5273a8716ecc76558fb60aa870684b3dc9068f466d745fa7ec00b80ac6936152
+entry wordcount(text: Text) -> Any
+
+fn wordcount(text) {
+  let t7 = let(t2 = let(t1 = fn(arg1) start(name: Text) -> Record{__lash_brand: Tuple(Enum("dataframe"), Enum("expr")), ..Any} bare direct {
+    if same(arg1, absent) {
+      do invoke py.fail("TypeError", "col() missing required argument: 'name'")
+    }
+    return invoke dataframe.col(arg1)
+  }, t1), let(t4 = let(t3 = fn(arg2) start(value?: Any) -> Record{__lash_brand: Tuple(Enum("dataframe"), Enum("expr")), ..Any} bare direct {
+    return invoke dataframe.lit(arg2)
+  }, t3), let(t6 = let(t5 = fn() start() -> Record{__lash_brand: Tuple(Enum("dataframe"), Enum("expr")), ..Any} bare direct {
+    return invoke dataframe.count()
+  }, t5), (t2, t4, t6))))
+  let t8 = invoke py.unpack(t7, 3)
+  let col = t8[0]
+  let lit = t8[1]
+  let count = t8[2]
+  let t20 = let(t19 = invoke dataframe.data_quanta.read_text(text), let(t18 = let(t17 = fn(l) start(l: Any) -> Any bare direct {
+    let t9 = let(t16 = if(same(l, absent), invoke py.arg_missing("<lambda>"), null), l)
+    let t10 = invoke brand.of(t9)
+    let t11 = if(same(t10, absent), 0, if(same(t10[0], "dataframe"), 1, 0))
+    if same(t11, 1) {
+      do invoke py.no_attribute(t9, "lower")
+    }
+    let t12 = invoke py.method.lower(t9)
+    let t13 = invoke brand.of(t12)
+    let t14 = if(same(t13, absent), 0, if(same(t13[0], "dataframe"), 1, 0))
+    if same(t14, 1) {
+      do invoke py.no_attribute(t12, "split")
+    }
+    let t15 = invoke py.method.split(t12)
+    return t15
+  }, t17), invoke dataframe.data_quanta.flat_map(t19, t18, {output: "utf8"})))
+  let t21 = apply col("value")
+  let t22 = invoke brand.of(t21)
+  let t23 = if(same(t22, absent), 0, if(same(t22, ("dataframe", "expr")), 2, if(same(t22[0], "dataframe"), 1, 0)))
+  if same(t23, 1) {
+    do invoke py.no_attribute(t21, "neq")
+  }
+  let t24 = apply lit("")
+  let t25 = absent
+  if same(t23, 2) {
+    set t25 = invoke dataframe.expr.neq(t21, t24)
+  } else {
+    do invoke py.no_attribute(t21, "neq")
+    set t25 = null
+  }
+  let t31 = invoke dataframe.data_quanta.filter(t20, t25)
+  let t30 = [apply col("value")]
+  let t26 = apply count()
+  let t27 = invoke brand.of(t26)
+  let t28 = if(same(t27, absent), 0, if(same(t27, ("dataframe", "expr")), 2, if(same(t27[0], "dataframe"), 1, 0)))
+  if same(t28, 1) {
+    do invoke py.no_attribute(t26, "alias")
+  }
+  let t29 = absent
+  if same(t28, 2) {
+    set t29 = invoke dataframe.expr.alias(t26, "n")
+  } else {
+    do invoke py.no_attribute(t26, "alias")
+    set t29 = null
+  }
+  let t36 = invoke dataframe.data_quanta.reduce_by_key(t31, t30, [t29])
+  let t32 = apply col("n")
+  let t33 = invoke brand.of(t32)
+  let t34 = if(same(t33, absent), 0, if(same(t33, ("dataframe", "data_quanta")), 2, if(same(t33, ("dataframe", "expr")), 3, if(same(t33[0], "dataframe"), 1, 0))))
+  if same(t34, 1) {
+    do invoke py.no_attribute(t32, "sort")
+  }
+  let t35 = absent
+  if same(t34, 2) {
+    do invoke py.fail("TypeError", "`sort` has no option `ascending`")
+    set t35 = null
+  } else {
+    if same(t34, 3) {
+      set t35 = invoke dataframe.expr.sort(t32, {ascending: false})
+    } else {
+      do invoke py.fail("TypeError", "`sort` takes no keyword argument `ascending`")
+      set t35 = null
+    }
+  }
+  let via = invoke dataframe.data_quanta.limit(invoke dataframe.data_quanta.sort(t36, [t35, apply col("value")]), 5)
+  let t37 = []
+  let t38 = via
+  let t39 = invoke brand.of(t38)
+  let t40 = if(same(t39, absent), 0, if(same(t39, ("dataframe", "data_quanta")), 2, if(same(t39[0], "dataframe"), 1, 0)))
+  if same(t40, 1) {
+    do invoke py.no_attribute(t38, "collect_rows")
+  }
+  let t41 = absent
+  if same(t40, 2) {
+    set t41 = invoke dataframe.data_quanta.collect_rows(t38)
+  } else {
+    do invoke py.no_attribute(t38, "collect_rows")
+    set t41 = null
+  }
+  let w_1 = absent
+  let n_1 = absent
+  for t42 in t41 via (open py.for_in.open, check py.for_in.check) {
+    let t43 = invoke py.unpack(t42, 2)
+    set w_1 = t43[0]
+    set n_1 = t43[1]
+    set t37[list.len(t37)] = let(t44 = invoke py.str(w_1), let(t45 = invoke py.str(n_1), text.concat(text.concat(t44, " "), t45)))
+  }
+  let t46 = via
+  let t47 = invoke brand.of(t46)
+  let t48 = if(same(t47, absent), 0, if(same(t47, ("dataframe", "data_quanta")), 2, if(same(t47[0], "dataframe"), 1, 0)))
+  if same(t48, 1) {
+    do invoke py.no_attribute(t46, "explain")
+  }
+  let t49 = absent
+  if same(t48, 2) {
+    set t49 = invoke dataframe.data_quanta.explain(t46)
+  } else {
+    do invoke py.no_attribute(t46, "explain")
+    set t49 = null
+  }
+  return invoke py.add(t37, [invoke py.str(t49)])
+}
+
+main {
+  let wordcount = &wordcount
+}

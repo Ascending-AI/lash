@@ -12,6 +12,8 @@ mod entries;
 mod expressions;
 mod format;
 mod lazy;
+mod methods;
+mod packages;
 mod range;
 mod repairs;
 mod saved;
@@ -207,6 +209,9 @@ pub(crate) struct Lowerer<'a> {
     declared_captions: Vec<lash_kernel_doc::CaptionEntry>,
     /// The `TypedDict`s a workflow module declares, by name.
     typed_dicts: typed_dicts::TypedDicts,
+    /// The package value types operands are known to hold, which
+    /// `Ty::Package` names by position.
+    brands: Vec<lash_kernel_dialect::dispatch::Brand>,
 }
 
 /// Whether `name` is one of the dialect's built-ins.
@@ -328,7 +333,7 @@ pub(crate) fn lower_with_calls(
         }],
         renames: Vec::new(),
         unbound_renames: BTreeSet::new(),
-        classes: Classes::builtin(),
+        classes: packages::classes(environment.namespaces),
         rebound,
         buf: Buf::default(),
         kernel_depth: 0,
@@ -348,6 +353,7 @@ pub(crate) fn lower_with_calls(
         captions: spelled.captions,
         declared_captions: Vec::new(),
         typed_dicts: typed_dicts::TypedDicts::new(),
+        brands: Vec::new(),
     };
     lowerer.declare_classes(&module.body)?;
     for name in &declared {
@@ -888,6 +894,9 @@ impl Lowerer<'_> {
                     format!("replace `{id}` with a supported built-in or an ordinary function")
                 },
             );
+        }
+        if self.namespaces.is_root(id) {
+            return self.namespace_value(id, range);
         }
         if let Some(refusal) = diagnostics::printed_source_name(id, range) {
             return refusal;

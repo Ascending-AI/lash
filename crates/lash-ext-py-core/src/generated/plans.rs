@@ -21,124 +21,125 @@ enum Departure { Next, Return(Value), Break, Continue }
 
 /// Every plan, in function identity order.
 pub const PLANS: &[&p::HelperPlan] = &[
+    &PY_GETITEM_PLAN,
     &PY_TEXT_PRINTABLE_PLAN,
-    &PY_METHOD_DIFFERENCE_PLAN,
-    &PY_METHOD_ITEMS_PLAN,
-    &PY_METHOD_POP_PLAN,
-    &PY_ENUMERATE_PLAN,
+    &PY_METHOD_UPPER_PLAN,
+    &PY_INT_PLAN,
+    &PY_METHOD_REMOVE_PLAN,
+    &PY_TO_LIST_PLAN,
     &PY_EXC_THROW_PLAN,
-    &PY_CONTAINS_PLAN,
-    &PY_STR_PLAN,
+    &PY_EXTREME_PLAN,
+    &PY_NO_ATTRIBUTE_PLAN,
+    &PY_METHOD_SPLIT_PLAN,
     &PY_METHOD_FIND_PLAN,
-    &PY_DELITEM_PLAN,
-    &PY_UNPACK_PLAN,
-    &PY_LENGTH_PLAN,
-    &PY_METHOD_STARTSWITH_PLAN,
-    &PY_SHOW_PLAN,
-    &PY_METHOD_DISCARD_PLAN,
+    &PY_METHOD_ENDSWITH_PLAN,
+    &PY_METHOD_INSERT_PLAN,
+    &PY_METHOD_STRIP_PLAN,
+    &PY_INDEX_PLAN,
+    &PY_ZIP_PLAN,
+    &PY_FOR_IN_KEYS_PLAN,
     &PY_IS_NUMBER_PLAN,
     &PY_FOR_IN_VALUE_PLAN,
-    &PY_EXTREME_PLAN,
     &LIST_INSERT_PLAN,
-    &PY_ORD_PLAN,
-    &PY_METHOD_UNION_PLAN,
-    &PY_METHOD_STRIP_PLAN,
-    &PY_MOD_PLAN,
-    &PY_MUL_PLAN,
-    &PY_METHOD_INDEX_PLAN,
-    &PY_GETITEM_PLAN,
-    &PY_NUMBER_TEXT_PLAN,
-    &PY_FLOAT_PLAN,
-    &PY_ZIP_PLAN,
+    &PY_METHOD_SORT_PLAN,
+    &PY_REVERSED_PLAN,
     &PY_EXC_NEW_PLAN,
-    &PY_NEG_PLAN,
+    &PY_NUMBER_TEXT_PLAN,
+    &PY_METHOD_INTERSECTION_PLAN,
+    &PY_METHOD_EXTEND_PLAN,
+    &PY_METHOD_RSTRIP_PLAN,
     &PY_TRUTH_PLAN,
-    &PY_FOR_IN_VALUES_PLAN,
+    &PY_FLOAT_PLAN,
+    &PY_STR_PLAN,
+    &PY_METHOD_SETDEFAULT_PLAN,
     &MAP_CLEAR_PLAN,
     &SET_CLEAR_PLAN,
-    &PY_SORTED_PLAN,
-    &PY_METHOD_SPLIT_PLAN,
-    &PY_FOR_IN_OPEN_PLAN,
+    &PY_SETITEM_PLAN,
+    &PY_METHOD_APPEND_PLAN,
+    &PY_FOR_IN_ITEMS_PLAN,
     &PY_EXC_IS_EXCEPTION_PLAN,
     &PY_EXC_RERAISE_PLAN,
-    &PY_TYPE_PLAN,
-    &PY_FOR_IN_KEYS_PLAN,
-    &PY_SUM_PLAN,
-    &PY_METHOD_APPEND_PLAN,
-    &PY_TO_TUPLE_PLAN,
-    &PY_TEXT_DECIMAL_PLAN,
-    &PY_TO_SET_PLAN,
+    &PY_METHOD_GET_PLAN,
+    &PY_SHOW_PLAN,
     &PY_METHOD_COPY_PLAN,
-    &PY_DIVMOD_PLAN,
-    &PY_ROUND_PLAN,
-    &PY_METHOD_ADD_PLAN,
-    &PY_METHOD_UPDATE_PLAN,
-    &PY_EXC_ARGS_PLAN,
-    &PY_METHOD_SETDEFAULT_PLAN,
-    &PY_REPLY_PLAN,
-    &PY_CHR_PLAN,
-    &PY_INT_PLAN,
-    &PY_METHOD_COUNT_PLAN,
-    &PY_IADD_PLAN,
-    &PY_NAME_CHECK_PLAN,
+    &PY_FOR_IN_OPEN_PLAN,
+    &PY_METHOD_INDEX_PLAN,
     &PY_ISINSTANCE_PLAN,
-    &PY_ALL_PLAN,
-    &PY_ADD_PLAN,
-    &PY_METHOD_REPLACE_PLAN,
-    &PY_FORMAT_GROUP_PLAN,
-    &PY_OPERAND_ERROR_PLAN,
-    &PY_REVERSED_PLAN,
-    &PY_FOR_IN_CHECK_PLAN,
-    &PY_METHOD_INTERSECTION_PLAN,
-    &PY_EXC_MATCHES_PLAN,
+    &PY_TEXT_DECIMAL_PLAN,
+    &PY_METHOD_UNION_PLAN,
+    &PY_TRUEDIV_PLAN,
     &PY_SLICE_PLAN,
-    &PY_METHOD_RSTRIP_PLAN,
-    &PY_TO_LIST_PLAN,
+    &PY_METHOD_KEYS_PLAN,
+    &PY_METHOD_ADD_PLAN,
+    &PY_FLOORDIV_PLAN,
+    &PY_EXC_ARGS_PLAN,
+    &PY_CHR_PLAN,
+    &PY_METHOD_VALUES_PLAN,
+    &PY_TYPE_PLAN,
+    &PY_ORD_PLAN,
+    &PY_ENUMERATE_PLAN,
+    &PY_METHOD_REVERSE_PLAN,
+    &PY_POS_PLAN,
+    &PY_UNPACK_PLAN,
+    &PY_NAME_CHECK_PLAN,
+    &PY_METHOD_DIFFERENCE_PLAN,
+    &PY_REPLY_PLAN,
+    &PY_SET_OP_PLAN,
+    &PY_NEG_PLAN,
+    &PY_FORMAT_GROUP_PLAN,
+    &PY_FOR_IN_CHECK_PLAN,
+    &PY_METHOD_COUNT_PLAN,
+    &PY_TO_DICT_PLAN,
+    &PY_ANY_PLAN,
+    &PY_EXC_MATCHES_PLAN,
+    &PY_SUM_PLAN,
     &PY_NUMBER_UNDERSCORES_PLAN,
     &PY_TEXT_REPR_PLAN,
-    &PY_METHOD_REMOVE_PLAN,
-    &PY_METHOD_INSERT_PLAN,
-    &PY_METHOD_GET_PLAN,
-    &PY_METHOD_REVERSE_PLAN,
-    &PY_FLOORDIV_PLAN,
-    &PY_FLOAT_TEXT_PLAN,
-    &PY_TEXT_WHITESPACE_PLAN,
-    &PY_METHOD_LOWER_PLAN,
-    &PY_ABS_PLAN,
-    &PY_METHOD_CLEAR_PLAN,
-    &PY_FOR_IN_ITEM_PLAN,
-    &PY_METHOD_KEYS_PLAN,
-    &PY_SETITEM_PLAN,
-    &PY_METHOD_VALUES_PLAN,
-    &PY_SET_OP_PLAN,
-    &PY_METHOD_SORT_PLAN,
-    &PY_ARG_MISSING_PLAN,
-    &PY_INDEX_PLAN,
-    &PY_METHOD_UPPER_PLAN,
-    &PY_METHOD_LSTRIP_PLAN,
-    &PY_METHOD_EXTEND_PLAN,
-    &PY_RANGE_PLAN,
+    &PY_METHOD_DISCARD_PLAN,
+    &PY_MUL_PLAN,
     &PY_FORMAT_PLAN,
-    &PY_FAIL_PLAN,
-    &PY_POS_PLAN,
-    &PY_TRUEDIV_PLAN,
-    &PY_EXC_CHECK_CAUSE_PLAN,
-    &PY_FOR_IN_ITEMS_PLAN,
+    &PY_FLOAT_TEXT_PLAN,
+    &PY_TO_SET_PLAN,
+    &PY_TEXT_WHITESPACE_PLAN,
+    &PY_ABS_PLAN,
     &PY_METHOD_JOIN_PLAN,
-    &PY_EXC_CAUSE_PLAN,
-    &PY_REPR_PLAN,
+    &PY_TO_TUPLE_PLAN,
+    &PY_FOR_IN_VALUES_PLAN,
+    &PY_METHOD_POP_PLAN,
+    &BRAND_OF_PLAN,
+    &PY_FOR_IN_ITEM_PLAN,
+    &PY_METHOD_LOWER_PLAN,
+    &PY_OPERAND_ERROR_PLAN,
+    &PY_METHOD_STARTSWITH_PLAN,
+    &PY_ALL_PLAN,
+    &PY_ARG_MISSING_PLAN,
     &PY_SUB_PLAN,
+    &PY_LENGTH_PLAN,
+    &PY_ROUND_PLAN,
+    &PY_SORTED_PLAN,
+    &PY_FAIL_PLAN,
+    &PY_IADD_PLAN,
+    &PY_DIVMOD_PLAN,
+    &PY_TEXT_OF_PLAN,
+    &PY_METHOD_CLEAR_PLAN,
+    &PY_REPR_PLAN,
+    &PY_METHOD_ITEMS_PLAN,
+    &PY_EXC_CHECK_CAUSE_PLAN,
+    &PY_MOD_PLAN,
+    &PY_METHOD_LSTRIP_PLAN,
+    &PY_EXC_CAUSE_PLAN,
+    &PY_METHOD_REPLACE_PLAN,
+    &PY_RANGE_PLAN,
+    &PY_ADD_PLAN,
     &PY_EXC_WITH_CAUSE_PLAN,
     &COLLECTION_RANGE_PLAN,
     &LIST_CLEAR_PLAN,
-    &PY_ANY_PLAN,
-    &PY_NO_ATTRIBUTE_PLAN,
-    &PY_METHOD_ENDSWITH_PLAN,
     &PY_FORMAT_EXPONENT_PLAN,
-    &PY_TO_DICT_PLAN,
-    &PY_TEXT_OF_PLAN,
     &PY_POW_PLAN,
+    &PY_CONTAINS_PLAN,
     &PY_EXC_NAME_PLAN,
+    &PY_METHOD_UPDATE_PLAN,
+    &PY_DELITEM_PLAN,
 ];
 
 const PY_TEXT_WHITESPACE_PLAN: p::HelperPlan = p::HelperPlan {
@@ -4723,9 +4724,413 @@ fn py_text_repr(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
     Ok(ctx.take(0))
 }
 
+const BRAND_OF_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "brand.of",
+    function: p::function("bd9a21264286394a5cd731fecaa03951fb50517689667675c0788623eb529dc1"),
+    callees: &[
+        p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
+        p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
+        p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"),
+        p::function("2eced051afe955ac8dbeed3762acd4b8ce74b7a4ed15763ea47dfd01e5cc5f71"),
+        p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("record"),
+        p::PlanLiteral::Text("__lash_brand"),
+        p::PlanLiteral::Text("tuple"),
+        p::PlanLiteral::Int("2"),
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Text("text"),
+        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Absent,
+    ],
+    fields: &["__lash_brand", ],
+    records: &[],
+    registers: 2,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "brand", path: &[0, 1, 0, 1, 0] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: brand_of,
+    template: Some(p::HelperTemplate { entry: Some(brand_of_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: brand_of_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+};
+
+/// `brand.of`.
+fn brand_of(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.literal(1, 1)?;
+        ctx.call(2, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.field(0, 0)?;
+            ctx.bind(1, 0)?;
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            ctx.call(0, 0, 1)?;
+            ctx.literal(2, 1)?;
+            ctx.call(1, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+                ctx.begin()?;
+                ctx.local(1, 0)?;
+                ctx.call(3, 0, 1)?;
+                ctx.literal(3, 1)?;
+                ctx.call(4, 0, 2)?;
+                if ctx.test(0, p::Test::If)? {
+                    ctx.begin()?;
+                    ctx.local(1, 0)?;
+                    ctx.literal(4, 1)?;
+                    ctx.index(0)?;
+                    ctx.call(0, 0, 1)?;
+                    ctx.literal(5, 1)?;
+                    ctx.call(1, 0, 2)?;
+                    if ctx.test(0, p::Test::If)? {
+                        ctx.begin()?;
+                        ctx.local(1, 0)?;
+                        ctx.literal(6, 1)?;
+                        ctx.index(0)?;
+                        ctx.call(0, 0, 1)?;
+                        ctx.literal(5, 1)?;
+                        ctx.call(1, 0, 2)?;
+                        if ctx.test(0, p::Test::If)? {
+                            ctx.begin()?;
+                            ctx.local(1, 0)?;
+                            return Ok(ctx.take(0));
+                        }
+                    }
+                }
+            }
+            ctx.unbind(1);
+        }
+    }
+    ctx.begin()?;
+    ctx.literal(7, 0)?;
+    Ok(ctx.take(0))
+}
+fn brand_of_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Absent)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+fn brand_of_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::LongText(_) | Value::List(_) | Value::Map(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Absent)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Record(_)] => {
+            if let Some(value) = (|| {
+                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                Some(Value::Absent)
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+
+const PY_TYPE_PLAN: p::HelperPlan = p::HelperPlan {
+    name: "py.type",
+    function: p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"),
+    callees: &[
+        p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
+        p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
+        p::function("bd9a21264286394a5cd731fecaa03951fb50517689667675c0788623eb529dc1"),
+        p::function("acfd50807c41e73f1bb1c4811459ba182f363914657804e6c7b4583a08241c0a"),
+        p::function("649f38eba0f5c8ce04da0c9ad8cf52c7fd5189fd9301d6ee3a7c65026bad5e81"),
+        p::function("a9d412b1ecfed3de7a78d9aa17829cae8396a1180adf0f3f681bc56d4d44170e"),
+        p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"),
+        p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"),
+        p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
+        p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
+        p::function("fc83b0ea9d71ee72309df257cff6e29f5f6183d497225973d0b49a30a2a63d8e"),
+    ],
+    literals: &[
+        p::PlanLiteral::Text("record"),
+        p::PlanLiteral::Absent,
+        p::PlanLiteral::Int("1"),
+        p::PlanLiteral::Text("_"),
+        p::PlanLiteral::Int("0"),
+        p::PlanLiteral::Text(""),
+        p::PlanLiteral::Text("null"),
+        p::PlanLiteral::Text("NoneType"),
+        p::PlanLiteral::Text("integer"),
+        p::PlanLiteral::Text("int"),
+        p::PlanLiteral::Text("text"),
+        p::PlanLiteral::Text("str"),
+        p::PlanLiteral::Text("map"),
+        p::PlanLiteral::Text("dict"),
+        p::PlanLiteral::Text("closure"),
+        p::PlanLiteral::Text("function"),
+        p::PlanLiteral::Text("task"),
+        p::PlanLiteral::Text("Task"),
+        p::PlanLiteral::Text("error"),
+    ],
+    fields: &[],
+    records: &[],
+    registers: 4,
+    slots: &[
+        p::PlanLocal { name: "value", path: &[] },
+        p::PlanLocal { name: "k", path: &[0] },
+        p::PlanLocal { name: "brand", path: &[1, 1, 0] },
+        p::PlanLocal { name: "parts", path: &[1, 1, 2] },
+        p::PlanLocal { name: "", path: &[] },
+        p::PlanLocal { name: "part", path: &[1, 1, 3, 1] },
+        p::PlanLocal { name: "head", path: &[1, 1, 3, 1, 0] },
+        p::PlanLocal { name: "name", path: &[8, 1, 0] },
+    ],
+    closures: &[
+    ],
+    sites: &[],
+    run: py_type,
+    template: Some(p::HelperTemplate { entry: Some(py_type_template), depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: py_type_heap, depth: 1, writes: false, callees: &[p::function("bd9a21264286394a5cd731fecaa03951fb50517689667675c0788623eb529dc1"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+};
+
+/// `py.type`.
+fn py_type(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
+    ctx.adopt(0, 0)?;
+    ctx.begin()?;
+    ctx.local(0, 0)?;
+    ctx.call(0, 0, 1)?;
+    ctx.bind(1, 0)?;
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(0, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(2, 0, 1)?;
+        ctx.bind(2, 0)?;
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.literal(1, 1)?;
+        ctx.call(1, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(1, 0)?;
+            return Ok(ctx.take(0));
+        }
+        ctx.begin()?;
+        ctx.list(0, 0)?;
+        ctx.bind(3, 0)?;
+        ctx.begin()?;
+        ctx.local(2, 0)?;
+        ctx.literal(2, 1)?;
+        ctx.index(0)?;
+        ctx.literal(3, 1)?;
+        ctx.call(3, 0, 2)?;
+        let c0 = ctx.open(0, 4)?;
+        'l0: loop {
+            ctx.meter(2)?;
+            if !ctx.next(c0, 0)? {
+                break 'l0;
+            }
+            ctx.bind(5, 0)?;
+            ctx.begin()?;
+            ctx.local(5, 0)?;
+            ctx.literal(4, 1)?;
+            ctx.literal(2, 2)?;
+            ctx.call(4, 0, 3)?;
+            ctx.call(5, 0, 1)?;
+            ctx.bind(6, 0)?;
+            ctx.begin()?;
+            ctx.local(6, 0)?;
+            ctx.local(5, 1)?;
+            ctx.literal(2, 2)?;
+            ctx.local(5, 3)?;
+            ctx.call(6, 3, 1)?;
+            ctx.call(4, 1, 3)?;
+            ctx.call(7, 0, 2)?;
+            ctx.pin(0)?;
+            ctx.local(3, 1)?;
+            ctx.local(3, 2)?;
+            ctx.call(8, 2, 1)?;
+            ctx.set_index(1, 0)?;
+            ctx.unbind(6);
+            ctx.unbind(5);
+            ctx.begin()?;
+        }
+        ctx.close(c0);
+        ctx.begin()?;
+        ctx.local(3, 0)?;
+        ctx.literal(5, 1)?;
+        ctx.call(9, 0, 2)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(6, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(7, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(8, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(9, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(10, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(11, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(12, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(13, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(14, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(15, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(16, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.literal(17, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(18, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(10, 0, 1)?;
+        ctx.bind(7, 0)?;
+        ctx.begin()?;
+        ctx.local(7, 0)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    Ok(ctx.take(0))
+}
+fn py_type_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = natives;
+    match args {
+        [Value::Null] => {
+            if let Some(value) = (|| {
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NoneType") }?))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Absent] => {
+            if let Some(value) = (|| {
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Bool(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Float(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("int") }?))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Text(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("str") }?))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+fn py_type_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
+    let _ = (&heap, natives);
+    match args {
+        [Value::Map(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("dict") }?))
+            })() { return Some(value); }
+            None
+        },
+        [Value::List(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?))
+            })() { return Some(value); }
+            None
+        },
+        [Value::LongText(_)] => {
+            if let Some(value) = (|| {
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("str") }?))
+            })() { return Some(value); }
+            None
+        },
+        [Value::Record(_)] => {
+            if let Some(value) = (|| {
+                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
+                heap.bind(v0, None)?;
+                let v1 = match (natives[0].entry)(&[v0, Value::Absent]) { Some(value) => value, None => heap.call(1, &[v0, Value::Absent])? }; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?))
+            })() { return Some(value); }
+            None
+        },
+        _ => None,
+    }
+}
+
 const PY_REPR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.repr",
-    function: p::function("ec2191ded0aac577faed0608b961f9f2888220eabb4d58eabd0df3a6ebea61a9"),
+    function: p::function("e54f3de12c265c41fcd8093a6b56ffd0b33000e40e222deb91514539b13e10fb"),
     callees: &[],
     literals: &[
         p::PlanLiteral::Absent,
@@ -4790,12 +5195,12 @@ fn py_repr(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanExi
 
 const PY_STR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.str",
-    function: p::function("12150ed4be72550f7253c76f50309b124bc50a2122d8ad096ead663f87549f33"),
+    function: p::function("4f44999108a453c71f7c0f89f8e74f0aaf863362a69f04b6282d623836599667"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("8d546dfc65b783924003ce02bde5f212533c8196845edf7caff51e44aafee0f7"),
-        p::function("ec2191ded0aac577faed0608b961f9f2888220eabb4d58eabd0df3a6ebea61a9"),
+        p::function("e54f3de12c265c41fcd8093a6b56ffd0b33000e40e222deb91514539b13e10fb"),
     ],
     literals: &[
         p::PlanLiteral::Text("text"),
@@ -4823,7 +5228,7 @@ const PY_STR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_str,
-    template: Some(p::HelperTemplate { entry: Some(py_str_template), depth: 1, callees: &[p::function("8d546dfc65b783924003ce02bde5f212533c8196845edf7caff51e44aafee0f7"), ], heap: Some(p::HeapTemplate { entry: py_str_heap, depth: 2, writes: false, callees: &[p::function("ec2191ded0aac577faed0608b961f9f2888220eabb4d58eabd0df3a6ebea61a9"), p::function("8d546dfc65b783924003ce02bde5f212533c8196845edf7caff51e44aafee0f7"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(py_str_template), depth: 1, callees: &[p::function("8d546dfc65b783924003ce02bde5f212533c8196845edf7caff51e44aafee0f7"), ], heap: Some(p::HeapTemplate { entry: py_str_heap, depth: 2, writes: false, callees: &[p::function("e54f3de12c265c41fcd8093a6b56ffd0b33000e40e222deb91514539b13e10fb"), p::function("8d546dfc65b783924003ce02bde5f212533c8196845edf7caff51e44aafee0f7"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.str`.
@@ -4928,195 +5333,6 @@ fn py_str_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
             if let Some(value) = (|| {
                 let v0 = match (natives[0].entry)(&[args[0]]) { Some(value) => value, None => heap.call(1, &[args[0]])? }; let _ = v0;
                 Some(v0)
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-
-const PY_TYPE_PLAN: p::HelperPlan = p::HelperPlan {
-    name: "py.type",
-    function: p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"),
-    callees: &[
-        p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
-        p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
-        p::function("fc83b0ea9d71ee72309df257cff6e29f5f6183d497225973d0b49a30a2a63d8e"),
-    ],
-    literals: &[
-        p::PlanLiteral::Text("null"),
-        p::PlanLiteral::Text("NoneType"),
-        p::PlanLiteral::Text("integer"),
-        p::PlanLiteral::Text("int"),
-        p::PlanLiteral::Text("text"),
-        p::PlanLiteral::Text("str"),
-        p::PlanLiteral::Text("map"),
-        p::PlanLiteral::Text("dict"),
-        p::PlanLiteral::Text("closure"),
-        p::PlanLiteral::Text("function"),
-        p::PlanLiteral::Text("task"),
-        p::PlanLiteral::Text("Task"),
-        p::PlanLiteral::Text("error"),
-    ],
-    fields: &[],
-    records: &[],
-    registers: 2,
-    slots: &[
-        p::PlanLocal { name: "value", path: &[] },
-        p::PlanLocal { name: "k", path: &[0] },
-        p::PlanLocal { name: "name", path: &[7, 1, 0] },
-    ],
-    closures: &[
-    ],
-    sites: &[],
-    run: py_type,
-    template: Some(p::HelperTemplate { entry: Some(py_type_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_type_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
-};
-
-/// `py.type`.
-fn py_type(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExit> {
-    ctx.adopt(0, 0)?;
-    ctx.begin()?;
-    ctx.local(0, 0)?;
-    ctx.call(0, 0, 1)?;
-    ctx.bind(1, 0)?;
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(0, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.literal(1, 0)?;
-        return Ok(ctx.take(0));
-    }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(2, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.literal(3, 0)?;
-        return Ok(ctx.take(0));
-    }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(4, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.literal(5, 0)?;
-        return Ok(ctx.take(0));
-    }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(6, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.literal(7, 0)?;
-        return Ok(ctx.take(0));
-    }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(8, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.literal(9, 0)?;
-        return Ok(ctx.take(0));
-    }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(10, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.literal(11, 0)?;
-        return Ok(ctx.take(0));
-    }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(12, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(0, 0)?;
-        ctx.call(2, 0, 1)?;
-        ctx.bind(2, 0)?;
-        ctx.begin()?;
-        ctx.local(2, 0)?;
-        return Ok(ctx.take(0));
-    }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    Ok(ctx.take(0))
-}
-fn py_type_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = natives;
-    match args {
-        [Value::Null] => {
-            if let Some(value) = (|| {
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NoneType") }?))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Absent] => {
-            if let Some(value) = (|| {
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("absent") }?))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Bool(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("bool") }?))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Float(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("float") }?))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Int(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("int") }?))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Text(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("str") }?))
-            })() { return Some(value); }
-            None
-        },
-        _ => None,
-    }
-}
-fn py_type_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
-    let _ = (&heap, natives);
-    match args {
-        [Value::Map(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("dict") }?))
-            })() { return Some(value); }
-            None
-        },
-        [Value::List(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("list") }?))
-            })() { return Some(value); }
-            None
-        },
-        [Value::Record(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("record") }?))
-            })() { return Some(value); }
-            None
-        },
-        [Value::LongText(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("str") }?))
             })() { return Some(value); }
             None
         },
@@ -5255,13 +5471,13 @@ fn py_exc_check_cause_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
 
 const PY_EXC_NEW_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.exc.new",
-    function: p::function("478eddd47a7d7b9cb859805d5b5b58c2566ac27e83d3d01cba02de49ed409cb2"),
+    function: p::function("3bf1db88e6fa84d52d55b9d2f08e4dd0dbbdaa3f900631988e09981539b90303"),
     callees: &[
         p::function("e66d3b1a0a2a43f213bad3f42915e1067e1bafa8fa7c8064693d0ededeae5e16"),
         p::function("2eced051afe955ac8dbeed3762acd4b8ce74b7a4ed15763ea47dfd01e5cc5f71"),
         p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"),
-        p::function("ec2191ded0aac577faed0608b961f9f2888220eabb4d58eabd0df3a6ebea61a9"),
-        p::function("12150ed4be72550f7253c76f50309b124bc50a2122d8ad096ead663f87549f33"),
+        p::function("e54f3de12c265c41fcd8093a6b56ffd0b33000e40e222deb91514539b13e10fb"),
+        p::function("4f44999108a453c71f7c0f89f8e74f0aaf863362a69f04b6282d623836599667"),
         p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"),
         p::function("94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064"),
     ],
@@ -6023,9 +6239,9 @@ fn py_is_number_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[
 
 const PY_OPERAND_ERROR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.operand_error",
-    function: p::function("9befde9f4844babdab2a9cbacd341c0953bd347fe7292f733de0cda5e417908c"),
+    function: p::function("c0e26c1c4cb4e647cd9d7d7ae906cedde64578296dc7de7603856bc2f10bfee7"),
     callees: &[
-        p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"),
+        p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"),
         p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
         p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
     ],
@@ -6341,7 +6557,7 @@ fn py_truth_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash
 
 const PY_ADD_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.add",
-    function: p::function("991c8bf00676509e4068578acdec2ab4176b10fc7b977adae1e9fb77db2afda2"),
+    function: p::function("ed414085bf1e69a6fd9d099e3e6bf23069e67cf6b190488a8c33a033f4a2012f"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
@@ -6349,7 +6565,7 @@ const PY_ADD_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"),
         p::function("3da975dd77f0c49e6cc2b4066a44091d1807247dfe97e1f524a79709ad92f9f5"),
         p::function("cb471f6847d41251a688fd3703cc1461b95db6cae5f54601979e8c6947953be9"),
-        p::function("9befde9f4844babdab2a9cbacd341c0953bd347fe7292f733de0cda5e417908c"),
+        p::function("c0e26c1c4cb4e647cd9d7d7ae906cedde64578296dc7de7603856bc2f10bfee7"),
     ],
     literals: &[
         p::PlanLiteral::Text("integer"),
@@ -6535,17 +6751,19 @@ fn py_add_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
 
 const PY_TO_LIST_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.to_list",
-    function: p::function("a3779293e724337ceef8595cb51e8c00450da006aeac56b5dbb444396298bc01"),
+    function: p::function("06faa35183e7d3cf9672082edef24b054a0a038c8322eba3e9cf90e709c86ef5"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("9582e9497de80ffe91797c946b2d48fc9e1621735e02d33bf53c8c828a41d63a"),
         p::function("5273a8716ecc76558fb60aa870684b3dc9068f466d745fa7ec00b80ac6936152"),
         p::function("c0ca090ea752577550298c1dc3ea7697df5676465337d814ffe3b4c265b5dc16"),
+        p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"),
+        p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"),
         p::function("3048431a57b64b680843cd96770d99536bab12b83c3c7788856614e555b4985c"),
         p::function("aa084b5d26e265b6f2ebbcb088dccbe68dc6c6b52b97b987914d08192529bc4c"),
         p::function("acfd50807c41e73f1bb1c4811459ba182f363914657804e6c7b4583a08241c0a"),
-        p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"),
+        p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"),
         p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
         p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
     ],
@@ -6554,6 +6772,7 @@ const PY_TO_LIST_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Text("tuple"),
         p::PlanLiteral::Text("map"),
         p::PlanLiteral::Text("record"),
+        p::PlanLiteral::Text("__lash_brand"),
         p::PlanLiteral::Text("set"),
         p::PlanLiteral::Text("text"),
         p::PlanLiteral::Text(""),
@@ -6574,7 +6793,7 @@ const PY_TO_LIST_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_to_list,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_to_list_heap, depth: 1, writes: false, callees: &[p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"), p::function("acfd50807c41e73f1bb1c4811459ba182f363914657804e6c7b4583a08241c0a"), p::function("9582e9497de80ffe91797c946b2d48fc9e1621735e02d33bf53c8c828a41d63a"), p::function("c0ca090ea752577550298c1dc3ea7697df5676465337d814ffe3b4c265b5dc16"), p::function("3048431a57b64b680843cd96770d99536bab12b83c3c7788856614e555b4985c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: py_to_list_heap, depth: 1, writes: false, callees: &[p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"), p::function("acfd50807c41e73f1bb1c4811459ba182f363914657804e6c7b4583a08241c0a"), p::function("9582e9497de80ffe91797c946b2d48fc9e1621735e02d33bf53c8c828a41d63a"), p::function("c0ca090ea752577550298c1dc3ea7697df5676465337d814ffe3b4c265b5dc16"), p::function("3048431a57b64b680843cd96770d99536bab12b83c3c7788856614e555b4985c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.to_list`.
@@ -6621,18 +6840,15 @@ fn py_to_list(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.call(5, 0, 1)?;
-        return Ok(ctx.take(0));
-    }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(4, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(0, 0)?;
+        ctx.literal(4, 1)?;
+        ctx.call(5, 0, 2)?;
         ctx.call(6, 0, 1)?;
-        return Ok(ctx.take(0));
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.call(7, 0, 1)?;
+            return Ok(ctx.take(0));
+        }
     }
     ctx.begin()?;
     ctx.local(1, 0)?;
@@ -6641,26 +6857,36 @@ fn py_to_list(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.literal(6, 1)?;
-        ctx.call(7, 0, 2)?;
+        ctx.call(8, 0, 1)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(6, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.literal(7, 1)?;
+        ctx.call(9, 0, 2)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
     ctx.local(0, 0)?;
-    ctx.call(8, 0, 1)?;
+    ctx.call(10, 0, 1)?;
     ctx.bind(2, 0)?;
     ctx.begin()?;
-    ctx.literal(7, 0)?;
+    ctx.literal(8, 0)?;
     ctx.local(2, 1)?;
-    ctx.literal(8, 2)?;
+    ctx.literal(9, 2)?;
     ctx.list(0, 3)?;
-    ctx.literal(6, 1)?;
-    ctx.call(9, 0, 2)?;
+    ctx.literal(7, 1)?;
+    ctx.call(11, 0, 2)?;
     ctx.bind(3, 0)?;
     ctx.begin()?;
-    ctx.literal(9, 0)?;
+    ctx.literal(10, 0)?;
     ctx.local(3, 1)?;
-    ctx.call(10, 0, 2)?;
+    ctx.call(12, 0, 2)?;
     ctx.begin()?;
     ctx.list(0, 0)?;
     Ok(ctx.take(0))
@@ -6691,8 +6917,11 @@ fn py_to_list_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
         },
         [Value::Record(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(4, &[args[0]])?; let _ = v0;
-                Some(v0)
+                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
+                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = heap.call(4, &[args[0]])?; let _ = v2;
+                Some(v2)
             })() { return Some(value); }
             None
         },
@@ -6702,13 +6931,13 @@ fn py_to_list_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
 
 const PY_IADD_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.iadd",
-    function: p::function("8ca420429e61cdf8489549cc9ea2fb4bc8686f064c3ba2ec8a568b4086119955"),
+    function: p::function("db032522a59b5ed49f7f09ed109e2de89b7f2899360c89623aa5e9334f178976"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537"),
-        p::function("9befde9f4844babdab2a9cbacd341c0953bd347fe7292f733de0cda5e417908c"),
-        p::function("a3779293e724337ceef8595cb51e8c00450da006aeac56b5dbb444396298bc01"),
+        p::function("c0e26c1c4cb4e647cd9d7d7ae906cedde64578296dc7de7603856bc2f10bfee7"),
+        p::function("06faa35183e7d3cf9672082edef24b054a0a038c8322eba3e9cf90e709c86ef5"),
         p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
         p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"),
         p::function("cb471f6847d41251a688fd3703cc1461b95db6cae5f54601979e8c6947953be9"),
@@ -6739,7 +6968,7 @@ const PY_IADD_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_iadd,
-    template: Some(p::HelperTemplate { entry: Some(py_iadd_template), depth: 1, callees: &[p::function("7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), ], heap: Some(p::HeapTemplate { entry: py_iadd_heap, depth: 1, writes: false, callees: &[p::function("a3779293e724337ceef8595cb51e8c00450da006aeac56b5dbb444396298bc01"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), ] }), forwards: p::Forwards { floats: Some(0), ints: Some(0) } }),
+    template: Some(p::HelperTemplate { entry: Some(py_iadd_template), depth: 1, callees: &[p::function("7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), ], heap: Some(p::HeapTemplate { entry: py_iadd_heap, depth: 1, writes: false, callees: &[p::function("06faa35183e7d3cf9672082edef24b054a0a038c8322eba3e9cf90e709c86ef5"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), ] }), forwards: p::Forwards { floats: Some(0), ints: Some(0) } }),
 };
 
 /// `py.iadd`.
@@ -6927,14 +7156,14 @@ fn py_iadd_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_
 
 const PY_SUB_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.sub",
-    function: p::function("ee8eee06a56bf0ee29a54182b43bc194d8451a5f1dafe9ed1c2064f18dc203e7"),
+    function: p::function("cb9039f5185ac44a3af17e9772ad4e1f2852bbbc0c426870476ebb9a747804a1"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("59b9d484a581bca4a1909189b23b1f4363670e1af545c6b28c6110f6ee95b01a"),
         p::function("dc285cf860c2224ebf2867d6648dddd6d2e66ba2397f07a4285c54327f1076df"),
         p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"),
-        p::function("9befde9f4844babdab2a9cbacd341c0953bd347fe7292f733de0cda5e417908c"),
+        p::function("c0e26c1c4cb4e647cd9d7d7ae906cedde64578296dc7de7603856bc2f10bfee7"),
     ],
     literals: &[
         p::PlanLiteral::Text("integer"),
@@ -7099,7 +7328,7 @@ fn py_sub_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) 
 
 const PY_MUL_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.mul",
-    function: p::function("3536552910167f5f607c7e19dfffb761bdd168d6de0ccd7a0863d62d3a828c97"),
+    function: p::function("aa398c964e346beb3c96dbb956b9fcefdc73c8d754314920c8fa3b9032deb274"),
     callees: &[
         p::function("273429fdbb65bda49dca8037d10a093d406bdff05ba437eb869bd4941b1f7dee"),
         p::function("16c930374dc518862f2c4f68a88248760ad0cddb3b96742f004d21aa74a89857"),
@@ -7110,7 +7339,7 @@ const PY_MUL_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
         p::function("7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537"),
         p::function("cb471f6847d41251a688fd3703cc1461b95db6cae5f54601979e8c6947953be9"),
-        p::function("9befde9f4844babdab2a9cbacd341c0953bd347fe7292f733de0cda5e417908c"),
+        p::function("c0e26c1c4cb4e647cd9d7d7ae906cedde64578296dc7de7603856bc2f10bfee7"),
     ],
     literals: &[
         p::PlanLiteral::Text("integer"),
@@ -7480,11 +7709,11 @@ fn py_mul_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
 
 const PY_TRUEDIV_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.truediv",
-    function: p::function("e07bebd8dc8bf2007805e2823ae0533b6b14f8b8d2e8848e0c46d4ca12a68465"),
+    function: p::function("6c2f60dc9ce336e95722c9c32dd093a2ce799f61fd5db266a38a74243121dc5d"),
     callees: &[
         p::function("273429fdbb65bda49dca8037d10a093d406bdff05ba437eb869bd4941b1f7dee"),
         p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"),
-        p::function("9befde9f4844babdab2a9cbacd341c0953bd347fe7292f733de0cda5e417908c"),
+        p::function("c0e26c1c4cb4e647cd9d7d7ae906cedde64578296dc7de7603856bc2f10bfee7"),
         p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"),
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
@@ -7669,11 +7898,11 @@ fn py_truediv_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
 
 const PY_FLOORDIV_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.floordiv",
-    function: p::function("aad23f4373c3d0a5d9551e259a52ff25e577b7e4a46c76167bf411d8303b684e"),
+    function: p::function("7245e6074a0c0940927107d60fa5b46929e85fd865ed797ff83712d954d90341"),
     callees: &[
         p::function("273429fdbb65bda49dca8037d10a093d406bdff05ba437eb869bd4941b1f7dee"),
         p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"),
-        p::function("9befde9f4844babdab2a9cbacd341c0953bd347fe7292f733de0cda5e417908c"),
+        p::function("c0e26c1c4cb4e647cd9d7d7ae906cedde64578296dc7de7603856bc2f10bfee7"),
         p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"),
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
@@ -7858,11 +8087,11 @@ fn py_floordiv_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[l
 
 const PY_MOD_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.mod",
-    function: p::function("3510ce909806d55b531378982b80f19e44f947511695a3b588f72bfb5b9514a0"),
+    function: p::function("e6baa6253601ccdc1e8ea6fe390db971e50c70e5aceb2d35fc0e376c820a06a1"),
     callees: &[
         p::function("273429fdbb65bda49dca8037d10a093d406bdff05ba437eb869bd4941b1f7dee"),
         p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"),
-        p::function("9befde9f4844babdab2a9cbacd341c0953bd347fe7292f733de0cda5e417908c"),
+        p::function("c0e26c1c4cb4e647cd9d7d7ae906cedde64578296dc7de7603856bc2f10bfee7"),
         p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"),
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
@@ -8047,11 +8276,11 @@ fn py_mod_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
 
 const PY_POW_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.pow",
-    function: p::function("f90ef5226b62b37c2b4a219b1820c07aa672b8201e25eab971778c23a369ac2e"),
+    function: p::function("f9e1ecc8292dea3ec039f684c315f2aa4539803d9827be553a181f3070b09266"),
     callees: &[
         p::function("273429fdbb65bda49dca8037d10a093d406bdff05ba437eb869bd4941b1f7dee"),
         p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"),
-        p::function("9befde9f4844babdab2a9cbacd341c0953bd347fe7292f733de0cda5e417908c"),
+        p::function("c0e26c1c4cb4e647cd9d7d7ae906cedde64578296dc7de7603856bc2f10bfee7"),
         p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"),
         p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"),
         p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
@@ -8204,11 +8433,11 @@ fn py_pow(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
 
 const PY_NEG_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.neg",
-    function: p::function("47944affc1dacf7ce4fcc461bca6e9d2f9f1d14c24db64f5e0e14a373ac0d4fb"),
+    function: p::function("97bb8f8f194ea7d0a138eef5c444f36bb3ac348679a613907cc746aa6404d3bd"),
     callees: &[
         p::function("273429fdbb65bda49dca8037d10a093d406bdff05ba437eb869bd4941b1f7dee"),
         p::function("6f3ea52e78d7a223944455be342eb4b50e26e69a674b825f5c5cc7116f659248"),
-        p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"),
+        p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"),
         p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
         p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
     ],
@@ -8232,7 +8461,7 @@ const PY_NEG_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_neg,
-    template: Some(p::HelperTemplate { entry: Some(py_neg_template), depth: 2, callees: &[p::function("6f3ea52e78d7a223944455be342eb4b50e26e69a674b825f5c5cc7116f659248"), ], heap: Some(p::HeapTemplate { entry: py_neg_heap, depth: 2, writes: false, callees: &[p::function("273429fdbb65bda49dca8037d10a093d406bdff05ba437eb869bd4941b1f7dee"), p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"), p::function("6f3ea52e78d7a223944455be342eb4b50e26e69a674b825f5c5cc7116f659248"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(py_neg_template), depth: 2, callees: &[p::function("6f3ea52e78d7a223944455be342eb4b50e26e69a674b825f5c5cc7116f659248"), ], heap: Some(p::HeapTemplate { entry: py_neg_heap, depth: 2, writes: false, callees: &[p::function("273429fdbb65bda49dca8037d10a093d406bdff05ba437eb869bd4941b1f7dee"), p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"), p::function("6f3ea52e78d7a223944455be342eb4b50e26e69a674b825f5c5cc7116f659248"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.neg`.
@@ -8301,10 +8530,10 @@ fn py_neg_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
 
 const PY_POS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.pos",
-    function: p::function("deac6de1a8fcd6570ac12659cba28906dd97a76dff08b97d9920ea1457e2cc9c"),
+    function: p::function("85c8c7087744c9a46b799088984c0c262abcabae88ea6f5b93439d4fe8265d5d"),
     callees: &[
         p::function("273429fdbb65bda49dca8037d10a093d406bdff05ba437eb869bd4941b1f7dee"),
-        p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"),
+        p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"),
         p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
         p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
     ],
@@ -8328,7 +8557,7 @@ const PY_POS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_pos,
-    template: Some(p::HelperTemplate { entry: Some(py_pos_template), depth: 2, callees: &[], heap: Some(p::HeapTemplate { entry: py_pos_heap, depth: 2, writes: false, callees: &[p::function("273429fdbb65bda49dca8037d10a093d406bdff05ba437eb869bd4941b1f7dee"), p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(py_pos_template), depth: 2, callees: &[], heap: Some(p::HeapTemplate { entry: py_pos_heap, depth: 2, writes: false, callees: &[p::function("273429fdbb65bda49dca8037d10a093d406bdff05ba437eb869bd4941b1f7dee"), p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.pos`.
@@ -8394,12 +8623,12 @@ fn py_pos_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
 
 const PY_SET_OP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.set_op",
-    function: p::function("c73ea9a4e884b851a3edc8ccaa61ef1e5fafefd7fffaf4c52295f78c66cdca56"),
+    function: p::function("91fbb55e9e1b5c8953b4e978d0cc367d67d82cd1548d1709065fd1403931c8a7"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"),
-        p::function("9befde9f4844babdab2a9cbacd341c0953bd347fe7292f733de0cda5e417908c"),
+        p::function("c0e26c1c4cb4e647cd9d7d7ae906cedde64578296dc7de7603856bc2f10bfee7"),
         p::function("dc285cf860c2224ebf2867d6648dddd6d2e66ba2397f07a4285c54327f1076df"),
     ],
     literals: &[
@@ -8604,7 +8833,7 @@ fn py_set_op(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Plan
 
 const PY_CONTAINS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.contains",
-    function: p::function("0f1cb4e03c354f6dc37647441a0251812ca7f853e38166fcc2bacb82b946e927"),
+    function: p::function("fb2fc1237af751d588342a94f4e9fd2dd6a08ecb50f948c53888a0cfbe80aa2b"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
@@ -8612,27 +8841,28 @@ const PY_CONTAINS_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("865719b4040dc09e2521e6be6ed41d8429fd68789553b5c55be60f766254ff11"),
         p::function("5a66ffea6554dc3cceb26c77fe239e0ab2ecd7dbbb0654104ab865df84ec75d3"),
         p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"),
+        p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"),
+        p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
+        p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
         p::function("dc285cf860c2224ebf2867d6648dddd6d2e66ba2397f07a4285c54327f1076df"),
         p::function("d6a03b25b47babadb575f8207e993332ab6a8f7b53e8dd5257e8b45c6ad17451"),
         p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"),
-        p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"),
-        p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
-        p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
     ],
     literals: &[
         p::PlanLiteral::Text("list"),
         p::PlanLiteral::Text("tuple"),
         p::PlanLiteral::Text("map"),
         p::PlanLiteral::Text("record"),
+        p::PlanLiteral::Text("__lash_brand"),
+        p::PlanLiteral::Text("argument of type '"),
+        p::PlanLiteral::Text("' is not iterable"),
+        p::PlanLiteral::Text(""),
+        p::PlanLiteral::Text("TypeError"),
         p::PlanLiteral::Text("text"),
         p::PlanLiteral::Bool(false),
         p::PlanLiteral::Text("set"),
         p::PlanLiteral::Int("0"),
         p::PlanLiteral::Text("'in <string>' requires string as left operand, not "),
-        p::PlanLiteral::Text(""),
-        p::PlanLiteral::Text("TypeError"),
-        p::PlanLiteral::Text("argument of type '"),
-        p::PlanLiteral::Text("' is not iterable"),
     ],
     fields: &[],
     records: &[],
@@ -8641,6 +8871,8 @@ const PY_CONTAINS_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLocal { name: "container", path: &[] },
         p::PlanLocal { name: "item", path: &[] },
         p::PlanLocal { name: "k", path: &[0] },
+        p::PlanLocal { name: "name", path: &[4, 1, 0, 1, 0] },
+        p::PlanLocal { name: "sealed", path: &[4, 1, 0, 1, 1] },
         p::PlanLocal { name: "name", path: &[6, 1, 1] },
         p::PlanLocal { name: "hoisted7", path: &[6, 1, 2] },
         p::PlanLocal { name: "name", path: &[7] },
@@ -8650,7 +8882,7 @@ const PY_CONTAINS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_contains,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"), ], heap: Some(p::HeapTemplate { entry: py_contains_heap, depth: 1, writes: false, callees: &[p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"), p::function("93b6bd82b3c1b09672cae1c1d42f431529751cbb77e8b914af0586e86ec8c899"), p::function("d6a03b25b47babadb575f8207e993332ab6a8f7b53e8dd5257e8b45c6ad17451"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"), ], heap: Some(p::HeapTemplate { entry: py_contains_heap, depth: 1, writes: false, callees: &[p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"), p::function("93b6bd82b3c1b09672cae1c1d42f431529751cbb77e8b914af0586e86ec8c899"), p::function("d6a03b25b47babadb575f8207e993332ab6a8f7b53e8dd5257e8b45c6ad17451"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.contains`.
@@ -8700,9 +8932,33 @@ fn py_contains(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.literal(4, 1)?;
+        ctx.call(5, 0, 2)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.call(6, 0, 1)?;
+            ctx.bind(3, 0)?;
+            ctx.begin()?;
+            ctx.literal(5, 0)?;
+            ctx.local(3, 1)?;
+            ctx.literal(6, 2)?;
+            ctx.list(0, 3)?;
+            ctx.literal(7, 1)?;
+            ctx.call(7, 0, 2)?;
+            ctx.bind(4, 0)?;
+            ctx.begin()?;
+            ctx.literal(8, 0)?;
+            ctx.local(4, 1)?;
+            ctx.call(8, 0, 2)?;
+            ctx.unbind(4);
+            ctx.unbind(3);
+        }
+        ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.call(0, 0, 1)?;
-        ctx.literal(4, 1)?;
+        ctx.literal(9, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
@@ -8712,87 +8968,81 @@ fn py_contains(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
-        ctx.literal(5, 0)?;
+        ctx.literal(10, 0)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
     ctx.local(2, 0)?;
-    ctx.literal(6, 1)?;
+    ctx.literal(11, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(0, 0)?;
         ctx.local(1, 1)?;
-        ctx.call(6, 0, 2)?;
+        ctx.call(9, 0, 2)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
     ctx.local(2, 0)?;
-    ctx.literal(4, 1)?;
+    ctx.literal(9, 1)?;
     ctx.call(1, 0, 2)?;
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(1, 0)?;
         ctx.call(0, 0, 1)?;
-        ctx.literal(4, 1)?;
+        ctx.literal(9, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(7, 0)?;
+            ctx.literal(12, 0)?;
             ctx.local(0, 1)?;
             ctx.local(1, 2)?;
-            ctx.literal(7, 3)?;
-            ctx.call(7, 1, 3)?;
-            ctx.call(8, 0, 2)?;
+            ctx.literal(12, 3)?;
+            ctx.call(10, 1, 3)?;
+            ctx.call(11, 0, 2)?;
             return Ok(ctx.take(0));
         }
         ctx.begin()?;
         ctx.local(1, 0)?;
-        ctx.call(9, 0, 1)?;
-        ctx.bind(3, 0)?;
+        ctx.call(6, 0, 1)?;
+        ctx.bind(5, 0)?;
+        ctx.begin()?;
+        ctx.literal(13, 0)?;
+        ctx.local(5, 1)?;
+        ctx.list(0, 2)?;
+        ctx.literal(7, 1)?;
+        ctx.call(7, 0, 2)?;
+        ctx.bind(6, 0)?;
         ctx.begin()?;
         ctx.literal(8, 0)?;
-        ctx.local(3, 1)?;
-        ctx.list(0, 2)?;
-        ctx.literal(9, 1)?;
-        ctx.call(10, 0, 2)?;
-        ctx.bind(4, 0)?;
-        ctx.begin()?;
-        ctx.literal(10, 0)?;
-        ctx.local(4, 1)?;
-        ctx.call(11, 0, 2)?;
-        ctx.unbind(4);
-        ctx.unbind(3);
+        ctx.local(6, 1)?;
+        ctx.call(8, 0, 2)?;
+        ctx.unbind(6);
+        ctx.unbind(5);
     }
     ctx.begin()?;
     ctx.local(0, 0)?;
-    ctx.call(9, 0, 1)?;
-    ctx.bind(5, 0)?;
-    ctx.begin()?;
-    ctx.literal(11, 0)?;
-    ctx.local(5, 1)?;
-    ctx.literal(12, 2)?;
-    ctx.list(0, 3)?;
-    ctx.literal(9, 1)?;
-    ctx.call(10, 0, 2)?;
-    ctx.bind(6, 0)?;
-    ctx.begin()?;
-    ctx.literal(10, 0)?;
-    ctx.local(6, 1)?;
-    ctx.call(11, 0, 2)?;
+    ctx.call(6, 0, 1)?;
+    ctx.bind(7, 0)?;
     ctx.begin()?;
     ctx.literal(5, 0)?;
+    ctx.local(7, 1)?;
+    ctx.literal(6, 2)?;
+    ctx.list(0, 3)?;
+    ctx.literal(7, 1)?;
+    ctx.call(7, 0, 2)?;
+    ctx.bind(8, 0)?;
+    ctx.begin()?;
+    ctx.literal(8, 0)?;
+    ctx.local(8, 1)?;
+    ctx.call(8, 0, 2)?;
+    ctx.begin()?;
+    ctx.literal(10, 0)?;
     Ok(ctx.take(0))
 }
 fn py_contains_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
     let _ = (&heap, natives);
     match args {
-        [Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
-            if let Some(value) = (|| {
-                Some(Value::Bool(false))
-            })() { return Some(value); }
-            None
-        },
         [Value::List(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Text(_) | Value::LongText(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
             if let Some(value) = (|| {
                 let v0 = heap.call(1, &[args[0], args[1]])?; let _ = v0;
@@ -8815,10 +9065,20 @@ fn py_contains_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[l
             })() { return Some(value); }
             None
         },
+        [Value::Record(_), Value::Null | Value::Absent | Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::List(_) | Value::Map(_) | Value::Record(_)] => {
+            if let Some(value) = (|| {
+                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                Some(Value::Bool(false))
+            })() { return Some(value); }
+            None
+        },
         [Value::Record(_), Value::Text(_) | Value::LongText(_)] => {
             if let Some(value) = (|| {
-                let v0_entry = heap.lookup(p::Table::Record, args[0], args[1])?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
-                Some(v0)
+                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v2_entry = heap.lookup(p::Table::Record, args[0], args[1])?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
+                Some(v2)
             })() { return Some(value); }
             None
         },
@@ -8828,12 +9088,12 @@ fn py_contains_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[l
 
 const PY_INDEX_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.index",
-    function: p::function("d0746bb36cb39de81c1a43e2bd3e7b0ba332a6916bd5a0ae3da55cc5afd6cc46"),
+    function: p::function("1c7404535f45a90df835bc45d94dd8b7ea6c843b5cb64ecdfd85cc9f662c537d"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"),
-        p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"),
+        p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"),
         p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
         p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
         p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"),
@@ -8867,7 +9127,7 @@ const PY_INDEX_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_index,
-    template: Some(p::HelperTemplate { entry: Some(py_index_template), depth: 1, callees: &[p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), p::function("7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537"), p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: py_index_heap, depth: 1, writes: false, callees: &[p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"), p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"), p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(py_index_template), depth: 1, callees: &[p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), p::function("7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537"), p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: py_index_heap, depth: 1, writes: false, callees: &[p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"), p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"), p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.index`.
@@ -9072,26 +9332,27 @@ fn py_index_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash
 
 const PY_GETITEM_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.getitem",
-    function: p::function("3a288bdb499bbfefab743d65cd13b875564073e7ea4776bda6daaab575f8e149"),
+    function: p::function("0168eab03c380b9e0218cf276f115be2c956e975ab0ef5c86351123cdfd93fd7"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
-        p::function("5a66ffea6554dc3cceb26c77fe239e0ab2ecd7dbbb0654104ab865df84ec75d3"),
         p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"),
-        p::function("ec2191ded0aac577faed0608b961f9f2888220eabb4d58eabd0df3a6ebea61a9"),
+        p::function("5a66ffea6554dc3cceb26c77fe239e0ab2ecd7dbbb0654104ab865df84ec75d3"),
+        p::function("e54f3de12c265c41fcd8093a6b56ffd0b33000e40e222deb91514539b13e10fb"),
         p::function("94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064"),
         p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
-        p::function("d0746bb36cb39de81c1a43e2bd3e7b0ba332a6916bd5a0ae3da55cc5afd6cc46"),
+        p::function("1c7404535f45a90df835bc45d94dd8b7ea6c843b5cb64ecdfd85cc9f662c537d"),
         p::function("2eced051afe955ac8dbeed3762acd4b8ce74b7a4ed15763ea47dfd01e5cc5f71"),
         p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"),
         p::function("04442e8b0037608a734e4e93b04c62f6c031cc039f13ae147827ba9d32f22db3"),
-        p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"),
+        p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"),
         p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
         p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
     ],
     literals: &[
         p::PlanLiteral::Text("map"),
         p::PlanLiteral::Text("record"),
+        p::PlanLiteral::Text("__lash_brand"),
         p::PlanLiteral::Bool(true),
         p::PlanLiteral::Bool(false),
         p::PlanLiteral::Text("text"),
@@ -9137,7 +9398,7 @@ const PY_GETITEM_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_getitem,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_getitem_heap, depth: 2, writes: false, callees: &[p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"), p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"), p::function("d0746bb36cb39de81c1a43e2bd3e7b0ba332a6916bd5a0ae3da55cc5afd6cc46"), p::function("04442e8b0037608a734e4e93b04c62f6c031cc039f13ae147827ba9d32f22db3"), p::function("ec2191ded0aac577faed0608b961f9f2888220eabb4d58eabd0df3a6ebea61a9"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_getitem_heap, depth: 2, writes: false, callees: &[p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"), p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"), p::function("1c7404535f45a90df835bc45d94dd8b7ea6c843b5cb64ecdfd85cc9f662c537d"), p::function("04442e8b0037608a734e4e93b04c62f6c031cc039f13ae147827ba9d32f22db3"), p::function("e54f3de12c265c41fcd8093a6b56ffd0b33000e40e222deb91514539b13e10fb"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.getitem`.
@@ -9165,8 +9426,15 @@ fn py_getitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
-            ctx.literal(2, 0)?;
-            ctx.assign(3, 0)?;
+            ctx.local(0, 0)?;
+            ctx.literal(2, 1)?;
+            ctx.call(2, 0, 2)?;
+            if ctx.test(0, p::Test::If)? {
+            } else {
+                ctx.begin()?;
+                ctx.literal(3, 0)?;
+                ctx.assign(3, 0)?;
+            }
         }
     }
     if r == 0 || matches!(r, 1) {
@@ -9178,7 +9446,7 @@ fn py_getitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
         if t0 {
             if r == 0 {
                 ctx.begin()?;
-                ctx.literal(3, 0)?;
+                ctx.literal(4, 0)?;
                 ctx.bind(4, 0)?;
             }
             if r == 0 {
@@ -9190,19 +9458,19 @@ fn py_getitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
                     ctx.begin()?;
                     ctx.local(0, 0)?;
                     ctx.local(1, 1)?;
-                    ctx.call(2, 0, 2)?;
+                    ctx.call(3, 0, 2)?;
                     ctx.assign(4, 0)?;
                 } else {
                     ctx.begin()?;
                     ctx.local(1, 0)?;
                     ctx.call(0, 0, 1)?;
-                    ctx.literal(4, 1)?;
+                    ctx.literal(5, 1)?;
                     ctx.call(1, 0, 2)?;
                     if ctx.test(0, p::Test::If)? {
                         ctx.begin()?;
                         ctx.local(0, 0)?;
                         ctx.local(1, 1)?;
-                        ctx.call(3, 0, 2)?;
+                        ctx.call(2, 0, 2)?;
                         ctx.assign(4, 0)?;
                     }
                 }
@@ -9226,11 +9494,11 @@ fn py_getitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
             }
             if r == 0 {
                 ctx.begin()?;
-                ctx.literal(5, 0)?;
+                ctx.literal(6, 0)?;
                 ctx.local(5, 1)?;
                 ctx.local(1, 2)?;
                 ctx.tuple(2, 1)?;
-                ctx.literal(6, 3)?;
+                ctx.literal(7, 3)?;
                 ctx.tuple(2, 2)?;
                 ctx.call(5, 0, 3)?;
                 return Err(p::PlanExit::Raise(ctx.take(0)));
@@ -9240,7 +9508,7 @@ fn py_getitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
     if r == 0 {
         ctx.begin()?;
         ctx.local(2, 0)?;
-        ctx.literal(7, 1)?;
+        ctx.literal(8, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
@@ -9250,8 +9518,8 @@ fn py_getitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
             ctx.begin()?;
             ctx.local(1, 0)?;
             ctx.local(6, 1)?;
-            ctx.literal(7, 2)?;
-            ctx.literal(8, 3)?;
+            ctx.literal(8, 2)?;
+            ctx.literal(9, 3)?;
             ctx.call(7, 0, 4)?;
             ctx.bind(7, 0)?;
             ctx.begin()?;
@@ -9264,7 +9532,7 @@ fn py_getitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
     if r == 0 {
         ctx.begin()?;
         ctx.local(2, 0)?;
-        ctx.literal(9, 1)?;
+        ctx.literal(10, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
@@ -9274,8 +9542,8 @@ fn py_getitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
             ctx.begin()?;
             ctx.local(1, 0)?;
             ctx.local(8, 1)?;
-            ctx.literal(9, 2)?;
-            ctx.literal(8, 3)?;
+            ctx.literal(10, 2)?;
+            ctx.literal(9, 3)?;
             ctx.call(7, 0, 4)?;
             ctx.bind(9, 0)?;
             ctx.begin()?;
@@ -9288,7 +9556,7 @@ fn py_getitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
     if r == 0 {
         ctx.begin()?;
         ctx.local(2, 0)?;
-        ctx.literal(4, 1)?;
+        ctx.literal(5, 1)?;
         ctx.call(1, 0, 2)?;
         if ctx.test(0, p::Test::If)? {
             ctx.begin()?;
@@ -9298,8 +9566,8 @@ fn py_getitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
             ctx.begin()?;
             ctx.local(1, 0)?;
             ctx.local(10, 1)?;
-            ctx.literal(10, 2)?;
-            ctx.literal(8, 3)?;
+            ctx.literal(11, 2)?;
+            ctx.literal(9, 3)?;
             ctx.call(7, 0, 4)?;
             ctx.bind(11, 0)?;
             ctx.begin()?;
@@ -9317,23 +9585,23 @@ fn py_getitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
     }
     if r == 0 {
         ctx.begin()?;
-        ctx.literal(11, 0)?;
+        ctx.literal(12, 0)?;
         ctx.local(12, 1)?;
-        ctx.literal(12, 2)?;
+        ctx.literal(13, 2)?;
         ctx.list(0, 3)?;
-        ctx.literal(8, 1)?;
+        ctx.literal(9, 1)?;
         ctx.call(12, 0, 2)?;
         ctx.bind(13, 0)?;
     }
     if r == 0 {
         ctx.begin()?;
-        ctx.literal(13, 0)?;
+        ctx.literal(14, 0)?;
         ctx.local(13, 1)?;
         ctx.call(13, 0, 2)?;
     }
     if r == 0 {
         ctx.begin()?;
-        ctx.literal(6, 0)?;
+        ctx.literal(7, 0)?;
         return Ok(ctx.take(0));
     }
     if r != 0 {
@@ -9377,9 +9645,11 @@ fn py_getitem_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
         },
         [Value::Record(_), Value::Text(_) | Value::LongText(_)] => {
             if let Some(value) = (|| {
-                let v0_entry = heap.lookup(p::Table::Record, args[0], args[1])?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
-                if !matches!(v0, Value::Bool(true)) { return None; }
-                Some(v0_found)
+                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
+                if !matches!(v0, Value::Bool(false)) { return None; }
+                let v2_entry = heap.lookup(p::Table::Record, args[0], args[1])?; let v2 = Value::Bool(v2_entry.is_some()); let v2_found = v2_entry.unwrap_or(Value::Absent); let _ = (v2, v2_found);
+                if !matches!(v2, Value::Bool(true)) { return None; }
+                Some(v2_found)
             })() { return Some(value); }
             None
         },
@@ -9389,13 +9659,13 @@ fn py_getitem_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
 
 const PY_SETITEM_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.setitem",
-    function: p::function("c60837c4fcf659cc63191c581a94c75c84d3bccfcab2683d292581aa39c38b60"),
+    function: p::function("56a7cb2d7a29d652cd71cc2b0d9b964ef0d03dd753c83ad4709eb637b7e73490"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
-        p::function("d0746bb36cb39de81c1a43e2bd3e7b0ba332a6916bd5a0ae3da55cc5afd6cc46"),
-        p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"),
+        p::function("1c7404535f45a90df835bc45d94dd8b7ea6c843b5cb64ecdfd85cc9f662c537d"),
+        p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"),
         p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
         p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
     ],
@@ -9426,7 +9696,7 @@ const PY_SETITEM_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_setitem,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_setitem_heap, depth: 2, writes: true, callees: &[p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"), p::function("d0746bb36cb39de81c1a43e2bd3e7b0ba332a6916bd5a0ae3da55cc5afd6cc46"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_setitem_heap, depth: 2, writes: true, callees: &[p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"), p::function("1c7404535f45a90df835bc45d94dd8b7ea6c843b5cb64ecdfd85cc9f662c537d"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.setitem`.
@@ -9526,16 +9796,16 @@ fn py_setitem_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
 
 const PY_DELITEM_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.delitem",
-    function: p::function("13a99c52a3a6b5a6af72493f1e8d2419b39026b9b5d93110198df554882a1a4b"),
+    function: p::function("fe090f52ff3727c74598a255b8dbc2d9523a46e8d2d4efdaf009c6522e2ad9bf"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("5a66ffea6554dc3cceb26c77fe239e0ab2ecd7dbbb0654104ab865df84ec75d3"),
-        p::function("ec2191ded0aac577faed0608b961f9f2888220eabb4d58eabd0df3a6ebea61a9"),
+        p::function("e54f3de12c265c41fcd8093a6b56ffd0b33000e40e222deb91514539b13e10fb"),
         p::function("94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064"),
         p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
-        p::function("d0746bb36cb39de81c1a43e2bd3e7b0ba332a6916bd5a0ae3da55cc5afd6cc46"),
-        p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"),
+        p::function("1c7404535f45a90df835bc45d94dd8b7ea6c843b5cb64ecdfd85cc9f662c537d"),
+        p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"),
         p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
         p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
     ],
@@ -9695,14 +9965,14 @@ fn py_delitem(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::Plan
 
 const PY_SLICE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.slice",
-    function: p::function("a01b82f38cf5eea4bc0dcbef9a41e89fb8317755ca8dc7dd2701f3ce8f9b2de6"),
+    function: p::function("6cc5ba9a39514b6f477f6e4c344f5f0558f1a3ea8974620356609cd02e8f8415"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
         p::function("2eced051afe955ac8dbeed3762acd4b8ce74b7a4ed15763ea47dfd01e5cc5f71"),
         p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"),
-        p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"),
+        p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"),
         p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
         p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
         p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"),
@@ -10150,17 +10420,19 @@ fn py_slice(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanE
 
 const PY_LENGTH_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.length",
-    function: p::function("1903be2841d029d1210ae4076e2b41e2bdb773276f0c92d27ee6da83fd077f4b"),
+    function: p::function("cc9ac110bb1e7b522181d159845638b0b2879d7d1b388383be932cbadd59f366"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
         p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"),
         p::function("eca67654cffa061303e34a549e20bb70b7668a3e655709d36fd1c2fdd6b2956d"),
+        p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"),
+        p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"),
         p::function("5866a6b77ba3e738a556e617baf8cc6570e9417d9df1f641ad49b4b0a77cd7ba"),
         p::function("2eced051afe955ac8dbeed3762acd4b8ce74b7a4ed15763ea47dfd01e5cc5f71"),
         p::function("3b70dd4bec191dc3c00a32a3aee61fa82e4e4b7256aac2668f25739b0b7a4d38"),
-        p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"),
+        p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"),
         p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
         p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
     ],
@@ -10169,6 +10441,7 @@ const PY_LENGTH_PLAN: p::HelperPlan = p::HelperPlan {
         p::PlanLiteral::Text("text"),
         p::PlanLiteral::Text("map"),
         p::PlanLiteral::Text("record"),
+        p::PlanLiteral::Text("__lash_brand"),
         p::PlanLiteral::Text("tuple"),
         p::PlanLiteral::Text("set"),
         p::PlanLiteral::Text("object of type '"),
@@ -10190,7 +10463,7 @@ const PY_LENGTH_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_length,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_length_heap, depth: 1, writes: false, callees: &[p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"), p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: py_length_heap, depth: 1, writes: false, callees: &[p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"), p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.length`.
@@ -10237,18 +10510,15 @@ fn py_length(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Plan
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.call(5, 0, 1)?;
-        return Ok(ctx.take(0));
-    }
-    ctx.begin()?;
-    ctx.local(1, 0)?;
-    ctx.literal(4, 1)?;
-    ctx.call(1, 0, 2)?;
-    if ctx.test(0, p::Test::If)? {
-        ctx.begin()?;
-        ctx.local(0, 0)?;
+        ctx.literal(4, 1)?;
+        ctx.call(5, 0, 2)?;
         ctx.call(6, 0, 1)?;
-        return Ok(ctx.take(0));
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.call(7, 0, 1)?;
+            return Ok(ctx.take(0));
+        }
     }
     ctx.begin()?;
     ctx.local(1, 0)?;
@@ -10257,27 +10527,37 @@ fn py_length(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Plan
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.call(7, 0, 1)?;
+        ctx.call(8, 0, 1)?;
+        return Ok(ctx.take(0));
+    }
+    ctx.begin()?;
+    ctx.local(1, 0)?;
+    ctx.literal(6, 1)?;
+    ctx.call(1, 0, 2)?;
+    if ctx.test(0, p::Test::If)? {
+        ctx.begin()?;
+        ctx.local(0, 0)?;
+        ctx.call(9, 0, 1)?;
         return Ok(ctx.take(0));
     }
     ctx.begin()?;
     ctx.local(0, 0)?;
-    ctx.call(8, 0, 1)?;
+    ctx.call(10, 0, 1)?;
     ctx.bind(2, 0)?;
     ctx.begin()?;
-    ctx.literal(6, 0)?;
+    ctx.literal(7, 0)?;
     ctx.local(2, 1)?;
-    ctx.literal(7, 2)?;
+    ctx.literal(8, 2)?;
     ctx.list(0, 3)?;
-    ctx.literal(8, 1)?;
-    ctx.call(9, 0, 2)?;
+    ctx.literal(9, 1)?;
+    ctx.call(11, 0, 2)?;
     ctx.bind(3, 0)?;
     ctx.begin()?;
-    ctx.literal(9, 0)?;
-    ctx.local(3, 1)?;
-    ctx.call(10, 0, 2)?;
-    ctx.begin()?;
     ctx.literal(10, 0)?;
+    ctx.local(3, 1)?;
+    ctx.call(12, 0, 2)?;
+    ctx.begin()?;
+    ctx.literal(11, 0)?;
     Ok(ctx.take(0))
 }
 fn py_length_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
@@ -10306,8 +10586,11 @@ fn py_length_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[las
         },
         [Value::Record(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.len(p::Collection::Record, args[0])?; let _ = v0;
-                Some(v0)
+                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
+                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = heap.len(p::Collection::Record, args[0])?; let _ = v2;
+                Some(v2)
             })() { return Some(value); }
             None
         },
@@ -10317,17 +10600,20 @@ fn py_length_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[las
 
 const PY_FOR_IN_OPEN_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.for_in.open",
-    function: p::function("591cd7733b4de6a472d9070757c3477461ce2c01170971828c8ebd4eb4b07b6d"),
+    function: p::function("6493a17d666515acdb0be8f73eef0f455873f1508f8bd296c11773152a7b7e3f"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
+        p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"),
+        p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"),
         p::function("3048431a57b64b680843cd96770d99536bab12b83c3c7788856614e555b4985c"),
-        p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"),
+        p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"),
         p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
         p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
     ],
     literals: &[
         p::PlanLiteral::Text("record"),
+        p::PlanLiteral::Text("__lash_brand"),
         p::PlanLiteral::Text("list"),
         p::PlanLiteral::Text("tuple"),
         p::PlanLiteral::Text("map"),
@@ -10354,7 +10640,7 @@ const PY_FOR_IN_OPEN_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_for_in_open,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_for_in_open_heap, depth: 1, writes: false, callees: &[p::function("3048431a57b64b680843cd96770d99536bab12b83c3c7788856614e555b4985c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: py_for_in_open_heap, depth: 1, writes: false, callees: &[p::function("3048431a57b64b680843cd96770d99536bab12b83c3c7788856614e555b4985c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.for_in.open`.
@@ -10371,15 +10657,22 @@ fn py_for_in_open(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
     if ctx.test(0, p::Test::If)? {
         ctx.begin()?;
         ctx.local(0, 0)?;
-        ctx.call(2, 0, 1)?;
-        return Ok(ctx.take(0));
+        ctx.literal(1, 1)?;
+        ctx.call(2, 0, 2)?;
+        ctx.call(3, 0, 1)?;
+        if ctx.test(0, p::Test::If)? {
+            ctx.begin()?;
+            ctx.local(0, 0)?;
+            ctx.call(4, 0, 1)?;
+            return Ok(ctx.take(0));
+        }
     }
     ctx.begin()?;
-    ctx.literal(1, 0)?;
-    ctx.literal(2, 1)?;
-    ctx.literal(3, 2)?;
-    ctx.literal(4, 3)?;
-    ctx.literal(5, 4)?;
+    ctx.literal(2, 0)?;
+    ctx.literal(3, 1)?;
+    ctx.literal(4, 2)?;
+    ctx.literal(5, 3)?;
+    ctx.literal(6, 4)?;
     ctx.list(0, 5)?;
     let c0 = ctx.open(0, 2)?;
     'l0: loop {
@@ -10402,22 +10695,22 @@ fn py_for_in_open(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
     ctx.close(c0);
     ctx.begin()?;
     ctx.local(0, 0)?;
-    ctx.call(3, 0, 1)?;
+    ctx.call(5, 0, 1)?;
     ctx.bind(4, 0)?;
     ctx.begin()?;
-    ctx.literal(6, 0)?;
+    ctx.literal(7, 0)?;
     ctx.local(4, 1)?;
-    ctx.literal(7, 2)?;
+    ctx.literal(8, 2)?;
     ctx.list(0, 3)?;
-    ctx.literal(8, 1)?;
-    ctx.call(4, 0, 2)?;
+    ctx.literal(9, 1)?;
+    ctx.call(6, 0, 2)?;
     ctx.bind(5, 0)?;
     ctx.begin()?;
-    ctx.literal(9, 0)?;
-    ctx.local(5, 1)?;
-    ctx.call(5, 0, 2)?;
-    ctx.begin()?;
     ctx.literal(10, 0)?;
+    ctx.local(5, 1)?;
+    ctx.call(7, 0, 2)?;
+    ctx.begin()?;
+    ctx.literal(11, 0)?;
     Ok(ctx.take(0))
 }
 fn py_for_in_open_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_kernel_doc::PreparedNative]) -> Option<Value> {
@@ -10425,8 +10718,11 @@ fn py_for_in_open_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
     match args {
         [Value::Record(_)] => {
             if let Some(value) = (|| {
-                let v0 = heap.call(0, &[args[0]])?; let _ = v0;
-                Some(v0)
+                let v0_entry = heap.lookup(p::Table::Record, args[0], Value::Text(const { lash_kernel_doc::arena::ShortText::new("__lash_brand") }?))?; let v0 = Value::Bool(v0_entry.is_some()); let v0_found = v0_entry.unwrap_or(Value::Absent); let _ = (v0, v0_found);
+                let v1 = (natives[0].entry)(&[v0])?; let _ = v1;
+                if !matches!(v1, Value::Bool(true)) { return None; }
+                let v2 = heap.call(0, &[args[0]])?; let _ = v2;
+                Some(v2)
             })() { return Some(value); }
             None
         },
@@ -10576,11 +10872,11 @@ fn py_for_in_check_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
 
 const PY_TO_TUPLE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.to_tuple",
-    function: p::function("6456c7b5aad7bd33ca666fa1c08ce6786c389fc009bf40b632be61282792d3d9"),
+    function: p::function("b7daf6c19428dad108d595b86f02956c0bf6d921ddea58872c3c71be2f6d3a10"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
-        p::function("a3779293e724337ceef8595cb51e8c00450da006aeac56b5dbb444396298bc01"),
+        p::function("06faa35183e7d3cf9672082edef24b054a0a038c8322eba3e9cf90e709c86ef5"),
         p::function("cb471f6847d41251a688fd3703cc1461b95db6cae5f54601979e8c6947953be9"),
     ],
     literals: &[
@@ -10648,12 +10944,12 @@ fn py_to_tuple(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
 
 const PY_TO_SET_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.to_set",
-    function: p::function("6634ac2c86e34788447b30f9dbd9862f488b08abdbbbc48329c8188bcb53c6ad"),
+    function: p::function("aef478168373bf0394ed727cf32d884a9bdb795a03c6df05f5d6fd6d41772c9f"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("f08c2196c0f37efaa83365bfba1359b8b2364d45ec566eff374194c4caf5ae5f"),
-        p::function("a3779293e724337ceef8595cb51e8c00450da006aeac56b5dbb444396298bc01"),
+        p::function("06faa35183e7d3cf9672082edef24b054a0a038c8322eba3e9cf90e709c86ef5"),
     ],
     literals: &[
         p::PlanLiteral::Text("set"),
@@ -10722,12 +11018,12 @@ fn py_to_set(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Plan
 
 const PY_TO_DICT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.to_dict",
-    function: p::function("f7f4e406e72cecf8ba7a43e8bf6277b05b20995ec82bf6329684e990c2c59160"),
+    function: p::function("9d550667761756d19d2b573b654a82d7b1d0f21c073a3155816405cf833f01fa"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("1491a14dc3ac774746ab59c965f2d5155f86361639ae2ba9fef154a447bda8cc"),
-        p::function("a3779293e724337ceef8595cb51e8c00450da006aeac56b5dbb444396298bc01"),
+        p::function("06faa35183e7d3cf9672082edef24b054a0a038c8322eba3e9cf90e709c86ef5"),
         p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
         p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"),
         p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"),
@@ -10756,7 +11052,7 @@ const PY_TO_DICT_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_to_dict,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_to_dict_heap, depth: 1, writes: false, callees: &[p::function("a3779293e724337ceef8595cb51e8c00450da006aeac56b5dbb444396298bc01"), p::function("1491a14dc3ac774746ab59c965f2d5155f86361639ae2ba9fef154a447bda8cc"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_to_dict_heap, depth: 1, writes: false, callees: &[p::function("06faa35183e7d3cf9672082edef24b054a0a038c8322eba3e9cf90e709c86ef5"), p::function("1491a14dc3ac774746ab59c965f2d5155f86361639ae2ba9fef154a447bda8cc"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.to_dict`.
@@ -10839,7 +11135,7 @@ fn py_to_dict_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
 
 const PY_REPLY_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.reply",
-    function: p::function("80c16e15d72610c71deb233d25b5cf09e04451185028fa4a95843aabd600b448"),
+    function: p::function("9069f1a97a82e155fe11114065351d42262bd0be81a4a8c41f522dfbb431d5d5"),
     callees: &[],
     literals: &[
         p::PlanLiteral::Absent,
@@ -10904,13 +11200,13 @@ fn py_reply(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::PlanEx
 
 const PY_UNPACK_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.unpack",
-    function: p::function("14208cc02bdbea875cfbdee008ac99eae2bfcc5a900206593d1646ccb0add7fc"),
+    function: p::function("87d71eb34e0b8509d2b84ddc54d419c82834470b8556e073c5da1afdd32eacc8"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("2eced051afe955ac8dbeed3762acd4b8ce74b7a4ed15763ea47dfd01e5cc5f71"),
         p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
-        p::function("a3779293e724337ceef8595cb51e8c00450da006aeac56b5dbb444396298bc01"),
+        p::function("06faa35183e7d3cf9672082edef24b054a0a038c8322eba3e9cf90e709c86ef5"),
         p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"),
         p::function("8d546dfc65b783924003ce02bde5f212533c8196845edf7caff51e44aafee0f7"),
         p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
@@ -10943,7 +11239,7 @@ const PY_UNPACK_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_unpack,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), ], heap: Some(p::HeapTemplate { entry: py_unpack_heap, depth: 2, writes: false, callees: &[p::function("a3779293e724337ceef8595cb51e8c00450da006aeac56b5dbb444396298bc01"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), ], heap: Some(p::HeapTemplate { entry: py_unpack_heap, depth: 2, writes: false, callees: &[p::function("06faa35183e7d3cf9672082edef24b054a0a038c8322eba3e9cf90e709c86ef5"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.unpack`.
@@ -11088,9 +11384,9 @@ fn py_unpack_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[las
 
 const PY_SHOW_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.show",
-    function: p::function("1e6057618f081eeeac2ec7ee944d6995781f6f8a4753f40a9601fd83162bf0d0"),
+    function: p::function("60ed01b1d416227763a9be4beb0442f89dc9738062ce79e3c00109f6c9540957"),
     callees: &[
-        p::function("12150ed4be72550f7253c76f50309b124bc50a2122d8ad096ead663f87549f33"),
+        p::function("4f44999108a453c71f7c0f89f8e74f0aaf863362a69f04b6282d623836599667"),
         p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
         p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
     ],
@@ -11461,7 +11757,7 @@ fn py_number_underscores(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Va
 
 const PY_INT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.int",
-    function: p::function("8568a89787fc2b2c1b78c4c6edd9eef09122ca4c1b9be2d6320d501dcbecacdb"),
+    function: p::function("03b16fdb3ee8ec4219985ca7717dc1db0d9317c8bd5fcbcfd52e485abba86c76"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
@@ -11476,13 +11772,13 @@ const PY_INT_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"),
         p::function("153b690a6dc8f7647c5f02d822b6f0a0fc1a0cb17f340addc8dba5f67ce2b04a"),
         p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"),
-        p::function("ec2191ded0aac577faed0608b961f9f2888220eabb4d58eabd0df3a6ebea61a9"),
+        p::function("e54f3de12c265c41fcd8093a6b56ffd0b33000e40e222deb91514539b13e10fb"),
         p::function("8d546dfc65b783924003ce02bde5f212533c8196845edf7caff51e44aafee0f7"),
         p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
         p::function("388cdb23acbb3cdf47d9d1fbe85797b4bb3673626907df950cf568d868932741"),
         p::function("54c5eb6ec7c9f7e61847949d19e9ea14cb571a8a13b1c684318d9df448b56b31"),
         p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"),
-        p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"),
+        p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"),
     ],
     literals: &[
         p::PlanLiteral::Text("text"),
@@ -11557,7 +11853,7 @@ const PY_INT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_int,
-    template: Some(p::HelperTemplate { entry: Some(py_int_template), depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), p::function("388cdb23acbb3cdf47d9d1fbe85797b4bb3673626907df950cf568d868932741"), p::function("54c5eb6ec7c9f7e61847949d19e9ea14cb571a8a13b1c684318d9df448b56b31"), p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), ], heap: Some(p::HeapTemplate { entry: py_int_heap, depth: 1, writes: false, callees: &[p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"), p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"), p::function("3c7bb2bf926bb115392798ae7d964df1f210b5dcd5fe0ebfa71b26a27781e4a6"), p::function("13d958224a9be9662479d6edfefb37fa7d1df23d055ddbf01944bda8bf1becbb"), p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"), p::function("649f38eba0f5c8ce04da0c9ad8cf52c7fd5189fd9301d6ee3a7c65026bad5e81"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(py_int_template), depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), p::function("388cdb23acbb3cdf47d9d1fbe85797b4bb3673626907df950cf568d868932741"), p::function("54c5eb6ec7c9f7e61847949d19e9ea14cb571a8a13b1c684318d9df448b56b31"), p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), ], heap: Some(p::HeapTemplate { entry: py_int_heap, depth: 1, writes: false, callees: &[p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"), p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"), p::function("3c7bb2bf926bb115392798ae7d964df1f210b5dcd5fe0ebfa71b26a27781e4a6"), p::function("13d958224a9be9662479d6edfefb37fa7d1df23d055ddbf01944bda8bf1becbb"), p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"), p::function("649f38eba0f5c8ce04da0c9ad8cf52c7fd5189fd9301d6ee3a7c65026bad5e81"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.int`.
@@ -12210,18 +12506,18 @@ fn py_int_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
 
 const PY_FLOAT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.float",
-    function: p::function("42e4f719816f9ae0ff432f59d8b02b7a0bc0a59350b9a06c3fbe687699f08806"),
+    function: p::function("4deffc961f0f4c3f0590eb0d22d0cd309d093535c01943d07d449b67da06d7c0"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"),
         p::function("3c7bb2bf926bb115392798ae7d964df1f210b5dcd5fe0ebfa71b26a27781e4a6"),
         p::function("a4f9059cf50515d434894bb020d2db76b3f174dd0448a803120ab8aad54f9dab"),
-        p::function("ec2191ded0aac577faed0608b961f9f2888220eabb4d58eabd0df3a6ebea61a9"),
+        p::function("e54f3de12c265c41fcd8093a6b56ffd0b33000e40e222deb91514539b13e10fb"),
         p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"),
         p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
         p::function("a4262f9eeb1b48f06aef5450c638868fb05b4b52b7a5df3aec00257c0ef7f9ae"),
-        p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"),
+        p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"),
         p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
     ],
     literals: &[
@@ -12641,11 +12937,11 @@ fn py_float_template(args: &[Value], natives: &[lash_kernel_doc::PreparedNative]
 
 const PY_ABS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.abs",
-    function: p::function("b1e33b52ca4c86c53aa41b25c7758d360cef1bf9ab87fd0c193b1b269baa7e83"),
+    function: p::function("b2f383d465e211a9836375f7f9a727a3b92ae6b030a8b0d5e081a481344dbfa5"),
     callees: &[
         p::function("273429fdbb65bda49dca8037d10a093d406bdff05ba437eb869bd4941b1f7dee"),
         p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"),
-        p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"),
+        p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"),
         p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
         p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
         p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"),
@@ -12676,7 +12972,7 @@ const PY_ABS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_abs,
-    template: Some(p::HelperTemplate { entry: Some(py_abs_template), depth: 2, callees: &[p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), p::function("6f3ea52e78d7a223944455be342eb4b50e26e69a674b825f5c5cc7116f659248"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: py_abs_heap, depth: 2, writes: false, callees: &[p::function("273429fdbb65bda49dca8037d10a093d406bdff05ba437eb869bd4941b1f7dee"), p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"), p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), p::function("6f3ea52e78d7a223944455be342eb4b50e26e69a674b825f5c5cc7116f659248"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(py_abs_template), depth: 2, callees: &[p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), p::function("6f3ea52e78d7a223944455be342eb4b50e26e69a674b825f5c5cc7116f659248"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: py_abs_heap, depth: 2, writes: false, callees: &[p::function("273429fdbb65bda49dca8037d10a093d406bdff05ba437eb869bd4941b1f7dee"), p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"), p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), p::function("6f3ea52e78d7a223944455be342eb4b50e26e69a674b825f5c5cc7116f659248"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.abs`.
@@ -12819,11 +13115,11 @@ fn py_abs_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
 
 const PY_EXTREME_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.extreme",
-    function: p::function("2ad9e4c43da5f8cd07cca24f5cc9e78dbe25952b989f7528f5cc4fe436314f27"),
+    function: p::function("0bf0936c942d94c89126164b07c7b6e17942672c2af1c58ed5c1301d4cb2354c"),
     callees: &[
         p::function("2eced051afe955ac8dbeed3762acd4b8ce74b7a4ed15763ea47dfd01e5cc5f71"),
         p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"),
-        p::function("a3779293e724337ceef8595cb51e8c00450da006aeac56b5dbb444396298bc01"),
+        p::function("06faa35183e7d3cf9672082edef24b054a0a038c8322eba3e9cf90e709c86ef5"),
         p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
         p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"),
         p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
@@ -12966,12 +13262,12 @@ fn py_extreme(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
 
 const PY_SUM_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.sum",
-    function: p::function("5b04378d1b8001145efd58ca3e4c660e7a11f9db28bd32a6e80421f95c67f832"),
+    function: p::function("9f2f8baabdeef6c409f8f66104ee859ddaa709ad3625e30e3de81567cefc4ee8"),
     callees: &[
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"),
-        p::function("a3779293e724337ceef8595cb51e8c00450da006aeac56b5dbb444396298bc01"),
-        p::function("991c8bf00676509e4068578acdec2ab4176b10fc7b977adae1e9fb77db2afda2"),
+        p::function("06faa35183e7d3cf9672082edef24b054a0a038c8322eba3e9cf90e709c86ef5"),
+        p::function("ed414085bf1e69a6fd9d099e3e6bf23069e67cf6b190488a8c33a033f4a2012f"),
     ],
     literals: &[
         p::PlanLiteral::Int("0"),
@@ -13040,9 +13336,9 @@ fn py_sum(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
 
 const PY_SORTED_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.sorted",
-    function: p::function("56ac4e556f460c7bf39d8c231025d228650bd2fdacfa5856d4d0c35d2c9b7dd2"),
+    function: p::function("d5ad1428c22aeadc2b97e54489433a3987ff6f4c453eed9e34edceb9067610b5"),
     callees: &[
-        p::function("a3779293e724337ceef8595cb51e8c00450da006aeac56b5dbb444396298bc01"),
+        p::function("06faa35183e7d3cf9672082edef24b054a0a038c8322eba3e9cf90e709c86ef5"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"),
         p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
@@ -13349,12 +13645,12 @@ fn collection_range(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
 
 const PY_RANGE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.range",
-    function: p::function("d7c9e36ad51e265806e58d2175e6becb8182e82ad10d0ec1f357d3aaeec075d5"),
+    function: p::function("ecf535ba709b4a89ee89c82e5d17acf807164fcc74d285b9fb677f465b4dfb57"),
     callees: &[
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"),
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
-        p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"),
+        p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"),
         p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
         p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
         p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"),
@@ -13491,11 +13787,11 @@ fn py_range(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanE
 
 const PY_ENUMERATE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.enumerate",
-    function: p::function("07f338d1310160ee2c456de9a51ed2675b12b788833ce20c512a80f376c9c097"),
+    function: p::function("805b739bc71bfe099060ca64eebae3a3d69b1e57e95f52f4bcbdfbd75a0c46d1"),
     callees: &[
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"),
-        p::function("a3779293e724337ceef8595cb51e8c00450da006aeac56b5dbb444396298bc01"),
+        p::function("06faa35183e7d3cf9672082edef24b054a0a038c8322eba3e9cf90e709c86ef5"),
         p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
         p::function("7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537"),
     ],
@@ -13580,9 +13876,9 @@ fn py_enumerate(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::P
 
 const PY_ZIP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.zip",
-    function: p::function("459723b3c0856cab736b1285399ddfd1c5c739dc08c2c1d81891d1ca02287688"),
+    function: p::function("1f4a5edb09e03af8353487dd373def11e66ba0d3d24bec33cdb17bff7b4f7fe4"),
     callees: &[
-        p::function("a3779293e724337ceef8595cb51e8c00450da006aeac56b5dbb444396298bc01"),
+        p::function("06faa35183e7d3cf9672082edef24b054a0a038c8322eba3e9cf90e709c86ef5"),
         p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"),
@@ -13739,9 +14035,9 @@ fn py_zip(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
 
 const PY_REVERSED_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.reversed",
-    function: p::function("9bf17adf3ba65d63f32c33d6ff9f5c7fa21054d7276388c44471e5cae23b05cb"),
+    function: p::function("338486a3135806676d02c4eac0b700e2831df77374cbb9b692fb035913da70e1"),
     callees: &[
-        p::function("a3779293e724337ceef8595cb51e8c00450da006aeac56b5dbb444396298bc01"),
+        p::function("06faa35183e7d3cf9672082edef24b054a0a038c8322eba3e9cf90e709c86ef5"),
         p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
         p::function("59b9d484a581bca4a1909189b23b1f4363670e1af545c6b28c6110f6ee95b01a"),
         p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"),
@@ -13813,9 +14109,9 @@ fn py_reversed(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pl
 
 const PY_ANY_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.any",
-    function: p::function("f0db12347dd844a6466dfa458a2ab20be9057c00991dec7c189d2b219b79f119"),
+    function: p::function("9d6530ef69ed52c98f07cdd764723ccf2ff45a35e4d17632981ca5a225b97dbd"),
     callees: &[
-        p::function("a3779293e724337ceef8595cb51e8c00450da006aeac56b5dbb444396298bc01"),
+        p::function("06faa35183e7d3cf9672082edef24b054a0a038c8322eba3e9cf90e709c86ef5"),
         p::function("4a8d4dd005aa80ffe554c521cf267f982e6ac15ba554f54aa59599a452372fce"),
     ],
     literals: &[
@@ -13877,9 +14173,9 @@ fn py_any(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
 
 const PY_ALL_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.all",
-    function: p::function("95f02053d8bff2a9e13f28197dc90d4b30d1c64f979a1598425e1bc2824f890d"),
+    function: p::function("c65d63e53210fbadc93a19c5ef6e024d95fff2d1ea620c41efb80850b6775968"),
     callees: &[
-        p::function("a3779293e724337ceef8595cb51e8c00450da006aeac56b5dbb444396298bc01"),
+        p::function("06faa35183e7d3cf9672082edef24b054a0a038c8322eba3e9cf90e709c86ef5"),
         p::function("4a8d4dd005aa80ffe554c521cf267f982e6ac15ba554f54aa59599a452372fce"),
         p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"),
     ],
@@ -13943,11 +14239,11 @@ fn py_all(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
 
 const PY_ROUND_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.round",
-    function: p::function("68249126c91004436031235eaeb6f16a9c21be2705b4db6c8675adc5fbfd094f"),
+    function: p::function("cf08681586c5f664abf8f619d9c83bd8b95c04c9572a269b09a4443f772f617a"),
     callees: &[
         p::function("273429fdbb65bda49dca8037d10a093d406bdff05ba437eb869bd4941b1f7dee"),
         p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"),
-        p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"),
+        p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"),
         p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
         p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
@@ -14023,7 +14319,7 @@ const PY_ROUND_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_round,
-    template: Some(p::HelperTemplate { entry: Some(py_round_template), depth: 2, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), p::function("388cdb23acbb3cdf47d9d1fbe85797b4bb3673626907df950cf568d868932741"), p::function("cd91b81988a7145858c9559d959114c267071a60f10fed10a8e5a2e267c2a456"), p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"), p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), p::function("6f3ea52e78d7a223944455be342eb4b50e26e69a674b825f5c5cc7116f659248"), p::function("627d3fa925484d12b13ecfa198a1a07f3d88fb6f75df2c907ff4b9373105ead9"), p::function("8d546dfc65b783924003ce02bde5f212533c8196845edf7caff51e44aafee0f7"), p::function("16c930374dc518862f2c4f68a88248760ad0cddb3b96742f004d21aa74a89857"), p::function("a4262f9eeb1b48f06aef5450c638868fb05b4b52b7a5df3aec00257c0ef7f9ae"), p::function("54c5eb6ec7c9f7e61847949d19e9ea14cb571a8a13b1c684318d9df448b56b31"), p::function("e6cd29e23878b70c30d6243e68ec3cd427006b152f6d63b42d7fc9dee624c9eb"), p::function("29af527b6d9c66e48a3f2f3d6c0fd85b2a209aa9c6b3b640b9970c53a7046c9e"), p::function("7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: py_round_heap, depth: 2, writes: false, callees: &[p::function("273429fdbb65bda49dca8037d10a093d406bdff05ba437eb869bd4941b1f7dee"), p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"), p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("388cdb23acbb3cdf47d9d1fbe85797b4bb3673626907df950cf568d868932741"), p::function("cd91b81988a7145858c9559d959114c267071a60f10fed10a8e5a2e267c2a456"), p::function("94de451fa1503a5dc37f23ad49340a6f47518dfd9eb860628fb1951641569bba"), p::function("a4262f9eeb1b48f06aef5450c638868fb05b4b52b7a5df3aec00257c0ef7f9ae"), p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), p::function("132be2ceea94e4d73f95c16acc49e9c3bfa57b06ac99d25f2121c4223c8356b1"), p::function("54c5eb6ec7c9f7e61847949d19e9ea14cb571a8a13b1c684318d9df448b56b31"), p::function("e6cd29e23878b70c30d6243e68ec3cd427006b152f6d63b42d7fc9dee624c9eb"), p::function("29af527b6d9c66e48a3f2f3d6c0fd85b2a209aa9c6b3b640b9970c53a7046c9e"), p::function("16c930374dc518862f2c4f68a88248760ad0cddb3b96742f004d21aa74a89857"), p::function("7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537"), p::function("6f3ea52e78d7a223944455be342eb4b50e26e69a674b825f5c5cc7116f659248"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("8d546dfc65b783924003ce02bde5f212533c8196845edf7caff51e44aafee0f7"), p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"), p::function("627d3fa925484d12b13ecfa198a1a07f3d88fb6f75df2c907ff4b9373105ead9"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(py_round_template), depth: 2, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), p::function("388cdb23acbb3cdf47d9d1fbe85797b4bb3673626907df950cf568d868932741"), p::function("cd91b81988a7145858c9559d959114c267071a60f10fed10a8e5a2e267c2a456"), p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"), p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), p::function("6f3ea52e78d7a223944455be342eb4b50e26e69a674b825f5c5cc7116f659248"), p::function("627d3fa925484d12b13ecfa198a1a07f3d88fb6f75df2c907ff4b9373105ead9"), p::function("8d546dfc65b783924003ce02bde5f212533c8196845edf7caff51e44aafee0f7"), p::function("16c930374dc518862f2c4f68a88248760ad0cddb3b96742f004d21aa74a89857"), p::function("a4262f9eeb1b48f06aef5450c638868fb05b4b52b7a5df3aec00257c0ef7f9ae"), p::function("54c5eb6ec7c9f7e61847949d19e9ea14cb571a8a13b1c684318d9df448b56b31"), p::function("e6cd29e23878b70c30d6243e68ec3cd427006b152f6d63b42d7fc9dee624c9eb"), p::function("29af527b6d9c66e48a3f2f3d6c0fd85b2a209aa9c6b3b640b9970c53a7046c9e"), p::function("7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: py_round_heap, depth: 2, writes: false, callees: &[p::function("273429fdbb65bda49dca8037d10a093d406bdff05ba437eb869bd4941b1f7dee"), p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"), p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("388cdb23acbb3cdf47d9d1fbe85797b4bb3673626907df950cf568d868932741"), p::function("cd91b81988a7145858c9559d959114c267071a60f10fed10a8e5a2e267c2a456"), p::function("94de451fa1503a5dc37f23ad49340a6f47518dfd9eb860628fb1951641569bba"), p::function("a4262f9eeb1b48f06aef5450c638868fb05b4b52b7a5df3aec00257c0ef7f9ae"), p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), p::function("132be2ceea94e4d73f95c16acc49e9c3bfa57b06ac99d25f2121c4223c8356b1"), p::function("54c5eb6ec7c9f7e61847949d19e9ea14cb571a8a13b1c684318d9df448b56b31"), p::function("e6cd29e23878b70c30d6243e68ec3cd427006b152f6d63b42d7fc9dee624c9eb"), p::function("29af527b6d9c66e48a3f2f3d6c0fd85b2a209aa9c6b3b640b9970c53a7046c9e"), p::function("16c930374dc518862f2c4f68a88248760ad0cddb3b96742f004d21aa74a89857"), p::function("7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537"), p::function("6f3ea52e78d7a223944455be342eb4b50e26e69a674b825f5c5cc7116f659248"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("8d546dfc65b783924003ce02bde5f212533c8196845edf7caff51e44aafee0f7"), p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"), p::function("627d3fa925484d12b13ecfa198a1a07f3d88fb6f75df2c907ff4b9373105ead9"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.round`.
@@ -14445,9 +14741,9 @@ fn py_round_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash
 
 const PY_ISINSTANCE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.isinstance",
-    function: p::function("95d0863c6d76094de322cb1b60092039326394a657c925ea5c7026f4a0582d5d"),
+    function: p::function("64cb3086aa591975f98c2832f637053ec263ec38a4897381b4010fd5e72a455a"),
     callees: &[
-        p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"),
+        p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"),
         p::function("865719b4040dc09e2521e6be6ed41d8429fd68789553b5c55be60f766254ff11"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
     ],
@@ -14507,12 +14803,12 @@ fn py_isinstance(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
 
 const PY_ORD_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.ord",
-    function: p::function("344b3039b8a107d6ecf88e8c071f674f99abf8bdbf310e4329169cda3e45c19a"),
+    function: p::function("7fe8e5681f69ce63b96dc87c841927040f30107c2929b8d56bf2c0449136b275"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"),
-        p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"),
+        p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"),
         p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
         p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
         p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"),
@@ -14544,7 +14840,7 @@ const PY_ORD_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_ord,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: py_ord_heap, depth: 1, writes: false, callees: &[p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"), p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"), p::function("f8e1c771241bcf79d4e804e35177d17075d8bafa331fd4d14446f4aa4538c2dc"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: py_ord_heap, depth: 1, writes: false, callees: &[p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"), p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"), p::function("f8e1c771241bcf79d4e804e35177d17075d8bafa331fd4d14446f4aa4538c2dc"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.ord`.
@@ -14631,12 +14927,12 @@ fn py_ord_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[lash_k
 
 const PY_CHR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.chr",
-    function: p::function("83a8a82ba69536eabc8d3d2241b8045e86d1c50301aaae9403d8adbfd2a19d91"),
+    function: p::function("7c79871022beb4102fd321ab86815c4e3e4d6c1247e1f8e1fef5db6d274966fd"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"),
-        p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"),
+        p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"),
         p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
         p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
         p::function("15ee852f242cc41febea71421a0af456926ad0f91429c4c96f1217c5b8732e43"),
@@ -14756,10 +15052,10 @@ fn py_chr(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::PlanExi
 
 const PY_DIVMOD_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.divmod",
-    function: p::function("66548d74ca0193d38e789ef0a78d37c70e9084b1106ece8d574af8c50604383a"),
+    function: p::function("db4eaca26f3815cdbd2c37151ca3b0743c5e0e8e314629888cfe2c28c69d361e"),
     callees: &[
-        p::function("aad23f4373c3d0a5d9551e259a52ff25e577b7e4a46c76167bf411d8303b684e"),
-        p::function("3510ce909806d55b531378982b80f19e44f947511695a3b588f72bfb5b9514a0"),
+        p::function("7245e6074a0c0940927107d60fa5b46929e85fd865ed797ff83712d954d90341"),
+        p::function("e6baa6253601ccdc1e8ea6fe390db971e50c70e5aceb2d35fc0e376c820a06a1"),
     ],
     literals: &[],
     fields: &[],
@@ -14775,7 +15071,7 @@ const PY_DIVMOD_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_divmod,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("e6cd29e23878b70c30d6243e68ec3cd427006b152f6d63b42d7fc9dee624c9eb"), p::function("29af527b6d9c66e48a3f2f3d6c0fd85b2a209aa9c6b3b640b9970c53a7046c9e"), ], heap: Some(p::HeapTemplate { entry: py_divmod_heap, depth: 2, writes: false, callees: &[p::function("aad23f4373c3d0a5d9551e259a52ff25e577b7e4a46c76167bf411d8303b684e"), p::function("3510ce909806d55b531378982b80f19e44f947511695a3b588f72bfb5b9514a0"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("e6cd29e23878b70c30d6243e68ec3cd427006b152f6d63b42d7fc9dee624c9eb"), p::function("29af527b6d9c66e48a3f2f3d6c0fd85b2a209aa9c6b3b640b9970c53a7046c9e"), ], heap: Some(p::HeapTemplate { entry: py_divmod_heap, depth: 2, writes: false, callees: &[p::function("7245e6074a0c0940927107d60fa5b46929e85fd865ed797ff83712d954d90341"), p::function("e6baa6253601ccdc1e8ea6fe390db971e50c70e5aceb2d35fc0e376c820a06a1"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.divmod`.
@@ -14818,9 +15114,9 @@ fn py_divmod_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[las
 
 const PY_NO_ATTRIBUTE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.no_attribute",
-    function: p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+    function: p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     callees: &[
-        p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"),
+        p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"),
         p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
         p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
     ],
@@ -14876,11 +15172,11 @@ fn py_no_attribute(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
 
 const PY_TEXT_OF_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.text_of",
-    function: p::function("f8a0d25ae1ce452e97f9b2e7835f97503cca822cdfb45a9da6497eb8c1afba55"),
+    function: p::function("de94bd34e6de6022e201ab8f62f0a4a30fe21db52bc77e757d7029e0300b855c"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
-        p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"),
+        p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"),
         p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
         p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
     ],
@@ -14903,7 +15199,7 @@ const PY_TEXT_OF_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_text_of,
-    template: Some(p::HelperTemplate { entry: Some(py_text_of_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_text_of_heap, depth: 1, writes: false, callees: &[p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(py_text_of_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_text_of_heap, depth: 1, writes: false, callees: &[p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.text_of`.
@@ -14967,12 +15263,12 @@ fn py_text_of_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[la
 
 const PY_METHOD_APPEND_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.append",
-    function: p::function("603c88894aabeb7aa91aa3ca6cfca97449a63d5ee4abaa16b6fd30e76992d2b6"),
+    function: p::function("584dca9bd91ebdc350171aa949edd11b36e26a31c4a85923412f887cdd68c8fc"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("list"),
@@ -15039,13 +15335,13 @@ fn py_method_append_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
 
 const PY_METHOD_EXTEND_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.extend",
-    function: p::function("d57d42356130a79d0b6a97f0cb5e445313b4c1066a09841ae1d7fb63d271fd99"),
+    function: p::function("40a305f052b320d86261e837ae29ea8d85adfa78f00a0f84a71832f02a71ad2a"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
-        p::function("a3779293e724337ceef8595cb51e8c00450da006aeac56b5dbb444396298bc01"),
+        p::function("06faa35183e7d3cf9672082edef24b054a0a038c8322eba3e9cf90e709c86ef5"),
         p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("list"),
@@ -15247,19 +15543,19 @@ fn list_insert_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &[l
 
 const PY_METHOD_INSERT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.insert",
-    function: p::function("a79f15313f2b8e52a17869927b7f38cf587bb9e5be42804e434962181b6d02d5"),
+    function: p::function("18e1f84cdcb34bf06b04112e1b012ca32700619d5105c357cc300c9969cbc776"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"),
-        p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"),
+        p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"),
         p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
         p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
         p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
         p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"),
         p::function("7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537"),
         p::function("2dd58e4bfe727e14de81d5a6ed60c9fa48a2df2d465caaa82558e7a1240786df"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("list"),
@@ -15384,13 +15680,13 @@ fn py_method_insert(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
 
 const PY_METHOD_POP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.pop",
-    function: p::function("054debe5c9fc7cb4486e5ba8c978d5b53aabd943b8091804e9a6b6765b0024e7"),
+    function: p::function("bad5b3269404dbe872b0aa9d189ab86152859a5e49b0521212e59924c0d2d2cb"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"),
         p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
-        p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"),
+        p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"),
         p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
         p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
         p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"),
@@ -15399,9 +15695,9 @@ const PY_METHOD_POP_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537"),
         p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"),
         p::function("5a66ffea6554dc3cceb26c77fe239e0ab2ecd7dbbb0654104ab865df84ec75d3"),
-        p::function("ec2191ded0aac577faed0608b961f9f2888220eabb4d58eabd0df3a6ebea61a9"),
+        p::function("e54f3de12c265c41fcd8093a6b56ffd0b33000e40e222deb91514539b13e10fb"),
         p::function("94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("list"),
@@ -15457,7 +15753,7 @@ const PY_METHOD_POP_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_method_pop,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("59b9d484a581bca4a1909189b23b1f4363670e1af545c6b28c6110f6ee95b01a"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), p::function("7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537"), p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"), ], heap: Some(p::HeapTemplate { entry: py_method_pop_heap, depth: 1, writes: false, callees: &[p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"), p::function("ec2191ded0aac577faed0608b961f9f2888220eabb4d58eabd0df3a6ebea61a9"), p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"), p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("59b9d484a581bca4a1909189b23b1f4363670e1af545c6b28c6110f6ee95b01a"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), p::function("7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537"), p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"), ], heap: Some(p::HeapTemplate { entry: py_method_pop_heap, depth: 1, writes: false, callees: &[p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"), p::function("e54f3de12c265c41fcd8093a6b56ffd0b33000e40e222deb91514539b13e10fb"), p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"), p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.pop`.
@@ -15752,7 +16048,7 @@ fn py_method_pop_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
 
 const PY_METHOD_REMOVE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.remove",
-    function: p::function("a780375c0d319ce592c51adf46634b859b1246ce6c2f87e4213d6add630edbf3"),
+    function: p::function("05ffb1b7470aac1eddb2a871448048d83efdfc58a932d6a9568415b41a1885f7"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
@@ -15760,9 +16056,9 @@ const PY_METHOD_REMOVE_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"),
         p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
         p::function("dc285cf860c2224ebf2867d6648dddd6d2e66ba2397f07a4285c54327f1076df"),
-        p::function("ec2191ded0aac577faed0608b961f9f2888220eabb4d58eabd0df3a6ebea61a9"),
+        p::function("e54f3de12c265c41fcd8093a6b56ffd0b33000e40e222deb91514539b13e10fb"),
         p::function("94cb9716bc8ce4815dfcc5451d7f6d00901c7ed7aeba0d131da241a5f750d064"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("list"),
@@ -15904,19 +16200,19 @@ fn py_method_remove(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p
 
 const PY_METHOD_INDEX_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.index",
-    function: p::function("361dfe0857f8d055f0d6609b7f82ede259a904bb3c8d7cbe4e713cd167a45fe6"),
+    function: p::function("64b54ac6d141caf13e8e9eeba7374620954b0c0936c2d41b80ffa3a680c8d9a3"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("634bc667bf316ff957bab50f756a0185d5381a757233b262533075aba24a6591"),
         p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"),
-        p::function("ec2191ded0aac577faed0608b961f9f2888220eabb4d58eabd0df3a6ebea61a9"),
+        p::function("e54f3de12c265c41fcd8093a6b56ffd0b33000e40e222deb91514539b13e10fb"),
         p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"),
         p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
         p::function("42f45c5cfcd2c36ab85260f5568daf0a063cbf4f98dafb95fd4728b81a53ba19"),
-        p::function("f8a0d25ae1ce452e97f9b2e7835f97503cca822cdfb45a9da6497eb8c1afba55"),
+        p::function("de94bd34e6de6022e201ab8f62f0a4a30fe21db52bc77e757d7029e0300b855c"),
         p::function("d6a03b25b47babadb575f8207e993332ab6a8f7b53e8dd5257e8b45c6ad17451"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("list"),
@@ -15956,7 +16252,7 @@ const PY_METHOD_INDEX_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_method_index,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), ], heap: Some(p::HeapTemplate { entry: py_method_index_heap, depth: 2, writes: false, callees: &[p::function("f8a0d25ae1ce452e97f9b2e7835f97503cca822cdfb45a9da6497eb8c1afba55"), p::function("d6a03b25b47babadb575f8207e993332ab6a8f7b53e8dd5257e8b45c6ad17451"), p::function("634bc667bf316ff957bab50f756a0185d5381a757233b262533075aba24a6591"), p::function("ec2191ded0aac577faed0608b961f9f2888220eabb4d58eabd0df3a6ebea61a9"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"), ], heap: Some(p::HeapTemplate { entry: py_method_index_heap, depth: 2, writes: false, callees: &[p::function("de94bd34e6de6022e201ab8f62f0a4a30fe21db52bc77e757d7029e0300b855c"), p::function("d6a03b25b47babadb575f8207e993332ab6a8f7b53e8dd5257e8b45c6ad17451"), p::function("634bc667bf316ff957bab50f756a0185d5381a757233b262533075aba24a6591"), p::function("e54f3de12c265c41fcd8093a6b56ffd0b33000e40e222deb91514539b13e10fb"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.index`.
@@ -16131,11 +16427,11 @@ fn py_method_index_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
 
 const PY_METHOD_COUNT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.count",
-    function: p::function("867f1cda2de2e2b42f6c261c841bf5a5dec618724120904db0fcee8e4d076fef"),
+    function: p::function("9cd5fb7842680a6ca561241de5f0fbce131284e88317ce25a737f241e2c64d2e"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
-        p::function("f8a0d25ae1ce452e97f9b2e7835f97503cca822cdfb45a9da6497eb8c1afba55"),
+        p::function("de94bd34e6de6022e201ab8f62f0a4a30fe21db52bc77e757d7029e0300b855c"),
         p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"),
         p::function("7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537"),
         p::function("acfd50807c41e73f1bb1c4811459ba182f363914657804e6c7b4583a08241c0a"),
@@ -16143,7 +16439,7 @@ const PY_METHOD_COUNT_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("59b9d484a581bca4a1909189b23b1f4363670e1af545c6b28c6110f6ee95b01a"),
         p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"),
         p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Int("0"),
@@ -16272,14 +16568,14 @@ fn py_method_count(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
 
 const PY_METHOD_SORT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.sort",
-    function: p::function("c8ff09ce120fbdda4967219d2f5caa418f673004e5ed937846855b2465a53bb0"),
+    function: p::function("3223a9bd5b6d48cc6da236d9229bb696a67a47f8165975ed8ac04faba15642b2"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
-        p::function("56ac4e556f460c7bf39d8c231025d228650bd2fdacfa5856d4d0c35d2c9b7dd2"),
+        p::function("d5ad1428c22aeadc2b97e54489433a3987ff6f4c453eed9e34edceb9067610b5"),
         p::function("efd75614e8825ba13ed2192eb9a0ccbabc76c56ba3b5d29e352d934cec02af48"),
         p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("list"),
@@ -16401,7 +16697,7 @@ fn py_method_sort(ctx: &mut dyn p::PlanContext, entry: u32) -> Result<Value, p::
 
 const PY_METHOD_REVERSE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.reverse",
-    function: p::function("a87a221806e581f3306c833885d5107af4ff8ff07476809bb19feffeb72f0ff1"),
+    function: p::function("829fb7d0153f1ddb65b1d53d0abdf19f80bbbfc4f966b4facfb655c5a0b3b94b"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
@@ -16410,7 +16706,7 @@ const PY_METHOD_REVERSE_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("59b9d484a581bca4a1909189b23b1f4363670e1af545c6b28c6110f6ee95b01a"),
         p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"),
         p::function("7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("list"),
@@ -16497,14 +16793,14 @@ fn py_method_reverse(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
 
 const PY_METHOD_COPY_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.copy",
-    function: p::function("6641a459d7d7ffbc8202e9e07da7b334663ccfe6ee257254b95f2d5aa2e9d844"),
+    function: p::function("61ff8826a6b1932575d3fa9719cf1dca70178ddc5005bf0522d3774bac996a33"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("9582e9497de80ffe91797c946b2d48fc9e1621735e02d33bf53c8c828a41d63a"),
         p::function("1491a14dc3ac774746ab59c965f2d5155f86361639ae2ba9fef154a447bda8cc"),
         p::function("f08c2196c0f37efaa83365bfba1359b8b2364d45ec566eff374194c4caf5ae5f"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("list"),
@@ -16755,14 +17051,14 @@ fn list_clear(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::Pla
 
 const PY_METHOD_CLEAR_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.clear",
-    function: p::function("bf7c8f879faf7324549ce05faf303eea936db8010c4de3060ab81aa1f388b78f"),
+    function: p::function("e0e9417c2ef2212474d823a4b6385559bd34612973ea739246728e06a7661baf"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("efd75614e8825ba13ed2192eb9a0ccbabc76c56ba3b5d29e352d934cec02af48"),
         p::function("51aec9def67e7dc51d8c93a505490008aa58dde2ffa7cb3dc8a494e5fc914c16"),
         p::function("535e57463d3c9b457a3fe2bfd90993342655a951a14e2629d5e9a3e95c1e1523"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("list"),
@@ -16839,13 +17135,13 @@ fn py_method_clear(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
 
 const PY_METHOD_GET_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.get",
-    function: p::function("a8664b8960f73d854a5549fa20ccaf2f94462e41382789b9a6f5aa8c008e5f52"),
+    function: p::function("5ccb00498d56087b790dd1d59c0edd264a8e8b26925b2f16d8b3cd93bef0b08a"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("5a66ffea6554dc3cceb26c77fe239e0ab2ecd7dbbb0654104ab865df84ec75d3"),
         p::function("c5ee063554dd9a59526868c163b1a3282db896327967a522d00fcde29c91c25c"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("map"),
@@ -17159,13 +17455,13 @@ fn py_method_get_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: &
 
 const PY_METHOD_KEYS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.keys",
-    function: p::function("c5d80cee41d11d6dc922e9d2303619ef19810e834c022a30fbe59f72b05f8d15"),
+    function: p::function("6da63805bab55871f9a2e4fc65231c8c3e4685a1f2727d9a5d919082489fef30"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("c0ca090ea752577550298c1dc3ea7697df5676465337d814ffe3b4c265b5dc16"),
         p::function("3048431a57b64b680843cd96770d99536bab12b83c3c7788856614e555b4985c"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("map"),
@@ -17242,12 +17538,12 @@ fn py_method_keys_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
 
 const PY_METHOD_VALUES_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.values",
-    function: p::function("c60fc5f7899b1bdc9f75c9f6569f16a36e9167f2441960dc84681fb59fc8d5d5"),
+    function: p::function("7efccd5b54d477367d3618c7a3eb772c45e77e19fd2b6fe9b0a6f887d33062f8"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("52849f963c318359e81934c83cd35ce4364ec742a159a8e99be42dff2351d980"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("map"),
@@ -17305,12 +17601,12 @@ fn py_method_values_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
 
 const PY_METHOD_ITEMS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.items",
-    function: p::function("053e9a33177027aa60168c9f5a4087638094665c206c90a93133bbd93beed34c"),
+    function: p::function("e5cd4c642150298f5c70cf3477fec30b978b5a9dda3ed1babc117ec72124643f"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("bce67885fcbad21636b74334937a7e88d299d7714f2b8e656803e78060f8b134"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("map"),
@@ -17368,11 +17664,11 @@ fn py_method_items_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
 
 const PY_FOR_IN_KEYS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.for_in.keys",
-    function: p::function("5afac1366657e468443855fc83e928ffac3f1904f33006a5b1486f4fe72d0119"),
+    function: p::function("25251bef99f3d86b40eb613dd904ab92cec0f24bebe67ced5fdd792258b32b38"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
-        p::function("c5d80cee41d11d6dc922e9d2303619ef19810e834c022a30fbe59f72b05f8d15"),
+        p::function("6da63805bab55871f9a2e4fc65231c8c3e4685a1f2727d9a5d919082489fef30"),
     ],
     literals: &[
         p::PlanLiteral::Text("map"),
@@ -17388,7 +17684,7 @@ const PY_FOR_IN_KEYS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_for_in_keys,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_for_in_keys_heap, depth: 2, writes: false, callees: &[p::function("c5d80cee41d11d6dc922e9d2303619ef19810e834c022a30fbe59f72b05f8d15"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_for_in_keys_heap, depth: 2, writes: false, callees: &[p::function("6da63805bab55871f9a2e4fc65231c8c3e4685a1f2727d9a5d919082489fef30"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.for_in.keys`.
@@ -17435,11 +17731,11 @@ fn py_for_in_keys_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
 
 const PY_FOR_IN_VALUES_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.for_in.values",
-    function: p::function("4f8cd61a06bd01f19cf23030fce8ce9cb9d1784deb5ab5d8fbe7426c75a4c1e3"),
+    function: p::function("b8daf2055cb7dcab538d9dadd75796e943a19cd458f9390e71e59c5e8e0d0622"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
-        p::function("c60fc5f7899b1bdc9f75c9f6569f16a36e9167f2441960dc84681fb59fc8d5d5"),
+        p::function("7efccd5b54d477367d3618c7a3eb772c45e77e19fd2b6fe9b0a6f887d33062f8"),
     ],
     literals: &[
         p::PlanLiteral::Text("map"),
@@ -17455,7 +17751,7 @@ const PY_FOR_IN_VALUES_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_for_in_values,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_for_in_values_heap, depth: 2, writes: false, callees: &[p::function("c60fc5f7899b1bdc9f75c9f6569f16a36e9167f2441960dc84681fb59fc8d5d5"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_for_in_values_heap, depth: 2, writes: false, callees: &[p::function("7efccd5b54d477367d3618c7a3eb772c45e77e19fd2b6fe9b0a6f887d33062f8"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.for_in.values`.
@@ -17502,11 +17798,11 @@ fn py_for_in_values_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
 
 const PY_FOR_IN_ITEMS_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.for_in.items",
-    function: p::function("e6aba369954931a9ccb3854aa4a2333db88238439eda6c4a07b991c3b5a59c36"),
+    function: p::function("595c63ae8df7b344c5d63b6fce2f9a1a62d470b489b0be348b48d99280124548"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
-        p::function("053e9a33177027aa60168c9f5a4087638094665c206c90a93133bbd93beed34c"),
+        p::function("e5cd4c642150298f5c70cf3477fec30b978b5a9dda3ed1babc117ec72124643f"),
     ],
     literals: &[
         p::PlanLiteral::Text("map"),
@@ -17522,7 +17818,7 @@ const PY_FOR_IN_ITEMS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_for_in_items,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_for_in_items_heap, depth: 2, writes: false, callees: &[p::function("053e9a33177027aa60168c9f5a4087638094665c206c90a93133bbd93beed34c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_for_in_items_heap, depth: 2, writes: false, callees: &[p::function("e5cd4c642150298f5c70cf3477fec30b978b5a9dda3ed1babc117ec72124643f"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.for_in.items`.
@@ -17724,13 +18020,13 @@ fn py_for_in_item_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives: 
 
 const PY_METHOD_SETDEFAULT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.setdefault",
-    function: p::function("7e0ad63c891bbc07246325eee2c0b6fb9a1b6978d2e45b0fb62f715017df83c8"),
+    function: p::function("4f49676159687fae8d98fc0c9fffb7a46b6c7aef1597ba466d0ef46d0229d75c"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("5a66ffea6554dc3cceb26c77fe239e0ab2ecd7dbbb0654104ab865df84ec75d3"),
         p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("map"),
@@ -17932,13 +18228,13 @@ fn py_method_setdefault_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nat
 
 const PY_METHOD_UPDATE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.update",
-    function: p::function("72f17c2ff3a426d3884926670a62e82c56c3b0bbff9c30bf5039b8b91a8c95f1"),
+    function: p::function("fc924cfb3b19a5365a79127a88b2447b0d1869b5802e3c9d6b7caec16a6d6806"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
-        p::function("f7f4e406e72cecf8ba7a43e8bf6277b05b20995ec82bf6329684e990c2c59160"),
-        p::function("a3779293e724337ceef8595cb51e8c00450da006aeac56b5dbb444396298bc01"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("9d550667761756d19d2b573b654a82d7b1d0f21c073a3155816405cf833f01fa"),
+        p::function("06faa35183e7d3cf9672082edef24b054a0a038c8322eba3e9cf90e709c86ef5"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("map"),
@@ -18051,11 +18347,11 @@ fn py_method_update(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, 
 
 const PY_METHOD_ADD_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.add",
-    function: p::function("6a8cfa99b45f4fa10d6a8877e645657db202854c4a3672423886c3bca4041e7b"),
+    function: p::function("7027aa75382ba0d490da7b59a1c67b4eb88abf403e49412b221a388f2352610a"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("set"),
@@ -18108,11 +18404,11 @@ fn py_method_add(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p::
 
 const PY_METHOD_DISCARD_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.discard",
-    function: p::function("234e836f4561ff7250492d795256488e047f3dd861b2bc61a8bd00cf368d8bd8"),
+    function: p::function("aa22613b96036d102717c982cb85e6eeeb6be4f23f9e7d95936ad3bbe981500f"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("set"),
@@ -18162,13 +18458,13 @@ fn py_method_discard(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value,
 
 const PY_METHOD_UNION_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.union",
-    function: p::function("349fc78ee3887d155b7016f07019a5be528e8d77e677d7a368adf3ad9d6ba795"),
+    function: p::function("66b2616d1b3b3ddd3ce132b3dcffb216b916a1949ce1a801916b34f434cdf296"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
-        p::function("6634ac2c86e34788447b30f9dbd9862f488b08abdbbbc48329c8188bcb53c6ad"),
-        p::function("c73ea9a4e884b851a3edc8ccaa61ef1e5fafefd7fffaf4c52295f78c66cdca56"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("aef478168373bf0394ed727cf32d884a9bdb795a03c6df05f5d6fd6d41772c9f"),
+        p::function("91fbb55e9e1b5c8953b4e978d0cc367d67d82cd1548d1709065fd1403931c8a7"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("set"),
@@ -18227,13 +18523,13 @@ fn py_method_union(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
 
 const PY_METHOD_INTERSECTION_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.intersection",
-    function: p::function("9d396d5cc484a9dd7dc1bb7d075bf6d35afae724db58e18fe77a34ba7a553305"),
+    function: p::function("3f1cccde267748b7553e835a773a6b7f8650f141196c3bd1e374ff57fe15babc"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
-        p::function("6634ac2c86e34788447b30f9dbd9862f488b08abdbbbc48329c8188bcb53c6ad"),
-        p::function("c73ea9a4e884b851a3edc8ccaa61ef1e5fafefd7fffaf4c52295f78c66cdca56"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("aef478168373bf0394ed727cf32d884a9bdb795a03c6df05f5d6fd6d41772c9f"),
+        p::function("91fbb55e9e1b5c8953b4e978d0cc367d67d82cd1548d1709065fd1403931c8a7"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("set"),
@@ -18292,14 +18588,14 @@ fn py_method_intersection(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<V
 
 const PY_METHOD_DIFFERENCE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.difference",
-    function: p::function("02883f7a5bc3bacf9c88f250f066c7f85d1eeee84b9bdaf7497ba05cda574dd9"),
+    function: p::function("8e6f6753ddcbc95f3397fcd1bf62254c8127b498fd663792d41fcc2ce948de1d"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
-        p::function("6634ac2c86e34788447b30f9dbd9862f488b08abdbbbc48329c8188bcb53c6ad"),
+        p::function("aef478168373bf0394ed727cf32d884a9bdb795a03c6df05f5d6fd6d41772c9f"),
         p::function("dc285cf860c2224ebf2867d6648dddd6d2e66ba2397f07a4285c54327f1076df"),
         p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("set"),
@@ -18382,17 +18678,17 @@ fn py_method_difference(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Val
 
 const PY_METHOD_JOIN_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.join",
-    function: p::function("e8c991ff7167a79e574c63182086f8b1d38f8ccdca3c7472a0c335c878e1f951"),
+    function: p::function("b3c895c93dc1de0eec5a800e3927158fc15fd137c0ebbd761d79551583a458d3"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
-        p::function("a3779293e724337ceef8595cb51e8c00450da006aeac56b5dbb444396298bc01"),
+        p::function("06faa35183e7d3cf9672082edef24b054a0a038c8322eba3e9cf90e709c86ef5"),
         p::function("54f8304801197ccb4b478fb0802f5a7b75e255adc9775e8da7c02d0b3114f46f"),
-        p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"),
+        p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"),
         p::function("8d546dfc65b783924003ce02bde5f212533c8196845edf7caff51e44aafee0f7"),
         p::function("79aad37e7cebc78b176b7458ed56e625112872a7faf900143e331db02c601a0f"),
         p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("text"),
@@ -18490,7 +18786,7 @@ fn py_method_join(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p:
 
 const PY_METHOD_SPLIT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.split",
-    function: p::function("5886b4051c3c981decd1d3199ec8fb1df8a78f62825422e11d04564dbfe0096e"),
+    function: p::function("137812e25d81cafb3c8f88f9f37468eeae3092cc77c27c7371f10dc93e906fec"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
@@ -18500,10 +18796,10 @@ const PY_METHOD_SPLIT_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("70d92c79f9c69cfe8cda0752cf30f5f0db0499a1bbffeeed9e2abddad9cf302b"),
         p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"),
         p::function("15ee852f242cc41febea71421a0af456926ad0f91429c4c96f1217c5b8732e43"),
-        p::function("f8a0d25ae1ce452e97f9b2e7835f97503cca822cdfb45a9da6497eb8c1afba55"),
+        p::function("de94bd34e6de6022e201ab8f62f0a4a30fe21db52bc77e757d7029e0300b855c"),
         p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
         p::function("acfd50807c41e73f1bb1c4811459ba182f363914657804e6c7b4583a08241c0a"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("text"),
@@ -18669,12 +18965,12 @@ fn py_method_split(ctx: &mut dyn p::PlanContext, _entry: u32) -> Result<Value, p
 
 const PY_METHOD_STRIP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.strip",
-    function: p::function("34d56c53c1236fb61aacbf7353ccb6a1dffea76c7a88c1176a4db1b8cdfce73e"),
+    function: p::function("1a5cfbe658d36ddbd6d990f05f22a95eae8c3b01b53a363609be8cf62e849566"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("99c8823a0fc76ffbb3c02bd28d7a9578d97e88cbb51b25ce9974347af677007f"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("text"),
@@ -18732,12 +19028,12 @@ fn py_method_strip_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
 
 const PY_METHOD_LSTRIP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.lstrip",
-    function: p::function("d39d2e5d733802e303dc12c9502fcb032954099d96923048994681540d0c5478"),
+    function: p::function("e86a59269d9d9352d0d846421eb60058ae7f3d9bfb430f131660b81adca3a246"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("63ee6649b1c35d5a9ab38c2a06f0d6dd39aca61600080ec36a27bcc0ceef5031"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("text"),
@@ -18795,12 +19091,12 @@ fn py_method_lstrip_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
 
 const PY_METHOD_RSTRIP_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.rstrip",
-    function: p::function("a09a1de7f5e6bc108392866a6c28ab3e58130d303888dedacb98713f232804d3"),
+    function: p::function("4a3639d9f784a504c0ff9700a29832f7ddd28c89ba63486dd5b02014c74c1e27"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("78f9bfc342e4fe91b7182a76df67db70cb62df61c9547f8f6d5149e8ffd91932"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("text"),
@@ -18858,12 +19154,12 @@ fn py_method_rstrip_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives
 
 const PY_METHOD_UPPER_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.upper",
-    function: p::function("d334322dfd6b057b605610c4f30595f59c8d88877ad213fb9bb7a7f203b7f918"),
+    function: p::function("01d34777941978620bf54d178175e7023e3080cf4a75ede20c42dd41c063ce70"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("a9d412b1ecfed3de7a78d9aa17829cae8396a1180adf0f3f681bc56d4d44170e"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("text"),
@@ -18921,12 +19217,12 @@ fn py_method_upper_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
 
 const PY_METHOD_LOWER_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.lower",
-    function: p::function("b1a1e0f12dc6803e535ed663280b908ae2b5665635ead724b466f19c794de0bc"),
+    function: p::function("c0224244dcfff26a94979cc0d8c97da20c223ecf6c20d855032f52567d3bebf3"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
         p::function("bdbb1f114c807cbc58923711d0ac8e83e42afa20b0d2e5de58d50de54bc8d276"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("text"),
@@ -18984,13 +19280,13 @@ fn py_method_lower_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], natives:
 
 const PY_METHOD_STARTSWITH_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.startswith",
-    function: p::function("1969e4776960521e908328c91342c597da63f14972d1bc07b6e9595afa4dbc1f"),
+    function: p::function("c2bf712bb40eb746cb71d1aff33f3b6dbad16d2cd5aed73f07e0857d08cb431d"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
-        p::function("f8a0d25ae1ce452e97f9b2e7835f97503cca822cdfb45a9da6497eb8c1afba55"),
+        p::function("de94bd34e6de6022e201ab8f62f0a4a30fe21db52bc77e757d7029e0300b855c"),
         p::function("13d958224a9be9662479d6edfefb37fa7d1df23d055ddbf01944bda8bf1becbb"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("text"),
@@ -19009,7 +19305,7 @@ const PY_METHOD_STARTSWITH_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_startswith,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_startswith_heap, depth: 2, writes: false, callees: &[p::function("f8a0d25ae1ce452e97f9b2e7835f97503cca822cdfb45a9da6497eb8c1afba55"), p::function("13d958224a9be9662479d6edfefb37fa7d1df23d055ddbf01944bda8bf1becbb"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_startswith_heap, depth: 2, writes: false, callees: &[p::function("de94bd34e6de6022e201ab8f62f0a4a30fe21db52bc77e757d7029e0300b855c"), p::function("13d958224a9be9662479d6edfefb37fa7d1df23d055ddbf01944bda8bf1becbb"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.startswith`.
@@ -19059,13 +19355,13 @@ fn py_method_startswith_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nat
 
 const PY_METHOD_ENDSWITH_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.endswith",
-    function: p::function("f641b72dc5078343ca19b8c8827f200731334fa1ae5b1ddb1133970e17e20439"),
+    function: p::function("17e607464c3f2c3d32d2ee0de625b5025b45caf0deaacd3c4e331ee6f962c85c"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
-        p::function("f8a0d25ae1ce452e97f9b2e7835f97503cca822cdfb45a9da6497eb8c1afba55"),
+        p::function("de94bd34e6de6022e201ab8f62f0a4a30fe21db52bc77e757d7029e0300b855c"),
         p::function("ffe8ac95125db709bb5e1963e5c401aa12fa80c3e1bd541e1544afd7e3131adf"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("text"),
@@ -19084,7 +19380,7 @@ const PY_METHOD_ENDSWITH_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_endswith,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_endswith_heap, depth: 2, writes: false, callees: &[p::function("f8a0d25ae1ce452e97f9b2e7835f97503cca822cdfb45a9da6497eb8c1afba55"), p::function("ffe8ac95125db709bb5e1963e5c401aa12fa80c3e1bd541e1544afd7e3131adf"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_endswith_heap, depth: 2, writes: false, callees: &[p::function("de94bd34e6de6022e201ab8f62f0a4a30fe21db52bc77e757d7029e0300b855c"), p::function("ffe8ac95125db709bb5e1963e5c401aa12fa80c3e1bd541e1544afd7e3131adf"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.endswith`.
@@ -19134,13 +19430,13 @@ fn py_method_endswith_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
 
 const PY_METHOD_REPLACE_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.replace",
-    function: p::function("9949717490ef6d0323aeb4ba77db5f9b428afb865e4a6e075ce105a12953c8cb"),
+    function: p::function("ec35811b2d6df778602dcd0f0104a0d0eac69c1b9f4f09097d5168d98d2bfc49"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
-        p::function("f8a0d25ae1ce452e97f9b2e7835f97503cca822cdfb45a9da6497eb8c1afba55"),
+        p::function("de94bd34e6de6022e201ab8f62f0a4a30fe21db52bc77e757d7029e0300b855c"),
         p::function("9244d4c580fec091b065b903ae281a7067477394a4d0bec660d4bca5145332aa"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("text"),
@@ -19161,7 +19457,7 @@ const PY_METHOD_REPLACE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_replace,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_replace_heap, depth: 2, writes: false, callees: &[p::function("f8a0d25ae1ce452e97f9b2e7835f97503cca822cdfb45a9da6497eb8c1afba55"), p::function("9244d4c580fec091b065b903ae281a7067477394a4d0bec660d4bca5145332aa"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_replace_heap, depth: 2, writes: false, callees: &[p::function("de94bd34e6de6022e201ab8f62f0a4a30fe21db52bc77e757d7029e0300b855c"), p::function("9244d4c580fec091b065b903ae281a7067477394a4d0bec660d4bca5145332aa"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.replace`.
@@ -19220,13 +19516,13 @@ fn py_method_replace_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], native
 
 const PY_METHOD_FIND_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.method.find",
-    function: p::function("12608028a77b58acba2b24a55daf864b0d6c56f0544fbbcafd407a5ff0ebe45d"),
+    function: p::function("17636f85aaf848c10c186a795289908556562a5dfa9f03b09e98aa3b20956fba"),
     callees: &[
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
-        p::function("f8a0d25ae1ce452e97f9b2e7835f97503cca822cdfb45a9da6497eb8c1afba55"),
+        p::function("de94bd34e6de6022e201ab8f62f0a4a30fe21db52bc77e757d7029e0300b855c"),
         p::function("d6a03b25b47babadb575f8207e993332ab6a8f7b53e8dd5257e8b45c6ad17451"),
-        p::function("f14ef306aec387423e87d2f0a810d928cfd69b8140485bc098ee63c06c3a047c"),
+        p::function("12ab7bfc57f60c13140543a061d94efe01b874a2804829bb2b4a7d2da107f376"),
     ],
     literals: &[
         p::PlanLiteral::Text("text"),
@@ -19245,7 +19541,7 @@ const PY_METHOD_FIND_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_method_find,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_find_heap, depth: 2, writes: false, callees: &[p::function("f8a0d25ae1ce452e97f9b2e7835f97503cca822cdfb45a9da6497eb8c1afba55"), p::function("d6a03b25b47babadb575f8207e993332ab6a8f7b53e8dd5257e8b45c6ad17451"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: py_method_find_heap, depth: 2, writes: false, callees: &[p::function("de94bd34e6de6022e201ab8f62f0a4a30fe21db52bc77e757d7029e0300b855c"), p::function("d6a03b25b47babadb575f8207e993332ab6a8f7b53e8dd5257e8b45c6ad17451"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.method.find`.
@@ -19511,11 +19807,11 @@ fn py_format_exponent_heap(heap: &mut dyn p::TemplateHeap, args: &[Value], nativ
 
 const PY_FORMAT_PLAN: p::HelperPlan = p::HelperPlan {
     name: "py.format",
-    function: p::function("d8ca5ae666e886eff9c80e101533959066f710d67d1db2acefb154d428a158ee"),
+    function: p::function("aa44a59f486fecd5d0b2e9363e956115328f89f62eb1a083f635660eba1ea0c3"),
     callees: &[
         p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"),
-        p::function("ec2191ded0aac577faed0608b961f9f2888220eabb4d58eabd0df3a6ebea61a9"),
-        p::function("12150ed4be72550f7253c76f50309b124bc50a2122d8ad096ead663f87549f33"),
+        p::function("e54f3de12c265c41fcd8093a6b56ffd0b33000e40e222deb91514539b13e10fb"),
+        p::function("4f44999108a453c71f7c0f89f8e74f0aaf863362a69f04b6282d623836599667"),
         p::function("3e2a9836b16b3ade4f7fcc2d56d1fb203dffed4bd5d7f4bf800df213c8c8c5f7"),
         p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"),
         p::function("da24400da6ab4bd87448a8afed5a80c5fd45bb814d74bd244c3c9b5bc5b10078"),
@@ -19535,7 +19831,7 @@ const PY_FORMAT_PLAN: p::HelperPlan = p::HelperPlan {
         p::function("a9e0784f1de47d5d04963535be1cd88bdd1a23bf1313aad8ef0f3af874d5e9d0"),
         p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"),
         p::function("649f38eba0f5c8ce04da0c9ad8cf52c7fd5189fd9301d6ee3a7c65026bad5e81"),
-        p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"),
+        p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"),
         p::function("13d958224a9be9662479d6edfefb37fa7d1df23d055ddbf01944bda8bf1becbb"),
         p::function("9ac7be8a82b2960750596a151de0befef85f29cb3b35823f53fd0a0e29e8c2f1"),
         p::function("7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537"),
@@ -19682,7 +19978,7 @@ const PY_FORMAT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: py_format,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), p::function("8d546dfc65b783924003ce02bde5f212533c8196845edf7caff51e44aafee0f7"), p::function("7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537"), p::function("59b9d484a581bca4a1909189b23b1f4363670e1af545c6b28c6110f6ee95b01a"), p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), p::function("e6cd29e23878b70c30d6243e68ec3cd427006b152f6d63b42d7fc9dee624c9eb"), ], heap: Some(p::HeapTemplate { entry: py_format_heap, depth: 1, writes: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("ec2191ded0aac577faed0608b961f9f2888220eabb4d58eabd0df3a6ebea61a9"), p::function("12150ed4be72550f7253c76f50309b124bc50a2122d8ad096ead663f87549f33"), p::function("5aaaa97ce4f3d7d466cc715dc05ecdf6f4a0fbb0293c6ecc8af2298361c60eb0"), p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"), p::function("59b9d484a581bca4a1909189b23b1f4363670e1af545c6b28c6110f6ee95b01a"), p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), p::function("e6cd29e23878b70c30d6243e68ec3cd427006b152f6d63b42d7fc9dee624c9eb"), p::function("649f38eba0f5c8ce04da0c9ad8cf52c7fd5189fd9301d6ee3a7c65026bad5e81"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), p::function("8d546dfc65b783924003ce02bde5f212533c8196845edf7caff51e44aafee0f7"), p::function("7e4f2312e59326d1b501e7b4d092549da7b8db86c07ada94902ee61f3317b537"), p::function("59b9d484a581bca4a1909189b23b1f4363670e1af545c6b28c6110f6ee95b01a"), p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), p::function("e6cd29e23878b70c30d6243e68ec3cd427006b152f6d63b42d7fc9dee624c9eb"), ], heap: Some(p::HeapTemplate { entry: py_format_heap, depth: 1, writes: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("e54f3de12c265c41fcd8093a6b56ffd0b33000e40e222deb91514539b13e10fb"), p::function("4f44999108a453c71f7c0f89f8e74f0aaf863362a69f04b6282d623836599667"), p::function("7f6673f469e839af64e8f42364bc60cba2a5bdfa0be97b4b7f9e013d63d06f98"), p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"), p::function("59b9d484a581bca4a1909189b23b1f4363670e1af545c6b28c6110f6ee95b01a"), p::function("7de8b2c2348a4e977e3cf159982ef820be6f7e51e8f810ad8ed8367418e7e169"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), p::function("e6cd29e23878b70c30d6243e68ec3cd427006b152f6d63b42d7fc9dee624c9eb"), p::function("649f38eba0f5c8ce04da0c9ad8cf52c7fd5189fd9301d6ee3a7c65026bad5e81"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `py.format`.

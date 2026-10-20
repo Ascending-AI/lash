@@ -28,6 +28,7 @@ or constant schedules.
 | `py.mul` | `sum(4, size(left), size(right), size(result))` | `sum(4, size(left), size(right), size(result))` | 2 × 2/test | Empty sequences repeat without growing; numeric multiplication keeps its size schedule. |
 | `py.format.group` | `sum(4, size(digits))` | `sum(4, product(size(digits), size(digits)))` | 1 × 2/test | Repeated prefix copies are quadratic; zero width requires a metered termination guard. |
 | `py.sorted` | `sum(8, product(256, size(values), sum(1, ceil_log2(size(values)))))` | `sum(8, product(2, size(values)), size(result))` | 1 × 2/test | Its extent can reach guest code, which can grow or detach its inputs, so each of its loops pays 2 per test (FIG-6971); formula covers the remaining work. |
+| `py.type` | `8` | `sum(8, size(result))` | 1 × 2/test | A package value's class name is its brand's type, PascalCased: the result covers the letters kept, and the split's loop pays 2 per test for each `_` dropped (FIG-6922). |
 | `py.method.sort` | `sum(8, product(256, size(self), sum(1, ceil_log2(size(self)))))` | `sum(8, product(4, size(self)))` | 1 × 2/test | Linear copying, key collection, clearing and replacement; the native merge bills separately, and replacement pays 2 per test. |
 | `ts.array.integer` | `8` | `sum(8, deep(value))` | 0 × 2/test | Numeric coercion parses variable-sized input. |
 | `ts.array.dense` | `8` | `sum(8, size(this), size(result))` | 1 × 2/test | Dynamic or shrinking traversal pays 2 per test; formula covers the remaining work. |

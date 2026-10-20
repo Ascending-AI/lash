@@ -146,6 +146,28 @@ asyncio: `asyncio.sleep`, `asyncio.gather` over coroutine calls, tasks or
 one `*tasks`, `asyncio.create_task`, and `asyncio.run` at the top level.
 A tool is a name of `environment.effects`, called as `await tool(x)`.
 
+Packages (`src/lower/packages.rs`): a package is in scope by its path and
+nothing is imported. `dataframe.col("x")` calls a function, and
+`dataframe.DataQuanta.read_text(t)` a static of a value type, which Python
+spells in PascalCase; `getattr(dataframe, "lambda")` reaches a segment
+Python cannot write. A call fills the member's slots in order, `absent`
+for a slot it leaves out that admits it, and a keyword names one field of
+the one options slot that has it: `q.flat_map(f, output="utf8")`. A method
+on a value whose package type the front end knows (a member's declared
+result) calls that type's member, and a property such as `e.name` reads
+through its getter. On a receiver of unknown type the value's brand
+selects the member before any argument is evaluated: a package value
+takes its type's member before the dialect's method of that name, a
+package value without it raises `AttributeError`, and any other value
+keeps the dialect's method, so a dict's `count` stays `py.method.count`.
+A package value is sealed: subscript, item assignment and deletion,
+`len`, iteration, `in`, `list()` and `dict()` raise `TypeError`, a tool's
+reply passes one through as it is, and it prints as its type,
+`<dataframe.DataQuanta>`. `col = dataframe.col` binds a function value
+that calls the member; a namespace, a value type, an error and an
+operation are no values. `except dataframe.ExecutionError` catches the
+error's kind.
+
 f-strings: `!r` and `!s`, and specifications of fill, alignment, sign,
 `#`, `0`, width, `,` or `_` grouping, precision and one of the codes
 `b d e E f F o s x X %`.
@@ -172,7 +194,10 @@ lacks (`PY_BUILTIN_AS_VALUE`, `PY_BUILTIN_UNSUPPORTED`), the format codes
 (`PY_DELETE_UNSUPPORTED`), slice and attribute targets
 (`PY_TARGET_UNSUPPORTED`), an exception class used as a value
 (`PY_EXCEPTION_CLASS`), complex numbers and bytes
-(`PY_LITERAL_UNSUPPORTED`).
+(`PY_LITERAL_UNSUPPORTED`). A package namespace, value type or error used
+as a value (`PY_PACKAGE_NAMESPACE_VALUE`), an operation read as a value
+(`PY_OPERATION_VALUE`) and a member a package or a known package type does
+not export (`PY_PACKAGE_MEMBER_UNKNOWN`) are program defects.
 
 Regular expressions are not in the subset: `import re` is refused as
 `PY_REGEX_UNSUPPORTED`, and the dialect ships no regex package.

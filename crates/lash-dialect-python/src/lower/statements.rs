@@ -175,7 +175,7 @@ impl Lowerer<'_> {
                         .as_ref()
                         .is_some_and(|asname| asname.id.as_str() != module);
                     if module != "asyncio" || renamed {
-                        return Err(unsupported_import(module, alias.range));
+                        return Err(unsupported_import(module, None, alias.range));
                     }
                 }
                 Ok(())
@@ -185,7 +185,8 @@ impl Lowerer<'_> {
                     .module
                     .as_ref()
                     .map_or("", |module| module.id.as_str());
-                Err(unsupported_import(module, import.range))
+                let member = import.names.first().map(|alias| alias.name.id.as_str());
+                Err(unsupported_import(module, member, import.range))
             }
             PyStmt::If(branch) => {
                 let test = self.expr(&branch.test)?;
@@ -897,6 +898,8 @@ impl Lowerer<'_> {
                 let id = attribute.attr.id.as_str();
                 matches!(id, "CancelledError" | "TimeoutError").then(|| id.to_string())
             }
+            // `dataframe.ExecutionError`: a package error, by its kind.
+            PyExpr::Attribute(_) | PyExpr::Call(_) => self.package_error(expr),
             _ => None,
         }
     }
@@ -1327,7 +1330,11 @@ impl Lowerer<'_> {
     }
 }
 
-fn unsupported_import(module: &str, range: TextRange) -> lash_kernel_dialect::Diagnostic {
+fn unsupported_import(
+    module: &str,
+    member: Option<&str>,
+    range: TextRange,
+) -> lash_kernel_dialect::Diagnostic {
     if module == "re" || module.starts_with("re.") {
         return diagnostics::with_repair(
             Code::RegexUnsupported,
@@ -1336,11 +1343,19 @@ fn unsupported_import(module: &str, range: TextRange) -> lash_kernel_dialect::Di
             "use `str` methods (`find`, `split`, `startswith`, `replace`)",
         );
     }
+    let member = member.unwrap_or("name");
+    let repair = if module == "asyncio" {
+        format!("write `asyncio.{member}`, not `from asyncio import {member}`")
+    } else {
+        format!(
+            "packages are already in scope by name: write `{module}.{member}(...)`, or bind a short name with `{member} = {module}.{member}`"
+        )
+    };
     diagnostics::with_repair(
         Code::ImportUnsupported,
         format!("`{module}` cannot be imported: the dialect has `import asyncio` and nothing else"),
         range,
-        "use the built-in functions and the tools the host provides; write `asyncio.name`, not `from asyncio import name`",
+        repair,
     )
 }
 

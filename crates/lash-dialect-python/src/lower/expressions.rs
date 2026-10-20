@@ -487,6 +487,11 @@ impl Lowerer<'_> {
         if let Some(refusal) = self.printed_receiver(&attribute.value) {
             return Err(refusal);
         }
+        if self.package_rooted(&attribute.value)
+            && let Some(read) = self.read_package(&PyExpr::Attribute(attribute.clone()))
+        {
+            return read;
+        }
         let name = attribute.attr.id.as_str();
         // `type(x).__name__`.
         if name == "__name__"
@@ -505,6 +510,23 @@ impl Lowerer<'_> {
             "__cause__" => Some("py.exc.cause"),
             _ => None,
         };
+        if self.seals() && !self.is_asyncio(&attribute.value) {
+            let receiver = self.expr(&attribute.value)?;
+            if let Some(brand) = self.brand_of(receiver.ty) {
+                return self.read_typed_member(receiver, &brand, name, attribute.range);
+            }
+            let targets = if receiver.ty == Ty::Unknown {
+                self.selectable(name, false)
+            } else {
+                Vec::new()
+            };
+            if !targets.is_empty() {
+                return self.select_read(receiver, name, helper, &targets);
+            }
+            if let Some(helper) = helper {
+                return self.invoke(helper, &[receiver], Ty::Unknown);
+            }
+        }
         match helper {
             Some(helper) if !self.is_asyncio(&attribute.value) => {
                 let value = self.expr(&attribute.value)?;

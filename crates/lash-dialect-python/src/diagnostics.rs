@@ -64,6 +64,9 @@ codes! {
     ShadowsBuiltin => "PY_SHADOWS_BUILTIN", Refusal;
     OperationShadowed => "PY_OPERATION_SHADOWED", ProgramDefect;
     OperationSpelling => "PY_OPERATION_SPELLING", ProgramDefect;
+    OperationValue => "PY_OPERATION_VALUE", ProgramDefect;
+    PackageNamespaceValue => "PY_PACKAGE_NAMESPACE_VALUE", ProgramDefect;
+    PackageMemberUnknown => "PY_PACKAGE_MEMBER_UNKNOWN", ProgramDefect;
     ControlCallPlacement => "PY_CONTROL_CALL_PLACEMENT", ProgramDefect;
     BuiltinAsValue => "PY_BUILTIN_AS_VALUE", Refusal;
     BuiltinUnsupported => "PY_BUILTIN_UNSUPPORTED", Refusal;

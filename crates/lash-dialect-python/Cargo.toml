@@ -32,6 +32,9 @@ serde_json = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
+lash-kernel-package = { workspace = true, features = ["testing"] }
+lash-vm-releases = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
+lash-vm-worker = { workspace = true, features = ["dialect-typescript", "dialect-python"] }
 lash-ext-helper-compiler = { workspace = true }
 lash-ext-py-core = { workspace = true }
 lash-ext-date-ecma = { workspace = true }
