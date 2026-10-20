@@ -15,8 +15,8 @@
 //!   whatever an abandoned attempt held are reclaimed;
 //! - every kernel-document pointer is held by an edge and every edge names
 //!   a pointer: no row leaked and none dangles;
-//! - every edge left is the session frame's, to a declaration, and the frame
-//!   holds the cell's declarations;
+//! - install pins hold exactly their package definitions, and every other
+//!   edge left is the session frame's, retaining the cell's declarations;
 //! - the turn committed once, and a zombie's writes after its reap are
 //!   refused.
 
@@ -253,6 +253,43 @@ impl CellDeclarations {
         }
         let (pointers, edges) = rows.read().await;
         let mut violations = Vec::new();
+        let backend = self.backend();
+        let packages = backend
+            .packages()
+            .expect("the core registered packages")
+            .packages();
+        let installed: BTreeSet<Edge> = packages
+            .sets()
+            .iter()
+            .flat_map(|(digest, set)| {
+                let mut bytes = [0_u8; 16];
+                bytes.copy_from_slice(&digest.as_bytes()[..16]);
+                bytes[6] = (bytes[6] & 0x0f) | 0x40;
+                bytes[8] = (bytes[8] & 0x3f) | 0x80;
+                let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+                let id = format!("host-pin:v1:{hex}");
+                set.keys()
+                    .flat_map(|key| packages.artifacts()[&key].code().ids().iter().copied())
+                    .map(move |function| {
+                        (
+                            format!("function:{function}"),
+                            "host_pin".to_owned(),
+                            id.clone(),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        let pins: BTreeSet<_> = installed.iter().map(|(_, _, id)| id).collect();
+        let actual: BTreeSet<_> = edges
+            .iter()
+            .filter(|(_, kind, id)| kind == "host_pin" && pins.contains(id))
+            .cloned()
+            .collect();
+        if actual != installed {
+            violations
+                .push("package pins do not hold exactly their installed definitions".to_owned());
+        }
         let held: BTreeSet<String> = edges
             .iter()
             .map(|(artifact, _, _)| artifact.clone())
@@ -270,7 +307,8 @@ impl CellDeclarations {
         if !dangling.is_empty() {
             violations.push(format!("edges to no stored artifact: {dangling:?}"));
         }
-        let frame = edges
+        let session_edges: BTreeSet<_> = edges.difference(&installed).collect();
+        let frame = session_edges
             .iter()
             .filter(|(artifact, kind, id)| {
                 kind == "frame_environment"
@@ -278,10 +316,10 @@ impl CellDeclarations {
                     && artifact.starts_with("function:")
             })
             .count();
-        if frame == 0 || frame != edges.len() {
+        if frame == 0 || frame != session_edges.len() {
             violations.push(format!(
                 "the session's frame holds {frame} declarations of {} kernel-document edges: {edges:?}",
-                edges.len()
+                session_edges.len()
             ));
         }
         violations

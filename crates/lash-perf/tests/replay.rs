@@ -175,6 +175,32 @@ fn a_first_cell_turn_stays_within_the_sql_statement_budget() {
     let shapes: serde_json::Value =
         serde_json::from_slice(&std::fs::read(shapes).unwrap()).unwrap();
     eprintln!("SQL attribution: {shapes}");
+    let phases = shapes["rounds"].as_array().unwrap();
+    let startup = phases
+        .iter()
+        .find(|phase| phase["phase"] == "node_start")
+        .expect("package installation has its own startup receipt");
+    let installs = |phase: &serde_json::Value| -> u64 {
+        phase["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|row| {
+                row["shape"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("insert into main.package_definitions ")
+            })
+            .map(|row| row["statements"].as_u64().unwrap())
+            .sum()
+    };
+    assert!(
+        installs(startup) > 0,
+        "startup accounts for definition-index statements"
+    );
+    for phase in phases.iter().filter(|phase| phase["phase"] != "node_start") {
+        assert_eq!(installs(phase), 0, "package installation escaped startup");
+    }
     let statements = receipt["workloads"][0]["rounds"][0]["metrics"]["sql_statements"]
         .as_f64()
         .unwrap();

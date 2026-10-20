@@ -29,6 +29,55 @@ enum Database {
 }
 
 impl Fixture {
+    /// Exact permanent roots of the registered package sets, derived from
+    /// their definitions rather than from whichever host pins happen to exist.
+    pub fn installed_edges(&self) -> std::collections::BTreeSet<Edge> {
+        let Some(node_packages) = self.backend.packages() else {
+            return Default::default();
+        };
+        let packages = node_packages.packages();
+        packages
+            .sets()
+            .iter()
+            .flat_map(|(digest, set)| {
+                let mut bytes = [0_u8; 16];
+                bytes.copy_from_slice(&digest.as_bytes()[..16]);
+                bytes[6] = (bytes[6] & 0x0f) | 0x40;
+                bytes[8] = (bytes[8] & 0x3f) | 0x80;
+                let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+                let id = format!("host-pin:v1:{hex}");
+                set.keys()
+                    .flat_map(|key| packages.artifacts()[&key].code().ids().iter().copied())
+                    .map(move |function| Edge {
+                        artifact_ref: format!("function:{function}"),
+                        kind: "host_pin".to_owned(),
+                        id: id.clone(),
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    /// Verify the install roots still hold exactly their definitions, then
+    /// return every other edge, including any unexpected host pin.
+    pub async fn session_edges(&self) -> Vec<Edge> {
+        let expected = self.installed_edges();
+        let pins: std::collections::BTreeSet<_> = expected.iter().map(|edge| &edge.id).collect();
+        let (installed, session): (Vec<_>, Vec<_>) = self
+            .kernel_document_edges()
+            .await
+            .into_iter()
+            .partition(|edge| edge.kind == "host_pin" && pins.contains(&edge.id));
+        assert_eq!(
+            installed
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>(),
+            expected,
+            "package pins hold exactly the installed definitions"
+        );
+        session
+    }
+
     /// Let the core's background work (its artifact cleanup relay) run
     /// before the next read.
     pub async fn settle(&self) {
@@ -95,11 +144,8 @@ impl Fixture {
     /// document fails every law that reads edges, and are left out of the
     /// answer.
     pub async fn edges(&self) -> Vec<Edge> {
-        let (declarations, documents): (Vec<Edge>, Vec<Edge>) = self
-            .kernel_document_edges()
-            .await
-            .into_iter()
-            .partition(|edge| {
+        let (declarations, documents): (Vec<Edge>, Vec<Edge>) =
+            self.session_edges().await.into_iter().partition(|edge| {
                 edge.artifact_ref.starts_with("function:")
                     || edge.artifact_ref.starts_with("requirements:")
             });

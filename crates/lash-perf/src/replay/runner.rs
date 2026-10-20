@@ -231,7 +231,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         "sql_shapes": options.identity.sql_shapes, "traffic": options.identity.traffic,
         "heap_window": options.identity.heap_window, "heap_frames": options.heap.dhat_frames,
         "window": "round first send through last successful outcome; counters at settled cuts",
-        "sql_work_window": options.sql_shapes.as_ref().map(|_| "session creation through core shutdown; start/finish phase cuts; includes unowned and cross-window SQL"),
+        "sql_work_window": options.sql_shapes.as_ref().map(|_| "node startup through core shutdown; start/finish phase cuts; includes unowned and cross-window SQL"),
         "terminal": "all scripted replies validated; successful outcomes",
     }));
     experiment.backend = probe.backend().to_owned();
@@ -261,7 +261,7 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         .map(super::sql_work::Spool::new)
         .transpose()?;
     let backend_name = meter.backend().to_owned();
-    lash_core::perf_witness::sql_shapes::work::set_window(None, "session_start");
+    lash_core::perf_witness::sql_shapes::work::set_window(None, "node_start");
     let (start_before, start_shapes, _) = meter.read_with_shapes(0).await;
     let pages = stores.durable_store().pages();
     let backend = lash::durable::DurableBackendBuilder::new(stores)
@@ -326,6 +326,26 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
         workers.as_ref(),
         provider::fixtures()?,
     )?;
+    // Registration follows package holding. Finish both before session and
+    // turn cuts, so install SQL belongs to startup even on a slow store.
+    tokio::time::timeout(ROUND_WATCHDOG, async {
+        while backend.durable().live_nodes().await?.is_empty() {
+            tokio::task::yield_now().await;
+        }
+        Ok::<_, lash_durable::DurableError>(())
+    })
+    .await
+    .context("the replay node never registered")?
+    .map_err(|error| anyhow::anyhow!("the replay node's registration: {error}"))?;
+    let (node_after, node_shapes, _) = meter.read_with_shapes(0).await;
+    let mut shape_rounds = Vec::new();
+    if let (Some(before), Some(after)) = (start_shapes, node_shapes) {
+        let mut row = sql_shape_round(0, before, after, &difference(&start_before, &node_after))?;
+        row["phase"] = serde_json::json!("node_start");
+        shape_rounds.push(row);
+    }
+    lash_core::perf_witness::sql_shapes::work::set_window(None, "session_start");
+    let (start_before, start_shapes, _) = meter.read_with_shapes(0).await;
     let cleanup = lash::testing::quiesce_artifact_cleanup(&core).await;
     let pool = workers
         .as_ref()
@@ -373,7 +393,6 @@ pub async fn run(workload: &Workload, options: &RunOptions) -> Result<WorkloadRe
     let mut compactions = Vec::new();
     let mut frame_depth = 0;
     let mut model_calls = 0_u64;
-    let mut shape_rounds = Vec::new();
     let (start_after, end_shapes, _) = meter.read_with_shapes(0).await;
     if let (Some(before), Some(after)) = (start_shapes, end_shapes) {
         let mut row = sql_shape_round(0, before, after, &difference(&start_before, &start_after))?;

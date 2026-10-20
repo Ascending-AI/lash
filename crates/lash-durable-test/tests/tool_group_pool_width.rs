@@ -371,6 +371,18 @@ impl Scenario for Wide {
             .await
             .map_err(|error| format!("send the turn's input: {error}"))?;
         nodes.start("a");
+        // Package holding precedes the runner's registration and uses the
+        // backend directly. SimNodes must wait out that setup before any
+        // virtual lease time can pass under this small-pool workload.
+        nodes.quiesce().await;
+        if !nodes.script().trace().iter().any(|write| {
+            write.point.label == lash_durable::CommitLabel::NODE_REGISTER && write.committed()
+        }) {
+            return Err(format!(
+                "the pool-width node did not register: {:?}",
+                nodes.stopped("a").await
+            ));
+        }
         Ok(())
     }
 

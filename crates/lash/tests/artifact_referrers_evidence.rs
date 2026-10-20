@@ -606,8 +606,8 @@ async fn a_second_cell_with_unchanged_declarations_writes_no_declaration_row() {
 }
 
 /// FIG-6481: the frame that retains its cells' declarations ends with its
-/// session, and the relay reclaims every declaration with it: deleting the
-/// session leaves no kernel-document pointer and no edge.
+/// session, and the relay reclaims its edges with it. Only the exact
+/// package-install roots and their declaration pointers survive deletion.
 async fn a_deleted_session_leaves_no_declaration_row(backend: Backend) {
     let fixture = Fixture::new(backend).await;
     let core = rlm_core(&fixture, vec![response(&helper_cell(1))]);
@@ -623,6 +623,11 @@ async fn a_deleted_session_leaves_no_declaration_row(backend: Backend) {
         .await
         .expect("cell turn");
     assert!(ran.is_success(), "the cell: {ran:?}");
+    let installed = fixture.installed_edges();
+    let installed_pointers: std::collections::BTreeSet<_> = installed
+        .iter()
+        .map(|edge| edge.artifact_ref.clone())
+        .collect();
     let held = wait_executions_released(&fixture).await;
     assert!(
         held.iter()
@@ -644,9 +649,21 @@ async fn a_deleted_session_leaves_no_declaration_row(backend: Backend) {
     );
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
     loop {
-        let edges = fixture.kernel_document_edges().await;
-        let pointers = fixture.kernel_document_pointers().await;
-        if edges.is_empty() && pointers.is_empty() {
+        let edges = fixture.session_edges().await;
+        let pointers: std::collections::BTreeSet<_> = fixture
+            .kernel_document_pointers()
+            .await
+            .into_iter()
+            .collect();
+        if edges.is_empty() && pointers == installed_pointers {
+            assert_eq!(
+                fixture
+                    .kernel_document_edges()
+                    .await
+                    .into_iter()
+                    .collect::<std::collections::BTreeSet<_>>(),
+                installed
+            );
             break;
         }
         assert!(

@@ -9,7 +9,7 @@ use crate::clock::{SimClock, settle};
 use crate::fault::{Activity, FaultStore};
 use crate::life::{Life, NodeClock, NodeLife};
 use crate::script::Script;
-use lash_durable::runner::{Activation, Drain, Hints, Runner, RunnerConfig, Stopped};
+use lash_durable::runner::{Activation, Drain, Exit, Hints, Owned, Runner, RunnerConfig, Stopped};
 use lash_durable::{
     CommitLabel, DurableError, DurableStore, FormatSet, LeaseConfig, MailCommit, MailTx, NodeId,
 };
@@ -35,6 +35,25 @@ struct SimNode {
     drain: Drain,
     stop: Option<tokio::sync::oneshot::Sender<()>>,
     task: JoinHandle<Option<Result<Stopped, DurableError>>>,
+}
+
+/// An activation's package install goes through its own backend, before the
+/// runner's first fault-store call. Keep that work on the simulation's clock.
+struct InstallingActivation {
+    inner: Arc<dyn Activation>,
+    clock: Arc<SimClock>,
+}
+
+#[async_trait::async_trait]
+impl Activation for InstallingActivation {
+    async fn hold(&self) -> Result<lash_durable::NodeHolding, DurableError> {
+        let _hold = self.clock.hold();
+        self.inner.hold().await
+    }
+
+    async fn activate(&self, owned: Owned) -> Exit {
+        self.inner.activate(owned).await
+    }
 }
 
 /// Several runner instances over one database, on one virtual clock, under
@@ -181,7 +200,10 @@ impl SimNodes {
                 claim_batch: self.config.max_active,
                 retirement: lash_durable::RetirementSettings::standard(),
             },
-            activation,
+            Arc::new(InstallingActivation {
+                inner: activation,
+                clock: Arc::clone(&self.clock),
+            }),
         )
         .with_drain(drain.clone());
         let hints = runner.hints();
@@ -577,6 +599,70 @@ mod tests {
             .unwrap();
         step_until(&nodes, || hold.acked.lock_recover().len() == 1).await;
         nodes
+    }
+
+    /// Package installation uses the activation's backend before registration,
+    /// outside the fault store. It must still keep virtual time from converging.
+    #[tokio::test]
+    async fn package_holding_finishes_before_virtual_time_can_converge() {
+        #[derive(Default)]
+        struct Installing {
+            entered: tokio::sync::Notify,
+            finish: tokio::sync::Notify,
+        }
+
+        #[async_trait::async_trait]
+        impl Activation for Installing {
+            async fn hold(&self) -> Result<lash_durable::NodeHolding, DurableError> {
+                self.entered.notify_one();
+                self.finish.notified().await;
+                Ok(Default::default())
+            }
+
+            async fn activate(&self, _: Owned) -> Exit {
+                unreachable!("no actor was created")
+            }
+        }
+
+        let clock = SimClock::new();
+        let installing = Arc::new(Installing::default());
+        let nodes = SimNodes::new(
+            sqlite(Arc::clone(&clock)).await,
+            clock,
+            Script::new(),
+            SimNodesConfig {
+                lease: LeaseConfig::default(),
+                decodes: vec![FormatSet::new(FORMATS)],
+                serves: Vec::new(),
+                max_active: 1,
+            },
+            installing.clone(),
+        );
+        nodes.start("a");
+        installing.entered.notified().await;
+        let quiesce = nodes.quiesce();
+        tokio::pin!(quiesce);
+        tokio::select! {
+            biased;
+            () = &mut quiesce => panic!("virtual time converged during package installation"),
+            () = settle() => {}
+        }
+        assert!(nodes.database().live_nodes().await.unwrap().is_empty());
+        // Killing a boot drops its pending hold. The replacement must acquire
+        // its own hold and register only after that installation finishes.
+        nodes.kill("a");
+        nodes.quiesce().await;
+        nodes.start("a");
+        installing.entered.notified().await;
+        installing.finish.notify_one();
+        nodes.quiesce().await;
+        assert_eq!(nodes.clock().logical_ms(), 0);
+        assert_eq!(nodes.database().live_nodes().await.unwrap().len(), 1);
+        assert!(
+            nodes.script().trace().iter().any(|write| {
+                write.point.label == CommitLabel::NODE_REGISTER && write.committed()
+            })
+        );
     }
 
     /// FIG-5545: a transient refusal of the first registration does not
