@@ -75,7 +75,7 @@ table lash_artifact_referrer_edges
   primary-key (namespace, artifact_ref, referrer_kind, referrer_id)
   foreign-key (namespace, artifact_ref) references lash_lash_vm_artifacts (namespace, artifact_ref) on delete cascade
 table lash_attachment_condemnations
-  column attachment_id text not-null
+  column attachment_id bytea not-null
   column delete_attempts integer not-null default
   column last_delete_error text nullable
   column next_delete_at_ms bigint not-null default
@@ -86,25 +86,25 @@ table lash_attachment_condemnations
   primary-key (attachment_id)
   foreign-key (write_token) references lash_attachment_pending_writes (write_id) on delete set null
 table lash_attachment_pending_writes
-  column attachment_id text not-null
+  column attachment_id bytea not-null
   column begun_at_ms bigint not-null
   column referrer_id text not-null
   column referrer_kind text not-null
   column write_id text not-null
   primary-key (write_id)
 table lash_attachment_referrer_edges
-  column attachment_id text not-null
+  column attachment_id bytea not-null
   column referrer_id text not-null
   column referrer_kind text not-null
   primary-key (attachment_id, referrer_kind, referrer_id)
 table lash_attachment_session_holds
-  column attachment_id text not-null
+  column attachment_id bytea not-null
   column holder_id text not-null
   column holder_kind text not-null
   column session_id text not-null
   primary-key (session_id, attachment_id, holder_kind, holder_id)
 table lash_attachment_session_releases
-  column attachment_id text not-null
+  column attachment_id bytea not-null
   column session_id text not-null
   primary-key (session_id, attachment_id)
 table lash_attachment_sweep_clock
@@ -112,7 +112,7 @@ table lash_attachment_sweep_clock
   column singleton boolean not-null default
   primary-key (singleton)
 table lash_attachment_uploads
-  column attachment_id text not-null
+  column attachment_id bytea not-null
   column written_at_ms bigint not-null
   primary-key (attachment_id)
 table lash_blob_edges

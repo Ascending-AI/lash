@@ -722,7 +722,7 @@ async fn malformed_durable_rows_surface_typed_corruption() {
         lash_protocol_types::attachment::AttachmentId::parse("b2".repeat(32)).unwrap();
     raw.execute(
         "INSERT INTO attachment_referrer_edges (attachment_id, referrer_kind, referrer_id) VALUES (?1, 'unknown', 'opaque')",
-        params![unknown_owner.as_str()],
+        params![crate::codec::SqlHash(unknown_owner.as_str())],
     )
     .expect("insert unknown owner kind");
     assert!(matches!(

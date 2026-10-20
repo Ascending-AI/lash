@@ -482,7 +482,7 @@ CREATE INDEX IF NOT EXISTS idx_lash_control_intents_session
     ON lash_control_intents(session_id, kind);
 
 CREATE TABLE IF NOT EXISTS lash_attachment_referrer_edges (
-    attachment_id TEXT NOT NULL CONSTRAINT ck_attachment_referrer_edges_attachment CHECK (char_length(attachment_id) > 0),
+    attachment_id BYTEA NOT NULL CONSTRAINT ck_attachment_referrer_edges_attachment CHECK (octet_length(attachment_id) = 32),
     referrer_kind TEXT NOT NULL CONSTRAINT ck_attachment_referrer_edges_kind CHECK (referrer_kind IN ('session', 'upload', 'execution', 'start_input', 'process_record', 'source')),
     referrer_id   TEXT NOT NULL CONSTRAINT ck_attachment_referrer_edges_id CHECK (char_length(referrer_id) > 0),
     PRIMARY KEY (attachment_id, referrer_kind, referrer_id)
@@ -495,7 +495,7 @@ CREATE INDEX IF NOT EXISTS idx_lash_attachment_referrer_edges_referrer
 -- one hold does.
 CREATE TABLE IF NOT EXISTS lash_attachment_session_holds (
     session_id    TEXT NOT NULL CONSTRAINT ck_attachment_session_holds_session CHECK (char_length(session_id) > 0),
-    attachment_id TEXT NOT NULL CONSTRAINT ck_attachment_session_holds_attachment CHECK (char_length(attachment_id) > 0),
+    attachment_id BYTEA NOT NULL CONSTRAINT ck_attachment_session_holds_attachment CHECK (octet_length(attachment_id) = 32),
     holder_kind   TEXT NOT NULL CONSTRAINT ck_attachment_session_holds_kind CHECK (holder_kind IN ('history', 'input', 'batch')),
     holder_id     TEXT NOT NULL,
     CONSTRAINT ck_attachment_session_holds_holder CHECK ((holder_kind = 'history') = (holder_id = '')),
@@ -508,13 +508,13 @@ CREATE INDEX IF NOT EXISTS idx_lash_attachment_session_holds_holder
 -- session edge of each one no hold names any more.
 CREATE TABLE IF NOT EXISTS lash_attachment_session_releases (
     session_id    TEXT NOT NULL,
-    attachment_id TEXT NOT NULL,
+    attachment_id BYTEA NOT NULL,
     PRIMARY KEY (session_id, attachment_id)
 );
 
 CREATE TABLE IF NOT EXISTS lash_attachment_pending_writes (
     write_id      TEXT PRIMARY KEY CONSTRAINT ck_attachment_pending_writes_write_id CHECK (char_length(write_id) = 32),
-    attachment_id TEXT NOT NULL CONSTRAINT ck_attachment_pending_writes_attachment CHECK (char_length(attachment_id) > 0),
+    attachment_id BYTEA NOT NULL CONSTRAINT ck_attachment_pending_writes_attachment CHECK (octet_length(attachment_id) = 32),
     referrer_kind TEXT NOT NULL CONSTRAINT ck_attachment_pending_writes_kind CHECK (referrer_kind IN ('session', 'upload', 'execution', 'start_input', 'process_record', 'source')),
     referrer_id   TEXT NOT NULL CONSTRAINT ck_attachment_pending_writes_id CHECK (char_length(referrer_id) > 0),
     begun_at_ms   BIGINT NOT NULL
@@ -525,12 +525,12 @@ CREATE INDEX IF NOT EXISTS idx_lash_attachment_pending_writes_referrer
     ON lash_attachment_pending_writes(referrer_kind, referrer_id);
 
 CREATE TABLE IF NOT EXISTS lash_attachment_uploads (
-    attachment_id TEXT PRIMARY KEY CONSTRAINT ck_attachment_uploads_attachment CHECK (char_length(attachment_id) > 0),
+    attachment_id BYTEA PRIMARY KEY CONSTRAINT ck_attachment_uploads_attachment CHECK (octet_length(attachment_id) = 32),
     written_at_ms BIGINT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS lash_attachment_condemnations (
-    attachment_id     TEXT PRIMARY KEY,
+    attachment_id     BYTEA PRIMARY KEY,
     phase             TEXT NOT NULL CONSTRAINT ck_attachment_condemnations_phase CHECK (phase IN ('condemned', 'deleting')),
     write_token       TEXT REFERENCES lash_attachment_pending_writes(write_id) ON DELETE SET NULL,
     next_delete_at_ms BIGINT NOT NULL DEFAULT 0 CONSTRAINT ck_attachment_condemnations_next_delete CHECK (next_delete_at_ms >= 0),
@@ -2471,7 +2471,7 @@ BEGIN
             END LOOP;
         WHEN 'attachment_referrer_edge.select_deleting' THEN
             v_rows := 0;
-            FOR v_row IN SELECT EXISTS (SELECT 1 FROM lash_attachment_condemnations WHERE attachment_id = (v_p->>0) AND phase = 'deleting') LOOP
+            FOR v_row IN SELECT EXISTS (SELECT 1 FROM lash_attachment_condemnations WHERE attachment_id = (decode(v_p->>0, 'hex')) AND phase = 'deleting') LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;
@@ -2479,7 +2479,7 @@ BEGIN
             END LOOP;
         WHEN 'attachment_upload.select_evidence' THEN
             v_rows := 0;
-            FOR v_row IN SELECT 1 FROM lash_attachment_uploads WHERE attachment_id = (v_p->>0) LOOP
+            FOR v_row IN SELECT 1 FROM lash_attachment_uploads WHERE attachment_id = (decode(v_p->>0, 'hex')) LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;
@@ -2487,17 +2487,17 @@ BEGIN
             END LOOP;
         WHEN 'attachment_condemnation.delete_unclaimed_condemned' THEN
             DELETE FROM lash_attachment_condemnations
-             WHERE attachment_id = (v_p->>0) AND phase = 'condemned' AND write_token IS NULL;
+             WHERE attachment_id = (decode(v_p->>0, 'hex')) AND phase = 'condemned' AND write_token IS NULL;
             GET DIAGNOSTICS v_rows = ROW_COUNT;
             IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'attachment_referrer_edge.insert' THEN
             INSERT INTO lash_attachment_referrer_edges (attachment_id, referrer_kind, referrer_id)
-             VALUES ((v_p->>0), (v_p->>1), (v_p->>2)) ON CONFLICT (attachment_id, referrer_kind, referrer_id) DO NOTHING;
+             VALUES ((decode(v_p->>0, 'hex')), (v_p->>1), (v_p->>2)) ON CONFLICT (attachment_id, referrer_kind, referrer_id) DO NOTHING;
             GET DIAGNOSTICS v_rows = ROW_COUNT;
             IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'attachment_session_hold.insert' THEN
             INSERT INTO lash_attachment_session_holds (session_id, attachment_id, holder_kind, holder_id)
-             VALUES ((v_p->>0), (v_p->>1), (v_p->>2), (v_p->>3))
+             VALUES ((v_p->>0), (decode(v_p->>1, 'hex')), (v_p->>2), (v_p->>3))
              ON CONFLICT (session_id, attachment_id, holder_kind, holder_id) DO NOTHING;
             GET DIAGNOSTICS v_rows = ROW_COUNT;
             IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;

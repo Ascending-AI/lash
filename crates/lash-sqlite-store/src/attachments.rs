@@ -1,5 +1,6 @@
 //! Attachment edges and external-byte write state in the durable-core catalog.
 use super::*;
+use crate::codec::{SqlHash, hash_column};
 use lash_core_store::artifact_referrer::ArtifactReferrer;
 use lash_core_store::artifact_referrer::ReferrerClaim;
 use lash_core_store::store::AttachmentWrite;
@@ -84,7 +85,7 @@ fn insert_edge(
         tx,
         attachment_sql().edges.insert.sql(),
         params![
-            id.as_str(),
+            SqlHash(id.as_str()),
             referrer.kind().as_str(),
             referrer.canonical_id()
         ],
@@ -105,7 +106,12 @@ pub(crate) fn hold_session_attachments_conn(
         crate::conn::cached_execute(
             tx,
             attachment_sql().holds.insert.sql(),
-            params![session.as_str(), id.as_str(), holder_kind, holder_id],
+            params![
+                session.as_str(),
+                SqlHash(id.as_str()),
+                holder_kind,
+                holder_id
+            ],
         )
         .map_err(sqlite_error)?;
     }
@@ -190,7 +196,7 @@ fn session_holds_conn(
     let (ingress, history): (bool, bool) = tx
         .query_row(
             attachment_sql().holds.select_holders.sql(),
-            params![session.as_str(), id.as_str()],
+            params![session.as_str(), SqlHash(id.as_str())],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .map_err(sqlite_error)?;
@@ -218,7 +224,7 @@ pub(crate) fn acquire_attachment_refs_conn(
         let deleting = tx
             .query_row(
                 attachment_sql().sqlite.select_deleting.sql(),
-                params![id.as_str()],
+                params![SqlHash(id.as_str())],
                 |_| Ok(()),
             )
             .optional()
@@ -227,7 +233,7 @@ pub(crate) fn acquire_attachment_refs_conn(
         let evidenced = tx
             .query_row(
                 attachment_sql().uploads.select_evidence.sql(),
-                params![id.as_str()],
+                params![SqlHash(id.as_str())],
                 |_| Ok(()),
             )
             .optional()
@@ -246,7 +252,7 @@ pub(crate) fn acquire_attachment_refs_conn(
                 .condemnation
                 .delete_unclaimed_condemned
                 .sql(),
-            params![id.as_str()],
+            params![SqlHash(id.as_str())],
         )
         .map_err(sqlite_error)?;
         insert_edge(tx, referrer, id)?;
@@ -265,7 +271,7 @@ fn has_permit(
         attachment_sql().pending.select_permit.sql(),
         params![
             token,
-            write.attachment_id.as_str(),
+            SqlHash(write.attachment_id.as_str()),
             write.claim.referrer().kind().as_str(),
             write.claim.referrer().canonical_id()
         ],
@@ -288,7 +294,7 @@ fn abort_write_conn(
         tx,
         attachment_sql().condemnation.delete_superseded_claim.sql(),
         params![
-            write.attachment_id.as_str(),
+            SqlHash(write.attachment_id.as_str()),
             token,
             referrer.kind().as_str(),
             referrer.canonical_id()
@@ -300,7 +306,7 @@ fn abort_write_conn(
         attachment_sql().pending.delete_permit.sql(),
         params![
             token,
-            write.attachment_id.as_str(),
+            SqlHash(write.attachment_id.as_str()),
             referrer.kind().as_str(),
             referrer.canonical_id()
         ],
@@ -310,7 +316,7 @@ fn abort_write_conn(
         tx,
         attachment_sql().edges.delete_unproven_ref.sql(),
         params![
-            write.attachment_id.as_str(),
+            SqlHash(write.attachment_id.as_str()),
             referrer.kind().as_str(),
             referrer.canonical_id()
         ],
@@ -332,7 +338,8 @@ impl SqliteStore {
     ) -> Result<lash_core_store::attachments::AttachmentRootPage, StoreError> {
         use lash_core_store::attachments::AttachmentRootPage;
         use lash_core_store::attachments::AttachmentRootSource;
-        let after = after.map(AttachmentId::to_string).unwrap_or_default();
+        // Empty bytes bind SQL's open lower bound, never a content identity.
+        let after = after.map(AttachmentId::to_string);
         let ids = self
             .conn
             .call(move |conn| {
@@ -352,11 +359,17 @@ impl SqliteStore {
                 let mut statement = conn.prepare_cached(query)?;
                 let rows = if let Some(kind) = kind {
                     statement
-                        .query_map(params![kind, after, limit], |row| row.get::<_, String>(0))?
+                        .query_map(
+                            params![kind, after.as_deref().map(SqlHash), limit, &[] as &[u8]],
+                            |row| hash_column(row, 0),
+                        )?
                         .collect::<rusqlite::Result<Vec<_>>>()?
                 } else {
                     statement
-                        .query_map(params![after, limit], |row| row.get::<_, String>(0))?
+                        .query_map(
+                            params![after.as_deref().map(SqlHash), limit, &[] as &[u8]],
+                            |row| hash_column(row, 0),
+                        )?
                         .collect::<rusqlite::Result<Vec<_>>>()?
                 };
                 Ok(rows)
@@ -379,7 +392,7 @@ impl SqliteStore {
                 Ok(conn
                     .query_row(
                         attachment_sql().edges.select_live_root.sql(),
-                        params![id],
+                        params![SqlHash(&id)],
                         |_| Ok(()),
                     )
                     .optional()?
@@ -399,7 +412,7 @@ impl SqliteStore {
                 statement
                     .query_map([], |row| {
                         Ok((
-                            row.get::<_, String>(0)?,
+                            hash_column(row, 0)?,
                             row.get::<_, String>(1)?,
                             row.get::<_, Option<String>>(2)?,
                             row.get::<_, Option<String>>(3)?,
@@ -516,7 +529,7 @@ impl SqliteStore {
                         statement
                             .query_map(params![mine], |row| {
                                 Ok((
-                                    row.get::<_, String>(0)?,
+                                    hash_column(row, 0)?,
                                     row.get::<_, i64>(1)?,
                                     row.get::<_, String>(2)?,
                                     row.get::<_, i64>(3)?,
@@ -573,7 +586,7 @@ impl SqliteStore {
                         let adopted = crate::conn::cached_execute(
                             tx,
                             attachment_sql().condemnation.adopt.sql(),
-                            params![digest, mine, owner, now],
+                            params![SqlHash(&digest), mine, owner, now],
                         )
                         .map_err(sqlite_error)?;
                         if adopted == 1 {
@@ -629,7 +642,7 @@ impl SqliteStore {
                 crate::conn::cached_execute(
                     tx,
                     attachment_sql().condemnation.arm_delete.sql(),
-                    params![attachment_id, generation],
+                    params![SqlHash(&attachment_id), generation],
                 )
             })
             .await
@@ -659,14 +672,14 @@ impl SqliteStore {
                     crate::conn::cached_execute(
                         tx,
                         attachment_sql().condemnation.delete_armed.sql(),
-                        params![attachment_id, generation],
+                        params![SqlHash(&attachment_id), generation],
                     )
                 }
                 lash_core_store::store::AttachmentCondemnationSettlement::Spared => {
                     crate::conn::cached_execute(
                         tx,
                         attachment_sql().condemnation.delete_spared.sql(),
-                        params![attachment_id, generation],
+                        params![SqlHash(&attachment_id), generation],
                     )
                 }
                 lash_core_store::store::AttachmentCondemnationSettlement::Failed {
@@ -676,7 +689,7 @@ impl SqliteStore {
                     tx,
                     attachment_sql().condemnation.record_failed_delete.sql(),
                     params![
-                        attachment_id,
+                        SqlHash(&attachment_id),
                         generation,
                         error,
                         stall.map(|reason| reason.as_str()),
@@ -706,7 +719,7 @@ impl SqliteStore {
                     if tx
                         .query_row(
                             attachment_sql().edges.select_live_root.sql(),
-                            params![id],
+                            params![SqlHash(&id)],
                             |_| Ok(()),
                         )
                         .optional()
@@ -718,7 +731,7 @@ impl SqliteStore {
                     if tx
                         .query_row(
                             attachment_sql().sqlite.select_condemned.sql(),
-                            params![id],
+                            params![SqlHash(&id)],
                             |_| Ok(()),
                         )
                         .optional()
@@ -732,13 +745,13 @@ impl SqliteStore {
                     crate::conn::cached_execute(
                         tx,
                         attachment_sql().sqlite.insert_condemned.sql(),
-                        params![id, generation],
+                        params![SqlHash(&id), generation],
                     )
                     .map_err(sqlite_error)?;
                     crate::conn::cached_execute(
                         tx,
                         attachment_sql().uploads.delete_by_id.sql(),
-                        params![id],
+                        params![SqlHash(&id)],
                     )
                     .map_err(sqlite_error)?;
                     Ok(lash_core_store::store::AttachmentCondemnation::Condemned)
@@ -758,7 +771,7 @@ impl SqliteStore {
                     let claim = tx
                         .query_row(
                             attachment_sql().condemnation.select_claim.sql(),
-                            params![id.as_str()],
+                            params![SqlHash(id.as_str())],
                             |row| {
                                 Ok((
                                     row.get::<_, String>(0)?,
@@ -955,7 +968,7 @@ impl AttachmentReferrers for SqliteStore {
                     let condemnation = tx
                         .query_row(
                             attachment_sql().condemnation.select_phase_and_claim.sql(),
-                            params![write.attachment_id.as_str()],
+                            params![SqlHash(write.attachment_id.as_str())],
                             |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
                         )
                         .optional()
@@ -982,7 +995,7 @@ impl AttachmentReferrers for SqliteStore {
                         attachment_sql().pending.insert.sql(),
                         params![
                             token.as_hex(),
-                            write.attachment_id.as_str(),
+                            SqlHash(write.attachment_id.as_str()),
                             referrer.kind().as_str(),
                             referrer.canonical_id(),
                             crate::clamp_epoch_ms(now)
@@ -993,7 +1006,7 @@ impl AttachmentReferrers for SqliteStore {
                         crate::conn::cached_execute(
                             tx,
                             attachment_sql().condemnation.claim_write.sql(),
-                            params![write.attachment_id.as_str(), token.as_hex()],
+                            params![SqlHash(write.attachment_id.as_str()), token.as_hex()],
                         )
                         .map_err(sqlite_error)?;
                     }
@@ -1028,13 +1041,13 @@ impl AttachmentReferrers for SqliteStore {
                     crate::conn::cached_execute(
                         tx,
                         attachment_sql().uploads.insert.sql(),
-                        params![write.attachment_id.as_str(), now],
+                        params![SqlHash(write.attachment_id.as_str()), now],
                     )
                     .map_err(sqlite_error)?;
                     crate::conn::cached_execute(
                         tx,
                         attachment_sql().condemnation.delete_by_write_token.sql(),
-                        params![write.attachment_id.as_str(), token],
+                        params![SqlHash(write.attachment_id.as_str()), token],
                     )
                     .map_err(sqlite_error)?;
                     crate::conn::cached_execute(
@@ -1042,7 +1055,7 @@ impl AttachmentReferrers for SqliteStore {
                         attachment_sql().pending.delete_permit.sql(),
                         params![
                             token,
-                            write.attachment_id.as_str(),
+                            SqlHash(write.attachment_id.as_str()),
                             write.claim.referrer().kind().as_str(),
                             write.claim.referrer().canonical_id()
                         ],
@@ -1121,7 +1134,7 @@ impl AttachmentReferrers for SqliteStore {
                         tx,
                         attachment_sql().edges.delete_ref.sql(),
                         params![
-                            id.as_str(),
+                            SqlHash(id.as_str()),
                             referrer.kind().as_str(),
                             referrer.canonical_id()
                         ],
@@ -1213,7 +1226,7 @@ impl AttachmentReferrers for SqliteStore {
                 let mut statement =
                     conn.prepare_cached(attachment_sql().edges.select_referrers.sql())?;
                 statement
-                    .query_map(params![id.as_str()], |row| {
+                    .query_map(params![SqlHash(id.as_str())], |row| {
                         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
                     })?
                     .collect::<rusqlite::Result<Vec<_>>>()

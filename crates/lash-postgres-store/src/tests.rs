@@ -518,7 +518,7 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
         format!("fence-race-{}", std::process::id()).as_bytes(),
     );
     sqlx::query("DELETE FROM lash_attachment_condemnations WHERE attachment_id = $1")
-        .bind(attachment_id.as_str())
+        .bind(crate::keys::key(attachment_id.as_str()))
         .execute(storage.pool())
         .await
         .expect("clear condemnation fixture");

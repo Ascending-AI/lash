@@ -64,7 +64,8 @@ fn content_address_columns_are_binary_keys() {
         let references_content = line.split_once("REFERENCES ").is_some_and(|(_, target)| {
             target.starts_with("lash_blobs(hash)") || target.starts_with("lash_prompt_texts(hash)")
         });
-        let content_key = references_content
+        let content_key = line.starts_with("attachment_id ")
+            || references_content
             || (matches!(table, "lash_blobs" | "lash_prompt_texts") && line.starts_with("hash "))
             || (table == "lash_retirement_frontier" && line.starts_with("node_ref "));
         if content_key {

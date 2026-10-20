@@ -272,7 +272,7 @@ async fn sqlite_attachment_condemnation_enumeration_refuses_corrupt_rows() {
             "PRAGMA ignore_check_constraints = ON;
              INSERT INTO attachment_condemnations
                  (attachment_id, phase, write_token, sweep_generation)
-             VALUES ('corrupt-condemnation', 'future-phase', NULL, 1);",
+             VALUES (X'a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1', 'future-phase', NULL, 1);",
         )
         .expect("inject unknown persisted phase");
     assert!(matches!(
@@ -285,7 +285,7 @@ async fn sqlite_attachment_condemnation_enumeration_refuses_corrupt_rows() {
              DELETE FROM attachment_condemnations;
              INSERT INTO attachment_condemnations
                  (attachment_id, phase, write_token, sweep_generation)
-             VALUES ('corrupt-condemnation', 'deleting', '0123456789abcdef0123456789abcdef', 1);",
+             VALUES (X'a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1', 'deleting', '0123456789abcdef0123456789abcdef', 1);",
         )
         .expect("inject inconsistent persisted provenance");
     assert!(matches!(
@@ -298,7 +298,7 @@ async fn sqlite_attachment_condemnation_enumeration_refuses_corrupt_rows() {
              INSERT INTO attachment_condemnations
                  (attachment_id, phase, sweep_generation, delete_attempts,
                   last_delete_error, stall_reason)
-             VALUES ('corrupt-condemnation', 'condemned', 1, 1, 'failed', 'future-reason');",
+             VALUES (X'a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1', 'condemned', 1, 1, 'failed', 'future-reason');",
         )
         .expect("inject an unknown persisted stall reason");
     assert!(matches!(
@@ -872,7 +872,7 @@ lash_conformance::attachment_referrer_tests!({
         let injector = injector.clone();
         Box::pin(async move {
             injector.raw()
-                .execute("INSERT INTO attachment_referrer_edges (attachment_id, referrer_kind, referrer_id) VALUES (?1, ?2, ?3)", rusqlite::params![id.as_str(), kind, key])
+                .execute("INSERT INTO attachment_referrer_edges (attachment_id, referrer_kind, referrer_id) VALUES (?1, ?2, ?3)", rusqlite::params![lash_core_store::checkpoint_graph::NodeId::from_hex(id.as_str()).expect("digest").0.as_slice(), kind, key])
                 .map(|_| ()).map_err(|error| lash_core_store::store::StoreError::Backend(error.to_string()))
         })
     });

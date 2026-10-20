@@ -132,7 +132,7 @@ impl RawDurableReader {
                         }
                     })
                     .collect();
-                let attachment_rows: Vec<AttachmentRow> = sqlx::query_as("SELECT r.attachment_id, r.referrer_kind, r.referrer_id,
+                let attachment_rows: Vec<AttachmentRow> = sqlx::query_as("SELECT encode(r.attachment_id, 'hex'), r.referrer_kind, r.referrer_id,
  EXISTS(SELECT 1 FROM lash_attachment_referrer_edges e WHERE e.attachment_id = r.attachment_id AND e.referrer_kind = r.referrer_kind AND e.referrer_id = r.referrer_id),
  EXISTS(SELECT 1 FROM lash_attachment_uploads u WHERE u.attachment_id = r.attachment_id),
  (SELECT COUNT(*) FROM lash_attachment_pending_writes p WHERE p.attachment_id = r.attachment_id AND p.referrer_kind = r.referrer_kind AND p.referrer_id = r.referrer_id)
@@ -391,7 +391,12 @@ pub(super) async fn read_sqlite_durable_state(
                 ],
                 |row| {
                     Ok((
-                        row.get::<_, String>(0)?,
+                        lash_core_store::checkpoint_graph::NodeId(
+                            row.get::<_, Vec<u8>>(0)?
+                                .try_into()
+                                .expect("32-byte digest"),
+                        )
+                        .to_hex(),
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
                         row.get::<_, bool>(3)?,

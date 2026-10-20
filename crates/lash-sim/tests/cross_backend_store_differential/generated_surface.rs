@@ -632,7 +632,15 @@ fn raw_sqlite_blobs(database_uri: &str) -> Vec<(lash_core::AttachmentId, Vec<u8>
         .expect("prepare the blob read");
     statement
         .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+            Ok((
+                lash_core_store::checkpoint_graph::NodeId(
+                    row.get::<_, Vec<u8>>(0)?
+                        .try_into()
+                        .expect("32-byte digest"),
+                )
+                .to_hex(),
+                row.get::<_, Vec<u8>>(1)?,
+            ))
         })
         .expect("read the attachment blobs")
         .map(|row| {

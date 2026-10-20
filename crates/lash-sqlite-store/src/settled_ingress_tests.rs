@@ -102,13 +102,13 @@ async fn hold_attachments(store: &SqliteStore, session: &SessionId, inputs: &[(&
                 tx.execute(
                     "INSERT INTO attachment_referrer_edges (attachment_id, referrer_kind, referrer_id)
                      VALUES (?1, 'session', ?2)",
-                    params![attachment, session],
+                    params![crate::codec::SqlHash(attachment), session],
                 )?;
                 tx.execute(
                     "INSERT INTO attachment_session_holds
                          (session_id, attachment_id, holder_kind, holder_id)
                      VALUES (?1, ?2, 'input', ?3)",
-                    params![session, attachment, input],
+                    params![session, crate::codec::SqlHash(attachment), input],
                 )?;
             }
             Ok(())
@@ -126,7 +126,7 @@ async fn session_edge(store: &SqliteStore, session: &SessionId, attachment: &str
             conn.query_row(
                 "SELECT EXISTS (SELECT 1 FROM attachment_referrer_edges
                      WHERE attachment_id = ?1 AND referrer_kind = 'session' AND referrer_id = ?2)",
-                [attachment.as_str(), session.as_str()],
+                params![crate::codec::SqlHash(&attachment), session.as_str()],
                 |row| row.get::<_, bool>(0),
             )
         })
@@ -195,8 +195,14 @@ async fn settled_ingress_bodies_follow_head_only_retention() {
         &store,
         &session,
         &[
-            (input.input_id.as_str(), "attachment-settled"),
-            (unconsumed.input_id.as_str(), "attachment-waiting"),
+            (
+                input.input_id.as_str(),
+                "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+            ),
+            (
+                unconsumed.input_id.as_str(),
+                "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+            ),
         ],
     )
     .await;
@@ -292,7 +298,7 @@ async fn settled_ingress_bodies_follow_head_only_retention() {
     let (input_id, batch_id) = (input.input_id.to_string(), command.batch_id.to_string());
     store.conn.write(move |tx| {
         for index in 1..=128 {
-            tx.execute("INSERT INTO attachment_session_holds VALUES ('settled-ingress', 'attachment-settled', 'input', 'input-extra-' || ?1)", [index])?;
+            tx.execute("INSERT INTO attachment_session_holds VALUES ('settled-ingress', X'a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1', 'input', 'input-extra-' || ?1)", [index])?;
             tx.execute("INSERT INTO pending_turn_inputs
                 (enqueue_seq, input_id, session_id, source_key, ingress_json, state,
                  input_json, submission_digest, enqueued_at_ms, admitted_run, terminal_at_ms)
@@ -411,7 +417,7 @@ async fn settled_ingress_bodies_follow_head_only_retention() {
         session_edge(
             &reopened,
             &SessionId::from("other-owner"),
-            "attachment-settled"
+            "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"
         )
         .await
     );
@@ -441,11 +447,21 @@ async fn settled_ingress_bodies_follow_head_only_retention() {
         "no settled body outlives its released revision"
     );
     assert!(
-        !session_edge(&store, &session, "attachment-settled").await,
+        !session_edge(
+            &store,
+            &session,
+            "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"
+        )
+        .await,
         "a released body's attachment is no longer the session's"
     );
     assert!(
-        session_edge(&store, &session, "attachment-waiting").await,
+        session_edge(
+            &store,
+            &session,
+            "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+        )
+        .await,
         "an unconsumed input keeps its attachment"
     );
 
@@ -571,7 +587,10 @@ async fn retained_neighbor(store: &SqliteStore) {
     hold_attachments(
         store,
         &session,
-        &[(input.input_id.as_str(), "attachment-settled")],
+        &[(
+            input.input_id.as_str(),
+            "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+        )],
     )
     .await;
     let id = input.input_id.to_string();

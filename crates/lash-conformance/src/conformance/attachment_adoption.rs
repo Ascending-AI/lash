@@ -153,10 +153,35 @@ pub async fn abandoned_attachment_write_recovery_after_cold_reopen<R, Fut>(
         ArtifactReferrer::ProcessRecord(ProcessId::fixture("cold-writer")),
     );
     let pending = permit(store.as_ref(), &attempt).await;
+    // ATTACHMENT-UPLOAD-RESUME: a surviving permit and its upload referrer
+    // cross the reopen together; completion publishes evidence the receiver
+    // can acquire. The abandoned attempt below still loses its permit.
+    let upload_id = lash_core::attachments::content_id(b"cold-resuming-upload");
+    let upload_referrer = ArtifactReferrer::Upload(UploadReferrerId::mint("cold-write".into()));
+    let upload = write(&upload_id, upload_referrer.clone());
+    let upload_permit = permit(store.as_ref(), &upload).await;
     drop(store);
     drop(pass);
     drop(initial_factory);
     let reopened = reopen().await;
+    assert!(reopened.has_live_attachment_ref(&upload_id).await.unwrap());
+    reopened
+        .complete_attachment_write(&upload, upload_permit)
+        .await
+        .unwrap();
+    let receiver = ArtifactReferrer::Session("cold-write".into());
+    reopened
+        .acquire_attachment_refs(&claim(receiver.clone()), std::slice::from_ref(&upload_id))
+        .await
+        .unwrap();
+    reopened
+        .end_attachment_referrer(&upload_referrer)
+        .await
+        .unwrap();
+    assert_eq!(
+        reopened.attachment_referrers(&upload_id).await.unwrap(),
+        vec![receiver]
+    );
     reopened
         .recover_abandoned_attachment_write(&id)
         .await

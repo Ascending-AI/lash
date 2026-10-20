@@ -192,23 +192,23 @@ pub(super) static LOCK_ATTACHMENT: Entry =
     Entry::new(|| &SQL.lock_attachment, &[Ty::Int, Ty::Text], Shape::Select);
 pub(super) static ATTACHMENT_DELETING: Entry = Entry::new(
     || &attachments().postgres.select_deleting,
-    &[Ty::Text],
+    &[Ty::Key],
     Shape::Select,
 )
 .flagged("exists");
 pub(super) static ATTACHMENT_UPLOADED: Entry = Entry::new(
     || &attachments().uploads.select_evidence,
-    &[Ty::Text],
+    &[Ty::Key],
     Shape::Select,
 );
 pub(super) static ATTACHMENT_CLAIMED: Entry = Entry::new(
     || &attachments().condemnation.delete_unclaimed_condemned,
-    &[Ty::Text],
+    &[Ty::Key],
     Shape::Exec,
 );
 pub(super) static ATTACHMENT_EDGE: Entry = Entry::new(
     || &attachments().edges.insert,
-    &[Ty::Text, Ty::Text, Ty::Text],
+    &[Ty::Key, Ty::Text, Ty::Text],
     Shape::Exec,
 );
 pub(super) static WORK_REMAINING: Entry = Entry::new(
@@ -1070,24 +1070,24 @@ fn acquire_attachments(
     }
     for id in &ids {
         program.push(
-            Step::none(&ATTACHMENT_DELETING, vec![text(id.as_str())]),
+            Step::none(&ATTACHMENT_DELETING, vec![Value::key(id.as_str())]),
             Refusal::Attachment((*id).clone()),
         );
         program.push(
-            Step::one(&ATTACHMENT_UPLOADED, vec![text(id.as_str())]),
+            Step::one(&ATTACHMENT_UPLOADED, vec![Value::key(id.as_str())]),
             Refusal::Attachment((*id).clone()),
         );
     }
     for id in &ids {
         program.push(
-            Step::any(&ATTACHMENT_CLAIMED, vec![text(id.as_str())]),
+            Step::any(&ATTACHMENT_CLAIMED, vec![Value::key(id.as_str())]),
             Refusal::Backstop,
         );
         program.push(
             Step::any(
                 &ATTACHMENT_EDGE,
                 vec![
-                    text(id.as_str()),
+                    Value::key(id.as_str()),
                     text(referrer.kind().as_str()),
                     text(referrer.canonical_id()),
                 ],
@@ -1099,7 +1099,7 @@ fn acquire_attachments(
                 &super::retention::HOLD_ATTACHMENT,
                 vec![
                     text(commit.session_id.as_str()),
-                    text(id.as_str()),
+                    Value::key(id.as_str()),
                     text(lash_store_sql::attachment::session_holds::HISTORY),
                     text(""),
                 ],

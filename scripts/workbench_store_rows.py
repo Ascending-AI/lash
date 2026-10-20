@@ -45,6 +45,6 @@ class StoreRows:
         """The stored bytes of one attachment: one entry when it is stored."""
         if self.store == "sqlite_file":
             return [row["content"] for row in
-                    self.sql("SELECT content FROM attachment_blobs WHERE attachment_id = ?", (attachment_id,))]
+                    self.sql("SELECT content FROM attachment_blobs WHERE attachment_id = ?", (bytes.fromhex(attachment_id),))]
         path = self.data / "attachments/blake3" / attachment_id[:2] / attachment_id
         return [path.read_bytes()] if path.is_file() else []

@@ -636,7 +636,12 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
     let manifest_stamp: i64 = sqlx::query_scalar(
         "SELECT written_at_ms FROM lash_attachment_uploads WHERE attachment_id = $1",
     )
-    .bind(clock_intent.attachment_id.as_str())
+    .bind(
+        lash_core_store::checkpoint_graph::NodeId::from_hex(clock_intent.attachment_id.as_str())
+            .expect("digest")
+            .0
+            .to_vec(),
+    )
     .fetch_one(storage.pool())
     .await
     .expect("read manifest commit stamp");
@@ -1075,7 +1080,7 @@ lash_conformance::attachment_referrer_tests!({
                 .await
                 .map_err(|error| StoreError::Backend(error.to_string()))?;
             sqlx::query("ALTER TABLE lash_attachment_referrer_edges DROP CONSTRAINT IF EXISTS ck_attachment_referrer_edges_kind").execute(&mut *tx).await.map_err(|error| StoreError::Backend(error.to_string()))?;
-            sqlx::query("INSERT INTO lash_attachment_referrer_edges (attachment_id, referrer_kind, referrer_id) VALUES ($1, $2, $3)").bind(id.as_str()).bind(kind).bind(key).execute(&mut *tx).await.map_err(|error| StoreError::Backend(error.to_string()))?;
+            sqlx::query("INSERT INTO lash_attachment_referrer_edges (attachment_id, referrer_kind, referrer_id) VALUES ($1, $2, $3)").bind(lash_core_store::checkpoint_graph::NodeId::from_hex(id.as_str()).expect("digest").0.to_vec()).bind(kind).bind(key).execute(&mut *tx).await.map_err(|error| StoreError::Backend(error.to_string()))?;
             sqlx::query(&format!("ALTER TABLE lash_attachment_referrer_edges ADD CONSTRAINT ck_attachment_referrer_edges_kind CHECK ({}) NOT VALID", lash_core_store::artifact_referrer::ArtifactReferrerKind::predicate_sql("referrer_kind", lash_core_store::artifact_referrer::ArtifactReferrerKind::holds_attachments))).execute(&mut *tx).await.map_err(|error| StoreError::Backend(error.to_string()))?;
             tx.commit()
                 .await

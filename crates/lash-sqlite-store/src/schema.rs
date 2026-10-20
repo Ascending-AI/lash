@@ -356,7 +356,7 @@ CREATE TABLE IF NOT EXISTS session_run_specs (
 -- binds ArtifactReferrerKind::as_str, and every read decodes through
 -- ArtifactReferrer::decode.
 CREATE TABLE IF NOT EXISTS attachment_referrer_edges (
-    attachment_id TEXT NOT NULL CONSTRAINT ck_attachment_referrer_edges_attachment CHECK (length(attachment_id) > 0),
+    attachment_id BLOB NOT NULL CONSTRAINT ck_attachment_referrer_edges_attachment CHECK (length(attachment_id) = 32),
     referrer_kind TEXT NOT NULL CONSTRAINT ck_attachment_referrer_edges_kind CHECK (length(referrer_kind) > 0),
     referrer_id   TEXT NOT NULL CONSTRAINT ck_attachment_referrer_edges_id CHECK (length(referrer_id) > 0),
     PRIMARY KEY (attachment_id, referrer_kind, referrer_id)
@@ -369,7 +369,7 @@ CREATE INDEX IF NOT EXISTS idx_attachment_referrer_edges_referrer
 -- one hold does.
 CREATE TABLE IF NOT EXISTS attachment_session_holds (
     session_id    TEXT NOT NULL CONSTRAINT ck_attachment_session_holds_session CHECK (length(session_id) > 0),
-    attachment_id TEXT NOT NULL CONSTRAINT ck_attachment_session_holds_attachment CHECK (length(attachment_id) > 0),
+    attachment_id BLOB NOT NULL CONSTRAINT ck_attachment_session_holds_attachment CHECK (length(attachment_id) = 32),
     holder_kind   TEXT NOT NULL CONSTRAINT ck_attachment_session_holds_kind CHECK (holder_kind IN ('history', 'input', 'batch')),
     holder_id     TEXT NOT NULL,
     CONSTRAINT ck_attachment_session_holds_holder CHECK ((holder_kind = 'history') = (holder_id = '')),
@@ -382,7 +382,7 @@ CREATE INDEX IF NOT EXISTS idx_attachment_session_holds_holder
 -- session edge of each one no hold names any more.
 CREATE TABLE IF NOT EXISTS attachment_session_releases (
     session_id    TEXT NOT NULL,
-    attachment_id TEXT NOT NULL,
+    attachment_id BLOB NOT NULL,
     PRIMARY KEY (session_id, attachment_id)
 );
 
@@ -390,7 +390,7 @@ CREATE TABLE IF NOT EXISTS attachment_session_releases (
 -- `write_id` is AttachmentWriteToken::as_hex.
 CREATE TABLE IF NOT EXISTS attachment_pending_writes (
     write_id      TEXT PRIMARY KEY CONSTRAINT ck_attachment_pending_writes_write_id CHECK (length(write_id) = 32),
-    attachment_id TEXT NOT NULL CONSTRAINT ck_attachment_pending_writes_attachment CHECK (length(attachment_id) > 0),
+    attachment_id BLOB NOT NULL CONSTRAINT ck_attachment_pending_writes_attachment CHECK (length(attachment_id) = 32),
     referrer_kind TEXT NOT NULL CONSTRAINT ck_attachment_pending_writes_kind CHECK (length(referrer_kind) > 0),
     referrer_id   TEXT NOT NULL CONSTRAINT ck_attachment_pending_writes_id CHECK (length(referrer_id) > 0),
     begun_at_ms   INTEGER NOT NULL
@@ -403,14 +403,14 @@ CREATE INDEX IF NOT EXISTS idx_attachment_pending_writes_referrer
 -- Upload evidence: one row per digest a completed write proved uploaded.
 -- Deleted only by condemnation, under the digest fence.
 CREATE TABLE IF NOT EXISTS attachment_uploads (
-    attachment_id TEXT PRIMARY KEY CONSTRAINT ck_attachment_uploads_attachment CHECK (length(attachment_id) > 0),
+    attachment_id BLOB PRIMARY KEY CONSTRAINT ck_attachment_uploads_attachment CHECK (length(attachment_id) = 32),
     written_at_ms INTEGER NOT NULL
 );
 
 -- Attachment GC fence per condemned digest (ADR 0067 section 6). A claim is the
 -- pending write that holds it; deleting that write releases the claim.
 CREATE TABLE IF NOT EXISTS attachment_condemnations (
-    attachment_id     TEXT PRIMARY KEY,
+    attachment_id     BLOB PRIMARY KEY,
     phase             TEXT NOT NULL CONSTRAINT ck_attachment_condemnations_phase CHECK (phase IN ('condemned', 'deleting')),
     write_token       TEXT REFERENCES attachment_pending_writes(write_id) ON DELETE SET NULL,
     next_delete_at_ms BIGINT NOT NULL DEFAULT 0 CONSTRAINT ck_attachment_condemnations_next_delete CHECK (next_delete_at_ms >= 0),
@@ -428,7 +428,7 @@ CREATE TABLE IF NOT EXISTS attachment_sweep_clock (singleton INTEGER PRIMARY KEY
 -- `blobs` holds checkpoint and artifact bytes rooted elsewhere. `stored_at_ms`
 -- is the freshness a repeated put restamps and the GC's write grace reads.
 CREATE TABLE IF NOT EXISTS attachment_blobs (
-    attachment_id TEXT PRIMARY KEY,
+    attachment_id BLOB PRIMARY KEY,
     content       BLOB NOT NULL,
     stored_at_ms  INTEGER NOT NULL
 );
@@ -909,7 +909,7 @@ mod compat_tests {
         provision(&mut connection);
         let columns = connection.prepare(
             "SELECT m.name, p.name, p.type FROM sqlite_schema AS m, pragma_table_info(m.name) AS p
-             WHERE m.type = 'table' AND (p.name IN ('hash', 'parent_hash', 'child_hash', 'node_ref')
+             WHERE m.type = 'table' AND (p.name IN ('hash', 'parent_hash', 'child_hash', 'node_ref', 'attachment_id')
                OR EXISTS (SELECT 1 FROM pragma_foreign_key_list(m.name) AS f
                           WHERE f.\"from\" = p.name AND f.\"table\" IN ('blobs', 'prompt_texts'))
                OR (m.name = 'prompt_text_edges' AND p.name IN ('parent', 'child')))"

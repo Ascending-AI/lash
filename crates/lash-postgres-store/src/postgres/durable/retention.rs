@@ -39,7 +39,7 @@ fn holds() -> &'static lash_store_sql::attachment::session_holds::SessionHoldSta
 /// Record a session attachment hold (FIG-6611).
 pub(super) static HOLD_ATTACHMENT: Entry = Entry::new(
     || &holds().insert,
-    &[Ty::Text, Ty::Text, Ty::Text, Ty::Text],
+    &[Ty::Text, Ty::Key, Ty::Text, Ty::Text],
     Shape::Exec,
 );
 /// Queue what the inputs and batches whose bodies were released held.

@@ -15,6 +15,7 @@
 //! [`AttachmentStorePersistence::Durable`], an in-memory one is
 //! [`AttachmentStorePersistence::Ephemeral`].
 
+use crate::codec::{SqlHash, hash_column};
 use std::sync::{Arc, LazyLock};
 
 use lash_core_store::attachments::AttachmentBlobPage;
@@ -70,7 +71,7 @@ lash_store_sql::statements! {
 
         /// Exclusive content cursor, with bounded result allocation.
         select_page_refs = "SELECT attachment_id, stored_at_ms FROM attachment_blobs
-             WHERE attachment_id > ?1 ORDER BY attachment_id LIMIT ?2";
+             WHERE attachment_id > COALESCE(?1, ?3) ORDER BY attachment_id LIMIT ?2";
 
         /// Drop the bytes held under `?1`. Deleting an absent id is a no-op.
         delete_by_id = "DELETE FROM attachment_blobs WHERE attachment_id = ?1";
@@ -199,7 +200,7 @@ impl AttachmentStore for SqliteAttachmentStore {
                 crate::conn::cached_execute(
                     tx,
                     attachment_blob_sql().upsert.sql(),
-                    params![attachment_id, bytes, stored_at_ms],
+                    params![SqlHash(&attachment_id), bytes, stored_at_ms],
                 )
             })
             .await
@@ -220,7 +221,7 @@ impl AttachmentStore for SqliteAttachmentStore {
                 connection
                     .query_row(
                         attachment_blob_sql().select_content.sql(),
-                        params![attachment_id, sql_limit],
+                        params![SqlHash(&attachment_id), sql_limit],
                         |row| Ok((row.get::<_, u64>(0)?, row.get::<_, Option<Vec<u8>>>(1)?)),
                     )
                     .optional()
@@ -258,7 +259,7 @@ impl AttachmentStore for SqliteAttachmentStore {
                 connection
                     .query_row(
                         attachment_blob_sql().select_delivery.sql(),
-                        params![id, expected, bound],
+                        params![SqlHash(&id), expected, bound],
                         |row| Ok((row.get::<_, u64>(0)?, row.get::<_, Option<Vec<u8>>>(1)?)),
                     )
                     .optional()
@@ -292,7 +293,7 @@ impl AttachmentStore for SqliteAttachmentStore {
                 crate::conn::cached_execute(
                     tx,
                     attachment_blob_sql().delete_by_id.sql(),
-                    params![attachment_id],
+                    params![SqlHash(&attachment_id)],
                 )
             })
             .await
@@ -307,9 +308,7 @@ impl AttachmentStore for SqliteAttachmentStore {
                 let mut statement =
                     connection.prepare_cached(attachment_blob_sql().select_all_refs.sql())?;
                 statement
-                    .query_map([], |row| {
-                        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-                    })?
+                    .query_map([], |row| Ok((hash_column(row, 0)?, row.get::<_, i64>(1)?)))?
                     .collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -324,16 +323,22 @@ impl AttachmentStore for SqliteAttachmentStore {
         after: Option<&AttachmentId>,
         limit: std::num::NonZeroU32,
     ) -> Result<AttachmentBlobPage, AttachmentStoreError> {
-        let after = after.map_or_else(String::new, |id| id.as_str().to_owned());
+        // Empty bytes bind SQL's open lower bound, never a content identity.
+        let after = after.map(|id| id.as_str().to_owned());
         let rows = self
             .conn
             .call(move |connection| {
                 let mut statement =
                     connection.prepare_cached(attachment_blob_sql().select_page_refs.sql())?;
                 statement
-                    .query_map(params![after, i64::from(limit.get())], |row| {
-                        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-                    })?
+                    .query_map(
+                        params![
+                            after.as_deref().map(SqlHash),
+                            i64::from(limit.get()),
+                            &[] as &[u8]
+                        ],
+                        |row| Ok((hash_column(row, 0)?, row.get::<_, i64>(1)?)),
+                    )?
                     .collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -353,8 +358,8 @@ impl AttachmentStore for SqliteAttachmentStore {
                 connection
                     .query_row(
                         attachment_blob_sql().select_ref.sql(),
-                        params![attachment_id],
-                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+                        params![SqlHash(&attachment_id)],
+                        |row| Ok((hash_column(row, 0)?, row.get::<_, i64>(1)?)),
                     )
                     .optional()
             })

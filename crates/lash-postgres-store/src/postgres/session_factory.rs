@@ -654,30 +654,34 @@ impl lash_core_store::attachments::AttachmentRootSet for PostgresStore {
         use lash_core_store::attachments::AttachmentRootPage;
         use lash_core_store::attachments::AttachmentRootSource;
         let sql = crate::attachments::attachment_sql();
+        // Empty bytes bind SQL's open lower bound, never a content identity.
         let after = after
             .map(lash_protocol_types::attachment::AttachmentId::as_str)
-            .unwrap_or("");
+            .map(crate::keys::key);
         let limit = AttachmentRootPage::QUERY_LIMIT as i64;
         let ids: Vec<String> = match source {
             AttachmentRootSource::Referrer(kind) => {
-                crate::observed_sql::query_scalar(sql.edges.select_root_page.sql())
+                crate::keys::query_scalar(sql.edges.select_root_page.sql())
                     .bind(kind.as_str())
                     .bind(after)
                     .bind(limit)
+                    .bind(Vec::<u8>::new())
                     .fetch_all(crate::observed_sql::executor(&self.pool))
                     .await
             }
             AttachmentRootSource::OtherReferrers => {
-                crate::observed_sql::query_scalar(sql.edges.select_other_root_page.sql())
+                crate::keys::query_scalar(sql.edges.select_other_root_page.sql())
                     .bind(after)
                     .bind(limit)
+                    .bind(Vec::<u8>::new())
                     .fetch_all(crate::observed_sql::executor(&self.pool))
                     .await
             }
             AttachmentRootSource::PendingWrites => {
-                crate::observed_sql::query_scalar(sql.pending.select_root_page.sql())
+                crate::keys::query_scalar(sql.pending.select_root_page.sql())
                     .bind(after)
                     .bind(limit)
+                    .bind(Vec::<u8>::new())
                     .fetch_all(crate::observed_sql::executor(&self.pool))
                     .await
             }
@@ -708,7 +712,7 @@ impl lash_core_store::attachments::AttachmentRootSet for PostgresStore {
                 .select_live_root
                 .sql(),
         )
-        .bind(id.as_str())
+        .bind(crate::keys::key(id.as_str()))
         .fetch_optional(crate::observed_sql::executor(&self.pool))
         .await
         .map_err(store_sqlx_error)?
@@ -761,7 +765,7 @@ impl lash_core_store::attachments::AttachmentRootSet for PostgresStore {
                 .select_live_root
                 .sql(),
         )
-        .bind(id.as_str())
+        .bind(crate::keys::key(id.as_str()))
         .fetch_optional(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?
@@ -776,7 +780,7 @@ impl lash_core_store::attachments::AttachmentRootSet for PostgresStore {
                 .insert_condemned
                 .sql(),
         )
-        .bind(id.as_str())
+        .bind(crate::keys::key(id.as_str()))
         .bind(generation)
         .execute(crate::observed_sql::executor(&mut **tx))
         .await
@@ -793,7 +797,7 @@ impl lash_core_store::attachments::AttachmentRootSet for PostgresStore {
                     .delete_by_id
                     .sql(),
             )
-            .bind(id.as_str())
+            .bind(crate::keys::key(id.as_str()))
             .execute(crate::observed_sql::executor(&mut **tx))
             .await
             .map_err(store_sqlx_error)?;
@@ -827,7 +831,7 @@ impl lash_core_store::attachments::AttachmentRootSet for PostgresStore {
                 .arm_delete
                 .sql(),
         )
-        .bind(id.as_str())
+        .bind(crate::keys::key(id.as_str()))
         .bind(generation)
         .execute(crate::observed_sql::executor(&mut **tx))
         .await
