@@ -29,14 +29,14 @@ the model's surrounding prose.
 ## Scenario-specific golden rules
 
 1. **Two cells are the contract.** The first turn must contain a completed
-   `tools.search` call whose observation names `text.sha256`, followed by a distinct
-   `<typescript>` execution cell that calls `text.sha256`. A single cell containing both
+   `tools.search` call whose observation names `strings.sha256`, followed by a distinct
+   `<typescript>` execution cell that calls `strings.sha256`. A single cell containing both
    is a link failure, not a passing shortcut.
-2. **The search observation is evidence.** Prompt text containing `text.sha256` proves
+2. **The search observation is evidence.** Prompt text containing `strings.sha256` proves
    nothing. Require the completed search tool result to contain `call_path:
-   "text.sha256"`, and save the matching trace extract.
+   "strings.sha256"`, and save the matching trace extract.
 3. **Execution is evidence.** Require a completed deferred call whose raw tool id is
-   `workbench_deferred_text_sha256`, plus the exact digest in the assistant reply. A
+   `workbench_deferred_strings_sha256`, plus the exact digest in the assistant reply. A
    model-computed digest without the tool call fails.
 4. **Restart means the web process.** Use `bash scripts/agent-workbench-dev.sh restart
    --port <port>` (equivalently `just agent-workbench-restart <port>`) with the same explicit
@@ -45,12 +45,12 @@ the model's surrounding prose.
    directory, the session id, and `deferred-tool-grants.db` must remain unchanged; never substitute the destructive
    reset.
 5. **No second search after restart.** Snapshot the trace byte offset before Phase 3.
-   The post-restart slice must contain a completed `workbench_deferred_text_sha256` tool call
+   The post-restart slice must contain a completed `workbench_deferred_strings_sha256` tool call
    and **no tool-call record named `search_tools`**. Gate on tool-call records, not on the
    string: the literal `tools.search` legitimately appears many times in the slice inside
    `llm_call_started` and `composition_changed` records, because it is in the advertised
    catalogue in the prompt. A `grep` for the string fails a correct run.
-6. **Inspect SQLite read-only.** The row for `text.sha256` must exist before restart and
+6. **Inspect SQLite read-only.** The row for `strings.sha256` must exist before restart and
    after restart with byte-identical `grant_json`. Do not edit the database to make a
    gate pass.
 
@@ -100,11 +100,11 @@ Submit one composer turn with this outcome constraint (do not paste a ready-made
 Poll for `turn_completed`, idle, and stable transcript/message counts. Then gate, in
 order:
 
-1. The completed `search_tools` result in `trace.jsonl` names `text.sha256` in its
+1. The completed `search_tools` result in `trace.jsonl` names `strings.sha256` in its
    observation. Save the exact record(s) as `01-search-observation.json`.
 2. `lash-vm-execution.jsonl` shows the search and deferred call in distinct foreground
    cells, in that order. Save the matching records as `01-two-blocks.json`.
-3. A completed raw `workbench_deferred_text_sha256` tool call exists after the search
+3. A completed raw `workbench_deferred_strings_sha256` tool call exists after the search
    observation. Save it as `01-deferred-call.json`.
 4. The structural gate is `outcome.payload.digest` on the completed deferred call, which must
    equal the locally computed SHA-256 of `FIG-1116 before restart`; that is what proves the
@@ -114,10 +114,10 @@ order:
    the structural gate but renders the digest badly — or whose cell finishes with
    `[object Object]` because it interpolated the whole result object instead of the digest
    field — has a presentation miss, not a failed deferred call.
-5. SQLite contains a `text.sha256` row. Other rows returned by the same ranked search
+5. SQLite contains a `strings.sha256` row. Other rows returned by the same ranked search
    are allowed and must be recorded, not normalized away. Save the ordered result as
-   `01-grants.json`; require the `text.sha256` grant to contain the deferred definition,
-   plugin source id, and execution binding for `text.sha256`.
+   `01-grants.json`; require the `strings.sha256` grant to contain the deferred definition,
+   plugin source id, and execution binding for `strings.sha256`.
 
 Run the three-layer cross-check: relative to Phase 0, the DOM has exactly one new user
 and one new assistant row; `/api/state` and the session graph have exactly one committed
@@ -135,23 +135,23 @@ same session URL.
 
 Require a new Workbench PID, unchanged session id, and
 the Phase 1 transcript reconstructed exactly. Query SQLite again and require the
-`text.sha256` row and `grant_json` to be byte-identical to `01-grants.json`. Screenshot
+`strings.sha256` row and `grant_json` to be byte-identical to `01-grants.json`. Screenshot
 `02-restarted.png`; save `02-state.json`, `02-grants.json`, and `02-identities.json`.
 
 ## Phase 3 — Call the persisted grant without search
 
 Submit one composer turn:
 
-> Without searching again, call the already-granted `text.sha256` operation to compute
+> Without searching again, call the already-granted `strings.sha256` operation to compute
 > the SHA-256 of the exact UTF-8 text `FIG-1116 after restart`. Return the digest.
 
 Poll for `turn_completed`, idle, and stable counts. Gate:
 
 1. The post-Phase-2 trace slice contains a completed
-   `workbench_deferred_text_sha256` call and contains no `search_tools` call.
+   `workbench_deferred_strings_sha256` call and contains no `search_tools` call.
 2. The rendered assistant row and `/api/state.transcript` contain the independently
    computed exact digest.
-3. SQLite still contains the byte-identical `text.sha256` grant.
+3. SQLite still contains the byte-identical `strings.sha256` grant.
 4. The trace contains exactly one new completed turn.
 
 Run the cumulative three-layer cross-check: 2 user rows, 2 assistant rows, 2 committed
@@ -167,7 +167,7 @@ Workbench process is gone. Preserve the artifact directory.
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
 | Fresh identity | health ready; rendered/API/disk session ids agree; grant DB empty | | `00-*` |
-| Search observation | completed `search_tools` result names `text.sha256` | | `01-search-observation.json` |
+| Search observation | completed `search_tools` result names `strings.sha256` | | `01-search-observation.json` |
 | Two-step handshake | search cell precedes a distinct deferred-call cell | | `01-two-blocks.json` |
 | Deferred execution | raw deferred call completes; UI/API show exact digest | | `01-deferred-call.json`, `01-search-call-complete.png` |
 | Durable grant | SQLite row contains definition, source, binding | | `01-grants.json` |

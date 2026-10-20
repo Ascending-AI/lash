@@ -41,9 +41,9 @@ console.log(JSON.stringify(matches));
 </typescript>"#
             .to_string(),
         1 => {
-            assert!(request.contains("text.sha256"), "{request}");
+            assert!(request.contains("strings.sha256"), "{request}");
             r#"<typescript>
-const result = await text.sha256({ text: "restart proof" });
+const result = await strings.sha256({ text: "restart proof" });
 await chat.reply(result.digest);
 </typescript>"#
                 .to_string()
@@ -72,12 +72,12 @@ async fn same_block_discovery_cannot_relink_and_unknown_paths_report_link_errors
     let provider = inspecting_provider(|call, request| match call {
         0 => r#"<typescript>
 const matches = await tools.search({ query: "text checksum", limit: 1 });
-const result = await text.sha256({ text: "too soon" });
+const result = await strings.sha256({ text: "too soon" });
 await chat.reply(result.digest);
 </typescript>"#
             .to_string(),
         1 => {
-            assert!(request.contains("text.sha256"), "{request}");
+            assert!(request.contains("strings.sha256"), "{request}");
             assert!(request.contains("link"), "{request}");
             r#"<typescript>
 const result = await mystery.not_real({});

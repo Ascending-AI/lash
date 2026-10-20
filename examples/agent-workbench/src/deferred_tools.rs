@@ -495,8 +495,8 @@ fn deferred_call_path(definition: &ToolDefinition) -> String {
 fn workbench_deferred_definitions() -> Vec<ToolDefinition> {
     vec![
         utility_definition(
-            "text_stats",
-            ["text"],
+            "strings_stats",
+            ["strings"],
             "stats",
             "Count bytes, Unicode characters, whitespace-delimited words, and lines in text.",
             json!({
@@ -518,24 +518,24 @@ fn workbench_deferred_definitions() -> Vec<ToolDefinition> {
             }),
         ),
         utility_definition(
-            "text_sha256",
-            ["text"],
+            "strings_sha256",
+            ["strings"],
             "sha256",
             "Compute the lowercase SHA-256 checksum of UTF-8 text for exact content comparisons.",
             one_field_schema("text", "string"),
             one_field_schema("digest", "string"),
         ),
         utility_definition(
-            "json_keys",
-            ["json"],
+            "objects_keys",
+            ["objects"],
             "keys",
             "List an object's keys in deterministic lexical order.",
             one_field_schema("value", "object"),
             string_list_field_schema("keys"),
         ),
         utility_definition(
-            "json_pointer",
-            ["json"],
+            "objects_pointer",
+            ["objects"],
             "pointer",
             "Resolve an RFC 6901 JSON Pointer and report whether it exists.",
             json!({
@@ -555,8 +555,8 @@ fn workbench_deferred_definitions() -> Vec<ToolDefinition> {
             }),
         ),
         utility_definition(
-            "list_sort",
-            ["list"],
+            "lists_sort",
+            ["lists"],
             "sort",
             "Sort strings lexically with an optional descending order.",
             json!({
@@ -571,8 +571,8 @@ fn workbench_deferred_definitions() -> Vec<ToolDefinition> {
             string_list_field_schema("values"),
         ),
         utility_definition(
-            "list_unique",
-            ["list"],
+            "lists_unique",
+            ["lists"],
             "unique",
             "Remove duplicate strings while preserving their first-seen order.",
             string_list_field_schema("values"),
@@ -621,9 +621,9 @@ fn string_list_field_schema(field: &str) -> Value {
 
 fn execute_workbench_utility(call_path: &str, args: &Value) -> ToolOutcome {
     match call_path {
-        "text.stats" => {
+        "strings.stats" => {
             let Some(text) = args.get("text").and_then(Value::as_str) else {
-                return invalid_arguments("text.stats requires string `text`");
+                return invalid_arguments("strings.stats requires string `text`");
             };
             ToolOutcome::ok(json!({
                 "bytes": text.len(),
@@ -632,21 +632,21 @@ fn execute_workbench_utility(call_path: &str, args: &Value) -> ToolOutcome {
                 "lines": text.lines().count(),
             }))
         }
-        "text.sha256" => {
+        "strings.sha256" => {
             let Some(text) = args.get("text").and_then(Value::as_str) else {
-                return invalid_arguments("text.sha256 requires string `text`");
+                return invalid_arguments("strings.sha256 requires string `text`");
             };
             ToolOutcome::ok(json!({ "digest": format!("{:x}", Sha256::digest(text.as_bytes())) }))
         }
-        "json.keys" => {
+        "objects.keys" => {
             let Some(object) = args.get("value").and_then(Value::as_object) else {
-                return invalid_arguments("json.keys requires object `value`");
+                return invalid_arguments("objects.keys requires object `value`");
             };
             ToolOutcome::ok(json!({ "keys": object.keys().collect::<Vec<_>>() }))
         }
-        "json.pointer" => {
+        "objects.pointer" => {
             let Some(pointer) = args.get("pointer").and_then(Value::as_str) else {
-                return invalid_arguments("json.pointer requires string `pointer`");
+                return invalid_arguments("objects.pointer requires string `pointer`");
             };
             let found = args.get("value").and_then(|value| value.pointer(pointer));
             ToolOutcome::ok(json!({
@@ -654,9 +654,9 @@ fn execute_workbench_utility(call_path: &str, args: &Value) -> ToolOutcome {
                 "value": found.cloned().unwrap_or(Value::Null),
             }))
         }
-        "list.sort" => {
+        "lists.sort" => {
             let Some(values) = string_values(args) else {
-                return invalid_arguments("list.sort requires string array `values`");
+                return invalid_arguments("lists.sort requires string array `values`");
             };
             let mut values = values;
             values.sort();
@@ -665,9 +665,9 @@ fn execute_workbench_utility(call_path: &str, args: &Value) -> ToolOutcome {
             }
             ToolOutcome::ok(json!({ "values": values }))
         }
-        "list.unique" => {
+        "lists.unique" => {
             let Some(values) = string_values(args) else {
-                return invalid_arguments("list.unique requires string array `values`");
+                return invalid_arguments("lists.unique requires string array `values`");
             };
             let mut seen = BTreeSet::new();
             let values = values
@@ -767,32 +767,32 @@ mod tests {
         let first = WorkbenchDeferredTools::open(&path).expect("open first grant store");
         first
             .store
-            .grant("text.sha256")
+            .grant("strings.sha256")
             .expect("persist deferred grant");
 
-        let turn_two = resolve(&first.provider, &["text.sha256"]).await;
+        let turn_two = resolve(&first.provider, &["strings.sha256"]).await;
         assert!(matches!(
-            turn_two.get("text.sha256"),
+            turn_two.get("strings.sha256"),
             Some(DeferredOutcome::Resolved { .. })
         ));
         drop(first);
 
         let reopened = WorkbenchDeferredTools::open(&path).expect("reopen SQLite grant store");
-        let after_restart = resolve(&reopened.provider, &["text.sha256"]).await;
-        let Some(DeferredOutcome::Resolved { link }) = after_restart.get("text.sha256") else {
+        let after_restart = resolve(&reopened.provider, &["strings.sha256"]).await;
+        let Some(DeferredOutcome::Resolved { link }) = after_restart.get("strings.sha256") else {
             panic!("expected the restored grant, got {after_restart:?}");
         };
-        assert_eq!(link.tool.as_str(), "workbench:deferred:text_sha256");
+        assert_eq!(link.tool.as_str(), "workbench:deferred:strings_sha256");
         assert_eq!(link.provider, deferred_provider());
-        assert_eq!(link.payload.as_ref(), Some(&binding_for("text.sha256")));
+        assert_eq!(link.payload.as_ref(), Some(&binding_for("strings.sha256")));
     }
 
     #[tokio::test]
     async fn unavailable_resolution_is_typed_and_deterministic() {
         let tools = WorkbenchDeferredTools::in_memory().expect("open deferred tools");
-        let outcomes = resolve(&tools.provider, &["text.sha256", "unknown.path"]).await;
+        let outcomes = resolve(&tools.provider, &["strings.sha256", "unknown.path"]).await;
         assert!(matches!(
-            outcomes.get("text.sha256"),
+            outcomes.get("strings.sha256"),
             Some(DeferredOutcome::Unavailable { note: None })
         ));
         assert!(matches!(
@@ -801,7 +801,7 @@ mod tests {
         ));
         assert_eq!(
             outcomes.keys().cloned().collect::<Vec<_>>(),
-            vec!["text.sha256".to_string(), "unknown.path".to_string()]
+            vec!["strings.sha256".to_string(), "unknown.path".to_string()]
         );
     }
 
@@ -815,7 +815,7 @@ mod tests {
                 .iter()
                 .map(|result| result.call_path.as_str())
                 .collect::<Vec<_>>(),
-            vec!["text.sha256", "text.stats"]
+            vec!["strings.sha256", "strings.stats"]
         );
         assert_eq!(
             first
