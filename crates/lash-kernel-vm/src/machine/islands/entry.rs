@@ -755,7 +755,7 @@ fn enter(
         Target::Declared(code) => island.declared(code),
         Target::Closure(handle) => island
             .resolve_cold(handle)
-            .and_then(|cached| island.callee(cached.plan, cached.captured)),
+            .and_then(|cached| island.cached_callee(cached)),
         Target::Guest(handle, occurrence) => island.guest(occurrence, handle),
         Target::Code(plan, cells) => island.with_cells(plan, cells),
     };

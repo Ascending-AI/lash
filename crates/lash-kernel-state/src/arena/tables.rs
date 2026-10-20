@@ -534,7 +534,9 @@ fn resident_mut(
 /// `None`. On a layout, or on a dense index of its own, an entry's
 /// sequence is its position. A key held by a cold chunk, or that only a
 /// cold chunk may hold, answers [`Retry::Cold`].
-#[inline]
+/// Keep the dense lookup with its caller: outlining the hash lookup in
+/// one downstream copy adds a second call on every resident key read.
+#[inline(always)]
 pub(crate) fn find(
     object: ArenaHandle,
     table: &Table,

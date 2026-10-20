@@ -594,6 +594,13 @@ impl IslandPlan {
         }
     }
 
+    /// A form already resolved in this executable. A cached callee is
+    /// admitted only after `compiled` succeeds, and the form never changes.
+    #[inline(always)]
+    pub(crate) fn resolved(&self) -> Option<&Compiled> {
+        self.compiled.get()?.as_ref()
+    }
+
     /// The plan's compiled form, built on its first entry.
     pub(crate) fn compiled(&self, exe: &Executable) -> Option<&Compiled> {
         self.compiled

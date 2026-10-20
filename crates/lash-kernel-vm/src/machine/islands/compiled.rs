@@ -20,6 +20,10 @@ use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_exec::ActIx;
 
+#[path = "shaped.rs"]
+mod shaped;
+use shaped::{call_argument, fused_call, typed_operator};
+
 use super::{Answer, Island, MAX_ARGS, Slots};
 use crate::compile::expr::{Arm, Callee, Close, Expr, Kind};
 use crate::compile::islands::{
@@ -163,13 +167,13 @@ pub(super) struct CStatement {
 /// its value's last node charges in.
 pub(super) enum CKind {
     Return {
-        value: Operand,
+        value: Node,
         close: Option<Close>,
         covered: bool,
         reg: u32,
     },
     Write {
-        value: Operand,
+        value: Node,
         close: Option<Close>,
         covered: bool,
         pc: u32,
@@ -178,7 +182,7 @@ pub(super) enum CKind {
         bind: bool,
     },
     If {
-        cond: Operand,
+        cond: Node,
         close: Option<Close>,
         covered: bool,
         pc: u32,
@@ -187,7 +191,7 @@ pub(super) enum CKind {
         else_: CBlock,
     },
     Discard {
-        value: Operand,
+        value: Node,
         close: Option<Close>,
         covered: bool,
         reg: u32,
@@ -381,7 +385,7 @@ fn statement(statement: &Statement, cx: &mut Build<'_>) -> Option<CStatement> {
     cx.cover(1);
     let kind = match &statement.kind {
         StatementKind::Return { value, close, reg } => CKind::Return {
-            value: expr(value, cx)?,
+            value: statement_value(expr(value, cx)?),
             close: *close,
             covered: cx.close(*close),
             reg: *reg,
@@ -394,7 +398,7 @@ fn statement(statement: &Statement, cx: &mut Build<'_>) -> Option<CStatement> {
             at,
             bind,
         } => CKind::Write {
-            value: expr(value, cx)?,
+            value: statement_value(expr(value, cx)?),
             close: *close,
             covered: cx.close(*close),
             pc: *pc,
@@ -410,7 +414,7 @@ fn statement(statement: &Statement, cx: &mut Build<'_>) -> Option<CStatement> {
             then_,
             else_,
         } => {
-            let cond = expr(cond, cx)?;
+            let cond = statement_value(expr(cond, cx)?);
             let covered = cx.close(*close);
             cx.end();
             CKind::If {
@@ -424,7 +428,7 @@ fn statement(statement: &Statement, cx: &mut Build<'_>) -> Option<CStatement> {
             }
         }
         StatementKind::Discard { value, close, reg } => CKind::Discard {
-            value: expr(value, cx)?,
+            value: statement_value(expr(value, cx)?),
             close: *close,
             covered: cx.close(*close),
             reg: *reg,
@@ -440,6 +444,21 @@ fn statement(statement: &Statement, cx: &mut Build<'_>) -> Option<CStatement> {
         ahead,
         kind,
     })
+}
+
+/// Selects a statement's reader once. In particular, a slot condition,
+/// return or write reads that slot directly, and an expression enters its
+/// node directly, without decoding an operand at every statement.
+fn statement_value(value: Operand) -> Node {
+    match value {
+        Operand::Slot { at, miss } => Box::new(move |island, slots| match slots.get(at) {
+            Some(Some(value)) => Ok(*value),
+            _ => Err(island.at(miss)),
+        }),
+        Operand::Const(value) => Box::new(move |_, _| Ok(value)),
+        Operand::Node(node) => node,
+        value => Box::new(move |island, slots| value.eval(island, slots)),
+    }
 }
 
 fn operands(args: &[Expr], cx: &mut Build<'_>) -> Option<Vec<Operand>> {
@@ -564,7 +583,12 @@ fn expr(expr: &Expr, cx: &mut Build<'_>) -> Option<Operand> {
                 Callee::Read(read) => (Some(self::expr(read, cx)?), None),
                 Callee::Declared(code) => (None, Some(*code)),
             };
-            let operands = operands(args, cx)?;
+            let fused = call_argument(args, cx);
+            let operands = if fused.is_some() {
+                Vec::new()
+            } else {
+                operands(args, cx)?
+            };
             if operands.len() > MAX_ARGS {
                 return None;
             }
@@ -582,7 +606,10 @@ fn expr(expr: &Expr, cx: &mut Build<'_>) -> Option<Operand> {
                 site: *site,
                 after,
             };
-            call(site, read, operands)
+            match fused {
+                Some(argument) => fused_call(site, read, argument),
+                None => call(site, read, operands),
+            }
         }
         Kind::Cond {
             cond,
@@ -844,43 +871,6 @@ pub(super) struct KindTest {
     pub(super) memo: crate::compile::kind_test::KindMemo,
 }
 
-/// The compiled typed operator `site` over `a` and `b` in a segment, which
-/// counts an occurrence where `COUNTED`: in an admitted segment its typed
-/// path commits unchecked, as [`Island::typed`] commits it, its close, its
-/// occurrence, then its formula; where it leaves the path, the segment is
-/// checked from there.
-fn covered_operator<const COUNTED: bool>(
-    site: OperatorSite,
-    pair: lash_kernel_doc::scalar::Pair,
-    a: Operand,
-    b: Operand,
-) -> Node {
-    Box::new(move |island, slots| {
-        let x = a.eval(island, slots)?;
-        let y = match b.eval(island, slots) {
-            Ok(y) => y,
-            Err(stop) => return Err(island.held(stop, site.reg, x)),
-        };
-        if let Some((value, units)) = typed(&site, &pair, x, y) {
-            if island.covered
-                && let Some(units) = units
-            {
-                island.charged += site.fixed;
-                if COUNTED && let Some(occurrence) = site.counted {
-                    island.count(occurrence)?;
-                }
-                island.charged += units;
-                return Ok(value);
-            }
-            if let Some(answer) = island.typed(&site, value, units) {
-                return answer;
-            }
-        }
-        island.covered = false;
-        island.operate(&site, &[x, y])
-    })
-}
-
 /// The compiled operator `site` over `operands`.
 fn operator(site: OperatorSite, operands: Vec<Operand>, cx: &mut Build<'_>) -> Node {
     let mut operands = operands.into_iter();
@@ -895,25 +885,15 @@ fn operator(site: OperatorSite, operands: Vec<Operand>, cx: &mut Build<'_>) -> N
     }
     match (operands.next(), operands.next(), operands.next()) {
         (Some(a), Some(b), None) if covered && let Some(pair) = pair => match site.counted {
-            Some(_) => covered_operator::<true>(site, pair, a, b),
-            None => covered_operator::<false>(site, pair, a, b),
+            Some(_) => typed_operator::<true, true>(site, pair, a, b),
+            None => typed_operator::<true, false>(site, pair, a, b),
         },
         // Two operands whose entry has typed paths: two floats or two
         // word integers take the path for their kind, committed in place
         // where it commits what the general path would.
-        (Some(a), Some(b), None) if let Some(pair) = pair => Box::new(move |island, slots| {
-            let x = a.eval(island, slots)?;
-            let y = match b.eval(island, slots) {
-                Ok(y) => y,
-                Err(stop) => return Err(island.held(stop, site.reg, x)),
-            };
-            if let Some((value, units)) = typed(&site, &pair, x, y)
-                && let Some(answer) = island.typed(&site, value, units)
-            {
-                return answer;
-            }
-            island.operate(&site, &[x, y])
-        }),
+        (Some(a), Some(b), None) if let Some(pair) = pair => {
+            typed_operator::<false, false>(site, pair, a, b)
+        }
         (Some(a), Some(b), None) => Box::new(move |island, slots| {
             let x = a.eval(island, slots)?;
             let y = match b.eval(island, slots) {

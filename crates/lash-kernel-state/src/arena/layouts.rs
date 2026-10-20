@@ -277,7 +277,7 @@ impl Layout {
     /// The position of `key`, if the layout holds it: a layout of at most
     /// [`SCANNED`] keys compares its own keys, last first, which costs
     /// less than hashing the key; a longer one asks its index.
-    #[inline]
+    #[inline(always)]
     pub(super) fn position(&self, key: &Key) -> Option<u32> {
         if self.len > SCANNED {
             return self.index().get(key).copied();

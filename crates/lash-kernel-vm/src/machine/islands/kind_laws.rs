@@ -339,3 +339,258 @@ fn region_kind_memo_stops_at_the_reference_op() {
         }
     }
 }
+
+fn operand_probes(
+    registry: &mut FunctionRegistry,
+    _: &BTreeMap<&'static str, FunctionId>,
+) -> Vec<(&'static str, FunctionId)> {
+    lash_kernel_lib::numbers()
+        .into_iter()
+        .filter(|(definition, _)| definition.name.as_str() == "num.lt")
+        .map(|(definition, native)| {
+            (
+                "typed_lt",
+                registry.register(definition, Some(native)).unwrap(),
+            )
+        })
+        .collect()
+}
+
+fn operand_machine() -> Embedder {
+    Embedder::with(
+        "fn compare(x, y) { return typed_lt(x, y) }\n\
+         fn echo(x) { return x }\n\
+         fn outer(x) { return call echo(typed_lt(x, 2)) }\n\
+         fn method(receiver, x) { return x }\n\
+         fn prefixed(x) { return call method(null, typed_lt(x, 2)) }\n\
+         main { let r = call outer(1) finish r }",
+        Setup {
+            probes: Some(operand_probes),
+            ..Setup::default()
+        },
+    )
+}
+
+/// PLAN-INDEP / K-CHG-002: a missing operand leaves at its read op,
+/// holding precisely the operands already read. Typed commits also keep
+/// close, occurrence and formula order at every bound, with or without a tape.
+#[test]
+fn specialised_operands_stop_with_the_general_paths_held_registers() {
+    let mut embedder = operand_machine();
+    let exe = Arc::clone(&embedder.machine.exe);
+    let code = exe.declared[&lash_kernel_doc::Name::new("compare")];
+    let plan = &exe.islands.plans[exe.island_of(code).unwrap() as usize];
+    let StatementKind::Return { value, .. } = &plan.body.statements[0].kind else {
+        panic!("compare returns its operator")
+    };
+    let slot = statement_value(Operand::Slot { at: 0, miss: 7 });
+    for missing in [false, true] {
+        let specialised = |island: &mut Island<'_>, slots: &mut Slots| {
+            if missing {
+                slots[0] = None;
+            }
+            slot(island, slots)
+        };
+        let general = |island: &mut Island<'_>, slots: &mut Slots| {
+            if missing {
+                slots[0] = None;
+            }
+            Operand::Slot { at: 0, miss: 7 }.eval(island, slots)
+        };
+        assert_eq!(
+            island_run(
+                &mut embedder.machine,
+                &specialised,
+                Value::Bool(true),
+                true,
+                true,
+                0
+            ),
+            island_run(
+                &mut embedder.machine,
+                &general,
+                Value::Bool(true),
+                true,
+                true,
+                0
+            ),
+        );
+    }
+    for covered in [false, true] {
+        for counted in [false, true] {
+            for constant in [false, true] {
+                let site = || {
+                    let mut site = operator_site(value, &exe).unwrap();
+                    site.counted = counted.then_some(0);
+                    site
+                };
+                let a = || Operand::Slot { at: 0, miss: 7 };
+                let b = || {
+                    if constant {
+                        Operand::Const(Value::Int(2))
+                    } else {
+                        Operand::Slot { at: 1, miss: 9 }
+                    }
+                };
+                let pair = site().entry.pair().unwrap();
+                let node = match (covered, counted) {
+                    (true, true) => typed_operator::<true, true>(site(), pair, a(), b()),
+                    (true, false) => typed_operator::<true, false>(site(), pair, a(), b()),
+                    (false, _) => typed_operator::<false, false>(site(), pair, a(), b()),
+                };
+                let site = site();
+                for missing in [None, Some(0), Some(1)] {
+                    for x in [
+                        Value::Int(1),
+                        Value::Int(i64::MAX),
+                        Value::Float(Float::new(f64::NAN)),
+                        Value::Bool(true),
+                    ] {
+                        for (charging, record) in
+                            [(true, false), (true, true), (false, false), (false, true)]
+                        {
+                            for bound in 0..=24 {
+                                let prepare = |island: &mut Island<'_>, slots: &mut Slots| {
+                                    slots[0] = Some(x);
+                                    slots[1] = Some(Value::Int(2));
+                                    if let Some(at) = missing {
+                                        slots[at] = None;
+                                    }
+                                    island.covered = covered && charging && !record && bound == 24;
+                                };
+                                let general = |island: &mut Island<'_>, slots: &mut Slots| {
+                                    prepare(island, slots);
+                                    let x = a().eval(island, slots)?;
+                                    let y = match b().eval(island, slots) {
+                                        Ok(y) => y,
+                                        Err(stop) => return Err(island.held(stop, site.reg, x)),
+                                    };
+                                    island.operate(&site, &[x, y])
+                                };
+                                let specialised = |island: &mut Island<'_>, slots: &mut Slots| {
+                                    prepare(island, slots);
+                                    node(island, slots)
+                                };
+                                assert_eq!(
+                                    island_run(
+                                        &mut embedder.machine,
+                                        &specialised,
+                                        x,
+                                        charging,
+                                        record,
+                                        bound
+                                    ),
+                                    island_run(
+                                        &mut embedder.machine,
+                                        &general,
+                                        x,
+                                        charging,
+                                        record,
+                                        bound
+                                    ),
+                                    "covered={covered} counted={counted} constant={constant} missing={missing:?} x={x:?} charging={charging} tape={record} bound={bound}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// PLAN-INDEP: fusing a call's typed argument preserves both the inner
+/// operator's held registers and the outer callee held while it runs.
+#[test]
+fn fused_call_arguments_stop_as_separate_nodes_do() {
+    let mut embedder = operand_machine();
+    let exe = Arc::clone(&embedder.machine.exe);
+    let mut calls = 0;
+    for plan in &exe.islands.plans {
+        let StatementKind::Return { value, .. } = &plan.body.statements[0].kind else {
+            continue;
+        };
+        let Kind::Call {
+            invoke,
+            args,
+            closes,
+            site,
+            callee: Callee::Declared(code),
+        } = &value.kind
+        else {
+            continue;
+        };
+        calls += 1;
+        for indirect in [false, true] {
+            let call_site = || CallSite {
+                callee: (!indirect).then_some(*code),
+                close: closes.first().copied(),
+                pc: value.pc,
+                reg: value.reg,
+                act: invoke.act,
+                occurrence: invoke.occurrence,
+                site: *site,
+                after: 0,
+            };
+            let read = || indirect.then_some(Operand::Const(Value::Bool(false)));
+            for covered in [false, true] {
+                let mut cx = Build::new(&exe, None);
+                if covered {
+                    cx.start();
+                }
+                let argument = call_argument(args, &mut cx).unwrap();
+                let node = fused_call(call_site(), read(), argument);
+                let mut cx = Build::new(&exe, None);
+                if covered {
+                    cx.start();
+                }
+                let general = call(call_site(), read(), operands(args, &mut cx).unwrap());
+                for missing in [false, true] {
+                    for (charging, record) in
+                        [(true, false), (true, true), (false, false), (false, true)]
+                    {
+                        for bound in 0..=24 {
+                            let prepare = |island: &mut Island<'_>, slots: &mut Slots| {
+                                if missing {
+                                    slots[0] = None;
+                                }
+                                island.covered = covered && charging && !record && bound == 24;
+                            };
+                            let fused = |island: &mut Island<'_>, slots: &mut Slots| {
+                                prepare(island, slots);
+                                node(island, slots)
+                            };
+                            let separate = |island: &mut Island<'_>, slots: &mut Slots| {
+                                prepare(island, slots);
+                                general(island, slots)
+                            };
+                            assert_eq!(
+                                island_run(
+                                    &mut embedder.machine,
+                                    &fused,
+                                    Value::Int(1),
+                                    charging,
+                                    record,
+                                    bound
+                                ),
+                                island_run(
+                                    &mut embedder.machine,
+                                    &separate,
+                                    Value::Int(1),
+                                    charging,
+                                    record,
+                                    bound
+                                ),
+                                "covered={covered} missing={missing} charging={charging} tape={record} bound={bound}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(
+        calls, 2,
+        "both plain and receiver-prefixed calls are exercised"
+    );
+}

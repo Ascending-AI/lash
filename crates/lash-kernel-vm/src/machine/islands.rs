@@ -159,7 +159,8 @@ struct Callee<'e> {
 struct Cached {
     epoch: u32,
     handle: ArenaHandle,
-    plan: u32,
+    /// Index of the plan whose compiled form resolution admitted.
+    compiled: u32,
     captured: u32,
 }
 
@@ -864,6 +865,19 @@ impl<'a> Island<'a> {
         })
     }
 
+    /// A cache hit carries the compiled form's plan index: resolution
+    /// has already compiled it, so neither code lookup nor lazy compilation
+    /// belongs on this path.
+    #[inline(always)]
+    fn cached_callee(&self, cached: Cached) -> Option<Callee<'a>> {
+        let plan = &self.exe.islands.plans[cached.compiled as usize];
+        Some(Callee {
+            plan,
+            compiled: plan.resolved()?,
+            captured: cached.captured,
+        })
+    }
+
     /// The island of declared code `code`.
     fn declared(&mut self, code: CodeId) -> Option<Callee<'a>> {
         let plan = self.exe.island_of(code)?;
@@ -890,7 +904,7 @@ impl<'a> Island<'a> {
                 cached
             }
         };
-        self.callee(cached.plan, cached.captured)
+        self.cached_callee(cached)
     }
 
     /// The island of the closure `handle` a region's guest call of
@@ -907,7 +921,7 @@ impl<'a> Island<'a> {
                 cached
             }
         };
-        self.callee(cached.plan, cached.captured)
+        self.cached_callee(cached)
     }
 
     /// The island of the closure `handle`, resolved in the open scope:
@@ -930,7 +944,7 @@ impl<'a> Island<'a> {
         Some(Cached {
             epoch: self.scratch.epoch,
             handle,
-            plan,
+            compiled: plan,
             captured,
         })
     }
@@ -1219,9 +1233,7 @@ fn run_statement(
             covered,
             reg,
         } => {
-            let value = value
-                .eval(island, slots)
-                .map_err(|stop| island.stand(stmt, stop))?;
+            let value = value(island, slots).map_err(|stop| island.stand(stmt, stop))?;
             if let Some(close) = close
                 && !island.close_in(close, *covered)
             {
@@ -1240,9 +1252,7 @@ fn run_statement(
             at,
             bind,
         } => {
-            let value = value
-                .eval(island, slots)
-                .map_err(|stop| island.stand(stmt, stop))?;
+            let value = value(island, slots).map_err(|stop| island.stand(stmt, stop))?;
             if let Some(close) = close
                 && !island.close_in(close, *covered)
             {
@@ -1271,9 +1281,7 @@ fn run_statement(
             then_,
             else_,
         } => {
-            let value = cond
-                .eval(island, slots)
-                .map_err(|stop| island.stand(stmt, stop))?;
+            let value = cond(island, slots).map_err(|stop| island.stand(stmt, stop))?;
             if let Some(close) = close
                 && !island.close_in(close, *covered)
             {
@@ -1310,9 +1318,7 @@ fn run_statement(
             covered,
             reg,
         } => {
-            let value = value
-                .eval(island, slots)
-                .map_err(|stop| island.stand(stmt, stop))?;
+            let value = value(island, slots).map_err(|stop| island.stand(stmt, stop))?;
             if let Some(close) = close
                 && !island.close_in(close, *covered)
             {
