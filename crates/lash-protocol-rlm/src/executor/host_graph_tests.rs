@@ -265,6 +265,7 @@ fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
         code: CellEnvelope::code_digest("1"),
         dialect: "typescript".to_owned(),
         document: lash_kernel_doc::IdentifiedDocument::new(document.clone()),
+        packages: lash_kernel_doc::PackageSetDigest::from_bytes([7; 32]),
         source_map: Some(source_map),
         written: std::collections::BTreeMap::new(),
         function_values: None,
@@ -327,6 +328,7 @@ fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
     assert_eq!(CellEnd::load(&mut decoder, root).unwrap(), end);
     let loaded = CellEnvelope::load(&mut decoder, end.envelope).unwrap();
     assert_eq!(loaded.document, envelope.document);
+    assert_eq!(loaded.packages, envelope.packages);
     assert_eq!(loaded.source_map, envelope.source_map);
     assert_eq!(loaded.effects, envelope.effects);
     assert_eq!(loaded.unavailable_notes, envelope.unavailable_notes);

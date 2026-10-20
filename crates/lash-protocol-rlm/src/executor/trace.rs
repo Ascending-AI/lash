@@ -20,6 +20,59 @@ use lash_trace::{
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
+/// Emit the outcome of one protocol step once the model response that asked
+/// for it is committed.
+pub(super) fn emit_step_trace(ctx: &RuntimeExecutionContext<'_>, result: Result<(), &str>) {
+    let Some(invocation) = ctx.parent_invocation().cloned() else {
+        return;
+    };
+    let Some(step_index) = invocation.attribution.protocol_iteration else {
+        return;
+    };
+    let Some(standing) = ctx.trace_standing() else {
+        return;
+    };
+    let tracing = PluginExecutionTrace::new(standing);
+    let failure = result.err().map(str::to_owned);
+    let emit = move || step_trace(&tracing, &invocation, step_index, failure.as_deref());
+    // Nothing of the cell is traced before a commit holds the model
+    // response that asked for it (FIG-6000).
+    match ctx.held_response() {
+        Some(held) => held.after_commit(Box::new(emit)),
+        None => emit(),
+    }
+}
+
+fn step_trace(
+    tracing: &PluginExecutionTrace,
+    invocation: &lash_core::RuntimeInvocation,
+    step_index: usize,
+    failure: Option<&str>,
+) {
+    tracing.emit(|| {
+        let context = lash_core::facade_support::trace_context_for_runtime_invocation(
+            lash_trace::TraceContext::default(),
+            invocation,
+        );
+        let outcome = match failure {
+            None => lash_trace::TraceProgramStepOutcome::Ok,
+            Some(diagnostic) => lash_trace::TraceProgramStepOutcome::Failure {
+                diagnostic: tracing
+                    .trace_runtime()
+                    .diagnostic_limits()
+                    .diagnostic_error(diagnostic),
+            },
+        };
+        (
+            context,
+            TraceEvent::ProgramStep {
+                step_index,
+                outcome,
+            },
+        )
+    });
+}
+
 #[derive(Clone)]
 pub(super) struct CellTrace {
     tracing: PluginExecutionTrace,

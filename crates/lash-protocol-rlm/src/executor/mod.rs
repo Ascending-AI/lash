@@ -132,9 +132,10 @@ pub(crate) async fn execute_cell(
         },
         Err(_) => None,
     };
+    let resumes = resumed.is_some();
     // A cell with no parked state enters its program from the start: the
     // one entry no resume may repeat (ADR 0132 §8).
-    if resumed.is_none() && opened.is_ok() {
+    if !resumes && opened.is_ok() {
         ctx.actor_context().probe().vm_program_entered(&exec);
     }
     // Boxed: the cell's outputs are recorded under the same context after
@@ -163,6 +164,14 @@ pub(crate) async fn execute_cell(
     // outputs. The activation that ends it does.
     if response.suspended {
         return response;
+    }
+    // A cell that stood parked under a set, an earlier activation's or
+    // this one's, has answered: the capture after it clears the stamp its
+    // parks left. A cell still parked keeps it.
+    if let Some((packages, committed)) = snapshots.park_stamp()
+        && (resumes || committed)
+    {
+        state.parked_under(packages);
     }
     // A cell that answers has no runs left to lose (FIG-6806).
     if !seal_ctx.has_nested_effect_error() {
@@ -329,6 +338,12 @@ async fn link_cell(
                 })?;
             state.note_pages(ended_root_pages(snapshots, resumed.root).as_ref());
         }
+        // The cell is written under the set its envelope records, whichever
+        // node resumes it: its next park stamps the session with that set
+        // again (CLAIM-HOLDS).
+        if services.packages.is_some() {
+            snapshots.stamp_parks_with(envelope.packages);
+        }
         return Ok(LinkedCell {
             document: envelope.document.clone(),
             boundary: envelope.boundary().map_err(host_failure)?,
@@ -396,15 +411,25 @@ async fn link_cell(
         .prepare_cell(ctx.session_pages())
         .await
         .map_err(|error| host_failure(format!("the session's state is not readable: {error}")))?;
-    // A cell is written under the first package set every live serving
-    // node holds (FIG-6918, FLEET-SET).
+    // A cell is written under the package set its round's prompt showed,
+    // the fleet gate's one answer for the round (P3), while this node holds
+    // it; else under the first set every live serving node holds now
+    // (FIG-6918, FLEET-SET). Its parks stamp the session with that set
+    // (CLAIM-HOLDS).
+    let held = services.kernel.packages().map_err(host_failure)?;
     let packages = match &services.packages {
         Some(gate) => {
-            let packages = gate
-                .writable()
-                .await
-                .map_err(|error| Refused::Packages(Box::new(error)))?;
-            state.writes_under(packages.digest());
+            let packages = match state
+                .shown_packages()
+                .filter(|shown| held.sets().contains_key(&shown.digest()))
+            {
+                Some(shown) => shown,
+                None => gate
+                    .writable()
+                    .await
+                    .map_err(|error| Refused::Packages(Box::new(error)))?,
+            };
+            snapshots.stamp_parks_with(packages.digest());
             packages
         }
         None => crate::plugin::CellPackages(
@@ -416,7 +441,6 @@ async fn link_cell(
     // Every carried saved function is relinked by name to that set, or
     // dropped naming it (RELINK-CLOSURE): what the cell lowers and what it
     // calls of the session come from the one set (CURRENT-RELEASE).
-    let held = services.kernel.packages().map_err(host_failure)?;
     state
         .relink(packages.digest(), &held)
         .await
@@ -543,7 +567,7 @@ async fn link_cell(
             let feedback =
                 crate::feedback::contribute_repairs(&mut refusal, code, &grant_calls, ctx);
             let observation = CellObservation::of_refusal(refusal);
-            emit_step_trace(ctx, Err(&observation.code()));
+            trace::emit_step_trace(ctx, Err(&observation.code()));
             let mut failure =
                 observation.failure(code, None, services.channel, services.prompts.as_ref());
             failure.feedback = feedback;
@@ -568,11 +592,11 @@ async fn link_cell(
             )));
         }
         Err(error) => {
-            emit_step_trace(ctx, Err(&error.to_string()));
+            trace::emit_step_trace(ctx, Err(&error.to_string()));
             return Err(Refused::Worker(Box::new(error)));
         }
     };
-    emit_step_trace(ctx, Ok(()));
+    trace::emit_step_trace(ctx, Ok(()));
     // The worker's token body is decoded here, once: the identity is its
     // digest, and the envelope, the store and every checkout share all
     // three.
@@ -583,6 +607,7 @@ async fn link_cell(
         code: CellEnvelope::code_digest(code),
         dialect: state.dialect().to_owned(),
         document,
+        packages: packages.digest(),
         source_map,
         written,
         function_values,
@@ -1606,57 +1631,6 @@ fn exec_response_from(collected: &CellHostLedgers, result: lash_core::CellOutcom
         bindings: Default::default(),
         suspended: false,
     }
-}
-
-fn emit_step_trace(ctx: &RuntimeExecutionContext<'_>, result: Result<(), &str>) {
-    let Some(invocation) = ctx.parent_invocation().cloned() else {
-        return;
-    };
-    let Some(step_index) = invocation.attribution.protocol_iteration else {
-        return;
-    };
-    let Some(standing) = ctx.trace_standing() else {
-        return;
-    };
-    let tracing = lash_core::plugin::PluginExecutionTrace::new(standing);
-    let failure = result.err().map(str::to_owned);
-    let emit = move || step_trace(&tracing, &invocation, step_index, failure.as_deref());
-    // Nothing of the cell is traced before a commit holds the model
-    // response that asked for it (FIG-6000).
-    match ctx.held_response() {
-        Some(held) => held.after_commit(Box::new(emit)),
-        None => emit(),
-    }
-}
-
-fn step_trace(
-    tracing: &lash_core::plugin::PluginExecutionTrace,
-    invocation: &lash_core::RuntimeInvocation,
-    step_index: usize,
-    failure: Option<&str>,
-) {
-    tracing.emit(|| {
-        let context = lash_core::facade_support::trace_context_for_runtime_invocation(
-            lash_trace::TraceContext::default(),
-            invocation,
-        );
-        let outcome = match failure {
-            None => lash_trace::TraceProgramStepOutcome::Ok,
-            Some(diagnostic) => lash_trace::TraceProgramStepOutcome::Failure {
-                diagnostic: tracing
-                    .trace_runtime()
-                    .diagnostic_limits()
-                    .diagnostic_error(diagnostic),
-            },
-        };
-        (
-            context,
-            lash_trace::TraceEvent::ProgramStep {
-                step_index,
-                outcome,
-            },
-        )
-    });
 }
 
 #[cfg(test)]

@@ -51,6 +51,11 @@ pub struct CellEnvelope {
     /// The kernel document the cell runs, decoded once where it was lowered
     /// or read back, with its identity and token body.
     pub document: IdentifiedDocument,
+    /// The package set the document was lowered against, the cell's
+    /// `CellPackages`: what a resumed cell is written under, so every park
+    /// of it stamps its session with the same set (CLAIM-HOLDS). The
+    /// document's closure lists identities, which do not name their set.
+    pub packages: lash_kernel_doc::PackageSetDigest,
     /// Where each statement of the document came from in the source, when
     /// the dialect gave a map: what a failure locates its tasks by, at
     /// whichever activation the cell ends. Nothing a run or a save needs is
@@ -550,12 +555,14 @@ impl TokenCodec for EffectTable {
 }
 
 /// Kind 15: what a cell is, staged once when it is lowered and named by
-/// every park's root: no park copies it.
+/// every park's root: no park copies it. It names the package set the
+/// document was lowered against beside the document.
 struct EnvelopeBody {
     code: String,
     dialect: String,
     document_id: lash_kernel_doc::DocumentId,
     document: NodeId,
+    packages: lash_kernel_doc::PackageSetDigest,
     source_map: Option<NodeId>,
     written: NodeId,
     function_values: Option<lash_kernel_doc::FunctionRepresentation>,
@@ -564,11 +571,12 @@ struct EnvelopeBody {
 
 impl TokenCodec for EnvelopeBody {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(8);
+        out.seq(9);
         out.text(&self.code);
         out.text(&self.dialect);
         self.document_id.encode(out);
         self.document.encode(out);
+        self.packages.encode(out);
         self.source_map.encode(out);
         self.written.encode(out);
         encode_opt_tree(self.function_values.as_ref(), out);
@@ -576,12 +584,13 @@ impl TokenCodec for EnvelopeBody {
     }
 
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(8)?;
+        input.expect_struct(9)?;
         Ok(Self {
             code: input.text()?.to_owned(),
             dialect: input.text()?.to_owned(),
             document_id: lash_kernel_doc::DocumentId::decode(input)?,
             document: NodeId::decode(input)?,
+            packages: lash_kernel_doc::PackageSetDigest::decode(input)?,
             source_map: Option::decode(input)?,
             written: NodeId::decode(input)?,
             function_values: decode_opt_tree(input)?,
@@ -618,6 +627,7 @@ impl CellEnvelope {
             dialect: self.dialect.clone(),
             document_id,
             document: staging.encode(NodeKind::DOCUMENT, logical)?,
+            packages: self.packages,
             source_map: self
                 .source_map
                 .as_ref()
@@ -680,6 +690,7 @@ impl CellEnvelope {
             code: body.code,
             dialect: body.dialect,
             document,
+            packages: body.packages,
             source_map,
             written,
             function_values: body.function_values,

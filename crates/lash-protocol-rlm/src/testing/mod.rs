@@ -133,6 +133,38 @@ pub(crate) async fn commit_working(
     (capture, published)
 }
 
+/// The turn's phase commit after a settled cell of `state`'s session: the
+/// session's state as its working state, which the next cell reads.
+pub(crate) async fn commit_phase(
+    state: &crate::plugin::runtime_state::RlmRuntimeState,
+    host: &DurableHost,
+) {
+    let capture = state
+        .capture_execution_graph(lash_core::plugin::ExecutionGraphPurpose::Working)
+        .await
+        .expect("the session's state captures");
+    host.commit_working(&capture, &mut Executor(state)).await;
+    state.acknowledge_execution_state_capture().await;
+}
+
+/// The session's executor as a working commit publishes its pages.
+struct Executor<'a>(&'a crate::plugin::runtime_state::RlmRuntimeState);
+
+#[async_trait::async_trait]
+impl Candidates for Executor<'_> {
+    async fn candidate(
+        &mut self,
+        root: lash_core_store::checkpoint_graph::NodeId,
+        commit: lash_core_store::checkpoint_graph::CommitId,
+        tx: &mut lash_durable::ActorTx,
+    ) -> Option<lash_core::plugin::ExecutionCandidate> {
+        self.0
+            .execution_candidate(root, commit, tx)
+            .await
+            .expect("the capture's candidate builds")
+    }
+}
+
 /// The context of the cell `replay_key` of `session`'s turn `turn`, with
 /// `provider`'s tools as the cell's catalog.
 pub(crate) fn cell_context(

@@ -361,18 +361,46 @@ pub(crate) struct SessionDialect {
 }
 
 impl SessionDialect {
-    /// The code exports of the package set the session's next cell is
-    /// written under, in its dialect's spelling (§2.3, P3): `None` when
-    /// the gate cannot answer now, or the set exports no code.
-    pub(crate) async fn package_surface(&self) -> Option<String> {
-        let packages = match &self.services.packages {
-            Some(gate) => gate.writable().await.ok()?.digest(),
-            None => lash_vm_runtime::lash_packages().ok()?.own(),
-        };
-        let held = self.services.kernel.packages().ok()?;
-        let view = held.view(&packages).ok()?;
+    /// The package set the session's next round is written under: the
+    /// fleet gate's answer now, or lash's own for a host with no gate.
+    ///
+    /// # Errors
+    ///
+    /// The gate's typed refusal, a retryable one when no set is yet held
+    /// by every live serving node.
+    pub(crate) async fn round_packages(&self) -> Result<crate::plugin::CellPackages, SessionError> {
+        match &self.services.packages {
+            Some(gate) => gate
+                .writable()
+                .await
+                .map_err(|error| SessionError::Plugin(error.into())),
+            None => lash_vm_runtime::lash_packages()
+                .map(|held| crate::plugin::CellPackages(held.own()))
+                .map_err(|error| SessionError::Protocol(error.to_string())),
+        }
+    }
+
+    /// The code exports of `packages`, the round's package set, in the
+    /// session's dialect's spelling (§2.3, P3): `None` when the set
+    /// exports no code.
+    ///
+    /// # Errors
+    ///
+    /// This node holds no library, or does not hold `packages`.
+    pub(crate) fn package_surface(
+        &self,
+        packages: crate::plugin::CellPackages,
+    ) -> Result<Option<String>, SessionError> {
+        let held = self
+            .services
+            .kernel
+            .packages()
+            .map_err(SessionError::Protocol)?;
+        let view = held
+            .view(&packages.digest())
+            .map_err(|error| SessionError::Protocol(error.to_string()))?;
         let surface = crate::package_surface::render(&view, self.language().spelling());
-        (!surface.is_empty()).then_some(surface)
+        Ok((!surface.is_empty()).then_some(surface))
     }
 
     pub(crate) fn read_only_variables_prompt(
@@ -946,6 +974,12 @@ impl DialectSession {
     /// for it. A binding that was not carried (`K-SES-003`) is listed by
     /// name with why it is not bound, so the listing names every name an
     /// earlier cell wrote.
+    /// Notes that the round's prompt shows `packages`: the round's cell is
+    /// written under it.
+    pub(crate) fn shows_packages(&mut self, packages: crate::plugin::CellPackages) {
+        self.state.shows_packages(packages);
+    }
+
     pub(crate) async fn prepare_bound_variables_prompt(
         &mut self,
         exclude: &BTreeSet<String>,

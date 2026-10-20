@@ -268,8 +268,15 @@ does not adopt an already-running process. The
 
 ## Sessions use the cell's current set
 
-A new cell lowers against the package set selected for that cell. A parked
-cell keeps its exact execution closure until it completes.
+A new cell lowers against the package set selected for its round. The fleet
+gate is asked once per round: the prompt shows that set's packages, and the
+round's cell is written under the same set while the node holds it. A gate
+that cannot answer yet fails the round's prompt with its typed retryable
+refusal, and the turn defers the call. A parked cell keeps its exact
+execution closure until it completes. Its envelope records its set, and its
+first park on each node stamps the session with it, so only a node holding
+that set claims the session while the cell stands parked. The turn's commit
+after the cell clears the stamp.
 
 A top-level function binding is saved as a self-contained document when
 its cell succeeds, with its captures frozen at cell end. At the start of

@@ -4,9 +4,12 @@
 //! from one set (CURRENT-RELEASE), and a package value built by another
 //! release of its package raises `package.stale_value` naming both
 //! (K-SES-002 carries it). The node holds every release, the earlier ones
-//! retained beside its own.
+//! retained beside its own. A round's prompt and its cell take one gate
+//! answer, and a parked cell's session stays stamped with its set across a
+//! reclaim (FIG-6986).
 
 use std::collections::BTreeSet;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
 use lash_kernel_doc::{FunctionId, PackageSetDigest};
@@ -14,6 +17,7 @@ use lash_kernel_package::{HeldPackages, Package, PackageSet, PackageSources, tes
 
 use super::{CellTools, SESSION, TURN, finish_of, open_host};
 use crate::CellDialect;
+use crate::plugin::runtime_state::RlmRuntimeState;
 use crate::testing::{DurableHost, cell_context, cell_services, run_cell};
 
 /// A gate a law moves between sets, as a fleet's would.
@@ -137,6 +141,23 @@ fn r2_resigned(lash: &[Arc<Package>]) -> Package {
             "function width(row: List(Any), extra: Int) -> Int",
         )],
     )
+}
+
+/// `q@value`, whose `f` answers `value`.
+fn q(lash: &[Arc<Package>], value: &str) -> Package {
+    Package::build(
+        "q",
+        value,
+        &PackageSources {
+            kernel: &format!(
+                "function q.f() -> Int\nkernel 1\ncharge 1\nbody {{\n  return {value}\n}}\n"
+            ),
+            surface: "function f() -> Int = q.f\n",
+            labels: "",
+        },
+        &[kernel(lash)],
+    )
+    .expect("q builds")
 }
 
 /// A node holding lash's packages with each of `releases` as a set of its
@@ -426,21 +447,6 @@ async fn a_cell_the_gate_writes_under_an_older_set_reaches_that_set_alone() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_dependency_closed_set_runs_one_release_of_each_line_directly_and_through_dependents() {
     let lash = lash();
-    let q = |value: &str| {
-        Package::build(
-            "q",
-            value,
-            &PackageSources {
-                kernel: &format!(
-                    "function q.f() -> Int\nkernel 1\ncharge 1\nbody {{\n  return {value}\n}}\n"
-                ),
-                surface: "function f() -> Int = q.f\n",
-                labels: "",
-            },
-            &[kernel(&lash)],
-        )
-        .expect("q builds")
-    };
     let p = |q: &Package| {
         Package::build(
             "p",
@@ -454,7 +460,7 @@ async fn a_dependency_closed_set_runs_one_release_of_each_line_directly_and_thro
         )
         .expect("p builds")
     };
-    let (q1, q2) = (q("1"), q("2"));
+    let (q1, q2) = (q(&lash, "1"), q(&lash, "2"));
     let (p1, p2) = (p(&q1), p(&q2));
     let (held, sets) = hold(&lash, vec![vec![q1, p1], vec![q2, p2]]);
     let mut session = Session::open(&held, sets[0]).await;
@@ -502,5 +508,227 @@ fn the_prompt_shows_the_cell_set_packages_in_each_dialect_spelling() {
     assert!(
         !typescript.contains("`run("),
         "operations are the tools' declarations"
+    );
+}
+
+/// A session's runtime state on `held`'s node, its rounds written under
+/// the sets `gate` answers.
+fn runtime_state(
+    held: &Arc<HeldPackages>,
+    gate: Arc<dyn crate::plugin::PackageGate>,
+) -> RlmRuntimeState {
+    let mut services = crate::dialect::test_dialect_services();
+    services.workers = lash_vm_client::service::Service::default().with_packages(Arc::clone(held));
+    services.kernel = super::super::KernelCarry::holding(Some(Arc::clone(held)), None);
+    services.packages = Some(gate);
+    RlmRuntimeState::new(Arc::new(crate::dialect::SessionDialect::new(
+        CellDialect::typescript(),
+        services,
+    )))
+    .expect("the session's state")
+}
+
+/// P3: the gate is asked once per round. When the fleet's answer moves
+/// between a round's prompt and its cell, the cell is written under the
+/// set the prompt showed; the next round's prompt shows the set the gate
+/// answers then, and its cell runs that set.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_round_cell_is_written_under_the_set_its_prompt_showed() {
+    let lash = lash();
+    let (held, sets) = hold(&lash, vec![vec![q(&lash, "1")], vec![q(&lash, "2")]]);
+    let gate = Arc::new(Switch(Mutex::new(sets[0])));
+    let state = runtime_state(&held, Arc::clone(&gate) as _);
+    let host = open_host().await;
+    let render = crate::testing::recorded_test_render();
+    for (round, (shown, moved_to, value)) in [(sets[0], sets[1], 1), (sets[1], sets[0], 2)]
+        .into_iter()
+        .enumerate()
+    {
+        *gate.0.lock().expect("the gate") = shown;
+        let facts = state
+            .prompt_facts(Some(&render), None, true, None)
+            .await
+            .expect("the round's prompt");
+        let surface = facts.packages.expect("the prompt shows the set's packages");
+        assert!(
+            surface.contains(&format!("#### `q` ({value})")),
+            "{surface}"
+        );
+        // The fleet moves before the round's cell runs.
+        *gate.0.lock().expect("the gate") = moved_to;
+        let key: &'static str = Box::leak(format!("exec-code:{round}").into_boxed_str());
+        let ran = Box::pin(state.execute_code(
+            cell_context(&host, SESSION, TURN, key, Arc::new(CellTools::default())),
+            lash_core::ExecRequest {
+                code: "await control.finish(q.f());".to_owned(),
+            },
+        ))
+        .await
+        .expect("the round's cell");
+        assert_eq!(
+            finish_of(&ran),
+            serde_json::json!(value),
+            "the cell runs the set its prompt showed"
+        );
+        state
+            .settle_code_execution(lash_core::plugin::CodeExecutionOutcome::Accepted)
+            .await
+            .expect("the cell settles");
+        crate::testing::commit_phase(&state, &host).await;
+    }
+}
+
+/// A gate with no set to answer yet.
+struct Unanswered;
+
+#[async_trait::async_trait]
+impl crate::plugin::PackageGate for Unanswered {
+    async fn writable(
+        &self,
+    ) -> Result<crate::CellPackages, lash_core::RuntimeEffectControllerError> {
+        Err(lash_core::RuntimeEffectControllerError::new(
+            lash_core::RuntimeErrorCode::RunDefinitionUnavailable,
+            "no package set is held by every live node serving these sessions",
+        )
+        .retryable_uncommitted_derivation())
+    }
+}
+
+/// P3: a round whose gate cannot answer has no prompt. The gate's typed
+/// refusal is the prompt's error, never a prompt without its package
+/// section, and the turn defers the call as a live fault.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_round_whose_gate_cannot_answer_has_no_prompt_and_defers_typed() {
+    let lash = lash();
+    let (held, _) = hold(&lash, vec![vec![r1(&lash)]]);
+    let state = runtime_state(&held, Arc::new(Unanswered));
+    let render = crate::testing::recorded_test_render();
+    let Err(error) = state.prompt_facts(Some(&render), None, true, None).await else {
+        panic!("a prompt rendered while the gate had no answer");
+    };
+    assert!(
+        matches!(
+            &error,
+            lash_core::SessionError::Plugin(
+                lash_execution_contracts::plugin_error::PluginError::RuntimeEffectController(refused)
+            ) if refused.code == lash_core::RuntimeErrorCode::RunDefinitionUnavailable
+        ),
+        "{error:?}"
+    );
+    assert!(
+        matches!(
+            lash_core::ExecutionEnvironmentSyncError::of_session_error(
+                lash_core::sansio::ExecutionEnvironmentSyncFailureKind::ProtocolFacts,
+                error,
+            ),
+            lash_core::ExecutionEnvironmentSyncError::Live(_)
+        ),
+        "the turn defers the call"
+    );
+}
+
+/// The cell a reclaim law parks: each call it makes is held, and a call a
+/// node died in is caught as interrupted.
+const PARKING_CELL: &str = "let first = \"unset\";\ntry {\n  first = await echo.say({ text: \"held\" });\n} catch (error) {\n  first = \"interrupted\";\n}\nlet second = \"unset\";\ntry {\n  second = await echo.say({ text: \"held\" });\n} catch (error) {\n  second = \"interrupted\";\n}";
+
+/// Runs [`PARKING_CELL`] in `state` on `host`'s node until its next held
+/// call starts, the cell parked on it.
+async fn park_at_the_held_call(
+    state: &mut super::super::CodeModeExecutionState,
+    host: &DurableHost,
+    services: &super::super::CellServices,
+    tools: &Arc<CellTools>,
+) {
+    let cell = run_cell(
+        state,
+        cell_context(host, SESSION, TURN, "exec-code:1", tools.clone()),
+        services,
+        PARKING_CELL,
+    );
+    tokio::select! {
+        response = cell => panic!("the cell ended with its call held: {:?}", response.result),
+        () = tools.held_started.notified() => {}
+    }
+}
+
+/// CLAIM-HOLDS across a reclaim: a cell written under the set the gate
+/// answers stamps its session with that set when it parks, so no node
+/// lacking the set claims the session while the cell stands parked. On
+/// the node that reclaims it, the turn's working state is restored and
+/// committed, which clears a stamp the restored state cannot know; the
+/// resumed cell parks again under the set its envelope records, and the
+/// session is stamped with it again. Once the cell ends, the turn's
+/// capture after it clears the stamp.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_parked_cell_keeps_its_session_stamped_with_its_set_across_a_reclaim() {
+    let own = lash_vm_runtime::lash_packages()
+        .expect("lash's packages")
+        .own();
+    let mut host = DurableHost::open_holding(
+        lash_core::AdmittedScope::turn(
+            lash_core::SessionId::from(SESSION),
+            lash_core::TurnId::from(TURN),
+        ),
+        own,
+    )
+    .await;
+    let mut services = cell_services(
+        &CellDialect::typescript(),
+        lash_vm_client::service::Service::default(),
+    );
+    services.packages = Some(Arc::new(Switch(Mutex::new(own))) as _);
+    let tools = Arc::new(CellTools::default());
+
+    // A first cell leaves the turn a working state to restore.
+    let mut state = crate::testing::session_state(&CellDialect::typescript());
+    ok(&run_cell(
+        &mut state,
+        cell_context(&host, SESSION, TURN, "exec-code:0", tools.clone()),
+        &services,
+        "const before = 1;",
+    )
+    .await);
+    let (capture, _) = crate::testing::commit_working(&mut state, &host).await;
+    let lash_core_store::execution_state::ExecutionGraphCapture::Replace(working) = capture else {
+        panic!("the first cell leaves a working state");
+    };
+    let restored = || {
+        let mut state = crate::testing::session_state(&CellDialect::typescript());
+        state
+            .restore_execution_graph(
+                &working,
+                lash_core_store::execution_state::ExecutionGraphPurpose::Working,
+            )
+            .expect("the working state restores");
+        state
+    };
+
+    tools.hold.store(true, Ordering::SeqCst);
+    park_at_the_held_call(&mut state, &host, &services, &tools).await;
+    assert!(
+        !host.kill_and_resume_past_a_lacking_node().await,
+        "a node lacking the cell's set claimed its session at the cell's first park"
+    );
+    let mut state = restored();
+    crate::testing::commit_working(&mut state, &host).await;
+    park_at_the_held_call(&mut state, &host, &services, &tools).await;
+    assert!(
+        !host.kill_and_resume_past_a_lacking_node().await,
+        "a node lacking the cell's set claimed its session after the cell parked again"
+    );
+
+    tools.hold.store(false, Ordering::SeqCst);
+    let mut state = restored();
+    ok(&run_cell(
+        &mut state,
+        cell_context(&host, SESSION, TURN, "exec-code:1", tools.clone()),
+        &services,
+        PARKING_CELL,
+    )
+    .await);
+    crate::testing::commit_working(&mut state, &host).await;
+    assert!(
+        host.kill_and_resume_past_a_lacking_node().await,
+        "a session between cells pins no code"
     );
 }

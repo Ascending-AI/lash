@@ -83,10 +83,13 @@ impl RlmRuntimeState {
             None => crate::projection::HistoryIndex::default(),
         };
         let provenance = index.provenance.clone();
-        let (bound_variables, globals, inferred_names) = self
-            .execution
-            .lock()
-            .await
+        // The gate is asked once per round: the prompt shows the packages
+        // of its answer, and the round's cell is written under it (P3).
+        let packages = self.dialect.round_packages().await?;
+        let package_surface = self.dialect.package_surface(packages)?;
+        let mut execution = self.execution.lock().await;
+        execution.shows_packages(packages);
+        let (bound_variables, globals, inferred_names) = execution
             .prepare_bound_variables_prompt(&exclude, params.preview, provenance, pages)
             .await?
             .render()
@@ -96,6 +99,7 @@ impl RlmRuntimeState {
                     error,
                 )
             })?;
+        drop(execution);
         reserved_names.extend(inferred_names);
         reserved_names.push(
             self.dialect
@@ -117,7 +121,7 @@ impl RlmRuntimeState {
             ),
             bound_variables,
             read_only_variables,
-            packages: self.dialect.package_surface().await,
+            packages: package_surface,
             globals: Arc::new(globals),
         })
     }
@@ -705,35 +709,6 @@ mod tests {
         .await
     }
 
-    /// The turn's phase commit after a settled cell: the session's state as
-    /// its working state, which the next cell reads.
-    async fn phase(state: &RlmRuntimeState, host: &crate::testing::DurableHost) {
-        let capture = state
-            .capture_execution_graph(lash_core::plugin::ExecutionGraphPurpose::Working)
-            .await
-            .expect("the session's state captures");
-        host.commit_working(&capture, &mut Executor(state)).await;
-        state.acknowledge_execution_state_capture().await;
-    }
-
-    /// The session's executor as a working commit publishes its pages.
-    struct Executor<'a>(&'a RlmRuntimeState);
-
-    #[async_trait::async_trait]
-    impl crate::testing::Candidates for Executor<'_> {
-        async fn candidate(
-            &mut self,
-            root: lash_core_store::checkpoint_graph::NodeId,
-            commit: lash_core_store::checkpoint_graph::CommitId,
-            tx: &mut lash_durable::ActorTx,
-        ) -> Option<lash_core::plugin::ExecutionCandidate> {
-            self.0
-                .execution_candidate(root, commit, tx)
-                .await
-                .expect("the capture's candidate builds")
-        }
-    }
-
     /// The scope [`admitted_context`] claims.
     fn admitted_scope() -> lash_core::AdmittedScope {
         lash_core::AdmittedScope::turn(
@@ -959,7 +934,7 @@ mod tests {
             .settle_code_execution(lash_core::plugin::CodeExecutionOutcome::Accepted)
             .await
             .expect("settle the baton cell");
-        phase(state, host).await;
+        crate::testing::commit_phase(state, host).await;
         assert_eq!(response.error(), None);
         response
             .finish_value()
@@ -1420,7 +1395,7 @@ mod tests {
                     ))
                     .await
                     .expect("restore seeds the committed baton");
-                phase(&state, &host).await;
+                crate::testing::commit_phase(&state, &host).await;
                 let committed = state
                     .hydrated_execution_graph()
                     .await

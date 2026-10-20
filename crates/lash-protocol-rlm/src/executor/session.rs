@@ -124,8 +124,8 @@ struct Pending {
     closures: BTreeSet<NodeId>,
     /// The held runs whose carries the capture owns once committed.
     runs: usize,
-    /// The package stamp the capture's commit writes, when it changes it.
-    stamp: Option<Option<lash_kernel_doc::PackageSetDigest>>,
+    /// Whether the capture's commit clears the session's package stamp.
+    clears: bool,
 }
 
 /// Why a cell's saved functions could not be relinked to its package set.
@@ -160,14 +160,17 @@ pub struct CodeModeExecutionState {
     closures: BTreeMap<NodeId, Closure>,
     /// The closures an acknowledged capture installed.
     installed_closures: BTreeSet<NodeId>,
-    /// The package set the fleet gate wrote this state's last cell under:
-    /// a capture of the cell parked stamps the session with it, so only a
-    /// node that holds the set claims the turn (FIG-6918, CLAIM-HOLDS).
-    packages: Option<lash_kernel_doc::PackageSetDigest>,
-    /// The stamp an acknowledged capture left on the session, once one did:
-    /// a capture rewrites it only when it changes, since a stamping commit
-    /// takes the store's explicit-transaction path.
+    /// The package stamp the session's row holds, when known: a parked
+    /// cell's parks stamp it with the set the cell was written under, so
+    /// only a node holding that set claims the turn (FIG-6918,
+    /// CLAIM-HOLDS), and a capture between cells clears it. A capture
+    /// rewrites it only when it changes, since a stamping commit takes the
+    /// store's explicit-transaction path.
     stamped: Option<Option<lash_kernel_doc::PackageSetDigest>>,
+    /// The package set the session's latest prompt showed: the fleet
+    /// gate's answer for its round, which the round's cell is written
+    /// under while this node holds it (P3).
+    shown: Option<crate::plugin::CellPackages>,
     pending: Option<Pending>,
     /// Whether the state as it stands is a turn's working state no session
     /// revision publishes yet: the turn's final capture owes it even when
@@ -214,8 +217,8 @@ impl CodeModeExecutionState {
             installed: None,
             closures: BTreeMap::new(),
             installed_closures: BTreeSet::new(),
-            packages: None,
             stamped: None,
+            shown: None,
             pending: None,
             final_owed: false,
             active: None,
@@ -957,7 +960,7 @@ impl CodeModeExecutionState {
             purpose,
             closures: BTreeSet::new(),
             runs: self.pages.held(),
-            stamp: None,
+            clears: false,
         });
         Ok(ExecutionGraphCapture::Replace(graph))
     }
@@ -982,9 +985,21 @@ impl CodeModeExecutionState {
         }
     }
 
-    /// Notes that this state's next cell is written under `packages`.
-    pub(crate) fn writes_under(&mut self, packages: lash_kernel_doc::PackageSetDigest) {
-        self.packages = Some(packages);
+    /// Notes that the round's prompt showed `packages`, the gate's answer
+    /// for the round.
+    pub(crate) fn shows_packages(&mut self, packages: crate::plugin::CellPackages) {
+        self.shown = Some(packages);
+    }
+
+    /// The package set the session's latest prompt showed.
+    pub(crate) fn shown_packages(&self) -> Option<crate::plugin::CellPackages> {
+        self.shown
+    }
+
+    /// Notes that a park of this state's cell stamped the session with
+    /// `packages`: the next capture between cells clears it.
+    pub(crate) fn parked_under(&mut self, packages: lash_kernel_doc::PackageSetDigest) {
+        self.stamped = Some(Some(packages));
     }
 
     /// The session's descriptor as it stands, if it holds one.
@@ -1000,7 +1015,9 @@ impl CodeModeExecutionState {
     /// spool holds it: a candidate of the same capture built before is
     /// withdrawn first. Every execution closure of a cell this state ran
     /// that the pages name and no acknowledged capture installed is staged
-    /// in `tx`. None when the store holds `root`'s pages.
+    /// in `tx`. None when the store holds `root`'s pages. A capture between
+    /// cells clears the package stamp a parked cell left in `tx`, either
+    /// way.
     ///
     /// # Errors
     ///
@@ -1011,10 +1028,17 @@ impl CodeModeExecutionState {
         commit: CommitId,
         tx: &mut lash_durable::ActorTx,
     ) -> Result<Option<lash_core::plugin::ExecutionCandidate>, SessionError> {
-        let Some(mut spool) = self.pages.staged().cloned() else {
+        let Some(pending) = self.pending.as_mut().filter(|pending| pending.root == root) else {
             return Ok(None);
         };
-        let Some(pending) = self.pending.as_mut().filter(|pending| pending.root == root) else {
+        // A parked cell's own parks stamp the session with the set it was
+        // written under; a session between cells relinks its next one and
+        // pins none, whether or not the commit publishes pages.
+        pending.clears = self.active.is_none() && self.stamped != Some(None);
+        if pending.clears {
+            tx.stamp_packages(None);
+        }
+        let Some(mut spool) = self.pages.staged().cloned() else {
             return Ok(None);
         };
         if !spool.contains(&root) {
@@ -1034,16 +1058,8 @@ impl CodeModeExecutionState {
             tx,
         )
         .map_err(protocol)?;
-        // A parked cell pins the code it was written under; a session
-        // between cells relinks its next one and pins none.
-        let stamp = self.packages.filter(|_| self.active.is_some());
-        let changes = self.stamped != Some(stamp);
-        if changes {
-            tx.stamp_packages(stamp);
-        }
         if let Some(pending) = self.pending.as_mut() {
             pending.closures = staged;
-            pending.stamp = changes.then_some(stamp);
         }
         Ok(Some(lash_core::plugin::ExecutionCandidate { manifest }))
     }
@@ -1063,8 +1079,8 @@ impl CodeModeExecutionState {
             return;
         };
         self.installed = Some(pending.root);
-        if let Some(stamp) = pending.stamp {
-            self.stamped = Some(stamp);
+        if pending.clears {
+            self.stamped = Some(None);
         }
         for closure in &pending.closures {
             self.closures.remove(closure);
