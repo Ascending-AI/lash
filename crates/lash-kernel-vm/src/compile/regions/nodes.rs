@@ -18,7 +18,7 @@
 
 use std::ops::Range;
 
-use lash_kernel_doc::arena::{ArenaHandle, Body};
+use lash_kernel_doc::arena::{ArenaHandle, Body, Chunks};
 use lash_kernel_doc::plan::Table;
 use lash_kernel_doc::{NewObject, Value, ValueKind};
 use lash_kernel_state::arena::VALUE_BYTES;
@@ -1051,10 +1051,23 @@ fn tuple(items: Vec<Node>) -> Node {
 }
 
 /// The compiled list of `items`, or set when `set`: a set's members are
-/// legal keys.
+/// legal keys. A list its body holds inline collects its members in
+/// place.
 fn list(items: Vec<Node>, set: bool) -> Node {
     let kind = if set { ValueKind::Set } else { ValueKind::List };
     Box::new(move |slots, cx| {
+        if !set && items.len() <= Chunks::INLINE {
+            let mut inline = [Value::Absent; Chunks::INLINE];
+            cx.collecting(kind, items.len(), |cx| {
+                for (member, item) in inline.iter_mut().zip(&items) {
+                    *member = item(slots, cx)?;
+                }
+                Some(())
+            })?;
+            let members = &inline[..items.len()];
+            let bound = cx.arena.sequence_bound(members.len());
+            return cx.made(bound, |arena| Ok(arena.create_list(members)));
+        }
         let members = cx.collecting(kind, items.len(), |cx| values(&items, slots, cx))?;
         if set {
             if members.iter().any(|member| cx.arena.key(member).is_err()) {
@@ -1066,21 +1079,24 @@ fn list(items: Vec<Node>, set: bool) -> Node {
     })
 }
 
-/// The compiled map of the keys and values `entries` holds by turns.
+/// The compiled map of the keys and values `entries` holds by turns,
+/// evaluated into an operand window and built from it ([`Cx::map`]),
+/// which every exit releases.
 fn map(entries: Vec<Node>) -> Node {
     Box::new(move |slots, cx| {
-        let table = cx.collecting(ValueKind::Map, entries.len() / 2, |cx| {
-            arguments(&entries, entries.len(), slots, cx, |cx, window| {
-                let pairs = cx.args[window].as_chunks::<2>().0;
-                let mut table = Vec::with_capacity(pairs.len());
-                for &[key, value] in pairs {
-                    cx.arena.key(&key).ok()?;
-                    table.push((key, value));
+        let window = cx.argument_window(entries.len())?;
+        let map = (|| {
+            cx.collecting(ValueKind::Map, entries.len() / 2, |cx| {
+                for (at, entry) in entries.iter().enumerate() {
+                    let value = entry(slots, cx)?;
+                    cx.args.put(window.start + at, value);
                 }
-                Some(table)
-            })
-        })?;
-        cx.build(NewObject::Map(table))
+                Some(())
+            })?;
+            cx.map(window.clone())
+        })();
+        cx.args.release(window.start);
+        map
     })
 }
 

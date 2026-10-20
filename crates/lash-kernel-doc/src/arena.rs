@@ -324,6 +324,19 @@ impl Chunks {
         }
     }
 
+    /// The values chunk `chunk` holds, when it is resident.
+    #[inline]
+    pub fn resident(&self, chunk: usize) -> Option<&[Value]> {
+        match self {
+            Self::Inline { len, values } => (chunk == 0).then(|| &values[..usize::from(*len)]),
+            Self::Whole(values) => (chunk == 0).then_some(values.as_slice()),
+            Self::Split(chunks) => match chunks.get(chunk)? {
+                Chunk::Resident(values) => Some(values),
+                Chunk::Cold { .. } => None,
+            },
+        }
+    }
+
     /// Chunk `chunk`, for an edit of the values it holds in place.
     #[inline]
     pub fn get_mut(&mut self, chunk: usize) -> Option<Chunk<&mut [Value]>> {

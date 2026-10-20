@@ -53,14 +53,32 @@ impl Arena {
     /// What [`Self::install_bound`] gives for `object` alone.
     #[inline]
     pub fn object_bound(&self, object: &NewObject) -> u64 {
-        body_bytes(match object {
-            NewObject::List(values) | NewObject::Tuple(values) => values.len() as u64,
-            NewObject::Map(entries) | NewObject::Record(entries) => 2 * entries.len() as u64,
-            NewObject::Set(members) => 2 * members.len() as u64,
-            NewObject::LongText(text) | NewObject::LongFunction(text) => text.len() as u64 / 16,
-            NewObject::Bytes(bytes) => bytes.len() as u64 / 16,
-            NewObject::BigInt(_) | NewObject::Timestamp(_) | NewObject::Error { .. } => 0,
-        })
+        match object {
+            NewObject::List(values) | NewObject::Tuple(values) => self.sequence_bound(values.len()),
+            NewObject::Map(entries) | NewObject::Record(entries) => self.table_bound(entries.len()),
+            NewObject::Set(members) => self.table_bound(members.len()),
+            NewObject::LongText(text) | NewObject::LongFunction(text) => {
+                body_bytes(text.len() as u64 / 16)
+            }
+            NewObject::Bytes(bytes) => body_bytes(bytes.len() as u64 / 16),
+            NewObject::BigInt(_) | NewObject::Timestamp(_) | NewObject::Error { .. } => {
+                body_bytes(0)
+            }
+        }
+    }
+
+    /// What [`Self::install_bound`] gives for a new list or tuple of
+    /// `values` values.
+    #[inline]
+    pub fn sequence_bound(&self, values: usize) -> u64 {
+        body_bytes(values as u64)
+    }
+
+    /// What [`Self::install_bound`] gives for a new map, set or record of
+    /// `entries` entries: a key and a value each.
+    #[inline]
+    pub fn table_bound(&self, entries: usize) -> u64 {
+        body_bytes((entries as u64).saturating_mul(2))
     }
 
     /// What [`Self::install_bound`] gives for a new long text of `bytes`
@@ -77,12 +95,9 @@ impl Arena {
     /// hold leaves its statement before they are allocated.
     #[inline]
     pub fn construction_floor(&self, kind: ValueKind, members: usize) -> u64 {
-        let members = members as u64;
         match kind {
-            ValueKind::List | ValueKind::Tuple => body_bytes(members),
-            ValueKind::Set | ValueKind::Map | ValueKind::Record => {
-                body_bytes(members.saturating_mul(2))
-            }
+            ValueKind::List | ValueKind::Tuple => self.sequence_bound(members),
+            ValueKind::Set | ValueKind::Map | ValueKind::Record => self.table_bound(members),
             _ => 0,
         }
     }

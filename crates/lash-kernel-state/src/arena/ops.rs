@@ -269,8 +269,8 @@ impl Arena {
     ) -> Result<(), NativeError> {
         self.warm(handle)?;
         let resident = self.key(&key)?;
-        let seq = match self.table_find(handle, &resident)? {
-            Some((place, _)) => self.table_replace(handle, place, value)?,
+        let seq = match self.table_overwrite(handle, &resident, value)? {
+            Some(seq) => seq,
             None => {
                 self.resident = self.resident.saturating_add(2);
                 self.table_append(handle, resident, key, value)?

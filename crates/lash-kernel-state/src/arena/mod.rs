@@ -769,6 +769,31 @@ impl Arena {
         Ok(naming(self.insert(body, facts)))
     }
 
+    /// Creates the map of `entries` in order, as [`Self::create`] creates
+    /// [`NewObject::Map`] of them, from entries no vector collected: what
+    /// a region's map literal makes of its operands.
+    pub fn create_map(
+        &mut self,
+        entries: impl ExactSizeIterator<Item = (Value, Value)>,
+    ) -> Result<Value, NativeError> {
+        let (table, index) = tables::build(&self.objects, &self.facts, &self.layouts, entries)?;
+        let facts = self.created(Some(index));
+        Ok(Value::Map(self.insert(Body::Map(table), facts)))
+    }
+
+    /// Creates the list of `values`, as [`Self::create`] creates
+    /// [`NewObject::List`] of them: a list a body holds inline is made
+    /// without a vector.
+    pub fn create_list(&mut self, values: &[Value]) -> Value {
+        let chunks = Chunks::of(values).unwrap_or_else(|| Chunks::Whole(values.to_vec()));
+        let sequence = Sequence {
+            len: values.len() as u64,
+            chunks,
+        };
+        let facts = self.created(None);
+        Value::List(self.insert(Body::List(sequence), facts))
+    }
+
     /// The body and facts of a new object: a mutable one created, without
     /// a durable id; an immutable composite with its summary.
     fn new_body(&mut self, object: NewObject) -> Result<(Body, Facts), NativeError> {
@@ -1407,14 +1432,15 @@ fn body_values(body: &Body) -> u64 {
 
 /// Visits every value `body` holds resident. A closure's captured cells
 /// are handles, not values: its `captures`.
-pub fn each_member(body: &Body, visit: &mut dyn FnMut(&Value)) {
-    let chunked = |chunks: &Chunks, visit: &mut dyn FnMut(&Value)| {
-        for chunk in chunks.iter() {
-            if let Chunk::Resident(values) = chunk {
+#[inline]
+pub fn each_member(body: &Body, visit: &mut impl FnMut(&Value)) {
+    fn chunked(chunks: &Chunks, visit: &mut impl FnMut(&Value)) {
+        for chunk in 0..chunks.count() {
+            if let Some(values) = chunks.resident(chunk) {
                 values.iter().for_each(&mut *visit);
             }
         }
-    };
+    }
     match body {
         Body::List(sequence) | Body::Tuple(sequence) => chunked(&sequence.chunks, visit),
         Body::Map(table) | Body::Set(table) | Body::Record(table) => chunked(&table.chunks, visit),

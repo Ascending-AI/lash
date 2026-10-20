@@ -11,8 +11,8 @@ use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::heap::{HeapFault, LogicalBytes};
 use lash_kernel_doc::plan::{Collection, Table, TemplateHeap};
 use lash_kernel_doc::{
-    Args, KernelDataLimits, Measure, NativeCall, NewObject, Nursery, PreparedAnswer, Value,
-    ValueKind, WorkCounter,
+    Args, KernelDataLimits, Measure, NativeCall, NativeError, NewObject, Nursery, PreparedAnswer,
+    Value, ValueKind, WorkCounter,
 };
 use lash_kernel_state::arena::Arena;
 
@@ -247,10 +247,49 @@ impl Cx<'_> {
 
     /// Builds `object`, as the reference's construction does.
     pub(super) fn build(&mut self, object: NewObject) -> Option<Value> {
-        if self.memory && self.arena.object_bound(&object) > self.free() {
+        let bound = self.arena.object_bound(&object);
+        self.made(bound, |arena| arena.create(object))
+    }
+
+    /// The map of the keys and values `window` holds by turns, built as
+    /// the reference's construction builds it, without collecting its
+    /// entries: `None`, having built nothing, where a key is no legal key
+    /// or the room does not hold the map.
+    pub(super) fn map(&mut self, window: Range<usize>) -> Option<Value> {
+        let pairs = self.args[window].as_chunks::<2>().0;
+        for [key, _] in pairs {
+            // A short text and a word are legal keys by their kinds.
+            if !matches!(key, Value::Text(_) | Value::Int(_)) {
+                self.arena.key(key).ok()?;
+            }
+        }
+        if self.memory && self.arena.table_bound(pairs.len()) > self.free() {
             return None;
         }
-        match self.arena.create(object) {
+        let made = self
+            .arena
+            .create_map(pairs.iter().map(|&[key, value]| (key, value)));
+        self.created(made)
+    }
+
+    /// Makes what `make` creates, which the arena's install bound gives
+    /// `bound` for, as the reference's construction does: `None`, having
+    /// made nothing, where the room does not hold it.
+    pub(super) fn made(
+        &mut self,
+        bound: u64,
+        make: impl FnOnce(&mut Arena) -> Result<Value, NativeError>,
+    ) -> Option<Value> {
+        if self.memory && bound > self.free() {
+            return None;
+        }
+        let made = make(self.arena);
+        self.created(made)
+    }
+
+    /// What a construction made, or the fault that ends the run.
+    fn created(&mut self, made: Result<Value, NativeError>) -> Option<Value> {
+        match made {
             Ok(value) => Some(value),
             Err(error) => {
                 self.fault = Some(HeapFault::Malformed(error.to_string()));
@@ -389,6 +428,14 @@ impl Cx<'_> {
                 | (Table::Record, Value::Record(_))
         ) {
             return None;
+        }
+        // A short text is a legal key of every table, and its own key.
+        if let (Value::Text(text), Some(handle)) = (key, target.handle()) {
+            let found = self.arena.table_get_text(handle, &text).ok()?;
+            return Some(found.map(|value| match table {
+                Table::Set => Value::Bool(true),
+                Table::Map | Table::Record => value,
+            }));
         }
         let semantics = self.arena.semantics().with_limits(self.limits);
         let args = Args::new(&[], self.arena.objects(), &semantics);

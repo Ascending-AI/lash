@@ -23,7 +23,7 @@ use std::rc::Rc;
 
 use foldhash::{HashMap, HashMapExt, HashSet, HashSetExt};
 
-use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, Chunks, Objects, Table};
+use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, Chunks, Objects, ShortText, Table};
 use lash_kernel_doc::{NativeError, Retry, Value};
 
 use super::Facts;
@@ -578,14 +578,13 @@ pub(crate) fn find(
 }
 
 /// The pair at `place` of a table.
-#[inline]
+#[inline(always)]
 pub(crate) fn pair(table: &Table, place: Place) -> Result<&[Value], NativeError> {
-    match table.chunks.get(place.chunk) {
-        Some(Chunk::Resident(values)) => values
-            .get(place.at * 2..place.at * 2 + 2)
-            .ok_or(NativeError::Malformed("a table's index names no entry")),
-        _ => Err(NativeError::Malformed("a table's index names no entry")),
-    }
+    table
+        .chunks
+        .resident(place.chunk)
+        .and_then(|values| values.get(place.at * 2..place.at * 2 + 2))
+        .ok_or(NativeError::Malformed("a table's index names no entry"))
 }
 
 impl super::Arena {
@@ -634,31 +633,42 @@ impl super::Arena {
         Ok((table, index))
     }
 
-    /// Writes `value` over the entry at `place`, where [`Self::table_find`]
-    /// found its key: the key keeps its first spelling and position
-    /// (`K-KEY-003`). A value write moves no entry, so the table's
-    /// position proofs stand. Gives the entry's sequence.
-    pub fn table_replace(
+    /// Writes `value` over the entry under `key`, if the table holds one:
+    /// the key keeps its first spelling and position (`K-KEY-003`). A
+    /// value write moves no entry, so the table's position proofs stand.
+    /// Gives the entry's sequence, or `None`, having written nothing,
+    /// where the table holds no `key`.
+    pub fn table_overwrite(
         &mut self,
         handle: ArenaHandle,
-        place: Place,
+        key: &Key,
         value: Value,
-    ) -> Result<u64, NativeError> {
-        self.warm(handle)?;
-        let index = handle.index() as usize;
-        let seq = self
-            .facts
-            .get(index)
-            .and_then(|facts| facts.index.as_ref())
-            .ok_or(NativeError::Malformed("a resident table has no index"))?
+    ) -> Result<Option<u64>, NativeError> {
+        let (Some(body), Some(facts)) = (
+            self.objects.get_mut(handle),
+            self.facts.get(handle.index() as usize),
+        ) else {
+            return Err(NativeError::Malformed("a stale handle reached the machine"));
+        };
+        if facts.cold {
+            return Err(Retry::Cold {
+                object: handle,
+                chunk: 0,
+            }
+            .into());
+        }
+        let index = facts
+            .index
+            .as_ref()
+            .ok_or(NativeError::Malformed("a resident table has no index"))?;
+        let table = table_mut(body)?;
+        let Some(place) = find(handle, table, index, key)? else {
+            return Ok(None);
+        };
+        let seq = index
             .sequences(place.chunk)
             .get(place.at)
             .ok_or(NativeError::Malformed("a table's index names no entry"))?;
-        let table = table_mut(
-            self.objects
-                .get_mut(handle)
-                .ok_or(NativeError::Malformed("a stale handle reached the machine"))?,
-        )?;
         let values = match table.chunks.get_mut(place.chunk) {
             Some(Chunk::Resident(values)) => values,
             Some(Chunk::Cold { .. }) => {
@@ -676,7 +686,7 @@ impl super::Arena {
         let old = std::mem::replace(held, value);
         self.hold(&value);
         self.unhold(&old);
-        Ok(seq)
+        Ok(Some(seq))
     }
 
     /// Writes `value` under `key`, whose resident key is `resident` and
@@ -777,6 +787,40 @@ impl super::Arena {
         Ok(Some((place, pair(table, place)?[1])))
     }
 
+    /// The value the table `handle` holds under the short text `text`,
+    /// read as a native's call reads it through the table's view and the
+    /// arena's lookup (`K-KEY-002`): a short text is its own key, so the
+    /// read normalizes and hashes nothing. A table with a cold chunk
+    /// answers [`Retry::Cold`], as its view does.
+    #[inline]
+    pub fn table_get_text(
+        &self,
+        handle: ArenaHandle,
+        text: &ShortText,
+    ) -> Result<Option<Value>, NativeError> {
+        let table = table_of(
+            self.objects
+                .get(handle)
+                .ok_or(NativeError::Malformed("a stale handle reached the arena"))?,
+        )?;
+        if let Some(chunk) = table.chunks.first_cold() {
+            return Err(Retry::Cold {
+                object: handle,
+                chunk,
+            }
+            .into());
+        }
+        let index = self
+            .facts
+            .get(handle.index() as usize)
+            .and_then(|facts| facts.index.as_ref())
+            .ok_or(NativeError::Malformed("a resident table has no index"))?;
+        let Some(place) = find(handle, table, index, &Key::text(text))? else {
+            return Ok(None);
+        };
+        Ok(Some(pair(table, place)?[1]))
+    }
+
     /// A process-local object identity and layout revision: what a position
     /// proof is guarded by. Every structural edit of the body revokes it,
     /// including changes of kind, chunk layout and key positions; a value
@@ -851,6 +895,7 @@ mod tests {
     use lash_kernel_doc::{Float, NewObject, Value};
 
     use super::super::Arena;
+    use super::super::layouts::MAX_KEYS;
     use super::*;
 
     fn map(arena: &mut Arena, entries: Vec<(Value, Value)>) -> ArenaHandle {
@@ -879,6 +924,61 @@ mod tests {
             after = Some(seq);
         }
         keys
+    }
+
+    /// K-KEY-002, K-KEY-003: a read by a short text, and the general
+    /// lookup, answer the value written under each key, and none for a
+    /// key the table does not hold, on every index: a layout that
+    /// compares its keys, one that hashes them, a table's own past the
+    /// layouts' bound and after a removal, and a set's.
+    #[test]
+    fn short_text_reads_find_each_key_on_every_index() {
+        let mut arena = Arena::new();
+        let names: Vec<String> = (0..=MAX_KEYS).map(|at| format!("key-{at}")).collect();
+        let texts: Vec<Value> = names.iter().map(|name| arena.text(name)).collect();
+        let mut tables = Vec::new();
+        for len in 1..=texts.len() {
+            let entries = (0..len)
+                .map(|at| (texts[at], Value::Int(at as i64)))
+                .collect();
+            let table = map(&mut arena, entries);
+            assert_eq!(layout(&arena, table).is_some(), len <= MAX_KEYS as usize);
+            tables.push((table, (0..len).collect::<Vec<_>>()));
+        }
+        let (removed, held) = &mut tables[2];
+        arena.table_delete(*removed, &texts[0]).unwrap();
+        held.remove(0);
+        let set = match arena.create(NewObject::Set(vec![texts[1]])).unwrap() {
+            Value::Set(handle) => handle,
+            _ => panic!("a set"),
+        };
+        let absent = Value::Text(ShortText::new("absent").unwrap());
+        for (table, held) in &tables {
+            for (at, text) in texts.iter().chain([&absent]).enumerate() {
+                let Value::Text(short) = text else {
+                    panic!("a short text")
+                };
+                let expected = held.contains(&at).then_some(at as i64);
+                for found in [
+                    arena.table_get_text(*table, short).unwrap(),
+                    arena.table_get(*table, text).unwrap(),
+                ] {
+                    let found = found.map(|value| match value {
+                        Value::Int(word) => word,
+                        other => panic!("{other:?}"),
+                    });
+                    assert_eq!(found, expected, "key {at} of {}", held.len());
+                }
+            }
+        }
+        for (at, text) in texts.iter().chain([&absent]).enumerate() {
+            let Value::Text(short) = text else {
+                panic!("a short text")
+            };
+            let found = arena.table_get_text(set, short).unwrap();
+            assert_eq!(found.is_some(), at == 1);
+            assert_eq!(arena.table_get(set, text).unwrap().is_some(), at == 1);
+        }
     }
 
     /// K-KEY-003, K-ITER-003: tables on one layout keep their own first

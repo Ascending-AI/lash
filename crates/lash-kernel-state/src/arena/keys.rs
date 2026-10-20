@@ -122,16 +122,29 @@ fn word_of(float: f64) -> Option<i64> {
         .then_some(float as i64)
 }
 
-/// `value`'s key, or `None` when it is no legal key.
-#[inline]
+/// `value`'s key, or `None` when it is no legal key: a short text's and a
+/// word's inline at the caller.
+#[inline(always)]
 pub(crate) fn key_of(
     objects: &Objects,
     facts: &[Facts],
     value: &Value,
 ) -> Result<Option<Key>, NativeError> {
     match value {
-        Value::Text(short) => return Ok(Some(Key::text(short))),
-        Value::Int(word) => return Ok(Some(Key::Int(*word))),
+        Value::Text(short) => Ok(Some(Key::text(short))),
+        Value::Int(word) => Ok(Some(Key::Int(*word))),
+        _ => other_key_of(objects, facts, value),
+    }
+}
+
+/// [`key_of`] of a value that is neither a short text nor a word.
+#[inline(never)]
+fn other_key_of(
+    objects: &Objects,
+    facts: &[Facts],
+    value: &Value,
+) -> Result<Option<Key>, NativeError> {
+    match value {
         Value::Float(float) => {
             if let Some(word) = word_of(float.get()) {
                 return Ok(Some(Key::Int(word)));

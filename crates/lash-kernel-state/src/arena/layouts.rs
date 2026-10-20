@@ -18,12 +18,13 @@
 //!
 //! Layouts are process-local: nothing projects them, a restored run
 //! starts with none, and two runs that build the same tables in another
-//! order share differently without either seeing it. What they hold is
-//! metered: each layout's bytes, and its index's when a table first takes
-//! it, are counted before they are allocated, and counted no more once no
-//! table holds it or a layout after it, so the capacity meter counts the
-//! layouts the run's live tables need, with the room a layout keeps for
-//! the layouts after it while it lives. The empty layout every run has is
+//! order share differently without either seeing it. A short layout finds
+//! a key by comparing its keys; a longer one keeps a hashed index of them.
+//! What they hold is metered: each layout's bytes, and its index's when a
+//! table first takes it, are counted before they are allocated, and
+//! counted no more once no table holds it or a layout after it, so the
+//! capacity meter counts the layouts the run's live tables need, with the
+//! room a layout keeps for the layouts after it while it lives. The empty layout every run has is
 //! not data and is not counted itself. The transitions are bounded
 //! ([`MAX_KEYS`], [`MAX_LAYOUTS`]): diverse data falls back to tables' own
 //! indexes rather than growing metadata without end.
@@ -46,6 +47,9 @@ const MAX_LAYOUTS: u32 = 1024;
 
 /// The next layouts a layout lists before it hashes them.
 const FEW: usize = 8;
+
+/// The most keys a layout finds a key among by comparing them in turn.
+const SCANNED: u32 = 8;
 
 /// What the layouts of one run hold.
 #[derive(Debug, Default)]
@@ -72,7 +76,11 @@ pub struct Layout {
     parent: Option<Rc<Layout>>,
     /// How many keys it holds.
     len: u32,
-    /// Each key's position, built when a table first takes the layout.
+    /// A table took it: appending its last key to a table on its parent
+    /// moves that table to it.
+    taken: Cell<bool>,
+    /// Each key's position, past [`SCANNED`] keys: built when a table
+    /// first takes the layout.
     index: OnceCell<HashMap<Key, u32>>,
     next: RefCell<Next>,
     /// The bytes it holds, counted by `meter`.
@@ -153,6 +161,7 @@ fn next_bytes(items: usize) -> u64 {
 }
 
 impl Next {
+    #[inline]
     fn get(&self, key: &Key) -> Option<&Weak<Layout>> {
         match self {
             Self::Few(few) => few
@@ -242,10 +251,12 @@ impl Layout {
             .filter_map(|layout| layout.key.as_ref())
     }
 
-    /// The layout as a table takes it: its index is built, and counted,
-    /// when the first table does.
+    /// The layout as a table takes it: its index, if it keeps one, is
+    /// built, and counted, when the first table does.
     pub(super) fn taken(self: Rc<Self>) -> Rc<Self> {
-        self.index();
+        if !self.taken.replace(true) && self.len > SCANNED {
+            self.index();
+        }
         self
     }
 
@@ -263,10 +274,22 @@ impl Layout {
         })
     }
 
-    /// The position of `key`, if the layout holds it.
+    /// The position of `key`, if the layout holds it: a layout of at most
+    /// [`SCANNED`] keys compares its own keys, last first, which costs
+    /// less than hashing the key; a longer one asks its index.
     #[inline]
     pub(super) fn position(&self, key: &Key) -> Option<u32> {
-        self.index().get(key).copied()
+        if self.len > SCANNED {
+            return self.index().get(key).copied();
+        }
+        let mut layout = self;
+        while let (Some(held), Some(parent)) = (&layout.key, &layout.parent) {
+            if held == key {
+                return Some(parent.len);
+            }
+            layout = parent;
+        }
+        None
     }
 
     /// Each key's position, as a table's own index of sequences.
@@ -282,17 +305,24 @@ impl Layout {
     /// table was built on it and still holds it or a layout after it.
     pub(super) fn next(&self, key: &Key) -> Option<Rc<Layout>> {
         let next = self.next.borrow().get(key).and_then(Weak::upgrade);
-        next.filter(|layout| layout.index.get().is_some())
+        next.filter(|layout| layout.taken.get())
     }
 
     /// What building a table makes of its next key `key`: the layout after
     /// this one, made if no table holds one yet, or the position this one
     /// already holds the key at (`K-KEY-003`), or none within the bounds.
+    #[inline]
     pub(super) fn step(self: &Rc<Self>, key: &Key) -> Step {
-        let mut next = self.next.borrow_mut();
-        if let Some(layout) = next.get(key).and_then(Weak::upgrade) {
+        if let Some(layout) = self.next.borrow().get(key).and_then(Weak::upgrade) {
             return Step::Next(layout);
         }
+        self.grow(key)
+    }
+
+    /// [`Self::step`] where no table holds the layout `key` leads to.
+    #[inline(never)]
+    fn grow(self: &Rc<Self>, key: &Key) -> Step {
+        let mut next = self.next.borrow_mut();
         // A layout one more key leads to never holds that key before it.
         if let Some(at) = (0..self.len)
             .rev()
@@ -312,6 +342,7 @@ impl Layout {
             key: Some(key.clone()),
             parent: Some(Rc::clone(self)),
             len: self.len + 1,
+            taken: Cell::new(false),
             index: OnceCell::new(),
             next: RefCell::new(Next::Few(Vec::new())),
             bytes: Cell::new(bytes),
@@ -338,6 +369,7 @@ impl Default for Layouts {
                 key: None,
                 parent: None,
                 len: 0,
+                taken: Cell::new(false),
                 index: OnceCell::new(),
                 next: RefCell::new(Next::Few(Vec::new())),
                 bytes: Cell::new(0),
