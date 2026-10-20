@@ -144,6 +144,15 @@ pub(crate) struct Commit {
     pub(crate) fixed: u64,
     /// The most the statement charges, when its formulas are bounded.
     pub(crate) max: Option<u64>,
+    /// The most its formulas and its conditionals' arms charge, when they
+    /// are bounded: its tables' maxima and each conditional's dearer arm.
+    /// An allocating plan's operator may still measure more, where its
+    /// typed path leaves the values to its formula.
+    pub(crate) formulas: Option<u64>,
+    /// The straight-line run of statements it starts in its block, in an
+    /// allocating plan, where its most is bounded and it makes no guest
+    /// call ([`CompiledBody::cover`]).
+    pub(crate) run: Option<super::cover::Cover>,
     pub(crate) program: Box<[super::Event]>,
     /// Its conditionals' arms, which its program names.
     pub(crate) arms: Box<[super::Arms]>,
@@ -158,10 +167,31 @@ impl From<&super::Summary> for Commit {
         Self {
             fixed: summary.fixed,
             max: summary.max(),
+            formulas: summary.formula_max,
+            run: None,
             program: summary.program.clone(),
             arms: summary.arms.clone(),
             calls: summary.calls.clone(),
             guest: summary.guest.clone().map(Box::new),
+        }
+    }
+}
+
+impl CompiledStep {
+    /// What the statement commits; a statement the region leaves commits
+    /// nothing.
+    #[inline(always)]
+    pub(crate) fn commit(&self) -> Option<&Commit> {
+        match self {
+            Self::Write { commit, .. }
+            | Self::Bind { commit, .. }
+            | Self::Session { commit, .. }
+            | Self::If { commit, .. }
+            | Self::Continue(commit)
+            | Self::Store { commit, .. }
+            | Self::Discard { commit, .. } => Some(commit),
+            Self::Typed(typed) => typed.1.commit(),
+            Self::Leave => None,
         }
     }
 }

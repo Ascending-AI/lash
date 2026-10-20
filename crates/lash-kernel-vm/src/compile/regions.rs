@@ -53,6 +53,7 @@ use lash_kernel_exec::{ActIx, Op, OpRange, Reg, Weight};
 
 mod accumulators;
 mod calls;
+mod cover;
 mod cx;
 mod nodes;
 mod typed;
@@ -1695,7 +1696,7 @@ impl LoopPlan {
                     charging: exe.charging(),
                     sessions: &self.sessions,
                 };
-                let head = match &self.head {
+                let mut head = match &self.head {
                     Head::While(test) => CompiledHead::While {
                         test: value(stream, &libs, test)?,
                         commit: test.into(),
@@ -1729,9 +1730,13 @@ impl LoopPlan {
                     }
                     _ => None,
                 };
+                let body = compile_body(stream, &libs, self, &self.body)?;
+                if libs.general {
+                    head.cover(&body);
+                }
                 Some(CompiledLoop {
                     head,
-                    body: compile_body(stream, &libs, self, &self.body)?,
+                    body,
                     iteration,
                 })
             })
@@ -1877,10 +1882,14 @@ fn compile_body(
         steps[at] = CompiledStep::Typed(Box::new((run, step)));
         at += covers;
     }
-    let steps = steps.into();
-    Some(CompiledBody {
+    let mut compiled = CompiledBody {
         block: body.block,
         declares: body.declares.clone(),
-        steps,
-    })
+        steps: steps.into(),
+    };
+    // An allocating plan admits its straight-line runs whole.
+    if libs.general {
+        compiled.cover();
+    }
+    Some(compiled)
 }

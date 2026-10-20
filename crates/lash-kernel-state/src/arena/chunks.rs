@@ -508,6 +508,40 @@ impl Arena {
         }
     }
 
+    /// A statement boundary ([`Self::statement_boundary`]), and whether a
+    /// release or a cycle collection is due after it. One test covers the
+    /// boundary where no streak ended and the zero-count list and resident
+    /// values are below what makes a release, an eviction or a collection
+    /// due; past it the full tests run, so it is due exactly where they
+    /// say.
+    #[inline(always)]
+    pub fn boundary_due(&mut self) -> bool {
+        if self.streaked.is_empty()
+            & (self.zero.len() < self.release_at)
+            & (self.resident < self.boundary_at)
+        {
+            return false;
+        }
+        self.boundary_tested()
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn boundary_tested(&mut self) -> bool {
+        self.statement_boundary();
+        self.release_due() || self.cycles_due()
+    }
+
+    /// Sets [`Self::boundary_at`] from the eviction and collection marks and
+    /// whether a count fell since the last collection.
+    pub(super) fn bound_boundary(&mut self) {
+        self.boundary_at = if self.candidates > 0 {
+            self.collect_at.min(self.evict_at)
+        } else {
+            self.evict_at
+        };
+    }
+
     #[cold]
     #[inline(never)]
     fn end_streaks_and_evict(&mut self) {
@@ -522,6 +556,7 @@ impl Arena {
         if self.resident >= self.evict_at {
             self.evict_clean();
             self.evict_at = self.resident.saturating_mul(2).max(EVICT_AT);
+            self.bound_boundary();
         }
     }
 

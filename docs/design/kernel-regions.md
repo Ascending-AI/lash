@@ -323,9 +323,26 @@ statement's own commit needs:
   one compare, with the same answer as the sum it replaces.
 - **Occurrences only where counted.** A commit that advances no
   occurrence touches no counter.
-- **Boundary in line.** The arena's statement boundary, which ends read
-  streaks and drops large clean objects once residency doubles, tests
-  that it has neither to do in line and does either out of line.
+- **Runs admitted whole (FIG-7001).** Each statement whose most is
+  bounded and that makes no guest call starts a run: it and the statements
+  after it in its block, up to an `if` or a `continue`, which ends the run,
+  or a statement that is unbounded or makes a guest call, which the run
+  stops before. A loop's head starts the run of its own commit and its
+  body's first run. Where the bound admits a run's summed most, its
+  statements test no admission of their own: each statement's admission
+  passes while those before it charged within their mosts. An operator's
+  typed path may leave its values to its formula, which can measure past
+  the table's most; a statement that charges past its most is admitted on
+  its own, and so is every statement after it in the run. The stops,
+  charges and tapes are the per-statement admission's.
+- **One boundary test (FIG-7001).** The arena keeps a boundary
+  watermark: the eviction mark and, once a count fell without reaching
+  zero since the last collection, the collection mark, whichever is
+  lower. A statement's end is one test of the read streaks, the
+  zero-count list and resident values against it; past it, the arena's
+  statement boundary and its release and collection tests run in full, so
+  a collection is due at exactly the boundary where the reference's step
+  collects.
 - **List appends.** `set t[list.len(t)] = v` of a frame variable, in a
   statement with no guest call (`xs.append(v)`, `xs.push(v)` and the
   comprehension collect lower to it), reads the list's length once for the
@@ -341,6 +358,12 @@ Python and TypeScript append programs across the bounds sweep, the slices
 and their cross-resumes, with charge Exact and Off, memory off and under a
 tight memory bound, and requires each natural run to commit appends
 (`RegionWork::appends`).
+`tests::regions::statement_runs_stop_where_the_reference_stops` runs kernel,
+Python and TypeScript programs with runs, among them one holding a big
+integer product that measures past its table's most, across the same
+sweep, and requires each natural run to end region iterations.
+`arena::tests::a_boundary_is_due_exactly_where_its_full_tests_say` holds
+the watermark to the full tests.
 
 Keyed writes (FIG-6979) take what an earlier read of the region proved:
 

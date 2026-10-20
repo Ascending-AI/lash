@@ -249,6 +249,11 @@ pub struct Arena {
     /// Resident values past which a statement boundary drops clean large
     /// objects back to their pages.
     evict_at: u64,
+    /// The resident values below which a statement boundary has neither to
+    /// evict nor a cycle collection due ([`Arena::boundary_due`]): the
+    /// least of `evict_at` and, once a count fell without reaching zero
+    /// since the last collection, `collect_at`.
+    boundary_at: u64,
     /// Objects decoded since the last statement boundary.
     streaked: Vec<ArenaHandle>,
     /// The empty tuple, while one is live: every empty tuple the run makes
@@ -283,6 +288,7 @@ impl Arena {
             collect_at: FIRST_COLLECTION,
             release_at: FIRST_RELEASE,
             evict_at: chunks::EVICT_AT,
+            boundary_at: chunks::EVICT_AT,
             capacity_mark: u64::MAX,
             ..Self::default()
         }
@@ -567,6 +573,9 @@ impl Arena {
         facts.count = facts.count.saturating_sub(1);
         if facts.count > 0 {
             self.candidates += 1;
+            if self.candidates == 1 {
+                self.bound_boundary();
+            }
         } else if !facts.zero {
             facts.zero = true;
             self.zero.push(handle);
@@ -1363,6 +1372,7 @@ impl Arena {
             .retain(|handle| self.objects.get(*handle).is_some());
         self.candidates = 0;
         self.collect_at = self.resident.saturating_mul(2).max(FIRST_COLLECTION);
+        self.bound_boundary();
     }
 }
 
@@ -1561,5 +1571,42 @@ mod tests {
         };
         assert_ne!(next, first);
         assert!(arena.body(next).is_ok());
+    }
+
+    /// FIG-7001: a statement boundary is due exactly where its full tests
+    /// say, and has nothing left to end or evict where it is not: resident
+    /// values past the collection mark make no collection due until a count
+    /// falls without reaching zero, the first such fall makes it due, a
+    /// collection clears it, and a full zero-count list makes a release due.
+    #[test]
+    fn a_boundary_is_due_exactly_where_its_full_tests_say() {
+        fn boundary(arena: &mut Arena) -> bool {
+            let due = arena.boundary_due();
+            assert!(arena.streaked.is_empty() && arena.resident < arena.evict_at);
+            assert_eq!(due, arena.release_due() || arena.cycles_due());
+            due
+        }
+        let mut arena = Arena::new();
+        assert!(!boundary(&mut arena));
+        let big = arena.create_list(&vec![Value::Null; FIRST_COLLECTION as usize]);
+        let shared = arena.create_list(&[Value::Null]);
+        let holders = [arena.create_list(&[shared]), arena.create_list(&[shared])];
+        assert!(arena.resident >= arena.collect_at);
+        assert!(
+            !boundary(&mut arena),
+            "no count fell since the last collection"
+        );
+        let Value::List(holder) = holders[0] else {
+            panic!("a list")
+        };
+        arena.list_set(holder, 0, Value::Null).unwrap();
+        assert!(boundary(&mut arena), "a count fell without reaching zero");
+        let roots = [big, shared, holders[0], holders[1]];
+        arena.collect_cycles(&mut |visit| roots.iter().for_each(&mut *visit));
+        assert!(!boundary(&mut arena), "the collection cleared what was due");
+        for _ in 0..FIRST_RELEASE {
+            arena.create_list(&[Value::Null]);
+        }
+        assert!(boundary(&mut arena), "the zero-count list is full");
     }
 }

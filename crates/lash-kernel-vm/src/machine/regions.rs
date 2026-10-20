@@ -11,7 +11,8 @@
 //! An allocating plan (§5, R5) admits a nursery at its entry: room for
 //! what its statements build and grow, which the census admits before the
 //! region runs, so that no admission inside it refuses (§3.5). Each of its
-//! statements is admitted against the bound and the slice on its own, as
+//! statements is admitted against the bound and the slice, a straight-line
+//! run of statements whose mosts are bounded once for the run (§2.5), as
 //! its formulas measure what they are given. At each statement's end it
 //! runs the statement's kill set: what the statement made is held by a
 //! root or garbage. When the arena's collection is due, the region exits
@@ -128,6 +129,11 @@ struct Run<'a, 'c, const INVOKES: bool, const ALLOC: bool> {
     /// An allocating plan's admission (`ALLOC`); a scalar plan admits
     /// whole iterations.
     admit: Admit,
+    /// The statements still to commit of the straight-line run an
+    /// allocating plan admitted whole ([`Commit::run`]): none
+    /// of them tests its own admission while each charges within its
+    /// most.
+    covered: u32,
     /// The reference's step would end here: a statement spent the slice,
     /// or the arena's collection is due. The region stops at this
     /// boundary, as the reference's step ends at it.
@@ -410,6 +416,7 @@ impl KernelMachine {
                 limit: bound.checked_sub(plan.loop_test),
                 slice_end,
             },
+            covered: 0,
             due: false,
             chain: Vec::new(),
             missed: false,
@@ -912,7 +919,7 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
                             }
                     }
                     CompiledStep::Typed(_) | CompiledStep::Leave => {
-                        if let Some(commit) = commit_of(step) {
+                        if let Some(commit) = step.commit() {
                             self.room(commit, &mut tried);
                         }
                         false
@@ -1187,7 +1194,8 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
         // A statement whose guest call ran stands in it: started, as the
         // reference's frame holds it there.
         if self.cx.called.is_some() {
-            let guest = commit_of(step)
+            let guest = step
+                .commit()
                 .and_then(|commit| commit.guest.as_deref())
                 .ok_or_else(|| fault("a guest call ran in no statement of its"))?;
             // What the statement charged before its call is paid.
@@ -1235,7 +1243,7 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
     /// so that what it builds is not left for a charge it then cannot
     /// commit. One that may not is not `tried`.
     #[inline(always)]
-    fn room(&self, commit: &Commit, tried: &mut bool) -> bool {
+    fn room(&mut self, commit: &Commit, tried: &mut bool) -> bool {
         if !ALLOC || self.ahead(commit) {
             return true;
         }
@@ -1245,15 +1253,27 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
 
     /// Whether a statement committing `commit` may run: always in a scalar
     /// plan; in an allocating one, unless its bounded most does not fit.
+    /// A statement of an admitted run fits: before it, each statement of
+    /// the run charged within its most, so the run's charge so far and its
+    /// own most are within the sum the run was admitted for. One that
+    /// starts a run the bound admits whole admits it.
     #[inline(always)]
-    fn ahead(&self, commit: &Commit) -> bool {
+    fn ahead(&mut self, commit: &Commit) -> bool {
         if !self.ready(commit) {
             return false;
         }
-        !ALLOC
-            || commit
-                .max
-                .is_none_or(|max| self.admit.admits(self.cx.charged, max))
+        if !ALLOC || self.covered != 0 {
+            return true;
+        }
+        if let Some(run) = commit.run
+            && self.admit.admits(self.cx.charged, run.most)
+        {
+            self.covered = run.covers;
+            return true;
+        }
+        commit
+            .max
+            .is_none_or(|max| self.admit.admits(self.cx.charged, max))
     }
 
     /// Whether the statement that ran metered by the meter, committing
@@ -1261,13 +1281,27 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
     /// in an allocating plan, when it does not pass the bound with the
     /// next test's unit still to charge. One that reaches the slice's end
     /// commits, and the region stops after it, where the reference yields.
+    /// A statement of an admitted run that charged within its most fits; one
+    /// that charged past it leaves the rest of the run to admit each of its
+    /// statements on its own.
     #[inline(always)]
-    fn fits(&self, commit: &Commit) -> bool {
-        !ALLOC
-            || commit
-                .fixed
-                .checked_add(self.cx.meter.units)
-                .is_some_and(|units| self.admit.admits(self.cx.charged, units))
+    fn fits(&mut self, commit: &Commit) -> bool {
+        if !ALLOC {
+            return true;
+        }
+        if self.covered != 0 {
+            if commit
+                .formulas
+                .is_some_and(|most| self.cx.meter.units <= most)
+            {
+                return true;
+            }
+            self.covered = 0;
+        }
+        commit
+            .fixed
+            .checked_add(self.cx.meter.units)
+            .is_some_and(|units| self.admit.admits(self.cx.charged, units))
     }
 
     /// Commits a region statement that ran metered by the meter: its fixed
@@ -1304,6 +1338,7 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
             );
         }
         if ALLOC {
+            self.covered = self.covered.saturating_sub(1);
             self.due |= self.cx.charged >= self.admit.slice_end;
         }
         Ok(())
@@ -1326,27 +1361,9 @@ impl<const INVOKES: bool, const ALLOC: bool> Run<'_, '_, INVOKES, ALLOC> {
     /// collection stops the region at this boundary.
     #[inline(always)]
     fn ended(&mut self) {
-        if ALLOC {
-            self.cx.statement_ended();
-            self.due |= self.cx.arena.release_due() || self.cx.arena.cycles_due();
+        if ALLOC && self.cx.statement_ended() {
+            self.due = true;
         }
-    }
-}
-
-/// What statement `step` commits; a statement the region leaves commits
-/// nothing.
-#[inline(always)]
-fn commit_of(step: &CompiledStep) -> Option<&Commit> {
-    match step {
-        CompiledStep::Write { commit, .. }
-        | CompiledStep::Bind { commit, .. }
-        | CompiledStep::Session { commit, .. }
-        | CompiledStep::If { commit, .. }
-        | CompiledStep::Continue(commit)
-        | CompiledStep::Store { commit, .. }
-        | CompiledStep::Discard { commit, .. } => Some(commit),
-        CompiledStep::Typed(typed) => commit_of(&typed.1),
-        CompiledStep::Leave => None,
     }
 }
 

@@ -257,10 +257,12 @@ impl Cx<'_> {
 
     /// The statement ended, as the reference's step ends it: what it set
     /// aside is released and the arena is at a statement boundary. A region
-    /// publishes no statement roots, so it has none to release.
-    pub(crate) fn statement_ended(&mut self) {
+    /// publishes no statement roots, so it has none to release. Whether the
+    /// arena's release or cycle collection is due there.
+    #[inline(always)]
+    pub(crate) fn statement_ended(&mut self) -> bool {
         self.transient = 0;
-        self.arena.statement_boundary();
+        self.arena.boundary_due()
     }
 
     /// Installs what a nursery built, which [`Self::admitted`] admitted.

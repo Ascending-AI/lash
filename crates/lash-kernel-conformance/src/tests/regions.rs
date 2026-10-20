@@ -2417,30 +2417,96 @@ const APPENDS: &[(&str, &str)] = &[
 /// statement, with its charge, its charge program and its images.
 #[test]
 fn list_appends_stop_where_the_reference_stops() {
+    stop_where_the_reference_stops(
+        "list appends",
+        APPENDS,
+        crate::helper_plans::append_programs(),
+        |work| work.appends > 0,
+    );
+}
+
+/// Programs whose allocating loops run straight-line statements whose
+/// charges are bounded (FIG-7001): runs ending in an `if` whose arms hold
+/// runs of their own and in a `continue`, a run holding a big integer
+/// product whose formula measures past its table's most, and runs between
+/// statements whose formulas no most bounds.
+const RUNS: &[(&str, &str)] = &[
+    (
+        "runs around a list literal and an index write",
+        "fn rows(n) { let i = 0 let s = 0 let kept = [0, 0] while num.lt(i, n) { let a = num.mul(i, 2) let b = num.add(a, 1) set kept[0] = [a, b] set s = num.add(s, b) set i = num.add(i, 1) } return (s, kept) }\n\
+         main { let r = call rows(12) finish r }",
+    ),
+    (
+        "a run whose big integer product measures past its most",
+        "fn grow(n) { let i = 0 let x = 3 let r = [0] while num.lt(i, n) { let a = num.add(i, 1) set x = num.mul(x, 7) set r = [a] set i = num.add(i, 1) } return (x, r) }\n\
+         main { let r = call grow(30) finish r }",
+    ),
+    (
+        "runs ending in an if and a continue",
+        "fn mix(n) { let i = 0 let s = 0 let t = [0] while num.lt(i, n) { set i = num.add(i, 1) let a = num.mul(i, 3) if num.lt(num.rem_trunc(i, 3), 1) { let b = num.add(a, 2) set t = [b] set s = num.add(s, b) continue } set t = [a] set s = num.sub(s, a) } return (s, t) }\n\
+         main { let r = call mix(13) finish r }",
+    ),
+    (
+        "runs between text concatenations",
+        "fn label(n) { let i = 0 let s = \"\" let k = [0] while num.lt(i, n) { let a = num.add(i, 2) set s = text.concat(s, num.to_text(a)) set k = [a, i] set i = num.add(i, 1) } return (s, k) }\n\
+         main { let r = call label(11) finish r }",
+    ),
+];
+
+/// FIG-7001: an allocating region admits each straight-line run of its
+/// bounded statements once, where the bound admits the run's most, and
+/// leaves a statement that charges past its own most, and every statement
+/// after it in the run, to admit on its own. Each program's natural run
+/// ends region iterations, and across the sweep, with charge Exact and
+/// Off, under every slice, with memory off and under a tight memory
+/// bound, a run with regions on stops where the reference stops: a bound
+/// that falls inside a run stops it at the reference's statement, with
+/// the reference's charge.
+#[test]
+fn statement_runs_stop_where_the_reference_stops() {
+    stop_where_the_reference_stops(
+        "statement runs",
+        RUNS,
+        crate::helper_plans::statement_run_programs(),
+        |work| work.iterations > 0,
+    );
+}
+
+/// Checks the kernel's `programs` and the dialects' `lowered` programs
+/// across the sweep, each as it is, with memory off and under a tight
+/// memory bound, where each one's natural run with regions on did the
+/// work `ran` names.
+fn stop_where_the_reference_stops(
+    what: &str,
+    programs: &[(&str, &str)],
+    lowered: Vec<(crate::helper_plans::runner::Case, Program)>,
+    ran: fn(&RegionWork) -> bool,
+) {
     let registry = Arc::new(super::corpus_registry());
-    let mut programs = Vec::new();
-    for (name, text) in APPENDS {
+    let mut cases = Vec::new();
+    for (name, text) in programs {
         let on = prepare_with_layout(Arc::clone(&registry), Layout(ON));
         let off = prepare_with_layout(Arc::clone(&registry), Layout(OFF));
-        programs.push((program_case(name, text, 16), on, off));
+        cases.push((program_case(name, text, 16), on, off));
     }
-    for (lowered, program) in crate::helper_plans::append_programs() {
+    for (lowered, program) in lowered {
         let registry = program.library.registry();
         let on = prepare_with_layout(Arc::clone(registry), Layout(ON));
         let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
         let mut case = program_case(&lowered.id, "main { return null }", 16);
         case.document = print_document(&program.document);
-        programs.push((case, on, off));
+        cases.push((case, on, off));
     }
     let mut counts = Counts::default();
     let mut failures = Vec::new();
-    for (case, on, off) in &programs {
+    for (case, on, off) in &cases {
         let work = check(on, off, case, &mut counts, &mut failures);
-        assert!(
-            work.appends > 0,
-            "{}: its natural run commits no list append: {work:?}",
-            case.name
-        );
+        if !ran(&work) {
+            failures.push(format!(
+                "{}: its natural run does not do the work the law is about: {work:?}",
+                case.name
+            ));
+        }
         let mut unaccounted = case.clone();
         unaccounted.name = format!("{} (memory off)", case.name);
         unaccounted.environment.bounds.memory_meter = lash_kernel_vm::MemoryMeter::Off;
@@ -2458,8 +2524,8 @@ fn list_appends_stop_where_the_reference_stops() {
         failures.join("\n")
     );
     println!(
-        "list appends: programs={} paired runs={} bounds={} slices={}",
-        programs.len(),
+        "{what}: programs={} paired runs={} bounds={} slices={}",
+        cases.len(),
         counts.runs,
         counts.bounds,
         counts.slices
