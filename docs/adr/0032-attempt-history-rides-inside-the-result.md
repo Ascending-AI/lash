@@ -55,7 +55,9 @@ reuse. Provider cache state is not durable session authority.
 ## Consequences
 
 Resume and followers read the same retained call facts without rebuilding
-them from telemetry. `ModelCallRecorded` carries only the committed call id.
+them from telemetry. `ModelCallRecorded` carries only the call id. It is
+published once the call's record is committed or, for a record the turn's
+commit writes with its terminal, just before that commit (FIG-6995).
 A tail accepted before its terminal keeps a pending identity through receipt
 consumption, cleared atomically with its sealed row. Per-turn usage is the
 sum of the rows; the session head retains the projected lifetime total. An accounting log with admission, delivery, reconciliation or money is

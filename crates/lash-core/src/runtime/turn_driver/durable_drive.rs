@@ -821,6 +821,23 @@ impl TurnDrive for RuntimeDrive {
                 "model call {id:?} owes no derivation"
             )));
         };
+        // A receipt held for the turn's commit leaves its call's sealed
+        // record pending until that commit writes it with the terminal
+        // (FIG-6955). The call is published now, before anything derived from
+        // it and before the outcome that holds the rest of the turn for its
+        // commit, so the terminal is never durable ahead of it (FIG-5507,
+        // FIG-6995); it is provisional until that commit, as the rest of the
+        // turn's activity is. A call `model.answer` committed was published
+        // with that commit, and one whose tail still drains has no record yet.
+        if self
+            .driver
+            .pending_model_calls
+            .iter()
+            .any(|fact| fact.call_id == answer.call_id)
+        {
+            self.driver
+                .publish_model_call(&self.observer, &answer.call_id);
+        }
         Box::pin(
             self.driver
                 .derive_llm_answer(&mut self.machine, id, answer, &self.observer),
