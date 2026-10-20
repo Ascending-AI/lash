@@ -234,13 +234,15 @@ pub use lash_core::store::{
     TurnChangePage, TurnCommitFailureCause, TurnCommitOutcome, TurnProjectionWatermark,
     UnsettledTurnCounts, commit_runtime_state_verified, validate_turn_commit_outcome_code,
 };
-/// A logical run's durable terminal evidence and the store segment that
-/// answers and binds runs (FIG-3600 S7, FIG-3607 item 8), and the
-/// control intent a session's close records.
+/// A logical run's durable terminal evidence, the store segment that
+/// answers and binds runs (FIG-3600 S7, FIG-3607 item 8) with the one
+/// snapshot a follower resolves from (FIG-7045), and the control intent a
+/// session's close records.
 pub use lash_core::store::{
     CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind, ControlIntentState,
-    ControlIntentStore, EnginePark, InputStatus, RunCommittedOutcome, RunEndOutcome, RunStore,
-    RunTerminal, RunTerminalCause, RunTerminalKind, RunTerminalWrite, TurnCommitId,
+    ControlIntentStore, EnginePark, FollowFacts, FollowSubject, InputFollowFacts,
+    RunCommittedOutcome, RunEndOutcome, RunFollowFacts, RunStore, RunTerminal, RunTerminalCause,
+    RunTerminalKind, RunTerminalWrite, TurnCommitId,
 };
 /// The multi-session store's catalog and bounded history segments, the
 /// one-session view runtime code holds, and the window loaders (ADR 0112).

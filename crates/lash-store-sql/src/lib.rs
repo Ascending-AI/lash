@@ -234,6 +234,7 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(durable::processes::ActorParkStatements::NEUTRAL);
     statements.extend_from_slice(durable::session_close::SessionCloseStatements::NEUTRAL);
     statements.extend_from_slice(durable::session_mail::SessionMailStatements::NEUTRAL);
+    statements.extend_from_slice(durable::session_follow::SessionFollowStatements::NEUTRAL);
     statements
 }
 

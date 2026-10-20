@@ -1,17 +1,20 @@
-//! Outcome derivation (FIG-3600 S5b, D1 §1.5): an input's run, then that
+//! Outcome derivation (FIG-3600 S5b, D1 §1.5): an input's run and that
 //! run's terminal, read from the store alone.
 //!
 //! Resolution makes no engine call, so it answers the same after a restart. A
 //! committed run answers from its terminal evidence, which the head commit
 //! of its final physical turn writes with the outcome it committed: one
-//! read, however deep the engine's queues are (FIG-4345).
+//! read, however deep the engine's queues are (FIG-4345), and the same read
+//! answers the input's binding and the session's park (FIG-7045).
 
+use lash_core::TurnId;
 use lash_core::facade_support::TurnOutcome;
-use lash_core::runtime::TurnInputAcceptanceReceipt;
-use lash_core::store::RunTerminalCause;
-use lash_core::{InputId, TurnId};
+use lash_core::store::{
+    FollowFacts, FollowSubject, InputFollowFacts, RunFollowFacts, RunTerminalCause,
+};
 
 use super::SendParts;
+use super::follow::Subject;
 use crate::error::Result;
 
 /// What the store says about an input or a run, right now.
@@ -55,66 +58,59 @@ fn store_error(error: lash_core::StoreError) -> crate::EmbedError {
     crate::EmbedError::Store(error)
 }
 
-/// Resolve an accepted input through the durable binding made by its claim.
+/// Resolve `subject` from one keyed snapshot of its facts (FIG-7045).
 ///
-/// One keyed read answers the binding, whether the input's row is open, and
-/// the session's fault, from one snapshot: the claim that binds an input
-/// moves its row in the same transaction, so a row no longer open with no
-/// binding beside it is no claim racing the read (FIG-5915).
-pub(super) async fn resolve_input(
-    parts: &SendParts,
-    receipt: &TurnInputAcceptanceReceipt,
-) -> Result<Resolution> {
-    let status = parts
+/// The snapshot answers an input's binding, whether its row is open, its
+/// withdrawal and its session's fault together with the bound run's terminal
+/// and its session's park: the claim that binds an input moves its row in
+/// the same transaction, so a row no longer open with no binding beside it
+/// is no claim racing the read (FIG-5915). Nothing is carried from one
+/// resolution to the next: a fork or release can rebind the input, so each
+/// resolution reads its binding afresh.
+pub(super) async fn resolve(parts: &SendParts, subject: &Subject) -> Result<Resolution> {
+    let subject = match subject {
+        Subject::Input(receipt) => FollowSubject::Input(receipt.input_id.clone()),
+        Subject::Run(run) => FollowSubject::Run(run.clone()),
+    };
+    match parts
         .store
-        .input_status(&receipt.input_id)
+        .follow_facts(&subject)
         .await
-        .map_err(store_error)?;
-    if let Some(run) = status.run {
-        return resolve_run(parts, &run).await;
+        .map_err(store_error)?
+    {
+        FollowFacts::Input(input) => resolve_input(parts, input).await,
+        FollowFacts::Run(run) => resolve_run(parts, run).await,
     }
-    if status.forsaken {
+}
+
+/// Resolve an accepted input through the durable binding made by its claim.
+async fn resolve_input(parts: &SendParts, input: InputFollowFacts) -> Result<Resolution> {
+    if let Some(run) = input.run {
+        // An operation's run is followed by its id: its batch is the
+        // operation's own fact, keyed by the run.
+        if lash_core::tool_run::OperationRun::for_run_id(parts.session_id.clone(), &run.run)
+            .is_some()
+        {
+            return Box::pin(resolve(parts, &Subject::Run(run.run))).await;
+        }
+        return resolve_run(parts, run).await;
+    }
+    if input.forsaken {
         return Ok(Resolution::Forsaken);
     }
-    if !status.open {
-        return unbound_input(parts, &receipt.input_id).await;
+    // An input no run is bound to whose row is settled: a withdrawal on
+    // record, or no record at all.
+    if !input.open {
+        return Ok(if input.withdrawn {
+            Resolution::Withdrawn
+        } else {
+            Resolution::Unknown
+        });
     }
-    if let Some(fault) = status.fault {
+    if let Some(fault) = input.fault {
         return Ok(Resolution::Faulted(fault.record.runtime_error()));
     }
     Ok(Resolution::Undecided { run: None })
-}
-
-/// An input with no run binding and no open row: a withdrawal on record, or
-/// no record at all. The input target's resolution reads the row in any
-/// state: a terminal row no run is bound to is a withdrawal, and nothing
-/// recorded is pending. A run that took the input since the read above
-/// answers it instead, on the next resolution.
-async fn unbound_input(parts: &SendParts, input: &InputId) -> Result<Resolution> {
-    let resolution = match parts
-        .store
-        .resolve_target(&lash_core::Target::Input(input.clone()))
-        .await
-    {
-        Err(lash_core::StoreError::ForkTargetUnavailable { .. }) => Resolution::Withdrawn,
-        Err(lash_core::StoreError::ForkTargetPending { .. }) => Resolution::Unknown,
-        Ok(_) | Err(lash_core::StoreError::ForkTargetPruned { .. }) => {
-            return Ok(Resolution::Undecided { run: None });
-        }
-        Err(error) => return Err(store_error(error)),
-    };
-    // An unavailable target is also a run that ended without a commit:
-    // only an input no run is bound to is withdrawn.
-    if parts
-        .store
-        .run_of_input(input)
-        .await
-        .map_err(store_error)?
-        .is_some()
-    {
-        return Ok(Resolution::Undecided { run: None });
-    }
-    Ok(resolution)
 }
 
 /// Resolve a logical run from its durable record: its terminal evidence.
@@ -123,13 +119,15 @@ async fn unbound_input(parts: &SendParts, input: &InputId) -> Result<Resolution>
 /// the outcome that commit wrote. A run whose execution
 /// ended with a typed refusal is refused. Any other run is parked while its
 /// session's actor is parked, and undecided otherwise.
-pub(super) async fn resolve_run(parts: &SendParts, run: &TurnId) -> Result<Resolution> {
-    let cause = parts
-        .store
-        .run_terminal(run)
-        .await
-        .map_err(store_error)?
-        .map(|terminal| terminal.cause);
+async fn resolve_run(parts: &SendParts, facts: RunFollowFacts) -> Result<Resolution> {
+    let RunFollowFacts {
+        run,
+        terminal,
+        operation_pending,
+        park,
+    } = facts;
+    let cause = terminal.map(|terminal| terminal.cause);
+    let run = &run;
     match &cause {
         Some(RunTerminalCause::Committed { outcome, .. }) => {
             return Ok(Resolution::Settled {
@@ -149,16 +147,10 @@ pub(super) async fn resolve_run(parts: &SendParts, run: &TurnId) -> Result<Resol
         }
         _ => {}
     }
-    if let Some(operation) =
-        lash_core::tool_run::OperationRun::for_run_id(parts.session_id.clone(), run)
+    if let Some(pending) = operation_pending
+        && let Some(operation) =
+            lash_core::tool_run::OperationRun::for_run_id(parts.session_id.clone(), run)
     {
-        let pending = parts
-            .store
-            .list_queued_work()
-            .await
-            .map_err(store_error)?
-            .into_iter()
-            .any(|batch| batch.batch_id.as_str() == operation.operation_id);
         if let Some(completion) = parts
             .store
             .queued_work_batch_completion(&operation.operation_id)
@@ -249,8 +241,10 @@ pub(super) async fn resolve_run(parts: &SendParts, run: &TurnId) -> Result<Resol
     }
     // A run with no end whose session parked is the session's open run: a
     // session runs one run at a time, and its park holds that run.
-    if let Some(reason) =
-        crate::durable_session::session_park(parts.effect_host.backend(), &parts.session_id).await?
+    if let Some(reason) = park
+        .as_deref()
+        .map(crate::durable_session::session_park_reason)
+        .transpose()?
     {
         return Ok(Resolution::Parked {
             run: run.clone(),

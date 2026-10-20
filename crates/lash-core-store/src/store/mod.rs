@@ -55,6 +55,7 @@ mod control_intent;
 mod realization;
 mod retention;
 mod run;
+mod run_follow;
 mod session_head;
 pub use session_head::{
     BlobRef, SessionAdmission, SessionHeadMeta, SessionHeadPayload, SessionHeadRef, SessionMeta,
@@ -154,11 +155,14 @@ pub use realization::{admit_runtime_commit_budget, commit_runtime_state_verified
 pub use retention::{RetentionBound, RetentionReport};
 pub use run::{
     AdmittedHead, AdmittedInputIds, AdmittedTurnRows, CheckpointAdmission,
-    CheckpointAdmissionRequest, EmptyInputAdmission, InMemoryRunLedger, InputStatus,
-    RunAdmissionRecord, RunCommittedOutcome, RunEndOutcome, RunStore, RunTerminal,
-    RunTerminalCause, RunTerminalKind, RunTerminalWrite, RunTerminalWriteDecision, RunTurns,
-    StoredRunTerminal, TurnCommitId, UnfinishedRun, decide_run_terminal_write,
-    run_binding_conflict,
+    CheckpointAdmissionRequest, EmptyInputAdmission, InMemoryRunLedger, RunAdmissionRecord,
+    RunCommittedOutcome, RunEndOutcome, RunStore, RunTerminal, RunTerminalCause, RunTerminalKind,
+    RunTerminalWrite, RunTerminalWriteDecision, RunTurns, StoredRunTerminal, TurnCommitId,
+    UnfinishedRun, decide_run_terminal_write, run_binding_conflict,
+};
+pub use run_follow::{
+    FollowFacts, FollowSubject, InputFollowFacts, RunFollowFacts, StoredControlIntent,
+    StoredFollowRow, StoredTerminalColumns,
 };
 pub use runtime_commit::{
     AppendRequestIdentity, EncodedSessionCommit, FrameTransition,
@@ -881,7 +885,7 @@ pub trait TurnInputStore: Send + Sync {
     /// [`TurnInputForsaking::Forsaken`]: from then on an admission of any
     /// draft under the key is refused with
     /// [`StoreError::TurnInputForsaken`] and stores nothing, and
-    /// [`RunStore::input_status`] of the key's input answers `forsaken`. A
+    /// [`RunStore::follow_facts`] of the key's input answers `forsaken`. A
     /// concurrent admission under the key is serialized against the forsake
     /// by that authority, so exactly one of them wins.
     ///

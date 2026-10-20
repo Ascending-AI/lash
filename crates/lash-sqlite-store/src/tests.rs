@@ -56,24 +56,20 @@ fn a_settled_inputs_run_and_pinned_revision_survive_without_a_binding_table() {
             params!["session", "input", "completed", "run", 42],
         )
         .expect("settle");
-    let status = connection
-        .query_row(
-            crate::session_runs::session_runs_sql()
-                .inputs
-                .select_status
-                .sql(),
-            params![session.as_str(), input.as_str()],
-            |row| {
-                Ok((
-                    row.get::<_, Option<String>>(0)?,
-                    row.get::<_, bool>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<i64>>(3)?,
-                ))
-            },
-        )
-        .expect("keyed input status");
-    assert_eq!(status, (Some(run.to_string()), false, None, None));
+    connection
+        .execute_batch(crate::durable::DURABLE_TABLES)
+        .expect("durable schema");
+    let lash_core_store::store::FollowFacts::Input(facts) = crate::session_runs::follow_facts_conn(
+        &connection,
+        &session,
+        &lash_core_store::store::FollowSubject::Input(input.clone()),
+    )
+    .expect("keyed input facts") else {
+        panic!("an input subject answers input facts");
+    };
+    assert_eq!(facts.run.map(|bound| bound.run), Some(run.clone()));
+    assert!(!facts.open, "the settled input's row is closed");
+    assert_eq!(facts.fault, None);
     assert_eq!(
         crate::session_runs::run_binding_conn(&connection, &session, &input).expect("run of input"),
         Some(run)

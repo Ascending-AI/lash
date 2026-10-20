@@ -297,7 +297,7 @@ impl lash_execution_contracts::deployment::DeploymentStore for SqliteStore {
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(rows
                 .into_iter()
-                .map(crate::session_runs::StoredIntentRow::decode)
+                .map(lash_core_store::store::StoredControlIntent::decode)
                 .collect())
         })
         .await

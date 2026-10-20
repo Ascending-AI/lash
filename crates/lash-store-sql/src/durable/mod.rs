@@ -35,6 +35,7 @@ pub mod processes;
 pub mod prompts;
 pub mod run_records;
 pub mod session_close;
+pub mod session_follow;
 pub mod session_mail;
 pub mod snapshots;
 pub mod turns;

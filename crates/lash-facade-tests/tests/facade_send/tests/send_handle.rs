@@ -135,6 +135,68 @@ async fn absent_sessions_answer_unknown_promptly() -> Result<()> {
     Ok(())
 }
 
+/// FIG-7045: a follower resolves a settled input or run from one keyed
+/// snapshot of its facts, and nothing else the follow reads repeats it.
+/// Before, a bound input's resolution read the input's status and then its
+/// run's terminal, and an undecided run's added its session actor's park.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_settled_follow_resolves_from_one_store_read() -> Result<()> {
+    use lash_core::testing::runtime_helpers::LayeredBackend;
+    use lash_core::testing::{Phase, Script};
+
+    let reads = Script::new();
+    let fixture = fixture_over(1, |backend| {
+        LayeredBackend::over(backend)
+            .map_session_store_factory(|inner| reads.wrap("follower", inner))
+            .into_backend()
+    })
+    .await?;
+    let session = created_session(&fixture.core, SessionId::fixture("one-follow-read"))
+        .await
+        .open()
+        .await?;
+    let handle = session.send(TurnInput::text("first")).await?;
+    let input = handle.input_id().clone();
+    handle.output().await?;
+    let run = session
+        .attach(input.clone())
+        .run()
+        .await?
+        .expect("settled run");
+    // Stop the engine so only the follower reads the store.
+    fixture.core.shutdown().await?;
+    let calls = || {
+        reads
+            .trace()
+            .into_iter()
+            .filter(|call| call.phase == Phase::Before)
+            .map(|call| call.op.name())
+            .collect::<Vec<_>>()
+    };
+    for (subject, durable) in [
+        ("input", false),
+        ("input", true),
+        ("run", false),
+        ("run", true),
+    ] {
+        let before = calls().len();
+        let outcome = match (subject, durable) {
+            ("input", false) => session.attach(input.clone()).outcome().await?,
+            ("input", true) => session.durable().attach(input.clone()).outcome().await?,
+            (_, false) => session.run(run.clone()).outcome().await?,
+            (_, true) => session.durable().run(run.clone()).outcome().await?,
+        };
+        assert_eq!(outcome.status(), lash::TurnStatus::Answered);
+        let made = calls().split_off(before);
+        assert_eq!(
+            made,
+            ["follow_facts"],
+            "a settled {subject} follow (durable: {durable}) resolves from one keyed snapshot"
+        );
+    }
+    Ok(())
+}
+
 /// FIG-6017: settled answers read only run evidence. Session windows are
 /// loaded only when the host explicitly asks for a committed-head view.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -317,15 +379,18 @@ impl lash_core::RuntimeStoreDecorator for CountedStatusReads {
         self.inner.session_fault(session_id).await
     }
 
-    async fn input_status(
+    async fn follow_facts(
         &self,
         session_id: &SessionId,
-        input: &lash_core::InputId,
-    ) -> std::result::Result<lash_core::store::InputStatus, lash_core::StoreError> {
-        if self.reads.watches(input) {
+        subject: &lash_core::store::FollowSubject,
+    ) -> std::result::Result<lash_core::store::FollowFacts, lash_core::StoreError> {
+        if subject
+            .input()
+            .is_some_and(|input| self.reads.watches(input))
+        {
             self.reads.count();
         }
-        self.inner.input_status(session_id, input).await
+        self.inner.follow_facts(session_id, subject).await
     }
 }
 

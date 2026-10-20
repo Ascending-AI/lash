@@ -264,9 +264,9 @@ async fn grace_binding_discovery_stays_at_floor_after_unbound_reads() {
     use lash_core::testing::{Script, StoreOp};
 
     let reads = Script::new();
-    let first = reads.on(StoreOp::input_status).after().pause();
-    let second = reads.on(StoreOp::input_status).nth(2).after().pause();
-    let third = reads.on(StoreOp::input_status).nth(3).before().pause();
+    let first = reads.on(StoreOp::follow_facts).after().pause();
+    let second = reads.on(StoreOp::follow_facts).nth(2).after().pause();
+    let third = reads.on(StoreOp::follow_facts).nth(3).before().pause();
     let backend = durable_backend(lash::sqlite::SqliteStoreSet::memory().await.unwrap()).unwrap();
     let backend = LayeredBackend::over(backend)
         .map_session_store_factory(|inner| reads.wrap("grace-observer", inner))

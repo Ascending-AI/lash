@@ -396,16 +396,7 @@ pub(super) async fn follow(
     loop {
         if resolve_now {
             observation.take_ready(ctx, &mut adoption, tap).await;
-            let resolution = match subject {
-                Subject::Input(receipt) => resolve::resolve_input(&ctx.parts, receipt).await,
-                Subject::Run(run) => resolve::resolve_run(&ctx.parts, run).await,
-            };
-            let resolution = match resolution {
-                Ok(resolution) => resolution,
-                Err(error) if super::absent_input_session(subject, &error) => Resolution::Unknown,
-                Err(error) => return Err(error),
-            };
-            match resolution {
+            match resolve::resolve(&ctx.parts, subject).await? {
                 Resolution::OperationSettled { run, outcome } => {
                     adoption.adopt(run.clone(), tap).await;
                     drain(ctx, &mut adoption, &mut observation, tap).await;
@@ -572,7 +563,7 @@ pub(super) async fn follow(
 /// it would learn the run and start its terminal polling schedule that late
 /// (FIG-3981). The admission that writes the binding runs in the worker's
 /// process and announces it to no other, so there is no event to wait on
-/// instead. Each floor read is one keyed read of the input's status, which
+/// instead. Each floor read is one keyed snapshot of the input's facts, which
 /// answers its binding, its withdrawal and its session's fault at once.
 fn at_floor(ctx: &SendContext, subject: &Subject, adoption: &Adoption) -> bool {
     matches!(subject, Subject::Input(_)) && adoption.run.is_none() && !ctx.live

@@ -13,7 +13,8 @@ use lash_core_store::store::ControlIntent;
 use lash_core_store::store::ControlIntentId;
 use lash_core_store::store::ControlIntentKind;
 use lash_core_store::store::ControlIntentState;
-use lash_core_store::store::InputStatus;
+use lash_core_store::store::FollowFacts;
+use lash_core_store::store::FollowSubject;
 use lash_core_store::store::RunAdmissionRecord;
 use lash_core_store::store::RunEndOutcome;
 use lash_core_store::store::RunStore;
@@ -21,6 +22,9 @@ use lash_core_store::store::RunTerminal;
 use lash_core_store::store::RunTerminalCause;
 use lash_core_store::store::RunTerminalWriteDecision;
 use lash_core_store::store::RunTurns;
+use lash_core_store::store::StoredControlIntent;
+use lash_core_store::store::StoredFollowRow;
+use lash_core_store::store::StoredTerminalColumns;
 use lash_core_store::store::UnfinishedRun;
 use lash_core_store::store::decide_run_terminal_write;
 use lash_core_store::store::run_binding_conflict;
@@ -28,6 +32,7 @@ use lash_core_store::store::stored_intent_kind;
 use lash_core_store::store::stored_intent_state;
 use lash_core_store::store_backend_support::turn_cancel::EndedRunInputRelease;
 use lash_protocol_types::{InputId, SessionId, TurnId};
+use lash_store_sql::durable::session_follow::SessionFollowStatements;
 use lash_store_sql::session_runs::{
     control_intents::ControlIntentStatements, run_inputs::SessionRunInputStatements,
     runs::SessionRunStatements,
@@ -42,6 +47,8 @@ pub(crate) struct SessionRunsSql {
     pub(crate) runs: SessionRunStatements,
     pub(crate) inputs: SessionRunInputStatements,
     pub(crate) intents: ControlIntentStatements,
+    /// A follower's one snapshot (FIG-7045).
+    pub(crate) follow: SessionFollowStatements,
 }
 
 static SESSION_RUNS_SQL: LazyLock<SessionRunsSql> = LazyLock::new(|| {
@@ -52,6 +59,7 @@ static SESSION_RUNS_SQL: LazyLock<SessionRunsSql> = LazyLock::new(|| {
         runs: SessionRunStatements::render(dialect),
         inputs: SessionRunInputStatements::render(dialect),
         intents: ControlIntentStatements::render(dialect),
+        follow: SessionFollowStatements::render(dialect),
     }
 });
 
@@ -69,26 +77,27 @@ fn sql_i64(field: &str, value: u64) -> Result<i64, StoreError> {
         .map_err(|_| StoreError::Backend(format!("{field} {value} exceeds the stored range")))
 }
 
-/// The stored terminal-evidence row: serialized cause, head revision and
-/// the terminal instant, all unset until the run goes terminal.
-type TerminalRow = (Option<String>, Option<i64>, Option<i64>, Option<String>);
-
 /// The terminal evidence of `run` in `session_id`, read on `conn`.
 pub(crate) fn run_terminal_conn(
     conn: &Connection,
     session_id: &SessionId,
     run: &TurnId,
 ) -> Result<Option<RunTerminal>, StoreError> {
-    let row: Option<TerminalRow> = conn
+    let row: Option<StoredTerminalColumns> = conn
         .prepare_cached(session_runs_sql().runs.select_terminal.sql())
         .and_then(|mut statement| {
             statement.query_row(params![session_id.as_str(), run.as_str()], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                Ok(StoredTerminalColumns {
+                    cause_json: row.get(0)?,
+                    head_revision: row.get(1)?,
+                    at_ms: row.get(2)?,
+                    kind: row.get(3)?,
+                })
             })
         })
         .optional()
         .map_err(sqlite_error)?;
-    let Some((cause_json, head_revision, at_ms, kind)) = row else {
+    let Some(columns) = row else {
         let deleted = conn
             .prepare_cached(
                 crate::session_sql::session_sql()
@@ -106,32 +115,7 @@ pub(crate) fn run_terminal_conn(
         return Ok(close_session_intent_conn(conn, session_id)?
             .and_then(|intent| intent.session_deleted_terminal(run)));
     };
-    let (cause_json, at_ms, kind) = match (cause_json, at_ms, kind) {
-        (None, None, None) if head_revision.is_none() => return Ok(None),
-        (Some(cause), Some(at), Some(kind)) => (cause, at, kind),
-        _ => {
-            return Err(stored_data_corrupt(
-                "RunTerminal",
-                "partial terminal evidence",
-            ));
-        }
-    };
-    let terminal = RunTerminal::from_stored(
-        session_id.clone(),
-        run.clone(),
-        &cause_json,
-        head_revision
-            .map(|revision| stored_u64("RunTerminal", revision))
-            .transpose()?,
-        stored_u64("RunTerminal", at_ms)?,
-    )?;
-    if terminal.kind().as_str() != kind {
-        return Err(stored_data_corrupt(
-            "RunTerminal",
-            "terminal kind disagrees with cause",
-        ));
-    }
-    Ok(Some(terminal))
+    columns.decode(session_id, run)
 }
 
 /// Name the session's published head revision as the terminal's window,
@@ -620,40 +604,54 @@ pub(crate) fn run_binding_conn(
         .map_err(StoreError::from)
 }
 
-/// What a follower of `input` of `session_id` reads, in one statement on
-/// `conn`: its binding, whether its row is open, and the session's fault.
-fn input_status_conn(
+/// Everything a follower of `subject` of `session_id` decides from, in one
+/// statement on `conn` (FIG-7045).
+pub(crate) fn follow_facts_conn(
     conn: &Connection,
     session_id: &SessionId,
-    input: &InputId,
-) -> Result<InputStatus, StoreError> {
-    let (run, open, fault_json, fault_at_ms, forsaken) = conn
-        .prepare_cached(session_runs_sql().inputs.select_status.sql())
+    subject: &FollowSubject,
+) -> Result<FollowFacts, StoreError> {
+    let actor = lash_durable::ActorKey::session(session_id.as_str()).ok();
+    let row = conn
+        .prepare_cached(session_runs_sql().follow.select.sql())
         .and_then(|mut stmt| {
-            stmt.query_row(params![session_id.as_str(), input.as_str()], |row| {
-                Ok((
-                    row.get::<_, Option<String>>(0)?,
-                    row.get::<_, bool>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<i64>>(3)?,
-                    row.get::<_, bool>(4)?,
-                ))
-            })
+            stmt.query_row(
+                params![
+                    session_id.as_str(),
+                    subject.input().map(InputId::as_str),
+                    subject.run().map(TurnId::as_str),
+                    subject.operation_batch(session_id),
+                    actor.as_ref().map(lash_durable::ActorKey::as_str),
+                ],
+                |row| {
+                    Ok(StoredFollowRow {
+                        binding: row.get(0)?,
+                        input_state: row.get(1)?,
+                        open: row.get(2)?,
+                        fault_json: row.get(3)?,
+                        fault_at_ms: row.get(4)?,
+                        forsaken: row.get(5)?,
+                        session_deleted: row.get(6)?,
+                        session_materialized: row.get(7)?,
+                        run_row: row.get(8)?,
+                        terminal: StoredTerminalColumns {
+                            cause_json: row.get(9)?,
+                            head_revision: row.get(10)?,
+                            at_ms: row.get(11)?,
+                            kind: row.get(12)?,
+                        },
+                        close_intent: row
+                            .get::<_, Option<i64>>(13)?
+                            .map(|_| intent_columns(row, 13))
+                            .transpose()?,
+                        operation_pending: row.get(19)?,
+                        park_json: row.get(20)?,
+                    })
+                },
+            )
         })
         .map_err(sqlite_error)?;
-    Ok(InputStatus {
-        run: run
-            .map(TurnId::parse)
-            .transpose()
-            .map_err(StoreError::from)?,
-        open,
-        fault: lash_core_store::store::SessionFault::from_stored_columns(
-            session_id,
-            fault_json,
-            fault_at_ms,
-        )?,
-        forsaken,
-    })
+    row.decode(session_id, subject)
 }
 
 /// Bind each of `inputs` to `run`, set-if-absent, and open `run`'s row, in
@@ -690,38 +688,20 @@ pub(crate) fn bind_run_inputs_conn(
     Ok(())
 }
 
-pub(crate) fn intent_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredIntentRow> {
-    Ok(StoredIntentRow {
-        id: row.get(0)?,
-        session_id: row.get(1)?,
-        format: row.get(2)?,
-        kind_json: row.get(3)?,
-        state_json: row.get(4)?,
-        created_at_ms: row.get(5)?,
+pub(crate) fn intent_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredControlIntent> {
+    intent_columns(row, 0)
+}
+
+/// The control intent whose six columns start at `first`.
+fn intent_columns(row: &rusqlite::Row<'_>, first: usize) -> rusqlite::Result<StoredControlIntent> {
+    Ok(StoredControlIntent {
+        id: row.get(first)?,
+        session_id: row.get(first + 1)?,
+        format: row.get(first + 2)?,
+        kind_json: row.get(first + 3)?,
+        state_json: row.get(first + 4)?,
+        created_at_ms: row.get(first + 5)?,
     })
-}
-
-pub(crate) struct StoredIntentRow {
-    id: i64,
-    session_id: String,
-    format: i64,
-    kind_json: String,
-    state_json: String,
-    created_at_ms: i64,
-}
-
-impl StoredIntentRow {
-    pub(crate) fn decode(self) -> Result<ControlIntent, StoreError> {
-        ControlIntent::from_stored(
-            stored_u64("ControlIntent", self.id)?,
-            SessionId::parse(self.session_id)?,
-            u32::try_from(self.format)
-                .map_err(|_| stored_data_corrupt("ControlIntent", "format out of range"))?,
-            &self.kind_json,
-            &self.state_json,
-            stored_u64("ControlIntent", self.created_at_ms)?,
-        )
-    }
 }
 
 /// `session_id`'s `close_session` intent, read on `conn`: its deletion
@@ -734,7 +714,7 @@ pub(crate) fn close_session_intent_conn(
         .and_then(|mut statement| statement.query_row(params![session_id.as_str()], intent_row))
         .optional()
         .map_err(sqlite_error)?
-        .map(StoredIntentRow::decode)
+        .map(StoredControlIntent::decode)
         .transpose()
 }
 
@@ -750,7 +730,7 @@ pub(crate) fn load_intent_conn(
     )
     .optional()
     .map_err(sqlite_error)?
-    .map(StoredIntentRow::decode)
+    .map(StoredControlIntent::decode)
     .transpose()
 }
 
@@ -975,15 +955,15 @@ impl RunStore for crate::SqliteStore {
         self.run_binding(session_id, input).await
     }
 
-    async fn input_status(
+    async fn follow_facts(
         &self,
         session_id: &SessionId,
-        input: &InputId,
-    ) -> Result<InputStatus, StoreError> {
+        subject: &FollowSubject,
+    ) -> Result<FollowFacts, StoreError> {
         let session_id = session_id.clone();
-        let input = input.clone();
+        let subject = subject.clone();
         self.read_connection()
-            .call(move |conn| Ok(input_status_conn(conn, &session_id, &input)))
+            .call(move |conn| Ok(follow_facts_conn(conn, &session_id, &subject)))
             .await
             .map_err(sqlite_error)?
     }

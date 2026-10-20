@@ -965,7 +965,12 @@ pub(crate) async fn session_park(
     else {
         return Ok(None);
     };
-    serde_json::from_str(&park).map(Some).map_err(|error| {
+    session_park_reason(&park).map(Some)
+}
+
+/// The typed park reason a parked session actor stored as `park`.
+pub(crate) fn session_park_reason(park: &str) -> Result<crate::SessionParkReason> {
+    serde_json::from_str(park).map_err(|error| {
         EmbedError::Plugin(
             lash_execution_contracts::plugin_error::PluginError::StoredDataCorrupt {
                 record_kind: "session park".to_owned(),

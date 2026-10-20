@@ -306,11 +306,17 @@ pub async fn a_forsake_and_an_admission_of_one_key_have_exactly_one_winner(
             ),
         };
         accepted += i64::from(send_won);
-        let status = handles
+        let crate::store::FollowFacts::Input(status) = handles
             .runtime
-            .input_status(&session(), &input_id)
+            .follow_facts(
+                &session(),
+                &crate::store::FollowSubject::Input(input_id.clone()),
+            )
             .await
-            .expect("read the raced key's status");
+            .expect("read the raced key's facts")
+        else {
+            panic!("round {round}: an input subject answers input facts");
+        };
         assert_eq!(status.forsaken, !send_won, "round {round}: {status:?}");
         assert_eq!(status.open, send_won, "round {round}: {status:?}");
         assert_eq!(

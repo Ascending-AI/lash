@@ -20,14 +20,19 @@ use lash_core_store::store::RunTerminal;
 use lash_core_store::store::RunTerminalCause;
 use lash_core_store::store::RunTerminalWriteDecision;
 use lash_core_store::store::RunTurns;
+use lash_core_store::store::StoredControlIntent;
+use lash_core_store::store::StoredFollowRow;
+use lash_core_store::store::StoredTerminalColumns;
 use lash_core_store::store::UnfinishedRun;
 use lash_core_store::store::decide_run_terminal_write;
 use lash_core_store::store::run_binding_conflict;
 use lash_core_store::store::stored_intent_kind;
 use lash_core_store::store::stored_intent_state;
+use lash_core_store::store::{FollowFacts, FollowSubject};
 use lash_core_store::store_backend_support::turn_cancel::EndedRunInputRelease;
 use lash_protocol_types::{InputId, SessionId, TurnId};
 use lash_store_sql::Dialect;
+use lash_store_sql::durable::session_follow::SessionFollowStatements;
 use lash_store_sql::session_runs::{
     control_intents::ControlIntentStatements, run_inputs::SessionRunInputStatements,
     runs::SessionRunStatements,
@@ -42,6 +47,8 @@ pub(crate) struct SessionRunsSql {
     pub(crate) runs: SessionRunStatements,
     pub(crate) inputs: SessionRunInputStatements,
     pub(crate) intents: ControlIntentStatements,
+    /// A follower's one snapshot (FIG-7045).
+    pub(crate) follow: SessionFollowStatements,
 }
 
 static SESSION_RUNS_SQL: LazyLock<SessionRunsSql> = LazyLock::new(|| {
@@ -51,6 +58,7 @@ static SESSION_RUNS_SQL: LazyLock<SessionRunsSql> = LazyLock::new(|| {
         runs: SessionRunStatements::render(dialect),
         inputs: SessionRunInputStatements::render(dialect),
         intents: ControlIntentStatements::render(dialect),
+        follow: SessionFollowStatements::render(dialect),
     }
 });
 
@@ -94,36 +102,20 @@ pub(crate) async fn run_terminal_conn(
             .await?
             .and_then(|intent| intent.session_deleted_terminal(run)));
     };
-    let cause_json: Option<String> = row.try_get(0).map_err(store_sqlx_error)?;
-    let head_revision: Option<i64> = row.try_get(1).map_err(store_sqlx_error)?;
-    let at_ms: Option<i64> = row.try_get(2).map_err(store_sqlx_error)?;
-    let kind: Option<String> = row.try_get(3).map_err(store_sqlx_error)?;
-    let (cause_json, at_ms, kind) = match (cause_json, at_ms, kind) {
-        (None, None, None) if head_revision.is_none() => return Ok(None),
-        (Some(cause), Some(at), Some(kind)) => (cause, at, kind),
-        _ => {
-            return Err(StoreError::StoredDataCorrupt {
-                record_kind: "RunTerminal",
-                message: "partial terminal evidence".to_owned(),
-            });
-        }
-    };
-    let terminal = RunTerminal::from_stored(
-        session_id.clone(),
-        run.clone(),
-        &cause_json,
-        head_revision
-            .map(|revision| u64_from_sql("RunTerminal", "terminal_head_revision", revision))
-            .transpose()?,
-        u64_from_sql("RunTerminal", "terminal_at_ms", at_ms)?,
-    )?;
-    if terminal.kind().as_str() != kind {
-        return Err(StoreError::StoredDataCorrupt {
-            record_kind: "RunTerminal",
-            message: "terminal kind disagrees with cause".to_owned(),
-        });
-    }
-    Ok(Some(terminal))
+    terminal_columns(&row, 0)?.decode(session_id, run)
+}
+
+/// The terminal-evidence columns starting at `first`.
+fn terminal_columns(
+    row: &sqlx::postgres::PgRow,
+    first: usize,
+) -> Result<StoredTerminalColumns, StoreError> {
+    Ok(StoredTerminalColumns {
+        cause_json: row.try_get(first).map_err(store_sqlx_error)?,
+        head_revision: row.try_get(first + 1).map_err(store_sqlx_error)?,
+        at_ms: row.try_get(first + 2).map_err(store_sqlx_error)?,
+        kind: row.try_get(first + 3).map_err(store_sqlx_error)?,
+    })
 }
 
 /// Name the session's published head revision as the terminal's window,
@@ -610,33 +602,44 @@ pub(crate) async fn run_binding_conn(
     .map_err(StoreError::from)
 }
 
-/// What a follower of `input` of `session_id` reads, in one statement on
-/// `conn`: its binding, whether its row is open, and the session's fault.
-async fn input_status_conn(
+/// Everything a follower of `subject` of `session_id` decides from, in one
+/// statement on `conn` (FIG-7045).
+async fn follow_facts_conn(
     conn: &mut PgConnection,
     session_id: &SessionId,
-    input: &InputId,
-) -> Result<lash_core_store::store::InputStatus, StoreError> {
-    let row = crate::observed_sql::query(session_runs_sql().inputs.select_status.sql())
+    subject: &FollowSubject,
+) -> Result<FollowFacts, StoreError> {
+    let actor = lash_durable::ActorKey::session(session_id.as_str()).ok();
+    let row = crate::observed_sql::query(session_runs_sql().follow.select.sql())
         .bind(session_id.as_str())
-        .bind(input.as_str())
+        .bind(subject.input().map(InputId::as_str))
+        .bind(subject.run().map(TurnId::as_str))
+        .bind(subject.operation_batch(session_id))
+        .bind(actor.as_ref().map(lash_durable::ActorKey::as_str))
         .fetch_one(crate::observed_sql::executor(&mut *conn))
         .await
         .map_err(store_sqlx_error)?;
-    let run: Option<String> = row.try_get(0).map_err(store_sqlx_error)?;
-    Ok(lash_core_store::store::InputStatus {
-        run: run
-            .map(TurnId::parse)
-            .transpose()
-            .map_err(StoreError::from)?,
-        open: row.try_get(1).map_err(store_sqlx_error)?,
-        fault: lash_core_store::store::SessionFault::from_stored_columns(
-            session_id,
-            row.try_get(2).map_err(store_sqlx_error)?,
-            row.try_get(3).map_err(store_sqlx_error)?,
-        )?,
-        forsaken: row.try_get(4).map_err(store_sqlx_error)?,
-    })
+    let get = |index: usize| row.try_get::<bool, _>(index).map_err(store_sqlx_error);
+    StoredFollowRow {
+        binding: row.try_get(0).map_err(store_sqlx_error)?,
+        input_state: row.try_get(1).map_err(store_sqlx_error)?,
+        open: get(2)?,
+        fault_json: row.try_get(3).map_err(store_sqlx_error)?,
+        fault_at_ms: row.try_get(4).map_err(store_sqlx_error)?,
+        forsaken: get(5)?,
+        session_deleted: get(6)?,
+        session_materialized: get(7)?,
+        run_row: get(8)?,
+        terminal: terminal_columns(&row, 9)?,
+        close_intent: row
+            .try_get::<Option<i64>, _>(13)
+            .map_err(store_sqlx_error)?
+            .map(|_| intent_columns(&row, 13))
+            .transpose()?,
+        operation_pending: get(19)?,
+        park_json: row.try_get(20).map_err(store_sqlx_error)?,
+    }
+    .decode(session_id, subject)
 }
 
 /// Bind each of `inputs` to `run`, set-if-absent, and open `run`'s row, in
@@ -675,24 +678,22 @@ pub(crate) async fn bind_run_inputs_conn(
 }
 
 pub(crate) fn decode_intent(row: &sqlx::postgres::PgRow) -> Result<ControlIntent, StoreError> {
-    let id: i64 = row.try_get(0).map_err(store_sqlx_error)?;
-    let session_id: String = row.try_get(1).map_err(store_sqlx_error)?;
-    let format: i64 = row.try_get(2).map_err(store_sqlx_error)?;
-    let kind_json: String = row.try_get(3).map_err(store_sqlx_error)?;
-    let state_json: String = row.try_get(4).map_err(store_sqlx_error)?;
-    let created_at_ms: i64 = row.try_get(5).map_err(store_sqlx_error)?;
-    let corrupt = |field: &str| StoreError::StoredDataCorrupt {
-        record_kind: "ControlIntent",
-        message: format!("{field} out of range"),
-    };
-    ControlIntent::from_stored(
-        u64_from_sql("ControlIntent", "intent_id", id)?,
-        SessionId::parse(session_id)?,
-        u32::try_from(format).map_err(|_| corrupt("format"))?,
-        &kind_json,
-        &state_json,
-        u64_from_sql("ControlIntent", "created_at_ms", created_at_ms)?,
-    )
+    intent_columns(row, 0)?.decode()
+}
+
+/// The control intent whose six columns start at `first`.
+fn intent_columns(
+    row: &sqlx::postgres::PgRow,
+    first: usize,
+) -> Result<StoredControlIntent, StoreError> {
+    Ok(StoredControlIntent {
+        id: row.try_get(first).map_err(store_sqlx_error)?,
+        session_id: row.try_get(first + 1).map_err(store_sqlx_error)?,
+        format: row.try_get(first + 2).map_err(store_sqlx_error)?,
+        kind_json: row.try_get(first + 3).map_err(store_sqlx_error)?,
+        state_json: row.try_get(first + 4).map_err(store_sqlx_error)?,
+        created_at_ms: row.try_get(first + 5).map_err(store_sqlx_error)?,
+    })
 }
 
 /// `session_id`'s `close_session` intent, read on `conn`: its deletion
@@ -920,13 +921,13 @@ impl RunStore for PostgresStore {
         self.run_binding(session_id, input).await
     }
 
-    async fn input_status(
+    async fn follow_facts(
         &self,
         session_id: &SessionId,
-        input: &InputId,
-    ) -> Result<lash_core_store::store::InputStatus, StoreError> {
+        subject: &FollowSubject,
+    ) -> Result<FollowFacts, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
-        input_status_conn(&mut connection, session_id, input).await
+        follow_facts_conn(&mut connection, session_id, subject).await
     }
 
     async fn run_binding(

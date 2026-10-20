@@ -823,11 +823,7 @@ async fn settle(
         // reads.
         Err(error) if absent_input_session(subject, &error) => match (subject, &error) {
             (Subject::Input(receipt), EmbedError::UnknownSession { .. })
-                if target
-                    .uncreated_store()?
-                    .input_status(&receipt.input_id)
-                    .await?
-                    .forsaken =>
+                if input_forsaken(&target.uncreated_store()?, &receipt.input_id).await? =>
             {
                 SendOutcome::Forsaken { gaps: Vec::new() }
             }
@@ -837,6 +833,20 @@ async fn settle(
     };
     shared.remember(&outcome);
     Ok(outcome)
+}
+
+/// Whether the host forsook `input`'s id in `store`'s session.
+async fn input_forsaken(
+    store: &lash_core::store::SessionStore,
+    input: &lash_core::InputId,
+) -> Result<bool> {
+    let facts = store
+        .follow_facts(&lash_core::store::FollowSubject::Input(input.clone()))
+        .await?;
+    Ok(matches!(
+        facts,
+        lash_core::store::FollowFacts::Input(input) if input.forsaken
+    ))
 }
 
 fn absent_input_session(subject: &Subject, error: &EmbedError) -> bool {
@@ -1280,7 +1290,7 @@ async fn send_context(target: &SendTarget, ids: &[&str]) -> Result<SendContext> 
     let store = target.uncreated_store()?;
     for id in ids {
         let input_id = lash_core::PendingTurnInputDraft::keyed_input_id(&session_id, id);
-        if store.input_status(&input_id).await?.forsaken {
+        if input_forsaken(&store, &input_id).await? {
             return Err(EmbedError::Runtime(
                 lash_core::StoreError::TurnInputForsaken {
                     session_id,

@@ -480,11 +480,11 @@ impl RunStore for Integrator {
     ) -> Result<Option<TurnId>, StoreError> {
         unreachable!("external signature witness")
     }
-    async fn input_status(
+    async fn follow_facts(
         &self,
         session_id: &SessionId,
-        input: &InputId,
-    ) -> Result<InputStatus, StoreError> {
+        subject: &FollowSubject,
+    ) -> Result<FollowFacts, StoreError> {
         unreachable!("external signature witness")
     }
     async fn run_binding(
