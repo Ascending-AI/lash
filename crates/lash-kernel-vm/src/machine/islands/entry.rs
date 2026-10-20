@@ -33,6 +33,41 @@ use crate::compile::{
 use crate::interface::Host;
 use crate::observe::ChargeTape;
 
+/// The island a plan's walk applies its steady callback as, under the
+/// walk's open gate, once known to take the walk's calls: what of its
+/// entries no call of the walk changes (FIG-6978).
+pub(in crate::machine) struct SteadyIsland {
+    plan: u32,
+    /// Its arity, which each call's arguments are checked against.
+    pub(in crate::machine) arity: usize,
+    /// The most virtual frames it runs under the gate.
+    frames: u32,
+}
+
+impl SteadyIsland {
+    /// Island plan `plan`, which a walk under the open gate `gate`
+    /// resolved for its steady callback closed over `cells` cells, where it
+    /// takes the walk's calls: its compiled form and its captures, and the
+    /// depth the gate's frames stand at, none of which an entry of the walk
+    /// changes. Each call's arguments are checked against its arity, which
+    /// is at most [`MAX_ARGS`].
+    pub(in crate::machine) fn of(
+        gate: &Gate,
+        exe: &Executable,
+        plan: u32,
+        cells: usize,
+    ) -> Option<Self> {
+        let island = exe.islands.plans.get(plan as usize)?;
+        let arity = island.compiled(exe)?.layout.arity;
+        (arity <= MAX_ARGS && cells == island.captures.len() && gate.base <= gate.call_depth)
+            .then_some(Self {
+                plan,
+                arity,
+                frames: frames(gate.base, gate.call_depth),
+            })
+    }
+}
+
 /// Where the caller of an island call stands while its callee runs.
 #[derive(Clone, Copy)]
 enum Caller {
@@ -235,6 +270,71 @@ impl KernelMachine {
             (args, count),
             None,
         )
+    }
+
+    /// [`Self::callback_entry`] of a walk's steady callback on `values`,
+    /// whose island `island` takes its calls ([`SteadyIsland::of`]):
+    /// only what changes from one entry to the next is checked, and its
+    /// cells are read afresh, as the callback may write them.
+    #[inline]
+    pub(in crate::machine) fn steady_entry(
+        &mut self,
+        gate: &Gate,
+        task: TaskId,
+        exe: &Executable,
+        (island, cells): (&SteadyIsland, &[ArenaHandle]),
+        values: &[Value],
+    ) -> Eval<Option<Ran>> {
+        if !values.iter().all(held)
+            || self.charged >= gate.slice_end
+            || self.capacity_headroom() < ISLAND_ADMITTED
+        {
+            return Ok(None);
+        }
+        let recorder = self
+            .observer
+            .as_deref()
+            .and_then(|observer| observer.charges.as_ref());
+        let mut arena = self.arena.borrow_mut();
+        let running = self
+            .tasks
+            .get_mut(task.0 as usize)?
+            .ok_or_else(|| fault("no task"))?;
+        let ground = Ground {
+            exe,
+            arena: &mut arena,
+            sites: &mut self.sites,
+            session: &self.session,
+            tape: recorder.filter(|_| gate.charging),
+            recorder,
+            charging: gate.charging,
+            bound: if gate.charging {
+                self.bounds.charge_limit
+            } else {
+                u64::MAX
+            },
+            slice_end: gate.slice_end,
+            observed: gate.observed,
+            limits: gate.limits,
+            memory: gate.memory,
+            base: gate.base,
+            call_depth: gate.call_depth,
+        };
+        let scratch = &mut self.islands;
+        scratch.open();
+        let charged = self.charged;
+        let mut entry = open(
+            ground,
+            scratch,
+            &mut running.counters,
+            (charged, island.frames),
+        );
+        let Some(callee) = entry.steady(island.plan, cells) else {
+            return Ok(None);
+        };
+        let ran = entry.enter(callee, values);
+        self.charged = entry.charged;
+        Ok(ended(scratch, ran)?)
     }
 
     /// Where a nested call or a root call action that `caller` stands at
@@ -635,38 +735,13 @@ fn enter(
     occurrence: Option<usize>,
     before: &[Weight],
 ) -> Result<Option<Ran>, Halt> {
-    let exe = ground.exe;
-    scratch.sessions.clear();
-    let mut island = Island {
-        exe,
-        stream: exe.document_stream(),
-        arena: ground.arena,
-        sites: ground.sites,
-        session: ground.session,
-        tape: ground.tape,
-        recorder: ground.recorder,
-        charging: ground.charging,
-        charged: *charged,
-        bound: ground.bound,
-        slice_end: ground.slice_end,
-        counters,
-        observed: ground.observed,
-        limits: ground.limits,
-        memory: ground.memory,
-        base: ground.base,
-        call_depth: ground.call_depth,
-        depth: 0,
-        frames: ground
-            .call_depth
-            .saturating_add(1)
-            .saturating_sub(ground.base)
-            .min(u64::from(ISLAND_DEPTH)) as u32,
-        admitted: false,
-        plain: ground.charging && ground.tape.is_none(),
-        swift: false,
-        covered: false,
+    let (base, call_depth) = (ground.base, ground.call_depth);
+    let mut island = open(
+        ground,
         scratch,
-    };
+        counters,
+        (*charged, frames(base, call_depth)),
+    );
     let target = match target {
         Target::Declared(code) => island.declared(code),
         Target::Closure(handle) => island
@@ -675,9 +750,9 @@ fn enter(
         Target::Guest(handle, occurrence) => island.guest(occurrence, handle),
         Target::Code(plan, cells) => island.with_cells(plan, cells),
     };
-    let Some(target) = target.filter(|target| {
-        values.len() <= target.compiled.layout.arity && ground.base <= ground.call_depth
-    }) else {
+    let Some(target) =
+        target.filter(|target| values.len() <= target.compiled.layout.arity && base <= call_depth)
+    else {
         return Ok(None);
     };
     for weight in before {
@@ -690,6 +765,64 @@ fn enter(
         .map_or(Ok(()), |occurrence| island.count(occurrence))
         .and_then(|()| island.enter(target, values));
     *charged = island.charged;
+    ended(scratch, ran)
+}
+
+/// One island entry in `scratch` under `ground`, in the resolution scope
+/// it holds open, counting in `counters`, from the charge `charged`: no
+/// callee resolved yet, and no frame.
+#[inline(always)]
+fn open<'a>(
+    ground: Ground<'a>,
+    scratch: &'a mut Scratch,
+    counters: &'a mut Occurrences,
+    (charged, frames): (u64, u32),
+) -> Island<'a> {
+    let exe = ground.exe;
+    scratch.sessions.clear();
+    Island {
+        exe,
+        stream: exe.document_stream(),
+        arena: ground.arena,
+        sites: ground.sites,
+        session: ground.session,
+        tape: ground.tape,
+        recorder: ground.recorder,
+        charging: ground.charging,
+        charged,
+        bound: ground.bound,
+        slice_end: ground.slice_end,
+        counters,
+        observed: ground.observed,
+        limits: ground.limits,
+        memory: ground.memory,
+        base: ground.base,
+        call_depth: ground.call_depth,
+        depth: 0,
+        frames,
+        admitted: false,
+        plain: ground.charging && ground.tape.is_none(),
+        swift: false,
+        covered: false,
+        scratch,
+    }
+}
+
+/// The most virtual frames an island runs above `base` frames under the
+/// call depth `call_depth`: [`ISLAND_DEPTH`], or fewer where the depth
+/// leaves fewer.
+#[inline(always)]
+fn frames(base: u64, call_depth: u64) -> u32 {
+    call_depth
+        .saturating_add(1)
+        .saturating_sub(base)
+        .min(u64::from(ISLAND_DEPTH)) as u32
+}
+
+/// What an island entry in `scratch` came to, its call having answered
+/// `ran`: its value, or the frames a stop left, or the halt it met.
+#[inline(always)]
+fn ended(scratch: &mut Scratch, ran: Result<Value, Stop>) -> Result<Option<Ran>, Halt> {
     match ran {
         Ok(value) => Ok(Some(Ran::Returned(value))),
         Err(Stop) => {

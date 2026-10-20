@@ -41,12 +41,13 @@ use lash_kernel_state::paged::PhaseRecord;
 use super::actions::Target;
 use super::exec::{Call, ResultOrigin};
 use super::frames::Role;
-use super::islands::Ran;
+use super::islands::{Ran, SteadyIsland};
 use super::loops::Header;
 use super::operation_entry::AdmittedBody;
 use super::ops::{Answer, Flow, Reg, Status};
 use super::plans::{PlanRun, Steady, Walk};
 use super::{Completion, Control, Eval, Frame, Halt, Interrupt, KernelMachine, LibraryCall, fault};
+use crate::compile::islands::MAX_SLOTS;
 use crate::compile::segments::{Segment, SiteControl};
 use crate::compile::{
     ActionKind, CodeId, Executable, Form, LibId, LibRun, NestedKind, PreparedPlan,
@@ -275,7 +276,8 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
     /// (`super::plan_regions`), which would take it from `at`: the callback
     /// its variable holds for the whole walk is resolved once, at the
     /// walk's first call of a closure, as [`Self::apply_at`] resolves it,
-    /// with the island it enters under the walk's gate.
+    /// with the island it enters under the walk's gate and what of that
+    /// island's entry no call of the walk changes (FIG-6978).
     pub(super) fn apply_steady(
         &mut self,
         site: u32,
@@ -287,47 +289,101 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
             self.machine.put(at, callee);
             return self.apply_at(site, at, count);
         };
-        let steady = match self.steady.take() {
-            Some(steady) if steady.closure == closure => steady,
-            _ => {
-                let target = self.machine.target(self.exe, callee);
-                let Target::Code(code, cells) = self.check(target)? else {
-                    return Err(self.lost("a closure resolved to no code"));
-                };
-                let island = self
-                    .machine
-                    .callback_plan(&mut self.gate, self.task, self.exe, code);
-                Steady {
-                    closure,
-                    code,
+        if !self.steadied(closure) {
+            self.steady = Some(self.resolve_steady(closure, callee)?);
+        }
+        let mut values = [Value::Absent; MAX_SLOTS];
+        let ran = match values.get_mut(..count) {
+            Some(held) => {
+                held.copy_from_slice(&self.machine.regs[at + 1..at + 1 + count]);
+                self.steady_entry(&values[..count])
+            }
+            None => Ok(None),
+        };
+        self.steady_ran(site, (at, count), ran)
+    }
+
+    /// Whether the walk's steady callback is resolved, and is `closure`.
+    #[inline(always)]
+    pub(super) fn steadied(&self, closure: ArenaHandle) -> bool {
+        self.steady
+            .as_ref()
+            .is_some_and(|steady| steady.closure == closure)
+    }
+
+    /// The resolved steady callback's island entry on `values`, where its
+    /// island takes them: `None` otherwise, and nothing changed.
+    #[inline(always)]
+    pub(super) fn steady_entry(&mut self, values: &[Value]) -> Eval<Option<Ran>> {
+        match (&self.steady, &self.gate) {
+            (
+                Some(Steady {
+                    island: Some(island),
                     cells,
-                    island: self.check(island)?,
-                }
+                    ..
+                }),
+                Some(gate),
+            ) if values.len() <= island.arity => {
+                self.machine
+                    .steady_entry(gate, self.task, self.exe, (island, cells), values)
             }
-        };
-        let ran = match (steady.island, self.gate.as_ref()) {
-            (Some(island), Some(gate)) => self.machine.callback_entry(
-                gate,
-                self.task,
-                self.exe,
-                (island, &steady.cells),
-                at + 1,
-                count,
-            ),
             _ => Ok(None),
-        };
-        match self.check(ran)? {
-            Some(Ran::Returned(value)) => {
-                self.steady = Some(steady);
-                self.returned(at, value);
-                Ok(())
-            }
-            ran => Err(self.stand_callee(site, steady.code, steady.cells, (at, count), ran)),
         }
     }
 
+    /// The steady callback applied from `at` to the `count` operands after
+    /// it, which they hold, came to `ran`: its value to `at` where its
+    /// island returned; otherwise the plan stands at site `site` while the
+    /// callback runs.
+    #[inline(always)]
+    pub(super) fn steady_ran(
+        &mut self,
+        site: u32,
+        (at, count): (Reg, usize),
+        ran: Eval<Option<Ran>>,
+    ) -> Result<(), PlanExit> {
+        match self.check(ran)? {
+            Some(Ran::Returned(value)) => {
+                self.returned(at, value);
+                Ok(())
+            }
+            ran => {
+                let Some(steady) = self.steady.take() else {
+                    return Err(self.lost("a steady site applied no callback"));
+                };
+                Err(self.stand_callee(site, steady.code, steady.cells, (at, count), ran))
+            }
+        }
+    }
+
+    /// The steady callback `closure`, the value `callee`: its code and
+    /// cells, and the island it runs as under the walk's gate where that
+    /// island takes the walk's calls.
+    #[cold]
+    #[inline(never)]
+    fn resolve_steady(&mut self, closure: ArenaHandle, callee: Value) -> Result<Steady, PlanExit> {
+        let target = self.machine.target(self.exe, callee);
+        let Target::Code(code, cells) = self.check(target)? else {
+            return Err(self.lost("a closure resolved to no code"));
+        };
+        let island = self
+            .machine
+            .callback_plan(&mut self.gate, self.task, self.exe, code);
+        let island = self.check(island)?.and_then(|plan| {
+            let gate = self.gate.as_ref()?;
+            SteadyIsland::of(gate, self.exe, plan, cells.len())
+        });
+        Ok(Steady {
+            closure,
+            code,
+            cells,
+            island,
+        })
+    }
+
     /// The callback applied from `at` returned `value`.
-    fn returned(&mut self, at: Reg, value: Value) {
+    #[inline(always)]
+    pub(super) fn returned(&mut self, at: Reg, value: Value) {
         self.machine.put(at, value);
         self.machine.borrow_value(value);
     }

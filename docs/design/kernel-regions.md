@@ -99,6 +99,22 @@ of region are built from one unit.
   code finishes that step; the next step is native again. A step whose
   variables are not small integers and lists runs as the region's pass.
   Only a charge tape may observe the run.
+- **Slots walk.** A helper plan's loop region whose body is one step of an
+  array callback helper's walk over its slots (TypeScript's `map`, `filter`
+  and `forEach`, `ts.array.map_slots` and its siblings): stop where the
+  index reaches the length taken first, read each item live, so a callback
+  that shortens the list leaves holes behind it, skip a hole, apply the
+  callback to a present item, and write its answer, or keep the item where
+  the answer is `true`, coercing any other answer through `ts.to_boolean`.
+  The region's machine steps it natively (FIG-6978): it opens every
+  statement the plan opens, in order, compares the index with the length
+  and advances it as Rust, and runs the item read, the callback's
+  application at its steady site (entering the callback's island with its
+  arguments in place) and the writes as the region's own forms on the
+  plan's registers. A callback that does not return at once stands the
+  plan at its site exactly as the region would. A walk the recogniser does
+  not match runs as the region's pass. Only a charge tape may observe the
+  run.
 
 **Barriers.** These ops end a region, so the reference runs them: every action
 and effect (`perform`, `sleep`, `spawn`, `join`, `yield`, `cancel`); the host

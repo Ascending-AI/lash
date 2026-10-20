@@ -167,7 +167,7 @@ struct Cached {
 /// the registers it holds there.
 type RunsOn = (StmtId, u32, Vec<(u32, Value)>);
 
-pub(super) use entry::{Gate, Ran, RegionGuests};
+pub(super) use entry::{Gate, Ran, RegionGuests, SteadyIsland};
 
 /// The machine's island state: buffers reused across entries, never saved.
 #[derive(Default)]
@@ -944,6 +944,19 @@ impl<'a> Island<'a> {
             plan,
             cells,
         )?;
+        self.callee(plan, captured)
+    }
+
+    /// The island plan `plan` of a walk's steady callback, whose compiled
+    /// form and captures the walk checked as it resolved it, closed over
+    /// the cells `cells`, read afresh.
+    #[inline(always)]
+    fn steady(&mut self, plan: u32, cells: &[ArenaHandle]) -> Option<Callee<'a>> {
+        let captured = self.scratch.captured.len() as u32;
+        for cell in cells {
+            let value = self.arena.cell(*cell).ok()?;
+            self.scratch.captured.push((value, *cell));
+        }
         self.callee(plan, captured)
     }
 

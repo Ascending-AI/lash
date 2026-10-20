@@ -9,6 +9,7 @@
 mod calls;
 mod conversions;
 mod numeric;
+pub(crate) mod slots;
 pub(crate) mod sorts;
 
 use crate::projection::{Plan, Projector};

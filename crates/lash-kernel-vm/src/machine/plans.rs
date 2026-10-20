@@ -52,8 +52,9 @@ pub(super) struct Steady {
     pub(super) closure: ArenaHandle,
     pub(super) code: crate::compile::CodeId,
     pub(super) cells: Vec<ArenaHandle>,
-    /// The island the callback runs as under the walk's gate, if any.
-    pub(super) island: Option<u32>,
+    /// The island the callback runs as under the walk's gate, if any,
+    /// once it is known to take the walk's calls.
+    pub(super) island: Option<super::islands::SteadyIsland>,
 }
 
 /// One running plan: the machine, the caller's arguments and the plan's
@@ -169,7 +170,27 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
 impl<const SHARED: bool> PlanRun<'_, SHARED> {
     /// Steps the loop on `cursor` to its next element, counting the pass
     /// it starts, or finds it exhausted.
+    #[inline(always)]
     pub(super) fn step(&mut self, cursor: PlanCursor) -> Result<Option<Value>, PlanExit> {
+        // A list's next item the arena holds resident, read as its cursor
+        // reads it; any other step is the cursor's own.
+        if let Some(Walk {
+            cursor: Cursor::List(items, position),
+            started,
+            ..
+        }) = self.cursors.get_mut(cursor.0 as usize)
+            && let Ok(element) = self.machine.arena.borrow().item(*items, *position as u64)
+        {
+            *position += usize::from(element.is_some());
+            *started += u64::from(element.is_some());
+            return Ok(element);
+        }
+        self.stepped(cursor)
+    }
+
+    /// [`Self::step`] by the cursor's own step.
+    #[inline(never)]
+    fn stepped(&mut self, cursor: PlanCursor) -> Result<Option<Value>, PlanExit> {
         let stepped = loop {
             let Some(walk) = self.cursors.get_mut(cursor.0 as usize) else {
                 let missing = Err(fault("a plan stepped a loop it has not opened"));

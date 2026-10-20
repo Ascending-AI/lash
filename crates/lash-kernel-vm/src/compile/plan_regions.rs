@@ -32,6 +32,7 @@
 //! uses, which its end empties.
 
 pub(crate) mod merge;
+pub(crate) mod slots;
 
 use lash_kernel_doc::Value;
 use lash_kernel_doc::plan::{HelperPlan, SiteCall};
@@ -57,6 +58,9 @@ pub(crate) struct PlanRegion {
     /// The merge pass of a comparator sort the body is, which the machine
     /// walks natively ([`merge`]).
     pub(crate) merge: Option<merge::Merge>,
+    /// The slots walk of an array callback helper the body is, which the
+    /// machine steps natively ([`slots`]).
+    pub(crate) slots: Option<slots::Slots>,
 }
 
 /// A block of the loop's body, its statements in order.
@@ -444,13 +448,19 @@ impl Former<'_, '_> {
         let mut written = vec![binding];
         body.written(&mut written);
         body.settle(&written);
-        let merge = merge::Recognise { lib: self.lib }.merge(&body);
+        let recognise = merge::Recognise { lib: self.lib };
+        let merge = recognise.merge(&body);
+        let slots = merge
+            .is_none()
+            .then(|| recognise.slots(&body, binding))
+            .flatten();
         Some(PlanRegion {
             walked,
             binding,
             metered: *metered,
             body,
             merge,
+            slots,
         })
     }
 

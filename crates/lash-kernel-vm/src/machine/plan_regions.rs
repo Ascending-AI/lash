@@ -43,6 +43,7 @@
 //! end empties only the registers it uses.
 
 mod merge;
+mod slots;
 
 use std::any::Any;
 
@@ -55,6 +56,7 @@ use crate::compile::plan_regions::{
     Block, Forward, IN_PLACE, Node, NodeKind, PlanRegion, Step, StepKind,
 };
 use crate::compile::{Entry, LibId, position};
+use crate::observe::Stepped;
 
 /// The capacity headroom past which a hole test need not build the tuple
 /// it compares with: an empty tuple holds one value's 16 bytes, so the
@@ -161,6 +163,7 @@ impl Regions {
                 metered: region.metered,
                 body: body(region.body),
                 merge: region.merge.and_then(merge::compiled),
+                slots: region.slots.and_then(slots::compiled),
             })
             .collect()
     }
@@ -184,13 +187,14 @@ impl Regions {
 
 /// A compiled region: the plan variable each element is bound to, the
 /// units each test of the loop charges, its body, and the merge pass of a
-/// comparator sort the body is, which the walk steps natively
-/// ([`merge`]).
+/// comparator sort ([`merge`]) or the slots walk of an array callback
+/// helper ([`slots`]) the body is, which the walk steps natively.
 struct Region<const S: bool> {
     binding: u32,
     metered: u64,
     body: Body<S>,
     merge: Option<merge::Merged<S>>,
+    slots: Option<slots::Slotted<S>>,
 }
 
 /// A compiled block: its statements in order, and the plan variables it
@@ -609,17 +613,18 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
         // each walk.
         self.steady = None;
         self.depth = None;
-        // A merge pass steps natively where nothing but a charge tape
-        // observes the run: its forms charge nothing, and the walk's tests
-        // and the comparator's island record their own charges (FIG-6948).
-        let merge = region.merge.as_ref().filter(|_| {
-            !self.machine.charging
-                && self
-                    .machine
-                    .observer
-                    .as_deref()
-                    .is_none_or(|observer| observer.only_charges())
-        });
+        // A merge pass and a slots walk step natively where nothing but a
+        // charge tape observes the run: their forms charge nothing, and the
+        // walk's tests and the callbacks' islands record their own charges
+        // (FIG-6948, FIG-6978).
+        let native = !self.machine.charging
+            && self
+                .machine
+                .observer
+                .as_deref()
+                .is_none_or(|observer| observer.only_charges());
+        let merge = region.merge.as_ref().filter(|_| native);
+        let slotted = region.slots.as_ref().filter(|_| native);
         let mut tested = true;
         loop {
             // The next test, in its own statement.
@@ -631,14 +636,13 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
                 return Ok(false);
             };
             self.bind_value(region.binding, element)?;
-            let stepped = match merge {
-                Some(merge) => self.merge_step(merge)?,
-                None => None,
-            };
-            let merged = stepped.is_some();
-            let went = match stepped {
-                Some(went) => went,
-                None => self.pass(&region.body)?,
+            let (went, stepped) = match (merge, slotted) {
+                (Some(merge), _) => match self.merge_step(merge)? {
+                    Some(went) => (went, Stepped::Merge),
+                    None => (self.pass(&region.body)?, Stepped::Pass),
+                },
+                (None, Some(slotted)) => (self.slots_step(slotted)?, Stepped::Slots),
+                (None, None) => (self.pass(&region.body)?, Stepped::Pass),
             };
             if let Some(tape) = self
                 .machine
@@ -646,7 +650,7 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
                 .as_deref()
                 .and_then(|observer| observer.charges.as_ref())
             {
-                tape.passed(merged);
+                tape.passed(stepped);
             }
             match went {
                 Went::Broke => return Ok(false),

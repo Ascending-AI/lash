@@ -120,8 +120,8 @@ impl<N, P> Merge<N, P> {
 }
 
 /// The kernel library function names a merge's integer forms call.
-const SAME: &str = "same";
-const ADD: &str = "num.add";
+pub(super) const SAME: &str = "same";
+pub(super) const ADD: &str = "num.add";
 const MIN: &str = "num.min";
 const LT: &str = "num.lt";
 
@@ -302,7 +302,7 @@ impl Recognise<'_, '_> {
     }
 
     /// An `if` that puts nothing in a register: its test and its arms.
-    fn branch<'s>(&self, step: &'s Step) -> Option<(&'s Node, &'s Block, &'s Block)> {
+    pub(super) fn branch<'s>(&self, step: &'s Step) -> Option<(&'s Node, &'s Block, &'s Block)> {
         match &step.kind {
             StepKind::If {
                 cond,
@@ -367,7 +367,7 @@ impl Recognise<'_, '_> {
     }
 
     /// A fused call of the kernel's native `name` on two operands.
-    fn call_args<'s>(&self, node: &'s Node, name: &str) -> Option<[&'s Node; 2]> {
+    pub(super) fn call_args<'s>(&self, node: &'s Node, name: &str) -> Option<[&'s Node; 2]> {
         let NodeKind::Call {
             lib,
             args,
@@ -390,7 +390,7 @@ impl Recognise<'_, '_> {
     }
 
     /// A fused call of the kernel's native `name` on two variables.
-    fn call_locals(&self, node: &Node, name: &str) -> Option<[u32; 2]> {
+    pub(super) fn call_locals(&self, node: &Node, name: &str) -> Option<[u32; 2]> {
         let [a, b] = self.call_args(node, name)?;
         Some([local(a)?, local(b)?])
     }
@@ -424,7 +424,7 @@ fn stored(step: &Step) -> Option<[&Node; 3]> {
 }
 
 /// The plan variable a node reads.
-fn local(node: &Node) -> Option<u32> {
+pub(super) fn local(node: &Node) -> Option<u32> {
     match node.kind {
         NodeKind::Local(slot) => Some(slot),
         _ => None,
@@ -432,19 +432,19 @@ fn local(node: &Node) -> Option<u32> {
 }
 
 /// `set slot = value`, putting nothing in a register.
-fn assigned(step: &Step) -> Option<(u32, &Node)> {
+pub(super) fn assigned(step: &Step) -> Option<(u32, &Node)> {
     match &step.kind {
         StepKind::Assign { slot, value } if step.span == 0 => Some((*slot, value)),
         _ => None,
     }
 }
 
-fn nothing_declared(block: &Block) -> Option<()> {
+pub(super) fn nothing_declared(block: &Block) -> Option<()> {
     block.declares.is_empty().then_some(())
 }
 
 /// An empty block that declares nothing.
-fn nothing(block: &Block) -> Option<()> {
+pub(super) fn nothing(block: &Block) -> Option<()> {
     nothing_declared(block)?;
     block.steps.is_empty().then_some(())
 }

@@ -694,6 +694,7 @@ fn check_in(
     counts.work.calls += natural.work.calls;
     counts.work.passes += natural.work.passes;
     counts.work.merges += natural.work.merges;
+    counts.work.slots += natural.work.slots;
     counts.ran += usize::from(natural.work != RegionWork::default());
     let program = Weight::expand(natural.tape.iter().copied());
     let whole = natural.observations.charged.unwrap_or(0);
@@ -2135,6 +2136,63 @@ fn a_bound_anywhere_in_a_small_comparator_sort_stops_as_the_reference() {
 #[test]
 fn default_sorts_run_as_the_reference() {
     sorts_as_the_reference_sorts("comparator sorts: default sorts");
+}
+
+/// FIG-6978: a TypeScript map or filter's slots walk steps natively in its
+/// helper's plan region, opening each statement the generated plan opens
+/// and applying the callback through the region's own steady entry. Under
+/// PLAN-INDEP's sweep (every bound around the charge program's events,
+/// every slice, each plan resuming the other's images, charge Exact and
+/// Off) the program `name` runs as the reference runs it: end, charge,
+/// tape and images; and its natural run steps some walk pass natively.
+fn slots_walk_as_the_reference_walks(name: &str) {
+    let mut counts = Counts::default();
+    let mut failures = Vec::new();
+    let (lowered, program) = crate::helper_plans::slots::slots_walk_program(name);
+    let registry = program.library.registry();
+    let on = prepare_with_layout(Arc::clone(registry), Layout(ON));
+    let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
+    let mut case = program_case(&lowered.id, "main { return null }", 16);
+    case.document = print_document(&program.document);
+    formed_alike(&on, &off, &case);
+    let work = check(&on, &off, &case, &mut counts, &mut failures);
+    if work.slots == 0 {
+        failures.push(format!(
+            "{}: its natural run stepped no slots walk natively",
+            case.name
+        ));
+    }
+    assert!(
+        failures.is_empty(),
+        "{} of {} paired runs disagree:\n{}",
+        failures.len(),
+        counts.runs,
+        failures.join("\n")
+    );
+}
+
+/// Callbacks that shorten, grow and empty the list they walk read it live,
+/// as the reference reads it; a write ahead of the walk is seen, holes are
+/// skipped and left holes, and filter answers that are no bool are coerced
+/// through `ts.to_boolean` at the coercion's site.
+#[test]
+fn slots_walks_with_mutating_callbacks_run_as_the_reference() {
+    slots_walk_as_the_reference_walks("slots walks: mutating callbacks");
+}
+
+/// A callback that raises midway, from its island or past it, leaves the
+/// walk with the reference's error and the calls the reference made.
+#[test]
+fn slots_walks_whose_callbacks_raise_midway_run_as_the_reference() {
+    slots_walk_as_the_reference_walks("slots walks: callbacks that raise midway");
+}
+
+/// The walks have fewer charge events than the sweep's bounds: a bound at
+/// each statement, inside every callback and between, stops the run where
+/// the reference stops it, with its charge.
+#[test]
+fn a_bound_anywhere_in_a_small_slots_walk_stops_as_the_reference() {
+    slots_walk_as_the_reference_walks("slots walks: every bound of a small walk");
 }
 
 /// Kernel loops whose straight-line statements run as typed blocks over
