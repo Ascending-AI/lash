@@ -239,6 +239,8 @@ fn region_kind_memo_records_both_general_formulas_for_every_kind() {
         guests: None,
         called: None,
         accumulator: None,
+        keyed: None,
+        absent: None,
     };
     for x in values() {
         let mut slots = vec![crate::machine::SlotState::Value(x); MAX_SLOTS];

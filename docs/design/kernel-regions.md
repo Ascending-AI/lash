@@ -339,6 +339,34 @@ and their cross-resumes, with charge Exact and Off, memory off and under a
 tight memory bound, and requires each natural run to commit appends
 (`RegionWork::appends`).
 
+Keyed writes (FIG-6979) take what an earlier read of the region proved:
+
+- **Keyed record writes.** A record read through a caching site leaves
+  the record and the site in the region's context (`Cx::keyed`). A write
+  of a short key to that record, by a store or by a template's held
+  write, overwrites the entry where the site's proof found it, without
+  finding the key again (`Arena::table_write_at`), while the record is
+  still the version the proof names and the entry there is keyed by it.
+  An edit that adds, removes or moves an entry revokes the version, and a
+  write by another key fails the key check: either finds its key again.
+- **Element writes.** A template that declares its paths on a list, a
+  whole float position at least zero below the list's length and
+  2³² − 1, and a value to be the element write
+  (`HeapTemplate::element_write`, TypeScript's `ts.set`) has that write
+  checked and held as its paths' own `set_index`, charged the template's
+  units. Any other operands run the paths.
+- **Absence proofs.** A record membership test that found a short text absent
+  keeps the table's version (`Cx::absent`); the next test of that text
+  there answers absent while the table is still that version, as the
+  brand test before each plain-record read and `ts.set` makes it.
+
+`helper_plans::calls::keyed_and_element_writes_find_their_keys_again_after_an_interposed_write`
+runs TypeScript programs whose regions add, write over and delete the
+keys they read, write by another key, brand the record, call a callback
+that adds and deletes keys between the read and the write, and write
+lists at, past and outside their length, against the regions-off
+reference across a spread of charge bounds.
+
 Warm paired `instructions:u` against main 7d6ab737dd: list_map_filter
 Python 2.606 → 2.020 M per body, TypeScript 6.550 → 6.229, whose rest is
 its helpers' plan walks; every other row within 1% or lower, charges and

@@ -1424,6 +1424,15 @@ fn arms(arms: BTreeMap<String, Vec<Vec<&'static str>>>) -> String {
         .join("\n")
 }
 
+/// The helpers whose body, on a list, a float that is a whole number at
+/// least zero and below both the list's length and 2³² − 1, and any
+/// value, makes the element write `set target[key] = value` and answers
+/// `value`, as [`lash_kernel_doc::plan::HeapTemplate::element_write`]
+/// declares: the TypeScript member write, whose list branch converts such
+/// a key to itself (`ts.number_index`) and writes there. The regions law
+/// that a region's element writes agree with the reference's pins each.
+const ELEMENT_WRITES: &[&str] = &["ts.set"];
+
 /// A generated template descriptor and its prepared code, if a typed path
 /// of this body can run using certified native entries, or the arena.
 pub(crate) fn emit(
@@ -1481,9 +1490,10 @@ pub(crate) fn emit(
     match heap {
         None => descriptor.push_str("None"),
         Some(heap) => {
+            let element_write = heap.writes && ELEMENT_WRITES.contains(&definition.name.as_str());
             let _ = write!(
                 descriptor,
-                "Some(p::HeapTemplate {{ entry: {ident}_heap, depth: {}, writes: {}, callees: &[",
+                "Some(p::HeapTemplate {{ entry: {ident}_heap, depth: {}, writes: {}, element_write: {element_write}, callees: &[",
                 heap.depth, heap.writes
             );
             for callee in &evaluator.heap_callees {

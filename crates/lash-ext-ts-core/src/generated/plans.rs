@@ -2012,7 +2012,7 @@ const TS_NUMBER_PARTS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_parts,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), ], heap: Some(p::HeapTemplate { entry: ts_number_parts_heap, depth: 1, writes: false, callees: &[p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"), p::function("deca028ad69c6201e1bd21f8e4e8a06f04f569de81bf874d0dea167f9c6d43f0"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), ], heap: Some(p::HeapTemplate { entry: ts_number_parts_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"), p::function("deca028ad69c6201e1bd21f8e4e8a06f04f569de81bf874d0dea167f9c6d43f0"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.number.parts`.
@@ -2315,7 +2315,7 @@ const TS_NUMBER_TO_STRING_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_to_string,
-    template: Some(p::HelperTemplate { entry: Some(ts_number_to_string_template), depth: 1, callees: &[p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"), p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), ], heap: Some(p::HeapTemplate { entry: ts_number_to_string_heap, depth: 1, writes: false, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), p::function("837280875267b97dfe4d629a8cd1d67d60ccfc0d543f2a6514987ba17856477b"), p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("b65fabffb79156c07512dac571905bdd69ee745f43b11f459cd8c9532d556369"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_number_to_string_template), depth: 1, callees: &[p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"), p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), ], heap: Some(p::HeapTemplate { entry: ts_number_to_string_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), p::function("837280875267b97dfe4d629a8cd1d67d60ccfc0d543f2a6514987ba17856477b"), p::function("a6c5541c537bca274e439467011e6f2a631cad9a29a4cca7a7710763e675f716"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("b65fabffb79156c07512dac571905bdd69ee745f43b11f459cd8c9532d556369"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.number.to_string`.
@@ -2817,7 +2817,7 @@ const TS_NUMBER_ROUND_DECIMAL_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_round_decimal,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("7c6d468905b27d5fdbe3d53b27a771d4faecb304b06800d5276e9737b0d7a65d"), p::function("a631f1db16e0919582a48c0115c70f620ac78ec530925aebb79838359199e6b4"), p::function("1966318104704b5e0349d117c7da61381305ced9c68b0316de24cf54ec1f1227"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), p::function("56b094872b8ca6408c2131c289eb04021b8a02d1151f834f22d7f45fe0ea6ea9"), ], heap: Some(p::HeapTemplate { entry: ts_number_round_decimal_heap, depth: 2, writes: false, callees: &[p::function("909cd0df1a0c9024f6a8fa1bcdcbaebbd5750b1561528ba7cd7563555f27d1e2"), p::function("019095a129505695c8bdb86f6cd4e03844f7fa3b9888bb776712605f4c2d993e"), p::function("7c6d468905b27d5fdbe3d53b27a771d4faecb304b06800d5276e9737b0d7a65d"), p::function("a631f1db16e0919582a48c0115c70f620ac78ec530925aebb79838359199e6b4"), p::function("1966318104704b5e0349d117c7da61381305ced9c68b0316de24cf54ec1f1227"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("7c6d468905b27d5fdbe3d53b27a771d4faecb304b06800d5276e9737b0d7a65d"), p::function("a631f1db16e0919582a48c0115c70f620ac78ec530925aebb79838359199e6b4"), p::function("1966318104704b5e0349d117c7da61381305ced9c68b0316de24cf54ec1f1227"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), p::function("56b094872b8ca6408c2131c289eb04021b8a02d1151f834f22d7f45fe0ea6ea9"), ], heap: Some(p::HeapTemplate { entry: ts_number_round_decimal_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("909cd0df1a0c9024f6a8fa1bcdcbaebbd5750b1561528ba7cd7563555f27d1e2"), p::function("019095a129505695c8bdb86f6cd4e03844f7fa3b9888bb776712605f4c2d993e"), p::function("7c6d468905b27d5fdbe3d53b27a771d4faecb304b06800d5276e9737b0d7a65d"), p::function("a631f1db16e0919582a48c0115c70f620ac78ec530925aebb79838359199e6b4"), p::function("1966318104704b5e0349d117c7da61381305ced9c68b0316de24cf54ec1f1227"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.number.round_decimal`.
@@ -2976,7 +2976,7 @@ const TS_REGEXP_ESCAPED_SOURCE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_escaped_source,
-    template: Some(p::HelperTemplate { entry: Some(ts_regexp_escaped_source_template), depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_regexp_escaped_source_heap, depth: 1, writes: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_regexp_escaped_source_template), depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_regexp_escaped_source_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.regexp.escaped_source`.
@@ -3203,7 +3203,7 @@ const TS_REGEXP_SPELL_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_spell,
-    template: Some(p::HelperTemplate { entry: Some(ts_regexp_spell_template), depth: 2, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), ], heap: Some(p::HeapTemplate { entry: ts_regexp_spell_heap, depth: 2, writes: false, callees: &[p::function("ec4fee5a46bb2d63665dd02de716b63bf630c4877fc96abc3b23525960656a0f"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_regexp_spell_template), depth: 2, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), ], heap: Some(p::HeapTemplate { entry: ts_regexp_spell_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("ec4fee5a46bb2d63665dd02de716b63bf630c4877fc96abc3b23525960656a0f"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.regexp.spell`.
@@ -3416,7 +3416,7 @@ const TS_EXOTIC_TO_PRIMITIVE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_exotic_to_primitive,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_exotic_to_primitive_heap, depth: 1, writes: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("17105be7ba3a8330dee6f0c09c5d302249850963f4312c7c272341d89c731bb9"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_exotic_to_primitive_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("17105be7ba3a8330dee6f0c09c5d302249850963f4312c7c272341d89c731bb9"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.exotic.to_primitive`.
@@ -3586,7 +3586,7 @@ const TS_EXOTIC_GET_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_exotic_get,
-    template: Some(p::HelperTemplate { entry: Some(ts_exotic_get_template), depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_exotic_get_heap, depth: 1, writes: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_exotic_get_template), depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_exotic_get_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.exotic.get`.
@@ -4229,7 +4229,7 @@ const BRAND_OF_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: brand_of,
-    template: Some(p::HelperTemplate { entry: Some(brand_of_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: brand_of_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(brand_of_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: brand_of_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `brand.of`.
@@ -4365,7 +4365,7 @@ const TS_RECEIVER_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_receiver,
-    template: Some(p::HelperTemplate { entry: Some(ts_receiver_template), depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), ], heap: Some(p::HeapTemplate { entry: ts_receiver_heap, depth: 1, writes: false, callees: &[p::function("bd9a21264286394a5cd731fecaa03951fb50517689667675c0788623eb529dc1"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_receiver_template), depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), ], heap: Some(p::HeapTemplate { entry: ts_receiver_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("bd9a21264286394a5cd731fecaa03951fb50517689667675c0788623eb529dc1"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.receiver`.
@@ -4576,7 +4576,7 @@ const TS_CALLABLE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_callable,
-    template: Some(p::HelperTemplate { entry: Some(ts_callable_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_callable_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_callable_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_callable_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.callable`.
@@ -4669,7 +4669,7 @@ const TS_IDENTITY_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_identity,
-    template: Some(p::HelperTemplate { entry: Some(ts_identity_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_identity_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_identity_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_identity_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.identity`.
@@ -4848,7 +4848,7 @@ const TS_NOTHING_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_nothing,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_nothing_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_nothing_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.nothing`.
@@ -4899,7 +4899,7 @@ const TS_IS_PRIMITIVE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_is_primitive,
-    template: Some(p::HelperTemplate { entry: Some(ts_is_primitive_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_is_primitive_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_is_primitive_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_is_primitive_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.is_primitive`.
@@ -5012,7 +5012,7 @@ const TS_IS_NULLISH_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_is_nullish,
-    template: Some(p::HelperTemplate { entry: Some(ts_is_nullish_template), depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_is_nullish_heap, depth: 1, writes: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_is_nullish_template), depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_is_nullish_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.is_nullish`.
@@ -5107,7 +5107,7 @@ const TS_TDZ_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_tdz,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_tdz_heap, depth: 1, writes: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_tdz_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.tdz`.
@@ -5173,7 +5173,7 @@ const TS_REQUIRE_OBJECT_COERCIBLE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_require_object_coercible,
-    template: Some(p::HelperTemplate { entry: Some(ts_require_object_coercible_template), depth: 2, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_require_object_coercible_heap, depth: 2, writes: false, callees: &[p::function("d03fe5e4e3e3d05cb1759701a45670d5304f2a0b3cd9b10ac54a3a75b7c1f329"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_require_object_coercible_template), depth: 2, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_require_object_coercible_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("d03fe5e4e3e3d05cb1759701a45670d5304f2a0b3cd9b10ac54a3a75b7c1f329"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.require_object_coercible`.
@@ -5276,7 +5276,7 @@ const TS_TO_BOOLEAN_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_to_boolean,
-    template: Some(p::HelperTemplate { entry: Some(ts_to_boolean_template), depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_to_boolean_heap, depth: 1, writes: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_to_boolean_template), depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_to_boolean_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.to_boolean`.
@@ -5452,7 +5452,7 @@ const TS_NOT_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_not,
-    template: Some(p::HelperTemplate { entry: Some(ts_not_template), depth: 2, callees: &[p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_not_heap, depth: 2, writes: false, callees: &[p::function("b4252aa68f32719de0ad3e54fa97a921dd9389de33636cc8e2f3cb5eed74933a"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_not_template), depth: 2, callees: &[p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_not_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("b4252aa68f32719de0ad3e54fa97a921dd9389de33636cc8e2f3cb5eed74933a"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.not`.
@@ -5707,7 +5707,7 @@ const TS_PRIMITIVE_TO_STRING_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_primitive_to_string,
-    template: Some(p::HelperTemplate { entry: Some(ts_primitive_to_string_template), depth: 2, callees: &[p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"), p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), ], heap: Some(p::HeapTemplate { entry: ts_primitive_to_string_heap, depth: 2, writes: false, callees: &[p::function("43247079116a53762b67e1adf9544aa048fac344f9605578010ed35243a83992"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_primitive_to_string_template), depth: 2, callees: &[p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"), p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), ], heap: Some(p::HeapTemplate { entry: ts_primitive_to_string_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("43247079116a53762b67e1adf9544aa048fac344f9605578010ed35243a83992"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.primitive_to_string`.
@@ -6079,7 +6079,7 @@ const TS_PRIMITIVE_TO_NUMBER_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_primitive_to_number,
-    template: Some(p::HelperTemplate { entry: Some(ts_primitive_to_number_template), depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_primitive_to_number_heap, depth: 2, writes: false, callees: &[p::function("5bdc442e52a107615a23256bf77b48e631d67534564ce1b066348f1d219e6ad9"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_primitive_to_number_template), depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_primitive_to_number_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("5bdc442e52a107615a23256bf77b48e631d67534564ce1b066348f1d219e6ad9"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.primitive_to_number`.
@@ -6252,7 +6252,7 @@ const TS_TO_PRIMITIVE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_to_primitive,
-    template: Some(p::HelperTemplate { entry: Some(ts_to_primitive_template), depth: 2, callees: &[], heap: Some(p::HeapTemplate { entry: ts_to_primitive_heap, depth: 2, writes: false, callees: &[p::function("3e69ab18f4601aeb45d3cd1d49dd3a82f3929ee7a7de58a6d13ac0cc2255b230"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_to_primitive_template), depth: 2, callees: &[], heap: Some(p::HeapTemplate { entry: ts_to_primitive_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("3e69ab18f4601aeb45d3cd1d49dd3a82f3929ee7a7de58a6d13ac0cc2255b230"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.to_primitive`.
@@ -6368,7 +6368,7 @@ const TS_TO_STRING_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_to_string,
-    template: Some(p::HelperTemplate { entry: Some(ts_to_string_template), depth: 2, callees: &[p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"), p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), ], heap: Some(p::HeapTemplate { entry: ts_to_string_heap, depth: 2, writes: false, callees: &[p::function("43247079116a53762b67e1adf9544aa048fac344f9605578010ed35243a83992"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_to_string_template), depth: 2, callees: &[p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"), p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), ], heap: Some(p::HeapTemplate { entry: ts_to_string_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("43247079116a53762b67e1adf9544aa048fac344f9605578010ed35243a83992"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.to_string`.
@@ -6703,7 +6703,7 @@ const TS_TO_NUMBER_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_to_number,
-    template: Some(p::HelperTemplate { entry: Some(ts_to_number_template), depth: 3, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_to_number_heap, depth: 2, writes: false, callees: &[p::function("04a7708dc45d479ed37f6240f5db8e0e93ded5280313782b87fc7dab40f125da"), p::function("e3f5ecc4293cdbcf0996708034c6c8db4dcc7cc8c8ff730e6fe472078484bc39"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_to_number_template), depth: 3, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_to_number_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("04a7708dc45d479ed37f6240f5db8e0e93ded5280313782b87fc7dab40f125da"), p::function("e3f5ecc4293cdbcf0996708034c6c8db4dcc7cc8c8ff730e6fe472078484bc39"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.to_number`.
@@ -6845,7 +6845,7 @@ const TS_TO_PROPERTY_KEY_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_to_property_key,
-    template: Some(p::HelperTemplate { entry: Some(ts_to_property_key_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_to_property_key_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_to_property_key_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_to_property_key_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.to_property_key`.
@@ -6967,7 +6967,7 @@ const TS_ADD_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_add,
-    template: Some(p::HelperTemplate { entry: Some(ts_add_template), depth: 3, callees: &[p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"), p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), ], heap: Some(p::HeapTemplate { entry: ts_add_heap, depth: 1, writes: false, callees: &[p::function("04a7708dc45d479ed37f6240f5db8e0e93ded5280313782b87fc7dab40f125da"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), ] }), forwards: p::Forwards { floats: Some(0), ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_add_template), depth: 3, callees: &[p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("602d19f60375c2c01e09fe99d8a2a7aa8d19da47cc2e58ebedea904f5cb8a1ea"), p::function("6ff2248639e3120f65b26cbddc76b695039f8bba6cc5987e5603eb1c81dfef29"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), ], heap: Some(p::HeapTemplate { entry: ts_add_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("04a7708dc45d479ed37f6240f5db8e0e93ded5280313782b87fc7dab40f125da"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), ] }), forwards: p::Forwards { floats: Some(0), ints: None } }),
 };
 
 /// `ts.add`.
@@ -7469,7 +7469,7 @@ const TS_SUB_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_sub,
-    template: Some(p::HelperTemplate { entry: Some(ts_sub_template), depth: 4, callees: &[p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_sub_heap, depth: 2, writes: false, callees: &[p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), ] }), forwards: p::Forwards { floats: Some(0), ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_sub_template), depth: 4, callees: &[p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_sub_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), ] }), forwards: p::Forwards { floats: Some(0), ints: None } }),
 };
 
 /// `ts.sub`.
@@ -7785,7 +7785,7 @@ const TS_MUL_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_mul,
-    template: Some(p::HelperTemplate { entry: Some(ts_mul_template), depth: 4, callees: &[p::function("7c6d468905b27d5fdbe3d53b27a771d4faecb304b06800d5276e9737b0d7a65d"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_mul_heap, depth: 2, writes: false, callees: &[p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("7c6d468905b27d5fdbe3d53b27a771d4faecb304b06800d5276e9737b0d7a65d"), ] }), forwards: p::Forwards { floats: Some(0), ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_mul_template), depth: 4, callees: &[p::function("7c6d468905b27d5fdbe3d53b27a771d4faecb304b06800d5276e9737b0d7a65d"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_mul_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("7c6d468905b27d5fdbe3d53b27a771d4faecb304b06800d5276e9737b0d7a65d"), ] }), forwards: p::Forwards { floats: Some(0), ints: None } }),
 };
 
 /// `ts.mul`.
@@ -8080,7 +8080,7 @@ const TS_DIV_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_div,
-    template: Some(p::HelperTemplate { entry: Some(ts_div_template), depth: 4, callees: &[p::function("911f0bcde803695098852e1c76b7506de3978c961cfdbe375faa942a23b85211"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_div_heap, depth: 2, writes: false, callees: &[p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("911f0bcde803695098852e1c76b7506de3978c961cfdbe375faa942a23b85211"), ] }), forwards: p::Forwards { floats: Some(0), ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_div_template), depth: 4, callees: &[p::function("911f0bcde803695098852e1c76b7506de3978c961cfdbe375faa942a23b85211"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_div_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("911f0bcde803695098852e1c76b7506de3978c961cfdbe375faa942a23b85211"), ] }), forwards: p::Forwards { floats: Some(0), ints: None } }),
 };
 
 /// `ts.div`.
@@ -8369,7 +8369,7 @@ const TS_REM_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_rem,
-    template: Some(p::HelperTemplate { entry: Some(ts_rem_template), depth: 4, callees: &[p::function("ddc71def75c553460771da4d369727feaee3697855d8bd53b06b285fe33e4374"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_rem_heap, depth: 2, writes: false, callees: &[p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("ddc71def75c553460771da4d369727feaee3697855d8bd53b06b285fe33e4374"), ] }), forwards: p::Forwards { floats: Some(0), ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_rem_template), depth: 4, callees: &[p::function("ddc71def75c553460771da4d369727feaee3697855d8bd53b06b285fe33e4374"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_rem_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("ddc71def75c553460771da4d369727feaee3697855d8bd53b06b285fe33e4374"), ] }), forwards: p::Forwards { floats: Some(0), ints: None } }),
 };
 
 /// `ts.rem`.
@@ -8666,7 +8666,7 @@ const TS_POW_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_pow,
-    template: Some(p::HelperTemplate { entry: Some(ts_pow_template), depth: 4, callees: &[p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("9327ff5d434096e51a0d591dfbf5fbf98a2478a276e5e767dc5b3973ef8ecc5a"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), ], heap: Some(p::HeapTemplate { entry: ts_pow_heap, depth: 2, writes: false, callees: &[p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_pow_template), depth: 4, callees: &[p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("9327ff5d434096e51a0d591dfbf5fbf98a2478a276e5e767dc5b3973ef8ecc5a"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), ], heap: Some(p::HeapTemplate { entry: ts_pow_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.pow`.
@@ -8869,7 +8869,7 @@ const TS_NEG_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_neg,
-    template: Some(p::HelperTemplate { entry: Some(ts_neg_template), depth: 4, callees: &[p::function("56b094872b8ca6408c2131c289eb04021b8a02d1151f834f22d7f45fe0ea6ea9"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_neg_heap, depth: 2, writes: false, callees: &[p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("56b094872b8ca6408c2131c289eb04021b8a02d1151f834f22d7f45fe0ea6ea9"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_neg_template), depth: 4, callees: &[p::function("56b094872b8ca6408c2131c289eb04021b8a02d1151f834f22d7f45fe0ea6ea9"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_neg_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("56b094872b8ca6408c2131c289eb04021b8a02d1151f834f22d7f45fe0ea6ea9"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.neg`.
@@ -8993,7 +8993,7 @@ const TS_TO_INT32_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_to_int32,
-    template: Some(p::HelperTemplate { entry: Some(ts_to_int32_template), depth: 4, callees: &[p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("5b5e2d3553d993fdb67a6863cbb1993be4e0c436d6cdd18fd2ec6695db681671"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_to_int32_heap, depth: 2, writes: false, callees: &[p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_to_int32_template), depth: 4, callees: &[p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("5b5e2d3553d993fdb67a6863cbb1993be4e0c436d6cdd18fd2ec6695db681671"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_to_int32_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.to_int32`.
@@ -9188,7 +9188,7 @@ const TS_SHIFT_COUNT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_shift_count,
-    template: Some(p::HelperTemplate { entry: Some(ts_shift_count_template), depth: 5, callees: &[p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("5b5e2d3553d993fdb67a6863cbb1993be4e0c436d6cdd18fd2ec6695db681671"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_shift_count_heap, depth: 2, writes: false, callees: &[p::function("7324402066a92f95eac00ead28b80f24e953d29c7ebdacaa0477cd972fc10e74"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_shift_count_template), depth: 5, callees: &[p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("5b5e2d3553d993fdb67a6863cbb1993be4e0c436d6cdd18fd2ec6695db681671"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_shift_count_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("7324402066a92f95eac00ead28b80f24e953d29c7ebdacaa0477cd972fc10e74"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.shift_count`.
@@ -9472,7 +9472,7 @@ const TS_BIT_AND_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_bit_and,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("5b5e2d3553d993fdb67a6863cbb1993be4e0c436d6cdd18fd2ec6695db681671"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_bit_and_heap, depth: 2, writes: false, callees: &[p::function("7324402066a92f95eac00ead28b80f24e953d29c7ebdacaa0477cd972fc10e74"), p::function("25bb0b6472f071a3dbc77b15868061217888842c5100b1bce3f95a1bd022d9a7"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("5b5e2d3553d993fdb67a6863cbb1993be4e0c436d6cdd18fd2ec6695db681671"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_bit_and_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("7324402066a92f95eac00ead28b80f24e953d29c7ebdacaa0477cd972fc10e74"), p::function("25bb0b6472f071a3dbc77b15868061217888842c5100b1bce3f95a1bd022d9a7"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.bit_and`.
@@ -9574,7 +9574,7 @@ const TS_BIT_OR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_bit_or,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("5b5e2d3553d993fdb67a6863cbb1993be4e0c436d6cdd18fd2ec6695db681671"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_bit_or_heap, depth: 2, writes: false, callees: &[p::function("7324402066a92f95eac00ead28b80f24e953d29c7ebdacaa0477cd972fc10e74"), p::function("25bb0b6472f071a3dbc77b15868061217888842c5100b1bce3f95a1bd022d9a7"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("5b5e2d3553d993fdb67a6863cbb1993be4e0c436d6cdd18fd2ec6695db681671"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_bit_or_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("7324402066a92f95eac00ead28b80f24e953d29c7ebdacaa0477cd972fc10e74"), p::function("25bb0b6472f071a3dbc77b15868061217888842c5100b1bce3f95a1bd022d9a7"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.bit_or`.
@@ -9676,7 +9676,7 @@ const TS_BIT_XOR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_bit_xor,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("5b5e2d3553d993fdb67a6863cbb1993be4e0c436d6cdd18fd2ec6695db681671"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_bit_xor_heap, depth: 2, writes: false, callees: &[p::function("7324402066a92f95eac00ead28b80f24e953d29c7ebdacaa0477cd972fc10e74"), p::function("25bb0b6472f071a3dbc77b15868061217888842c5100b1bce3f95a1bd022d9a7"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("5b5e2d3553d993fdb67a6863cbb1993be4e0c436d6cdd18fd2ec6695db681671"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_bit_xor_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("7324402066a92f95eac00ead28b80f24e953d29c7ebdacaa0477cd972fc10e74"), p::function("25bb0b6472f071a3dbc77b15868061217888842c5100b1bce3f95a1bd022d9a7"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.bit_xor`.
@@ -9768,7 +9768,7 @@ const TS_BIT_NOT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_bit_not,
-    template: Some(p::HelperTemplate { entry: Some(ts_bit_not_template), depth: 5, callees: &[p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("5b5e2d3553d993fdb67a6863cbb1993be4e0c436d6cdd18fd2ec6695db681671"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("56b094872b8ca6408c2131c289eb04021b8a02d1151f834f22d7f45fe0ea6ea9"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_bit_not_heap, depth: 2, writes: false, callees: &[p::function("7324402066a92f95eac00ead28b80f24e953d29c7ebdacaa0477cd972fc10e74"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_bit_not_template), depth: 5, callees: &[p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("5b5e2d3553d993fdb67a6863cbb1993be4e0c436d6cdd18fd2ec6695db681671"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("56b094872b8ca6408c2131c289eb04021b8a02d1151f834f22d7f45fe0ea6ea9"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_bit_not_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("7324402066a92f95eac00ead28b80f24e953d29c7ebdacaa0477cd972fc10e74"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.bit_not`.
@@ -9872,7 +9872,7 @@ const TS_SHL_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_shl,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("5b5e2d3553d993fdb67a6863cbb1993be4e0c436d6cdd18fd2ec6695db681671"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("7c6d468905b27d5fdbe3d53b27a771d4faecb304b06800d5276e9737b0d7a65d"), ], heap: Some(p::HeapTemplate { entry: ts_shl_heap, depth: 2, writes: false, callees: &[p::function("7324402066a92f95eac00ead28b80f24e953d29c7ebdacaa0477cd972fc10e74"), p::function("0f94c82b5ae73b1925ae125b7b54e6a5cb375a4d38651c70963380f01b0892a4"), p::function("019095a129505695c8bdb86f6cd4e03844f7fa3b9888bb776712605f4c2d993e"), p::function("7a85dc4fb58b9b41d083fde14a055636e111c24f87d4569b12bf9f06927eb54e"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("5b5e2d3553d993fdb67a6863cbb1993be4e0c436d6cdd18fd2ec6695db681671"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("7c6d468905b27d5fdbe3d53b27a771d4faecb304b06800d5276e9737b0d7a65d"), ], heap: Some(p::HeapTemplate { entry: ts_shl_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("7324402066a92f95eac00ead28b80f24e953d29c7ebdacaa0477cd972fc10e74"), p::function("0f94c82b5ae73b1925ae125b7b54e6a5cb375a4d38651c70963380f01b0892a4"), p::function("019095a129505695c8bdb86f6cd4e03844f7fa3b9888bb776712605f4c2d993e"), p::function("7a85dc4fb58b9b41d083fde14a055636e111c24f87d4569b12bf9f06927eb54e"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.shl`.
@@ -9985,7 +9985,7 @@ const TS_SHR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_shr,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("5b5e2d3553d993fdb67a6863cbb1993be4e0c436d6cdd18fd2ec6695db681671"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("ebe65811f61f7e8eacdb0869fffd62062a5424a93c09efad9772dbfd58ff2e5e"), ], heap: Some(p::HeapTemplate { entry: ts_shr_heap, depth: 2, writes: false, callees: &[p::function("7324402066a92f95eac00ead28b80f24e953d29c7ebdacaa0477cd972fc10e74"), p::function("0f94c82b5ae73b1925ae125b7b54e6a5cb375a4d38651c70963380f01b0892a4"), p::function("019095a129505695c8bdb86f6cd4e03844f7fa3b9888bb776712605f4c2d993e"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("5b5e2d3553d993fdb67a6863cbb1993be4e0c436d6cdd18fd2ec6695db681671"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("ebe65811f61f7e8eacdb0869fffd62062a5424a93c09efad9772dbfd58ff2e5e"), ], heap: Some(p::HeapTemplate { entry: ts_shr_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("7324402066a92f95eac00ead28b80f24e953d29c7ebdacaa0477cd972fc10e74"), p::function("0f94c82b5ae73b1925ae125b7b54e6a5cb375a4d38651c70963380f01b0892a4"), p::function("019095a129505695c8bdb86f6cd4e03844f7fa3b9888bb776712605f4c2d993e"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.shr`.
@@ -10086,7 +10086,7 @@ const TS_USHR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_ushr,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("5b5e2d3553d993fdb67a6863cbb1993be4e0c436d6cdd18fd2ec6695db681671"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("ebe65811f61f7e8eacdb0869fffd62062a5424a93c09efad9772dbfd58ff2e5e"), ], heap: Some(p::HeapTemplate { entry: ts_ushr_heap, depth: 2, writes: false, callees: &[p::function("7324402066a92f95eac00ead28b80f24e953d29c7ebdacaa0477cd972fc10e74"), p::function("0f94c82b5ae73b1925ae125b7b54e6a5cb375a4d38651c70963380f01b0892a4"), p::function("019095a129505695c8bdb86f6cd4e03844f7fa3b9888bb776712605f4c2d993e"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("5b5e2d3553d993fdb67a6863cbb1993be4e0c436d6cdd18fd2ec6695db681671"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("ebe65811f61f7e8eacdb0869fffd62062a5424a93c09efad9772dbfd58ff2e5e"), ], heap: Some(p::HeapTemplate { entry: ts_ushr_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("7324402066a92f95eac00ead28b80f24e953d29c7ebdacaa0477cd972fc10e74"), p::function("0f94c82b5ae73b1925ae125b7b54e6a5cb375a4d38651c70963380f01b0892a4"), p::function("019095a129505695c8bdb86f6cd4e03844f7fa3b9888bb776712605f4c2d993e"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.ushr`.
@@ -10276,7 +10276,7 @@ const TS_STRICT_NOT_EQUALS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_strict_not_equals,
-    template: Some(p::HelperTemplate { entry: Some(ts_strict_not_equals_template), depth: 3, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), ], heap: Some(p::HeapTemplate { entry: ts_strict_not_equals_heap, depth: 2, writes: false, callees: &[p::function("22c37722c14659f302c927ace77eff939fb4cfdb0a9b6a2e07d3cda44f706406"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_strict_not_equals_template), depth: 3, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), ], heap: Some(p::HeapTemplate { entry: ts_strict_not_equals_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("22c37722c14659f302c927ace77eff939fb4cfdb0a9b6a2e07d3cda44f706406"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.strict_not_equals`.
@@ -10439,7 +10439,7 @@ const TS_LOOSE_NOT_EQUALS_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_loose_not_equals,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_loose_not_equals_heap, depth: 2, writes: false, callees: &[p::function("ee00c8086a46d3d2ea3150e8087677aa47237db521806023a1ae45e0b6cf61cf"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_loose_not_equals_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("ee00c8086a46d3d2ea3150e8087677aa47237db521806023a1ae45e0b6cf61cf"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.loose_not_equals`.
@@ -10637,7 +10637,7 @@ const TS_LT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_lt,
-    template: Some(p::HelperTemplate { entry: Some(ts_lt_template), depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ], heap: Some(p::HeapTemplate { entry: ts_lt_heap, depth: 1, writes: false, callees: &[p::function("8b786c8cf9af13d71d7308daaa27451edb34c0dd83f99f1bf074dee658b372c8"), p::function("b67f500ce137b6b799850a96d9f81e2aa25e1f7272972265fb43a65142e955ed"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ] }), forwards: p::Forwards { floats: Some(1), ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_lt_template), depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ], heap: Some(p::HeapTemplate { entry: ts_lt_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("8b786c8cf9af13d71d7308daaa27451edb34c0dd83f99f1bf074dee658b372c8"), p::function("b67f500ce137b6b799850a96d9f81e2aa25e1f7272972265fb43a65142e955ed"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ] }), forwards: p::Forwards { floats: Some(1), ints: None } }),
 };
 
 /// `ts.lt`.
@@ -10798,7 +10798,7 @@ const TS_GT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_gt,
-    template: Some(p::HelperTemplate { entry: Some(ts_gt_template), depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ], heap: Some(p::HeapTemplate { entry: ts_gt_heap, depth: 1, writes: false, callees: &[p::function("8b786c8cf9af13d71d7308daaa27451edb34c0dd83f99f1bf074dee658b372c8"), p::function("b67f500ce137b6b799850a96d9f81e2aa25e1f7272972265fb43a65142e955ed"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_gt_template), depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ], heap: Some(p::HeapTemplate { entry: ts_gt_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("8b786c8cf9af13d71d7308daaa27451edb34c0dd83f99f1bf074dee658b372c8"), p::function("b67f500ce137b6b799850a96d9f81e2aa25e1f7272972265fb43a65142e955ed"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.gt`.
@@ -10961,7 +10961,7 @@ const TS_LE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_le,
-    template: Some(p::HelperTemplate { entry: Some(ts_le_template), depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_le_heap, depth: 1, writes: false, callees: &[p::function("8b786c8cf9af13d71d7308daaa27451edb34c0dd83f99f1bf074dee658b372c8"), p::function("b67f500ce137b6b799850a96d9f81e2aa25e1f7272972265fb43a65142e955ed"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), ] }), forwards: p::Forwards { floats: Some(1), ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_le_template), depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_le_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("8b786c8cf9af13d71d7308daaa27451edb34c0dd83f99f1bf074dee658b372c8"), p::function("b67f500ce137b6b799850a96d9f81e2aa25e1f7272972265fb43a65142e955ed"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), ] }), forwards: p::Forwards { floats: Some(1), ints: None } }),
 };
 
 /// `ts.le`.
@@ -11127,7 +11127,7 @@ const TS_GE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_ge,
-    template: Some(p::HelperTemplate { entry: Some(ts_ge_template), depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_ge_heap, depth: 1, writes: false, callees: &[p::function("8b786c8cf9af13d71d7308daaa27451edb34c0dd83f99f1bf074dee658b372c8"), p::function("b67f500ce137b6b799850a96d9f81e2aa25e1f7272972265fb43a65142e955ed"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_ge_template), depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_ge_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("8b786c8cf9af13d71d7308daaa27451edb34c0dd83f99f1bf074dee658b372c8"), p::function("b67f500ce137b6b799850a96d9f81e2aa25e1f7272972265fb43a65142e955ed"), p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.ge`.
@@ -11278,7 +11278,7 @@ const TS_PAD_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_pad,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), ], heap: Some(p::HeapTemplate { entry: ts_pad_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), ], heap: Some(p::HeapTemplate { entry: ts_pad_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.pad`.
@@ -11984,7 +11984,7 @@ const TS_NUMBER_INDEX_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_number_index,
-    template: Some(p::HelperTemplate { entry: Some(ts_number_index_template), depth: 1, callees: &[p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), ], heap: Some(p::HeapTemplate { entry: ts_number_index_heap, depth: 1, writes: false, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_number_index_template), depth: 1, callees: &[p::function("d85e26af1e62c7c06fe6456f3a4a756dbd7d92b98361ea1bf89b69d08d81354b"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), ], heap: Some(p::HeapTemplate { entry: ts_number_index_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.number_index`.
@@ -12243,7 +12243,7 @@ const TS_GET_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_get,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_get_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_get_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.get`.
@@ -12472,7 +12472,7 @@ const TS_SET_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_set,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_set_heap, depth: 2, writes: true, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("802dfd92c69326cab249403280675a5fb1ce4e299a0bf653659123953c8a924a"), p::function("410e5d470cbf6542e202284c3b45ca02da9f1ee32f5d5eff5892c59fdb8843c0"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("54dfeddf2cdae29653d493078bbdd0e86fd6e7cb67068eac8b64a3dd5af4c817"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_set_heap, depth: 2, writes: true, element_write: true, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("802dfd92c69326cab249403280675a5fb1ce4e299a0bf653659123953c8a924a"), p::function("410e5d470cbf6542e202284c3b45ca02da9f1ee32f5d5eff5892c59fdb8843c0"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("54dfeddf2cdae29653d493078bbdd0e86fd6e7cb67068eac8b64a3dd5af4c817"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.set`.
@@ -13811,7 +13811,7 @@ const TS_HAS_OWN_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_has_own,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_has_own_heap, depth: 2, writes: false, callees: &[p::function("410e5d470cbf6542e202284c3b45ca02da9f1ee32f5d5eff5892c59fdb8843c0"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("802dfd92c69326cab249403280675a5fb1ce4e299a0bf653659123953c8a924a"), p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_has_own_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("410e5d470cbf6542e202284c3b45ca02da9f1ee32f5d5eff5892c59fdb8843c0"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("802dfd92c69326cab249403280675a5fb1ce4e299a0bf653659123953c8a924a"), p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.has_own`.
@@ -14545,7 +14545,7 @@ const TS_HAS_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_has,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_has_heap, depth: 2, writes: false, callees: &[p::function("3e69ab18f4601aeb45d3cd1d49dd3a82f3929ee7a7de58a6d13ac0cc2255b230"), p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("802dfd92c69326cab249403280675a5fb1ce4e299a0bf653659123953c8a924a"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("0bcd8588a3a604b23580d7410b019675f7b986bbf558107960504db410fbf1a1"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_has_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("3e69ab18f4601aeb45d3cd1d49dd3a82f3929ee7a7de58a6d13ac0cc2255b230"), p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("802dfd92c69326cab249403280675a5fb1ce4e299a0bf653659123953c8a924a"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("0bcd8588a3a604b23580d7410b019675f7b986bbf558107960504db410fbf1a1"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.has`.
@@ -15574,7 +15574,7 @@ const TS_BOUNDARY_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_boundary,
-    template: Some(p::HelperTemplate { entry: Some(ts_boundary_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_boundary_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_boundary_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_boundary_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.boundary`.
@@ -16788,7 +16788,7 @@ const TS_MAP_KEY_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_map_key,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("bbea7a5425fe76c17d73173ea16def91df3e7f5987c5bb840911be86629023d7"), ], heap: Some(p::HeapTemplate { entry: ts_map_key_heap, depth: 1, writes: false, callees: &[p::function("bbea7a5425fe76c17d73173ea16def91df3e7f5987c5bb840911be86629023d7"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("bbea7a5425fe76c17d73173ea16def91df3e7f5987c5bb840911be86629023d7"), ], heap: Some(p::HeapTemplate { entry: ts_map_key_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("bbea7a5425fe76c17d73173ea16def91df3e7f5987c5bb840911be86629023d7"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.map.key`.
@@ -16853,7 +16853,7 @@ const TS_MAP_VALUE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_map_value,
-    template: Some(p::HelperTemplate { entry: Some(ts_map_value_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_map_value_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_map_value_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_map_value_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.map.value`.
@@ -17227,7 +17227,7 @@ const TS_MAP_IS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_map_is,
-    template: Some(p::HelperTemplate { entry: Some(ts_map_is_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_map_is_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_map_is_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_map_is_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.map.is`.
@@ -17297,7 +17297,7 @@ const TS_MAP_SIZE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_map_size,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_map_size_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_map_size_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.map.size`.
@@ -17371,7 +17371,7 @@ const TS_MAP_SET_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_map_set,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("bbea7a5425fe76c17d73173ea16def91df3e7f5987c5bb840911be86629023d7"), ], heap: Some(p::HeapTemplate { entry: ts_map_set_heap, depth: 1, writes: true, callees: &[p::function("fcebef303d3a1e680301434fa6bfc4aaef2beff0dd9b8916753e4d2a4be4eaf4"), p::function("bbea7a5425fe76c17d73173ea16def91df3e7f5987c5bb840911be86629023d7"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("bbea7a5425fe76c17d73173ea16def91df3e7f5987c5bb840911be86629023d7"), ], heap: Some(p::HeapTemplate { entry: ts_map_set_heap, depth: 1, writes: true, element_write: false, callees: &[p::function("fcebef303d3a1e680301434fa6bfc4aaef2beff0dd9b8916753e4d2a4be4eaf4"), p::function("bbea7a5425fe76c17d73173ea16def91df3e7f5987c5bb840911be86629023d7"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.map.set`.
@@ -17547,7 +17547,7 @@ const TS_MAP_HAS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_map_has,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("bbea7a5425fe76c17d73173ea16def91df3e7f5987c5bb840911be86629023d7"), ], heap: Some(p::HeapTemplate { entry: ts_map_has_heap, depth: 1, writes: false, callees: &[p::function("fcebef303d3a1e680301434fa6bfc4aaef2beff0dd9b8916753e4d2a4be4eaf4"), p::function("bbea7a5425fe76c17d73173ea16def91df3e7f5987c5bb840911be86629023d7"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("bbea7a5425fe76c17d73173ea16def91df3e7f5987c5bb840911be86629023d7"), ], heap: Some(p::HeapTemplate { entry: ts_map_has_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("fcebef303d3a1e680301434fa6bfc4aaef2beff0dd9b8916753e4d2a4be4eaf4"), p::function("bbea7a5425fe76c17d73173ea16def91df3e7f5987c5bb840911be86629023d7"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.map.has`.
@@ -18596,7 +18596,7 @@ const TS_SET_IS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_set_is,
-    template: Some(p::HelperTemplate { entry: Some(ts_set_is_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_set_is_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_set_is_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_set_is_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.set.is`.
@@ -19399,7 +19399,7 @@ const TS_SET_OTHER_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_set_other,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), ], heap: Some(p::HeapTemplate { entry: ts_set_other_heap, depth: 1, writes: false, callees: &[p::function("6d85a5db708b9eacee39796ab1556021e5310f316a9f5736e5f4c785f6a54324"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("7fb5154d44a31046fccc5c7dc57c6e347c7722d7774389baf931942e74602e22"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), ], heap: Some(p::HeapTemplate { entry: ts_set_other_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("6d85a5db708b9eacee39796ab1556021e5310f316a9f5736e5f4c785f6a54324"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("7fb5154d44a31046fccc5c7dc57c6e347c7722d7774389baf931942e74602e22"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.set.other`.
@@ -19568,7 +19568,7 @@ const TS_SET_CONTAINS_OTHER_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_set_contains_other,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_set_contains_other_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_set_contains_other_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.set.contains_other`.
@@ -19637,7 +19637,7 @@ const TS_SET_OTHER_SIZE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_set_other_size,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_set_other_size_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_set_other_size_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.set.other_size`.
@@ -20763,7 +20763,7 @@ const TS_BOOLEAN_CONVERT_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_boolean_convert,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_boolean_convert_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("b4252aa68f32719de0ad3e54fa97a921dd9389de33636cc8e2f3cb5eed74933a"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_boolean_convert_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("b4252aa68f32719de0ad3e54fa97a921dd9389de33636cc8e2f3cb5eed74933a"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.boolean.convert`.
@@ -20831,7 +20831,7 @@ const TS_BOOLEAN_VALUEOF_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_boolean_valueof,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_boolean_valueof_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_boolean_valueof_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.boolean.valueOf`.
@@ -20887,7 +20887,7 @@ const TS_BOOLEAN_TOSTRING_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_boolean_tostring,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_boolean_tostring_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_boolean_tostring_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.boolean.toString`.
@@ -20980,7 +20980,7 @@ const TS_OBJECT_OWN_KEYS_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_object_own_keys,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_object_own_keys_heap, depth: 2, writes: false, callees: &[p::function("66243008bcfdd0fd72283a81388aea4975e4ffd5134940b8d7f5372b58af3ae2"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_object_own_keys_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("66243008bcfdd0fd72283a81388aea4975e4ffd5134940b8d7f5372b58af3ae2"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.object.own_keys`.
@@ -21211,7 +21211,7 @@ const TS_OBJECT_CONVERT_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_object_convert,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_object_convert_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("d03fe5e4e3e3d05cb1759701a45670d5304f2a0b3cd9b10ac54a3a75b7c1f329"), p::function("3e69ab18f4601aeb45d3cd1d49dd3a82f3929ee7a7de58a6d13ac0cc2255b230"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_object_convert_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("d03fe5e4e3e3d05cb1759701a45670d5304f2a0b3cd9b10ac54a3a75b7c1f329"), p::function("3e69ab18f4601aeb45d3cd1d49dd3a82f3929ee7a7de58a6d13ac0cc2255b230"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.object.convert`.
@@ -23650,7 +23650,7 @@ const TS_OBJECT_ISPROTOTYPEOF_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_object_isprototypeof,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_object_isprototypeof_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("3e69ab18f4601aeb45d3cd1d49dd3a82f3929ee7a7de58a6d13ac0cc2255b230"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_object_isprototypeof_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("3e69ab18f4601aeb45d3cd1d49dd3a82f3929ee7a7de58a6d13ac0cc2255b230"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.object.isPrototypeOf`.
@@ -23834,7 +23834,7 @@ const TS_OBJECT_IS_INSTANCE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_object_is_instance,
-    template: Some(p::HelperTemplate { entry: Some(ts_object_is_instance_template), depth: 2, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_object_is_instance_heap, depth: 2, writes: false, callees: &[p::function("3e69ab18f4601aeb45d3cd1d49dd3a82f3929ee7a7de58a6d13ac0cc2255b230"), p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_object_is_instance_template), depth: 2, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_object_is_instance_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("3e69ab18f4601aeb45d3cd1d49dd3a82f3929ee7a7de58a6d13ac0cc2255b230"), p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.object.is_instance`.
@@ -23948,7 +23948,7 @@ const TS_MATH_ABS_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_abs,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), ], heap: Some(p::HeapTemplate { entry: ts_math_abs_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), ], heap: Some(p::HeapTemplate { entry: ts_math_abs_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("5a3601c17d34d0a6b1c736f4ffe5fd0706a77addcf2112c808677c15e7b8913a"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.math.abs`.
@@ -24043,7 +24043,7 @@ const TS_MATH_FLOOR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_floor,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), ], heap: Some(p::HeapTemplate { entry: ts_math_floor_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), ], heap: Some(p::HeapTemplate { entry: ts_math_floor_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.math.floor`.
@@ -24138,7 +24138,7 @@ const TS_MATH_CEIL_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_ceil,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b73d9e68f7bb112e1a7dfb043e6324a81341bbaf557cc32e05ea0b9f8eb1adb6"), ], heap: Some(p::HeapTemplate { entry: ts_math_ceil_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("b73d9e68f7bb112e1a7dfb043e6324a81341bbaf557cc32e05ea0b9f8eb1adb6"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b73d9e68f7bb112e1a7dfb043e6324a81341bbaf557cc32e05ea0b9f8eb1adb6"), ], heap: Some(p::HeapTemplate { entry: ts_math_ceil_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("b73d9e68f7bb112e1a7dfb043e6324a81341bbaf557cc32e05ea0b9f8eb1adb6"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.math.ceil`.
@@ -24233,7 +24233,7 @@ const TS_MATH_TRUNC_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_trunc,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), ], heap: Some(p::HeapTemplate { entry: ts_math_trunc_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), ], heap: Some(p::HeapTemplate { entry: ts_math_trunc_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.math.trunc`.
@@ -24328,7 +24328,7 @@ const TS_MATH_SIGN_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_sign,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("5f2b7875300125122a338a2eeaf624f4dd9a9187e057fd95b84701d6aea97ef3"), ], heap: Some(p::HeapTemplate { entry: ts_math_sign_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("5f2b7875300125122a338a2eeaf624f4dd9a9187e057fd95b84701d6aea97ef3"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("5f2b7875300125122a338a2eeaf624f4dd9a9187e057fd95b84701d6aea97ef3"), ], heap: Some(p::HeapTemplate { entry: ts_math_sign_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("5f2b7875300125122a338a2eeaf624f4dd9a9187e057fd95b84701d6aea97ef3"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.math.sign`.
@@ -24423,7 +24423,7 @@ const TS_MATH_ACOS_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_acos,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("5816fae9aea136d2e42e284c878f199e715a9a397df62f120daeb9a14a2e2a84"), ], heap: Some(p::HeapTemplate { entry: ts_math_acos_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("5816fae9aea136d2e42e284c878f199e715a9a397df62f120daeb9a14a2e2a84"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("5816fae9aea136d2e42e284c878f199e715a9a397df62f120daeb9a14a2e2a84"), ], heap: Some(p::HeapTemplate { entry: ts_math_acos_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("5816fae9aea136d2e42e284c878f199e715a9a397df62f120daeb9a14a2e2a84"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.math.acos`.
@@ -24518,7 +24518,7 @@ const TS_MATH_ASIN_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_asin,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b2dc781abf0bc9362a991090069e72b3504d7bea0f35a21f7c62144857423493"), ], heap: Some(p::HeapTemplate { entry: ts_math_asin_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("b2dc781abf0bc9362a991090069e72b3504d7bea0f35a21f7c62144857423493"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b2dc781abf0bc9362a991090069e72b3504d7bea0f35a21f7c62144857423493"), ], heap: Some(p::HeapTemplate { entry: ts_math_asin_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("b2dc781abf0bc9362a991090069e72b3504d7bea0f35a21f7c62144857423493"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.math.asin`.
@@ -24613,7 +24613,7 @@ const TS_MATH_ACOSH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_acosh,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("a786bba549e93f8686cd03e054306a96ef1c9223213965aaf90c5c0991b75a33"), ], heap: Some(p::HeapTemplate { entry: ts_math_acosh_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("a786bba549e93f8686cd03e054306a96ef1c9223213965aaf90c5c0991b75a33"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("a786bba549e93f8686cd03e054306a96ef1c9223213965aaf90c5c0991b75a33"), ], heap: Some(p::HeapTemplate { entry: ts_math_acosh_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("a786bba549e93f8686cd03e054306a96ef1c9223213965aaf90c5c0991b75a33"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.math.acosh`.
@@ -24708,7 +24708,7 @@ const TS_MATH_ASINH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_asinh,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("3c8fd951c94929dfd46f91a0824b846550c399c40797ac48ca01b6e13c0eb6c1"), ], heap: Some(p::HeapTemplate { entry: ts_math_asinh_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("3c8fd951c94929dfd46f91a0824b846550c399c40797ac48ca01b6e13c0eb6c1"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("3c8fd951c94929dfd46f91a0824b846550c399c40797ac48ca01b6e13c0eb6c1"), ], heap: Some(p::HeapTemplate { entry: ts_math_asinh_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("3c8fd951c94929dfd46f91a0824b846550c399c40797ac48ca01b6e13c0eb6c1"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.math.asinh`.
@@ -24803,7 +24803,7 @@ const TS_MATH_ATAN_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_atan,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("029cf6b958bccc224d4633350ba1ea4ba228714b9d35fbc0f5e65a617681df72"), ], heap: Some(p::HeapTemplate { entry: ts_math_atan_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("029cf6b958bccc224d4633350ba1ea4ba228714b9d35fbc0f5e65a617681df72"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("029cf6b958bccc224d4633350ba1ea4ba228714b9d35fbc0f5e65a617681df72"), ], heap: Some(p::HeapTemplate { entry: ts_math_atan_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("029cf6b958bccc224d4633350ba1ea4ba228714b9d35fbc0f5e65a617681df72"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.math.atan`.
@@ -24898,7 +24898,7 @@ const TS_MATH_ATANH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_atanh,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("cb1355b144ff6c623b51a08eb8ac7e8f5ea85e9a321a06fbc3a055159c6af196"), ], heap: Some(p::HeapTemplate { entry: ts_math_atanh_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("cb1355b144ff6c623b51a08eb8ac7e8f5ea85e9a321a06fbc3a055159c6af196"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("cb1355b144ff6c623b51a08eb8ac7e8f5ea85e9a321a06fbc3a055159c6af196"), ], heap: Some(p::HeapTemplate { entry: ts_math_atanh_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("cb1355b144ff6c623b51a08eb8ac7e8f5ea85e9a321a06fbc3a055159c6af196"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.math.atanh`.
@@ -24993,7 +24993,7 @@ const TS_MATH_CBRT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_cbrt,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("94904af1987514b79d980e031ca8ac4af874dbc27bbd757594f7bd7f98060977"), ], heap: Some(p::HeapTemplate { entry: ts_math_cbrt_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("94904af1987514b79d980e031ca8ac4af874dbc27bbd757594f7bd7f98060977"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("94904af1987514b79d980e031ca8ac4af874dbc27bbd757594f7bd7f98060977"), ], heap: Some(p::HeapTemplate { entry: ts_math_cbrt_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("94904af1987514b79d980e031ca8ac4af874dbc27bbd757594f7bd7f98060977"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.math.cbrt`.
@@ -25088,7 +25088,7 @@ const TS_MATH_COS_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_cos,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("6e9986d803f2da99d2bdb94bc35db387b71534a6c9c7de76143cc9675127e33e"), ], heap: Some(p::HeapTemplate { entry: ts_math_cos_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("6e9986d803f2da99d2bdb94bc35db387b71534a6c9c7de76143cc9675127e33e"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("6e9986d803f2da99d2bdb94bc35db387b71534a6c9c7de76143cc9675127e33e"), ], heap: Some(p::HeapTemplate { entry: ts_math_cos_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("6e9986d803f2da99d2bdb94bc35db387b71534a6c9c7de76143cc9675127e33e"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.math.cos`.
@@ -25183,7 +25183,7 @@ const TS_MATH_COSH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_cosh,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("91dc00baa613460d2b4fc6a04c7e5b71babdfafdb989ab4729c5b332a5987913"), ], heap: Some(p::HeapTemplate { entry: ts_math_cosh_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("91dc00baa613460d2b4fc6a04c7e5b71babdfafdb989ab4729c5b332a5987913"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("91dc00baa613460d2b4fc6a04c7e5b71babdfafdb989ab4729c5b332a5987913"), ], heap: Some(p::HeapTemplate { entry: ts_math_cosh_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("91dc00baa613460d2b4fc6a04c7e5b71babdfafdb989ab4729c5b332a5987913"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.math.cosh`.
@@ -25278,7 +25278,7 @@ const TS_MATH_EXP_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_exp,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("567c1b4d56ba6ff84c85cc7bd32fbffa22d6b4b8c3093f4e1a2f5de7c86084bf"), ], heap: Some(p::HeapTemplate { entry: ts_math_exp_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("567c1b4d56ba6ff84c85cc7bd32fbffa22d6b4b8c3093f4e1a2f5de7c86084bf"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("567c1b4d56ba6ff84c85cc7bd32fbffa22d6b4b8c3093f4e1a2f5de7c86084bf"), ], heap: Some(p::HeapTemplate { entry: ts_math_exp_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("567c1b4d56ba6ff84c85cc7bd32fbffa22d6b4b8c3093f4e1a2f5de7c86084bf"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.math.exp`.
@@ -25373,7 +25373,7 @@ const TS_MATH_EXPM1_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_expm1,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("9feec48d3846cadcf959475719a24719c805f60a34c9766e0faec92e868110aa"), ], heap: Some(p::HeapTemplate { entry: ts_math_expm1_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("9feec48d3846cadcf959475719a24719c805f60a34c9766e0faec92e868110aa"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("9feec48d3846cadcf959475719a24719c805f60a34c9766e0faec92e868110aa"), ], heap: Some(p::HeapTemplate { entry: ts_math_expm1_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("9feec48d3846cadcf959475719a24719c805f60a34c9766e0faec92e868110aa"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.math.expm1`.
@@ -25468,7 +25468,7 @@ const TS_MATH_LOG_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_log,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("31ba8e968bfe32f3d37cccac8c3276179e44934b55ea4e8bf98f337932bdc686"), ], heap: Some(p::HeapTemplate { entry: ts_math_log_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("31ba8e968bfe32f3d37cccac8c3276179e44934b55ea4e8bf98f337932bdc686"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("31ba8e968bfe32f3d37cccac8c3276179e44934b55ea4e8bf98f337932bdc686"), ], heap: Some(p::HeapTemplate { entry: ts_math_log_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("31ba8e968bfe32f3d37cccac8c3276179e44934b55ea4e8bf98f337932bdc686"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.math.log`.
@@ -25563,7 +25563,7 @@ const TS_MATH_LOG1P_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_log1p,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("9f910859f5e05463065955004a21a340c91cc14dc7a824e2d49acf3da68ebb58"), ], heap: Some(p::HeapTemplate { entry: ts_math_log1p_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("9f910859f5e05463065955004a21a340c91cc14dc7a824e2d49acf3da68ebb58"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("9f910859f5e05463065955004a21a340c91cc14dc7a824e2d49acf3da68ebb58"), ], heap: Some(p::HeapTemplate { entry: ts_math_log1p_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("9f910859f5e05463065955004a21a340c91cc14dc7a824e2d49acf3da68ebb58"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.math.log1p`.
@@ -25658,7 +25658,7 @@ const TS_MATH_LOG10_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_log10,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("eac6c2d57196d42ace64c7847f8de83677489054748ac86a5115490b23de5ec8"), ], heap: Some(p::HeapTemplate { entry: ts_math_log10_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("eac6c2d57196d42ace64c7847f8de83677489054748ac86a5115490b23de5ec8"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("eac6c2d57196d42ace64c7847f8de83677489054748ac86a5115490b23de5ec8"), ], heap: Some(p::HeapTemplate { entry: ts_math_log10_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("eac6c2d57196d42ace64c7847f8de83677489054748ac86a5115490b23de5ec8"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.math.log10`.
@@ -25753,7 +25753,7 @@ const TS_MATH_LOG2_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_log2,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("9d4534f37b7b141e62728f10b7f98bb0c5421d1ca6a17d540490f9e12af59c1a"), ], heap: Some(p::HeapTemplate { entry: ts_math_log2_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("9d4534f37b7b141e62728f10b7f98bb0c5421d1ca6a17d540490f9e12af59c1a"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("9d4534f37b7b141e62728f10b7f98bb0c5421d1ca6a17d540490f9e12af59c1a"), ], heap: Some(p::HeapTemplate { entry: ts_math_log2_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("9d4534f37b7b141e62728f10b7f98bb0c5421d1ca6a17d540490f9e12af59c1a"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.math.log2`.
@@ -25848,7 +25848,7 @@ const TS_MATH_SIN_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_sin,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("35587f11ab840a644e7fe0380b6d7524c38164da96de6433fcdb289c929f25d0"), ], heap: Some(p::HeapTemplate { entry: ts_math_sin_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("35587f11ab840a644e7fe0380b6d7524c38164da96de6433fcdb289c929f25d0"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("35587f11ab840a644e7fe0380b6d7524c38164da96de6433fcdb289c929f25d0"), ], heap: Some(p::HeapTemplate { entry: ts_math_sin_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("35587f11ab840a644e7fe0380b6d7524c38164da96de6433fcdb289c929f25d0"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.math.sin`.
@@ -25943,7 +25943,7 @@ const TS_MATH_SINH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_sinh,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b618e0492fb1a64db2a7a2059799e5d561110b1984d51bd201af2c219a204985"), ], heap: Some(p::HeapTemplate { entry: ts_math_sinh_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("b618e0492fb1a64db2a7a2059799e5d561110b1984d51bd201af2c219a204985"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b618e0492fb1a64db2a7a2059799e5d561110b1984d51bd201af2c219a204985"), ], heap: Some(p::HeapTemplate { entry: ts_math_sinh_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("b618e0492fb1a64db2a7a2059799e5d561110b1984d51bd201af2c219a204985"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.math.sinh`.
@@ -26038,7 +26038,7 @@ const TS_MATH_TAN_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_tan,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("f23af18d602ecb0aa8b076e2d1b7075c7fa0fff8deb6dc5d603d68571540a43f"), ], heap: Some(p::HeapTemplate { entry: ts_math_tan_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("f23af18d602ecb0aa8b076e2d1b7075c7fa0fff8deb6dc5d603d68571540a43f"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("f23af18d602ecb0aa8b076e2d1b7075c7fa0fff8deb6dc5d603d68571540a43f"), ], heap: Some(p::HeapTemplate { entry: ts_math_tan_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("f23af18d602ecb0aa8b076e2d1b7075c7fa0fff8deb6dc5d603d68571540a43f"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.math.tan`.
@@ -26133,7 +26133,7 @@ const TS_MATH_TANH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_tanh,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("daf9b318bbd7f9cf13addf619c95bdad1133b9eb70c2cb2f2490d8aae1c90587"), ], heap: Some(p::HeapTemplate { entry: ts_math_tanh_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("daf9b318bbd7f9cf13addf619c95bdad1133b9eb70c2cb2f2490d8aae1c90587"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("daf9b318bbd7f9cf13addf619c95bdad1133b9eb70c2cb2f2490d8aae1c90587"), ], heap: Some(p::HeapTemplate { entry: ts_math_tanh_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("daf9b318bbd7f9cf13addf619c95bdad1133b9eb70c2cb2f2490d8aae1c90587"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.math.tanh`.
@@ -26228,7 +26228,7 @@ const TS_MATH_SQRT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_sqrt,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("c1b1d905b1aed00b7db610248ded059cf936b7e6905a957b8f21709448f92adf"), ], heap: Some(p::HeapTemplate { entry: ts_math_sqrt_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("c1b1d905b1aed00b7db610248ded059cf936b7e6905a957b8f21709448f92adf"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("c1b1d905b1aed00b7db610248ded059cf936b7e6905a957b8f21709448f92adf"), ], heap: Some(p::HeapTemplate { entry: ts_math_sqrt_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("c1b1d905b1aed00b7db610248ded059cf936b7e6905a957b8f21709448f92adf"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.math.sqrt`.
@@ -26323,7 +26323,7 @@ const TS_MATH_ROUND_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_round,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("9feac0b2fe88c48bbe28b0f004fd2c890f06b6eea9a177c477ea053df4895e7b"), ], heap: Some(p::HeapTemplate { entry: ts_math_round_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("9feac0b2fe88c48bbe28b0f004fd2c890f06b6eea9a177c477ea053df4895e7b"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("9feac0b2fe88c48bbe28b0f004fd2c890f06b6eea9a177c477ea053df4895e7b"), ], heap: Some(p::HeapTemplate { entry: ts_math_round_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("9feac0b2fe88c48bbe28b0f004fd2c890f06b6eea9a177c477ea053df4895e7b"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.math.round`.
@@ -26429,7 +26429,7 @@ const TS_MATH_ATAN2_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_atan2,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("fdc6aea4b86867bcfe9a15fb5174cf3aded821dc55f296a319a4370f3f75b865"), ], heap: Some(p::HeapTemplate { entry: ts_math_atan2_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("fdc6aea4b86867bcfe9a15fb5174cf3aded821dc55f296a319a4370f3f75b865"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("fdc6aea4b86867bcfe9a15fb5174cf3aded821dc55f296a319a4370f3f75b865"), ], heap: Some(p::HeapTemplate { entry: ts_math_atan2_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("fdc6aea4b86867bcfe9a15fb5174cf3aded821dc55f296a319a4370f3f75b865"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.math.atan2`.
@@ -26543,7 +26543,7 @@ const TS_MATH_POW_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_math_pow,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_math_pow_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("e487b9d21fcc8ea6030bb669369332900ff72219ca09659a51e30d81ba4c25f2"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_math_pow_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("e487b9d21fcc8ea6030bb669369332900ff72219ca09659a51e30d81ba4c25f2"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.math.pow`.
@@ -27777,7 +27777,7 @@ const TS_NUMBER_CONVERT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_number_convert,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), ], heap: Some(p::HeapTemplate { entry: ts_number_convert_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), ], heap: Some(p::HeapTemplate { entry: ts_number_convert_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.number.convert`.
@@ -28171,7 +28171,7 @@ const TS_NUMBER_PARSEFLOAT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_number_parsefloat,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_number_parsefloat_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("df85fc159a8cabd4b521557da045e4fa9c64115e31a21d9d1f7b0dbf0f180d5d"), p::function("485ed82cdabbacc595702b5b52055b798f96d6c8dcaba52e723c4da99f00f2a4"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_number_parsefloat_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("df85fc159a8cabd4b521557da045e4fa9c64115e31a21d9d1f7b0dbf0f180d5d"), p::function("485ed82cdabbacc595702b5b52055b798f96d6c8dcaba52e723c4da99f00f2a4"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.number.parseFloat`.
@@ -28287,7 +28287,7 @@ const TS_NUMBER_PARSEINT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_number_parseint,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_number_parseint_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("df85fc159a8cabd4b521557da045e4fa9c64115e31a21d9d1f7b0dbf0f180d5d"), p::function("7324402066a92f95eac00ead28b80f24e953d29c7ebdacaa0477cd972fc10e74"), p::function("3849314fcefb23b8a9c499f62aabfd6e57105165d50eaa7a728b7704fab849cd"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_number_parseint_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("df85fc159a8cabd4b521557da045e4fa9c64115e31a21d9d1f7b0dbf0f180d5d"), p::function("7324402066a92f95eac00ead28b80f24e953d29c7ebdacaa0477cd972fc10e74"), p::function("3849314fcefb23b8a9c499f62aabfd6e57105165d50eaa7a728b7704fab849cd"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.number.parseInt`.
@@ -28397,7 +28397,7 @@ const TS_NUMBER_RECEIVER_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_receiver,
-    template: Some(p::HelperTemplate { entry: Some(ts_number_receiver_template), depth: 2, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_number_receiver_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_number_receiver_template), depth: 2, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_number_receiver_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.number.receiver`.
@@ -28471,7 +28471,7 @@ const TS_NUMBER_VALUEOF_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_number_valueof,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_number_valueof_heap, depth: 2, writes: false, callees: &[p::function("f3073d3a4568679f1306b981c623af63882803589dcdc04363f53b63a2cce58b"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_number_valueof_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("f3073d3a4568679f1306b981c623af63882803589dcdc04363f53b63a2cce58b"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.number.valueOf`.
@@ -30161,7 +30161,7 @@ const TS_NUMBER_GLOBAL_ISFINITE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_number_global_isfinite,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), ], heap: Some(p::HeapTemplate { entry: ts_number_global_isfinite_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), ], heap: Some(p::HeapTemplate { entry: ts_number_global_isfinite_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.number.global_isFinite`.
@@ -30256,7 +30256,7 @@ const TS_NUMBER_GLOBAL_ISNAN_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_number_global_isnan,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), ], heap: Some(p::HeapTemplate { entry: ts_number_global_isnan_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), ], heap: Some(p::HeapTemplate { entry: ts_number_global_isnan_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.number.global_isNaN`.
@@ -30774,7 +30774,7 @@ const TS_DATE_IS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_is,
-    template: Some(p::HelperTemplate { entry: Some(ts_date_is_template), depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_date_is_heap, depth: 1, writes: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_date_is_template), depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_date_is_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.date.is`.
@@ -30866,7 +30866,7 @@ const TS_DATE_REQUIRE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_require,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_require_heap, depth: 2, writes: false, callees: &[p::function("c5bf9bc30911003a28608cd77814c42889312431881ad3b32a9cb028c3e02aed"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_require_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("c5bf9bc30911003a28608cd77814c42889312431881ad3b32a9cb028c3e02aed"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.date.require`.
@@ -30940,7 +30940,7 @@ const TS_DATE_PARSE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_date_parse,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_parse_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("df85fc159a8cabd4b521557da045e4fa9c64115e31a21d9d1f7b0dbf0f180d5d"), p::function("acf51075f77facce1391563ca6a9d5c6cc33b6452726683d8a72178cfb12c0dd"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_parse_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("df85fc159a8cabd4b521557da045e4fa9c64115e31a21d9d1f7b0dbf0f180d5d"), p::function("acf51075f77facce1391563ca6a9d5c6cc33b6452726683d8a72178cfb12c0dd"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.date.parse`.
@@ -31028,7 +31028,7 @@ const TS_DATE_UTC_2_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_date_utc_2,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_utc_2_heap, depth: 2, writes: false, callees: &[p::function("a8e75b053b0c104c319703d17745cb8a87e4d9ec846ec9eba2fe213cdc379363"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_utc_2_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("a8e75b053b0c104c319703d17745cb8a87e4d9ec846ec9eba2fe213cdc379363"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.date.UTC`.
@@ -31410,7 +31410,7 @@ const TS_DATE_GETUTCFULLYEAR_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getutcfullyear,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getutcfullyear_heap, depth: 2, writes: false, callees: &[p::function("944b2dcbe0dcbbb610d19cd3c82f5171288e0da72890b0d0cf96067a417a06a8"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getutcfullyear_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("944b2dcbe0dcbbb610d19cd3c82f5171288e0da72890b0d0cf96067a417a06a8"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.date.getUTCFullYear`.
@@ -31464,7 +31464,7 @@ const TS_DATE_GETUTCMONTH_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getutcmonth,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getutcmonth_heap, depth: 2, writes: false, callees: &[p::function("944b2dcbe0dcbbb610d19cd3c82f5171288e0da72890b0d0cf96067a417a06a8"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getutcmonth_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("944b2dcbe0dcbbb610d19cd3c82f5171288e0da72890b0d0cf96067a417a06a8"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.date.getUTCMonth`.
@@ -31518,7 +31518,7 @@ const TS_DATE_GETUTCDATE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getutcdate,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getutcdate_heap, depth: 2, writes: false, callees: &[p::function("944b2dcbe0dcbbb610d19cd3c82f5171288e0da72890b0d0cf96067a417a06a8"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getutcdate_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("944b2dcbe0dcbbb610d19cd3c82f5171288e0da72890b0d0cf96067a417a06a8"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.date.getUTCDate`.
@@ -31572,7 +31572,7 @@ const TS_DATE_GETUTCDAY_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getutcday,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getutcday_heap, depth: 2, writes: false, callees: &[p::function("944b2dcbe0dcbbb610d19cd3c82f5171288e0da72890b0d0cf96067a417a06a8"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getutcday_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("944b2dcbe0dcbbb610d19cd3c82f5171288e0da72890b0d0cf96067a417a06a8"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.date.getUTCDay`.
@@ -31626,7 +31626,7 @@ const TS_DATE_GETUTCHOURS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getutchours,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getutchours_heap, depth: 2, writes: false, callees: &[p::function("944b2dcbe0dcbbb610d19cd3c82f5171288e0da72890b0d0cf96067a417a06a8"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getutchours_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("944b2dcbe0dcbbb610d19cd3c82f5171288e0da72890b0d0cf96067a417a06a8"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.date.getUTCHours`.
@@ -31680,7 +31680,7 @@ const TS_DATE_GETUTCMINUTES_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getutcminutes,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getutcminutes_heap, depth: 2, writes: false, callees: &[p::function("944b2dcbe0dcbbb610d19cd3c82f5171288e0da72890b0d0cf96067a417a06a8"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getutcminutes_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("944b2dcbe0dcbbb610d19cd3c82f5171288e0da72890b0d0cf96067a417a06a8"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.date.getUTCMinutes`.
@@ -31734,7 +31734,7 @@ const TS_DATE_GETUTCSECONDS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getutcseconds,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getutcseconds_heap, depth: 2, writes: false, callees: &[p::function("944b2dcbe0dcbbb610d19cd3c82f5171288e0da72890b0d0cf96067a417a06a8"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getutcseconds_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("944b2dcbe0dcbbb610d19cd3c82f5171288e0da72890b0d0cf96067a417a06a8"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.date.getUTCSeconds`.
@@ -31788,7 +31788,7 @@ const TS_DATE_GETUTCMILLISECONDS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_date_getutcmilliseconds,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getutcmilliseconds_heap, depth: 2, writes: false, callees: &[p::function("944b2dcbe0dcbbb610d19cd3c82f5171288e0da72890b0d0cf96067a417a06a8"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_date_getutcmilliseconds_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("944b2dcbe0dcbbb610d19cd3c82f5171288e0da72890b0d0cf96067a417a06a8"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.date.getUTCMilliseconds`.
@@ -33817,7 +33817,7 @@ const TS_ERROR_NEW_ERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_new_error,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_new_error_heap, depth: 2, writes: false, callees: &[p::function("d8945a7716b4ab2afaa8c3f169a4ca0a4da85b16687cfee1b636981dfa2e8e0c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_new_error_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("d8945a7716b4ab2afaa8c3f169a4ca0a4da85b16687cfee1b636981dfa2e8e0c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.error.new_Error`.
@@ -33881,7 +33881,7 @@ const TS_ERROR_IS_ERROR_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_error_is_error,
-    template: Some(p::HelperTemplate { entry: Some(ts_error_is_error_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_is_error_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_error_is_error_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_is_error_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.error.is_Error`.
@@ -33958,7 +33958,7 @@ const TS_ERROR_NEW_TYPEERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_new_typeerror,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_new_typeerror_heap, depth: 2, writes: false, callees: &[p::function("d8945a7716b4ab2afaa8c3f169a4ca0a4da85b16687cfee1b636981dfa2e8e0c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_new_typeerror_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("d8945a7716b4ab2afaa8c3f169a4ca0a4da85b16687cfee1b636981dfa2e8e0c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.error.new_TypeError`.
@@ -34037,7 +34037,7 @@ const TS_ERROR_IS_TYPEERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_is_typeerror,
-    template: Some(p::HelperTemplate { entry: Some(ts_error_is_typeerror_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_is_typeerror_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_error_is_typeerror_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_is_typeerror_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.error.is_TypeError`.
@@ -34156,7 +34156,7 @@ const TS_ERROR_NEW_RANGEERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_new_rangeerror,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_new_rangeerror_heap, depth: 2, writes: false, callees: &[p::function("d8945a7716b4ab2afaa8c3f169a4ca0a4da85b16687cfee1b636981dfa2e8e0c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_new_rangeerror_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("d8945a7716b4ab2afaa8c3f169a4ca0a4da85b16687cfee1b636981dfa2e8e0c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.error.new_RangeError`.
@@ -34235,7 +34235,7 @@ const TS_ERROR_IS_RANGEERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_is_rangeerror,
-    template: Some(p::HelperTemplate { entry: Some(ts_error_is_rangeerror_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_is_rangeerror_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_error_is_rangeerror_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_is_rangeerror_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.error.is_RangeError`.
@@ -34354,7 +34354,7 @@ const TS_ERROR_NEW_SYNTAXERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_new_syntaxerror,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_new_syntaxerror_heap, depth: 2, writes: false, callees: &[p::function("d8945a7716b4ab2afaa8c3f169a4ca0a4da85b16687cfee1b636981dfa2e8e0c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_new_syntaxerror_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("d8945a7716b4ab2afaa8c3f169a4ca0a4da85b16687cfee1b636981dfa2e8e0c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.error.new_SyntaxError`.
@@ -34433,7 +34433,7 @@ const TS_ERROR_IS_SYNTAXERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_is_syntaxerror,
-    template: Some(p::HelperTemplate { entry: Some(ts_error_is_syntaxerror_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_is_syntaxerror_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_error_is_syntaxerror_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_is_syntaxerror_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.error.is_SyntaxError`.
@@ -34552,7 +34552,7 @@ const TS_ERROR_NEW_REFERENCEERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_new_referenceerror,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_new_referenceerror_heap, depth: 2, writes: false, callees: &[p::function("d8945a7716b4ab2afaa8c3f169a4ca0a4da85b16687cfee1b636981dfa2e8e0c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_new_referenceerror_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("d8945a7716b4ab2afaa8c3f169a4ca0a4da85b16687cfee1b636981dfa2e8e0c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.error.new_ReferenceError`.
@@ -34631,7 +34631,7 @@ const TS_ERROR_IS_REFERENCEERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_is_referenceerror,
-    template: Some(p::HelperTemplate { entry: Some(ts_error_is_referenceerror_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_is_referenceerror_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_error_is_referenceerror_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_is_referenceerror_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.error.is_ReferenceError`.
@@ -34750,7 +34750,7 @@ const TS_ERROR_NEW_URIERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_new_urierror,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_new_urierror_heap, depth: 2, writes: false, callees: &[p::function("d8945a7716b4ab2afaa8c3f169a4ca0a4da85b16687cfee1b636981dfa2e8e0c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_new_urierror_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("d8945a7716b4ab2afaa8c3f169a4ca0a4da85b16687cfee1b636981dfa2e8e0c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.error.new_URIError`.
@@ -34829,7 +34829,7 @@ const TS_ERROR_IS_URIERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_is_urierror,
-    template: Some(p::HelperTemplate { entry: Some(ts_error_is_urierror_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_is_urierror_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_error_is_urierror_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_is_urierror_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.error.is_URIError`.
@@ -34948,7 +34948,7 @@ const TS_ERROR_NEW_EVALERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_new_evalerror,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_new_evalerror_heap, depth: 2, writes: false, callees: &[p::function("d8945a7716b4ab2afaa8c3f169a4ca0a4da85b16687cfee1b636981dfa2e8e0c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_new_evalerror_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("d8945a7716b4ab2afaa8c3f169a4ca0a4da85b16687cfee1b636981dfa2e8e0c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.error.new_EvalError`.
@@ -35027,7 +35027,7 @@ const TS_ERROR_IS_EVALERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_is_evalerror,
-    template: Some(p::HelperTemplate { entry: Some(ts_error_is_evalerror_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_is_evalerror_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_error_is_evalerror_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_is_evalerror_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.error.is_EvalError`.
@@ -35146,7 +35146,7 @@ const TS_ERROR_NEW_AGGREGATEERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_new_aggregateerror,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_new_aggregateerror_heap, depth: 2, writes: false, callees: &[p::function("d8945a7716b4ab2afaa8c3f169a4ca0a4da85b16687cfee1b636981dfa2e8e0c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_new_aggregateerror_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("d8945a7716b4ab2afaa8c3f169a4ca0a4da85b16687cfee1b636981dfa2e8e0c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.error.new_AggregateError`.
@@ -35225,7 +35225,7 @@ const TS_ERROR_IS_AGGREGATEERROR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_error_is_aggregateerror,
-    template: Some(p::HelperTemplate { entry: Some(ts_error_is_aggregateerror_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_is_aggregateerror_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_error_is_aggregateerror_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_error_is_aggregateerror_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.error.is_AggregateError`.
@@ -35596,7 +35596,7 @@ const TS_URL_IS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_is,
-    template: Some(p::HelperTemplate { entry: Some(ts_url_is_template), depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_url_is_heap, depth: 1, writes: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_url_is_template), depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_url_is_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.url.is`.
@@ -35845,7 +35845,7 @@ const TS_URL_TOSTRING_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_tostring,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_url_tostring_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_url_tostring_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.url.toString`.
@@ -35889,7 +35889,7 @@ const TS_URL_TOJSON_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_tojson,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_url_tojson_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_url_tojson_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.url.toJSON`.
@@ -35933,7 +35933,7 @@ const TS_URL_VALUEOF_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_valueof,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_url_valueof_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_url_valueof_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.url.valueOf`.
@@ -36438,7 +36438,7 @@ const TS_URL_SEARCH_PARAMS_IS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_search_params_is,
-    template: Some(p::HelperTemplate { entry: Some(ts_url_search_params_is_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_url_search_params_is_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_url_search_params_is_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_url_search_params_is_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.url_search_params.is`.
@@ -36506,7 +36506,7 @@ const TS_URL_SEARCH_PARAMS_SIZE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_search_params_size,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_url_search_params_size_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_url_search_params_size_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.url_search_params.size`.
@@ -36553,7 +36553,7 @@ const TS_URL_SEARCH_PARAMS_TOSTRING_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_search_params_tostring,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_url_search_params_tostring_heap, depth: 1, writes: false, callees: &[p::function("82e73f11d5b82ddd5477f84ddfe6a49f2278ee371b39cd262d033aeb22b414f7"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_url_search_params_tostring_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("82e73f11d5b82ddd5477f84ddfe6a49f2278ee371b39cd262d033aeb22b414f7"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.url_search_params.toString`.
@@ -36597,7 +36597,7 @@ const TS_URL_SEARCH_PARAMS_VALUEOF_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_url_search_params_valueof,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_url_search_params_valueof_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_url_search_params_valueof_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.url_search_params.valueOf`.
@@ -38706,7 +38706,7 @@ const TS_JSON_PLAIN_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_json_plain,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("ddc71def75c553460771da4d369727feaee3697855d8bd53b06b285fe33e4374"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_json_plain_heap, depth: 1, writes: false, callees: &[p::function("de57f9003079cb2dee575c8b3066d606261bee175a93c6b286c2a38633797eea"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("ddc71def75c553460771da4d369727feaee3697855d8bd53b06b285fe33e4374"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_json_plain_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("de57f9003079cb2dee575c8b3066d606261bee175a93c6b286c2a38633797eea"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.json.plain`.
@@ -38915,7 +38915,7 @@ const TS_ARRAY_MATCH_LENGTH_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_match_length,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_array_match_length_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_array_match_length_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.array.match_length`.
@@ -38985,7 +38985,7 @@ const TS_ARRAY_SET_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_set,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_array_set_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("a620f4af917b9bbee6d6cadbc581865974d78b95cd56088886b934379b726147"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_array_set_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("a620f4af917b9bbee6d6cadbc581865974d78b95cd56088886b934379b726147"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.array.set`.
@@ -39118,7 +39118,7 @@ const TS_ARRAY_REMOVE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_remove,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_array_remove_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("9a7771698d7b651fe6394b11fdfaecb6564a69f1ed6f71d39149847a80fefdec"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_array_remove_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("9a7771698d7b651fe6394b11fdfaecb6564a69f1ed6f71d39149847a80fefdec"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.array.remove`.
@@ -39228,7 +39228,7 @@ const TS_ARRAY_ARGUMENT_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_argument,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ], heap: Some(p::HeapTemplate { entry: ts_array_argument_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ], heap: Some(p::HeapTemplate { entry: ts_array_argument_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.array.argument`.
@@ -39307,7 +39307,7 @@ const TS_ARRAY_INTEGER_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_integer,
-    template: Some(p::HelperTemplate { entry: Some(ts_array_integer_template), depth: 4, callees: &[p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_array_integer_heap, depth: 2, writes: false, callees: &[p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_array_integer_template), depth: 4, callees: &[p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_array_integer_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.array.integer`.
@@ -39543,7 +39543,7 @@ const TS_ARRAY_LENGTH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_length,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_array_length_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_array_length_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.array.length`.
@@ -39639,7 +39639,7 @@ const TS_ARRAY_LENGTH_PROPERTY_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_length_property,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_array_length_property_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_array_length_property_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.array.length_property`.
@@ -39691,7 +39691,7 @@ const TS_ARRAY_IS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_is,
-    template: Some(p::HelperTemplate { entry: Some(ts_array_is_template), depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_array_is_heap, depth: 1, writes: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_array_is_template), depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_array_is_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.array.is`.
@@ -39859,7 +39859,7 @@ const TS_ARRAY_CALLBACK_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_callback,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_array_callback_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("7fb5154d44a31046fccc5c7dc57c6e347c7722d7774389baf931942e74602e22"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_array_callback_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("7fb5154d44a31046fccc5c7dc57c6e347c7722d7774389baf931942e74602e22"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.array.callback`.
@@ -40142,7 +40142,7 @@ const TS_ARRAY_BOUND_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_bound,
-    template: Some(p::HelperTemplate { entry: Some(ts_array_bound_template), depth: 5, callees: &[p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_array_bound_heap, depth: 2, writes: false, callees: &[p::function("73cf5440457f0488161c4946183b6f8aa140666ef9bdf1ef14765753b2a811dd"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_array_bound_template), depth: 5, callees: &[p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_array_bound_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("73cf5440457f0488161c4946183b6f8aa140666ef9bdf1ef14765753b2a811dd"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.array.bound`.
@@ -40457,7 +40457,7 @@ const TS_ARRAY_SPREAD_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_spread,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_array_spread_heap, depth: 2, writes: false, callees: &[p::function("2b13f4f8d1eb10f312ed2cbe665b0207adf83f053b8574e39b4362d82032356d"), p::function("10715a7c49dfac6a94aef20d188815fda8286eb92a5e3f354e255fab55116e68"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_array_spread_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("2b13f4f8d1eb10f312ed2cbe665b0207adf83f053b8574e39b4362d82032356d"), p::function("10715a7c49dfac6a94aef20d188815fda8286eb92a5e3f354e255fab55116e68"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.array.spread`.
@@ -40546,7 +40546,7 @@ const TS_ARRAY_CONSTRUCT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_construct,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_array_construct_heap, depth: 1, writes: false, callees: &[p::function("9582e9497de80ffe91797c946b2d48fc9e1621735e02d33bf53c8c828a41d63a"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_array_construct_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("9582e9497de80ffe91797c946b2d48fc9e1621735e02d33bf53c8c828a41d63a"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.array.construct`.
@@ -40679,7 +40679,7 @@ const TS_ARRAY_OF_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_of,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_array_of_heap, depth: 1, writes: false, callees: &[p::function("9582e9497de80ffe91797c946b2d48fc9e1621735e02d33bf53c8c828a41d63a"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_array_of_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("9582e9497de80ffe91797c946b2d48fc9e1621735e02d33bf53c8c828a41d63a"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.array.of`.
@@ -41519,7 +41519,7 @@ const TS_ARRAY_SLICE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_slice,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), ], heap: Some(p::HeapTemplate { entry: ts_array_slice_heap, depth: 2, writes: false, callees: &[p::function("d1cd4168b6d562cc16bc904be838f8502ea97fdf4a6e36e8fb76cdd9ad70fbd4"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("de24617b869c64332524c62aeef7da893e7d6794dc486ba41909d21d2b2a47d5"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), ], heap: Some(p::HeapTemplate { entry: ts_array_slice_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("d1cd4168b6d562cc16bc904be838f8502ea97fdf4a6e36e8fb76cdd9ad70fbd4"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("de24617b869c64332524c62aeef7da893e7d6794dc486ba41909d21d2b2a47d5"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.array.slice`.
@@ -42498,7 +42498,7 @@ const TS_ARRAY_PRIMITIVE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_primitive,
-    template: Some(p::HelperTemplate { entry: Some(ts_array_primitive_template), depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_array_primitive_heap, depth: 1, writes: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_array_primitive_template), depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_array_primitive_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.array.primitive`.
@@ -42644,7 +42644,7 @@ const TS_ARRAY_SEARCHABLE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_array_searchable,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_array_searchable_heap, depth: 2, writes: false, callees: &[p::function("eafad64d97d839804ea5ca944154bcc23156684ad8ea54f83338470fedd31e96"), p::function("cbc86a93e534595f5ec81449f701670c5fbeca9da3f0eb7edd00d1d652529a39"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_array_searchable_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("eafad64d97d839804ea5ca944154bcc23156684ad8ea54f83338470fedd31e96"), p::function("cbc86a93e534595f5ec81449f701670c5fbeca9da3f0eb7edd00d1d652529a39"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.array.searchable`.
@@ -43070,7 +43070,7 @@ const TS_ARRAY_GENERIC_INDEXOF_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_generic_indexof,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), ], heap: Some(p::HeapTemplate { entry: ts_array_generic_indexof_heap, depth: 2, writes: false, callees: &[p::function("6d765a1c4ff10aa2652f0b0adadb0a1c5b1872bb3f079301141ae536b2ad28d3"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("eafad64d97d839804ea5ca944154bcc23156684ad8ea54f83338470fedd31e96"), p::function("73cf5440457f0488161c4946183b6f8aa140666ef9bdf1ef14765753b2a811dd"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), ], heap: Some(p::HeapTemplate { entry: ts_array_generic_indexof_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("6d765a1c4ff10aa2652f0b0adadb0a1c5b1872bb3f079301141ae536b2ad28d3"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("eafad64d97d839804ea5ca944154bcc23156684ad8ea54f83338470fedd31e96"), p::function("73cf5440457f0488161c4946183b6f8aa140666ef9bdf1ef14765753b2a811dd"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.array.generic_indexOf`.
@@ -43464,7 +43464,7 @@ const TS_ARRAY_GENERIC_LASTINDEXOF_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_generic_lastindexof,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), ], heap: Some(p::HeapTemplate { entry: ts_array_generic_lastindexof_heap, depth: 2, writes: false, callees: &[p::function("6d765a1c4ff10aa2652f0b0adadb0a1c5b1872bb3f079301141ae536b2ad28d3"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("eafad64d97d839804ea5ca944154bcc23156684ad8ea54f83338470fedd31e96"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("73cf5440457f0488161c4946183b6f8aa140666ef9bdf1ef14765753b2a811dd"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), ], heap: Some(p::HeapTemplate { entry: ts_array_generic_lastindexof_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("6d765a1c4ff10aa2652f0b0adadb0a1c5b1872bb3f079301141ae536b2ad28d3"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("eafad64d97d839804ea5ca944154bcc23156684ad8ea54f83338470fedd31e96"), p::function("f2398fa57623b70bf53b29519dc1a967051e687bff7c01036fbeb0b9c3f96d28"), p::function("73cf5440457f0488161c4946183b6f8aa140666ef9bdf1ef14765753b2a811dd"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.array.generic_lastIndexOf`.
@@ -43832,7 +43832,7 @@ const TS_ARRAY_GENERIC_INCLUDES_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_generic_includes,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), ], heap: Some(p::HeapTemplate { entry: ts_array_generic_includes_heap, depth: 2, writes: false, callees: &[p::function("6d765a1c4ff10aa2652f0b0adadb0a1c5b1872bb3f079301141ae536b2ad28d3"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("eafad64d97d839804ea5ca944154bcc23156684ad8ea54f83338470fedd31e96"), p::function("73cf5440457f0488161c4946183b6f8aa140666ef9bdf1ef14765753b2a811dd"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), ], heap: Some(p::HeapTemplate { entry: ts_array_generic_includes_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("6d765a1c4ff10aa2652f0b0adadb0a1c5b1872bb3f079301141ae536b2ad28d3"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("eafad64d97d839804ea5ca944154bcc23156684ad8ea54f83338470fedd31e96"), p::function("73cf5440457f0488161c4946183b6f8aa140666ef9bdf1ef14765753b2a811dd"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.array.generic_includes`.
@@ -44486,7 +44486,7 @@ const TS_ARRAY_MAP_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_map,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_array_map_heap, depth: 2, writes: false, callees: &[p::function("6d765a1c4ff10aa2652f0b0adadb0a1c5b1872bb3f079301141ae536b2ad28d3"), p::function("eafad64d97d839804ea5ca944154bcc23156684ad8ea54f83338470fedd31e96"), p::function("854c8c86be7de923efcf6a6959adf31700f528b5b2398b0ab7d6dbbd0e373766"), p::function("ed8e805492c5af68712a7a678997a98df36f46ae2c864165fe06699b20f56f67"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_array_map_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("6d765a1c4ff10aa2652f0b0adadb0a1c5b1872bb3f079301141ae536b2ad28d3"), p::function("eafad64d97d839804ea5ca944154bcc23156684ad8ea54f83338470fedd31e96"), p::function("854c8c86be7de923efcf6a6959adf31700f528b5b2398b0ab7d6dbbd0e373766"), p::function("ed8e805492c5af68712a7a678997a98df36f46ae2c864165fe06699b20f56f67"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.array.map`.
@@ -44901,7 +44901,7 @@ const TS_ARRAY_FILTER_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_filter,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_array_filter_heap, depth: 2, writes: false, callees: &[p::function("6d765a1c4ff10aa2652f0b0adadb0a1c5b1872bb3f079301141ae536b2ad28d3"), p::function("eafad64d97d839804ea5ca944154bcc23156684ad8ea54f83338470fedd31e96"), p::function("854c8c86be7de923efcf6a6959adf31700f528b5b2398b0ab7d6dbbd0e373766"), p::function("99e40e2c2a77dc9d0c06ef073b13457191f43f9181fd82b19c701ff81a4c8d17"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_array_filter_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("6d765a1c4ff10aa2652f0b0adadb0a1c5b1872bb3f079301141ae536b2ad28d3"), p::function("eafad64d97d839804ea5ca944154bcc23156684ad8ea54f83338470fedd31e96"), p::function("854c8c86be7de923efcf6a6959adf31700f528b5b2398b0ab7d6dbbd0e373766"), p::function("99e40e2c2a77dc9d0c06ef073b13457191f43f9181fd82b19c701ff81a4c8d17"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.array.filter`.
@@ -48189,7 +48189,7 @@ const TS_ARRAY_JOIN_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_join,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_array_join_heap, depth: 2, writes: false, callees: &[p::function("ff89e79463b389383e570f643b3be31ae9e876dd728b5e994760581a991a5eff"), p::function("eafad64d97d839804ea5ca944154bcc23156684ad8ea54f83338470fedd31e96"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("54f8304801197ccb4b478fb0802f5a7b75e255adc9775e8da7c02d0b3114f46f"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_array_join_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("ff89e79463b389383e570f643b3be31ae9e876dd728b5e994760581a991a5eff"), p::function("eafad64d97d839804ea5ca944154bcc23156684ad8ea54f83338470fedd31e96"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("54f8304801197ccb4b478fb0802f5a7b75e255adc9775e8da7c02d0b3114f46f"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.array.join`.
@@ -52193,7 +52193,7 @@ const TS_ARRAY_ITERATOR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_array_iterator,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_array_iterator_heap, depth: 1, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("5519731ddb6c9d2183742b87ee54c7244f9e08d2f4557c9f7a3513595ed71db7"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_array_iterator_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("5519731ddb6c9d2183742b87ee54c7244f9e08d2f4557c9f7a3513595ed71db7"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.array.iterator`.
@@ -52589,7 +52589,7 @@ const TS_FOR_OF_ITEM_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_for_of_item,
-    template: Some(p::HelperTemplate { entry: Some(ts_for_of_item_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_for_of_item_heap, depth: 1, writes: false, callees: &[p::function("3b2ee022ee040a49d72d15e26389d4ba272fc9bea81b3a8905d739a43a95cdd7"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_for_of_item_template), depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_for_of_item_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("3b2ee022ee040a49d72d15e26389d4ba272fc9bea81b3a8905d739a43a95cdd7"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.for_of.item`.
@@ -53247,7 +53247,7 @@ const TS_PROMISE_IS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_promise_is,
-    template: Some(p::HelperTemplate { entry: Some(ts_promise_is_template), depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_promise_is_heap, depth: 1, writes: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_promise_is_template), depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_promise_is_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.promise.is`.
@@ -53611,7 +53611,7 @@ const TS_PROMISE_REJECT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_promise_reject,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_promise_reject_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("5f4023b66e52ea4c9cb3f8a93b6aa667e4faf3910643f28206ee60877e21b585"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_promise_reject_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("5f4023b66e52ea4c9cb3f8a93b6aa667e4faf3910643f28206ee60877e21b585"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.promise.reject`.
@@ -53691,7 +53691,7 @@ const TS_PROMISE_CALLABLE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_promise_callable,
-    template: Some(p::HelperTemplate { entry: Some(ts_promise_callable_template), depth: 2, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_promise_callable_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_promise_callable_template), depth: 2, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_promise_callable_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.promise.callable`.
@@ -54806,7 +54806,7 @@ const TS_STRING_INTEGER_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_integer,
-    template: Some(p::HelperTemplate { entry: Some(ts_string_integer_template), depth: 4, callees: &[p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("56b094872b8ca6408c2131c289eb04021b8a02d1151f834f22d7f45fe0ea6ea9"), p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_string_integer_heap, depth: 2, writes: false, callees: &[p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("56b094872b8ca6408c2131c289eb04021b8a02d1151f834f22d7f45fe0ea6ea9"), p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_string_integer_template), depth: 4, callees: &[p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("56b094872b8ca6408c2131c289eb04021b8a02d1151f834f22d7f45fe0ea6ea9"), p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_string_integer_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("a0c12830696e2cbd2d547538d846835145cf02502b8e488fb281ffb82af77f2f"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("56b094872b8ca6408c2131c289eb04021b8a02d1151f834f22d7f45fe0ea6ea9"), p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.string.integer`.
@@ -55154,7 +55154,7 @@ const TS_STRING_LENGTH_VALUE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_length_value,
-    template: Some(p::HelperTemplate { entry: Some(ts_string_length_value_template), depth: 5, callees: &[p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("56b094872b8ca6408c2131c289eb04021b8a02d1151f834f22d7f45fe0ea6ea9"), p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), ], heap: Some(p::HeapTemplate { entry: ts_string_length_value_heap, depth: 2, writes: false, callees: &[p::function("846044558963cde91450c13ce540f3092820fb697e4cb43afba0ea720f6942f1"), p::function("de926b99e63c22ca8515e49d77a25f532c2a861886818d5614a64eee56def28b"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_string_length_value_template), depth: 5, callees: &[p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("56b094872b8ca6408c2131c289eb04021b8a02d1151f834f22d7f45fe0ea6ea9"), p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), ], heap: Some(p::HeapTemplate { entry: ts_string_length_value_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("846044558963cde91450c13ce540f3092820fb697e4cb43afba0ea720f6942f1"), p::function("de926b99e63c22ca8515e49d77a25f532c2a861886818d5614a64eee56def28b"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.string.length_value`.
@@ -55248,7 +55248,7 @@ const TS_STRING_UINT32_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_uint32,
-    template: Some(p::HelperTemplate { entry: Some(ts_string_uint32_template), depth: 5, callees: &[p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("56b094872b8ca6408c2131c289eb04021b8a02d1151f834f22d7f45fe0ea6ea9"), p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("5b5e2d3553d993fdb67a6863cbb1993be4e0c436d6cdd18fd2ec6695db681671"), ], heap: Some(p::HeapTemplate { entry: ts_string_uint32_heap, depth: 2, writes: false, callees: &[p::function("846044558963cde91450c13ce540f3092820fb697e4cb43afba0ea720f6942f1"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_string_uint32_template), depth: 5, callees: &[p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("56b094872b8ca6408c2131c289eb04021b8a02d1151f834f22d7f45fe0ea6ea9"), p::function("245d3a9995df0ef77249cf6565eefb12e84f874908234401f3aad6ff6717874d"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("5b5e2d3553d993fdb67a6863cbb1993be4e0c436d6cdd18fd2ec6695db681671"), ], heap: Some(p::HeapTemplate { entry: ts_string_uint32_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("846044558963cde91450c13ce540f3092820fb697e4cb43afba0ea720f6942f1"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.string.uint32`.
@@ -55413,7 +55413,7 @@ const TS_STRING_SLICE_UNITS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_string_slice_units,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_slice_units_heap, depth: 1, writes: false, callees: &[p::function("e63080421899ba41a3d2d26b5a0e27ab7e48207de832479e1e6614032c6fe409"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_slice_units_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("e63080421899ba41a3d2d26b5a0e27ab7e48207de832479e1e6614032c6fe409"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.string.slice_units`.
@@ -55536,7 +55536,7 @@ const TS_STRING_CREATE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_create,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), ], heap: Some(p::HeapTemplate { entry: ts_string_create_heap, depth: 2, writes: false, callees: &[p::function("df85fc159a8cabd4b521557da045e4fa9c64115e31a21d9d1f7b0dbf0f180d5d"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), ], heap: Some(p::HeapTemplate { entry: ts_string_create_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("df85fc159a8cabd4b521557da045e4fa9c64115e31a21d9d1f7b0dbf0f180d5d"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.string.create`.
@@ -55636,7 +55636,7 @@ const TS_STRING_LENGTH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_length,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_string_length_heap, depth: 2, writes: false, callees: &[p::function("86fffbfdb01ba2da3e8bf890f79977bf262b459049bbcb9ca30570e2ffb7d8cf"), p::function("7be9b48ecb000bf8c0c6267fce3ef23096b08740ce0279b456bd06e9c5e3ad18"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ], heap: Some(p::HeapTemplate { entry: ts_string_length_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("86fffbfdb01ba2da3e8bf890f79977bf262b459049bbcb9ca30570e2ffb7d8cf"), p::function("7be9b48ecb000bf8c0c6267fce3ef23096b08740ce0279b456bd06e9c5e3ad18"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.string.length`.
@@ -55704,7 +55704,7 @@ const TS_STRING_TOSTRING_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_string_tostring,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_tostring_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_tostring_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.string.toString`.
@@ -55766,7 +55766,7 @@ const TS_STRING_VALUEOF_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_string_valueof,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_valueof_heap, depth: 1, writes: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_valueof_heap, depth: 1, writes: false, element_write: false, callees: &[] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.string.valueOf`.
@@ -56021,7 +56021,7 @@ const TS_STRING_AT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_at,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_string_at_heap, depth: 2, writes: false, callees: &[p::function("59a193d23aa95e75c1fc4cb56a6a435dcf1c2fdf444b605d657fe6a3d4f5d0dd"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("7be9b48ecb000bf8c0c6267fce3ef23096b08740ce0279b456bd06e9c5e3ad18"), p::function("c617a25ab13eb8437afa5870c1923fd8d0cff61ff35fa6b92075cdbcd69a8261"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_string_at_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("59a193d23aa95e75c1fc4cb56a6a435dcf1c2fdf444b605d657fe6a3d4f5d0dd"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("7be9b48ecb000bf8c0c6267fce3ef23096b08740ce0279b456bd06e9c5e3ad18"), p::function("c617a25ab13eb8437afa5870c1923fd8d0cff61ff35fa6b92075cdbcd69a8261"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.string.at`.
@@ -56934,7 +56934,7 @@ const TS_STRING_SLICE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_slice,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), ], heap: Some(p::HeapTemplate { entry: ts_string_slice_heap, depth: 2, writes: false, callees: &[p::function("104833717c4a70403e670eee622cd4b12e9a9a455c8cba5261a011ac05ccbd06"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("7be9b48ecb000bf8c0c6267fce3ef23096b08740ce0279b456bd06e9c5e3ad18"), p::function("c617a25ab13eb8437afa5870c1923fd8d0cff61ff35fa6b92075cdbcd69a8261"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), ], heap: Some(p::HeapTemplate { entry: ts_string_slice_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("104833717c4a70403e670eee622cd4b12e9a9a455c8cba5261a011ac05ccbd06"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("7be9b48ecb000bf8c0c6267fce3ef23096b08740ce0279b456bd06e9c5e3ad18"), p::function("c617a25ab13eb8437afa5870c1923fd8d0cff61ff35fa6b92075cdbcd69a8261"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("9cda7fce431cb6f247f593c290eba8aa75171a9f1fbcc628f4603c6fe7ab6343"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.string.slice`.
@@ -57421,7 +57421,7 @@ const TS_STRING_SUBSTRING_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_substring,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), ], heap: Some(p::HeapTemplate { entry: ts_string_substring_heap, depth: 2, writes: false, callees: &[p::function("620625a4edb144aa322b7522003f71447231bca7f70cc1af59df20990da613bc"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("7be9b48ecb000bf8c0c6267fce3ef23096b08740ce0279b456bd06e9c5e3ad18"), p::function("c617a25ab13eb8437afa5870c1923fd8d0cff61ff35fa6b92075cdbcd69a8261"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), ], heap: Some(p::HeapTemplate { entry: ts_string_substring_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("620625a4edb144aa322b7522003f71447231bca7f70cc1af59df20990da613bc"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("7be9b48ecb000bf8c0c6267fce3ef23096b08740ce0279b456bd06e9c5e3ad18"), p::function("c617a25ab13eb8437afa5870c1923fd8d0cff61ff35fa6b92075cdbcd69a8261"), p::function("0c412f839cbb4167b04256db40d430712583b490f9b684311ef01425adc1b9e6"), p::function("f3138497830af2363d878e84442f5932393d6c39e47e3f483392895db5b6f035"), p::function("7a9b9822490042faf3b05f57d78ece79c003f3b9b49089644ef84b4602453692"), p::function("e763ef789f3cc61e6fcf1869bb8b764c2b681433559221835704cb88a282f758"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.string.substring`.
@@ -57852,7 +57852,7 @@ const TS_STRING_INDEXOF_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_indexof,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ], heap: Some(p::HeapTemplate { entry: ts_string_indexof_heap, depth: 2, writes: false, callees: &[p::function("a34e59a6db54f8f720290e2b5bea191b1918aca1edda6238a74dd8d9c86836f7"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ], heap: Some(p::HeapTemplate { entry: ts_string_indexof_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("a34e59a6db54f8f720290e2b5bea191b1918aca1edda6238a74dd8d9c86836f7"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.string.indexOf`.
@@ -58897,7 +58897,7 @@ const TS_STRING_INCLUDES_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_includes,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ], heap: Some(p::HeapTemplate { entry: ts_string_includes_heap, depth: 2, writes: false, callees: &[p::function("228cd39079c4b634336b134f2453cad4e04872f35a55bf507ab67be06473b863"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ], heap: Some(p::HeapTemplate { entry: ts_string_includes_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("228cd39079c4b634336b134f2453cad4e04872f35a55bf507ab67be06473b863"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.string.includes`.
@@ -59110,7 +59110,7 @@ const TS_STRING_STARTSWITH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_startswith,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ], heap: Some(p::HeapTemplate { entry: ts_string_startswith_heap, depth: 2, writes: false, callees: &[p::function("42b3a327048d1a6449759d11dea5985a77c9f926dc2ec0a02715598fd470254c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ], heap: Some(p::HeapTemplate { entry: ts_string_startswith_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("42b3a327048d1a6449759d11dea5985a77c9f926dc2ec0a02715598fd470254c"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.string.startsWith`.
@@ -59327,7 +59327,7 @@ const TS_STRING_ENDSWITH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_endswith,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ], heap: Some(p::HeapTemplate { entry: ts_string_endswith_heap, depth: 2, writes: false, callees: &[p::function("0b2265fdcfe258d9863cb16eea6c61e4626bc0e83cd5c124e33a94bdea7ab51e"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ], heap: Some(p::HeapTemplate { entry: ts_string_endswith_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("0b2265fdcfe258d9863cb16eea6c61e4626bc0e83cd5c124e33a94bdea7ab51e"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.string.endsWith`.
@@ -59828,7 +59828,7 @@ const TS_STRING_TOLOWERCASE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_tolowercase,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_tolowercase_heap, depth: 2, writes: false, callees: &[p::function("86fffbfdb01ba2da3e8bf890f79977bf262b459049bbcb9ca30570e2ffb7d8cf"), p::function("bdbb1f114c807cbc58923711d0ac8e83e42afa20b0d2e5de58d50de54bc8d276"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_tolowercase_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("86fffbfdb01ba2da3e8bf890f79977bf262b459049bbcb9ca30570e2ffb7d8cf"), p::function("bdbb1f114c807cbc58923711d0ac8e83e42afa20b0d2e5de58d50de54bc8d276"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.string.toLowerCase`.
@@ -59899,7 +59899,7 @@ const TS_STRING_TOUPPERCASE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_touppercase,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_touppercase_heap, depth: 2, writes: false, callees: &[p::function("86fffbfdb01ba2da3e8bf890f79977bf262b459049bbcb9ca30570e2ffb7d8cf"), p::function("a9d412b1ecfed3de7a78d9aa17829cae8396a1180adf0f3f681bc56d4d44170e"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_touppercase_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("86fffbfdb01ba2da3e8bf890f79977bf262b459049bbcb9ca30570e2ffb7d8cf"), p::function("a9d412b1ecfed3de7a78d9aa17829cae8396a1180adf0f3f681bc56d4d44170e"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.string.toUpperCase`.
@@ -59977,7 +59977,7 @@ const TS_STRING_TRIM_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_trim,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_trim_heap, depth: 2, writes: false, callees: &[p::function("86fffbfdb01ba2da3e8bf890f79977bf262b459049bbcb9ca30570e2ffb7d8cf"), p::function("2845fabd1d62dd6ae12b69a56f9d794fb12ffe649201c3673b746b1b27be1a8a"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_trim_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("86fffbfdb01ba2da3e8bf890f79977bf262b459049bbcb9ca30570e2ffb7d8cf"), p::function("2845fabd1d62dd6ae12b69a56f9d794fb12ffe649201c3673b746b1b27be1a8a"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.string.trim`.
@@ -60090,7 +60090,7 @@ const TS_STRING_TRIMSTART_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_trimstart,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_trimstart_heap, depth: 2, writes: false, callees: &[p::function("86fffbfdb01ba2da3e8bf890f79977bf262b459049bbcb9ca30570e2ffb7d8cf"), p::function("2845fabd1d62dd6ae12b69a56f9d794fb12ffe649201c3673b746b1b27be1a8a"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_trimstart_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("86fffbfdb01ba2da3e8bf890f79977bf262b459049bbcb9ca30570e2ffb7d8cf"), p::function("2845fabd1d62dd6ae12b69a56f9d794fb12ffe649201c3673b746b1b27be1a8a"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.string.trimStart`.
@@ -60203,7 +60203,7 @@ const TS_STRING_TRIMEND_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_trimend,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_trimend_heap, depth: 2, writes: false, callees: &[p::function("86fffbfdb01ba2da3e8bf890f79977bf262b459049bbcb9ca30570e2ffb7d8cf"), p::function("2845fabd1d62dd6ae12b69a56f9d794fb12ffe649201c3673b746b1b27be1a8a"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_trimend_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("86fffbfdb01ba2da3e8bf890f79977bf262b459049bbcb9ca30570e2ffb7d8cf"), p::function("2845fabd1d62dd6ae12b69a56f9d794fb12ffe649201c3673b746b1b27be1a8a"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.string.trimEnd`.
@@ -60332,7 +60332,7 @@ const TS_STRING_REPEAT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_repeat,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), ], heap: Some(p::HeapTemplate { entry: ts_string_repeat_heap, depth: 2, writes: false, callees: &[p::function("86fffbfdb01ba2da3e8bf890f79977bf262b459049bbcb9ca30570e2ffb7d8cf"), p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("846044558963cde91450c13ce540f3092820fb697e4cb43afba0ea720f6942f1"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("ca62f99d0b5b81be587148f931be7dcd29cae182ebc2ab6452b239cc50ead43a"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("4e79059234c9b617d2f146baadf5d6e4f5ffae6cae8dc0a4a4238835d2d0b88f"), ], heap: Some(p::HeapTemplate { entry: ts_string_repeat_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("86fffbfdb01ba2da3e8bf890f79977bf262b459049bbcb9ca30570e2ffb7d8cf"), p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("846044558963cde91450c13ce540f3092820fb697e4cb43afba0ea720f6942f1"), p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), p::function("2e2f292f507fea3a1c2e9d20ce1413cc8c61336f957027dbb72a9871a8e92bd3"), p::function("d81bedfbb828d8f81af0837c36d149f2f7fa01413120b322e484b1e20f8434df"), p::function("ca62f99d0b5b81be587148f931be7dcd29cae182ebc2ab6452b239cc50ead43a"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.string.repeat`.
@@ -61562,7 +61562,7 @@ const TS_STRING_APPLY_ARGUMENTS_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_apply_arguments,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_string_apply_arguments_heap, depth: 2, writes: false, callees: &[p::function("d03fe5e4e3e3d05cb1759701a45670d5304f2a0b3cd9b10ac54a3a75b7c1f329"), p::function("6d85a5db708b9eacee39796ab1556021e5310f316a9f5736e5f4c785f6a54324"), p::function("c146a3be3f53dc23d31caa6527ccadfa79ddd38042931f62a8b6c381593c8c1e"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_string_apply_arguments_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("d03fe5e4e3e3d05cb1759701a45670d5304f2a0b3cd9b10ac54a3a75b7c1f329"), p::function("6d85a5db708b9eacee39796ab1556021e5310f316a9f5736e5f4c785f6a54324"), p::function("c146a3be3f53dc23d31caa6527ccadfa79ddd38042931f62a8b6c381593c8c1e"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.string.apply_arguments`.
@@ -61764,7 +61764,7 @@ const TS_REGEXP_IS_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_is,
-    template: Some(p::HelperTemplate { entry: Some(ts_regexp_is_template), depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_regexp_is_heap, depth: 1, writes: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_regexp_is_template), depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_regexp_is_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.regexp.is`.
@@ -61846,7 +61846,7 @@ const TS_REGEXP_REQUIRE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_require,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_regexp_require_heap, depth: 2, writes: false, callees: &[p::function("5d2ea7ac8a98e247840be4d85839cd888f518350b1312e3279e899e733aa6804"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_regexp_require_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("5d2ea7ac8a98e247840be4d85839cd888f518350b1312e3279e899e733aa6804"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.regexp.require`.
@@ -62369,7 +62369,7 @@ const TS_REGEXP_MATCH_RECORD_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_match_record,
-    template: Some(p::HelperTemplate { entry: Some(ts_regexp_match_record_template), depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_regexp_match_record_heap, depth: 1, writes: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(ts_regexp_match_record_template), depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_regexp_match_record_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.regexp.match_record`.
@@ -62554,7 +62554,7 @@ const TS_REGEXP_NATIVE_EXEC_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_native_exec,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_regexp_native_exec_heap, depth: 1, writes: false, callees: &[p::function("6696d4e0615875f39386af68f8c10c06e522d58e495522434795f49a0591f211"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_regexp_native_exec_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("6696d4e0615875f39386af68f8c10c06e522d58e495522434795f49a0591f211"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.regexp.native_exec`.
@@ -62667,7 +62667,7 @@ const TS_REGEXP_NATIVE_MATCH_ALL_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_native_match_all,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_regexp_native_match_all_heap, depth: 1, writes: false, callees: &[p::function("e6f96e1e7a0004f2b649493954489ffcb80408588234c0c8ac6f1d5c7370cb94"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_regexp_native_match_all_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("e6f96e1e7a0004f2b649493954489ffcb80408588234c0c8ac6f1d5c7370cb94"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.regexp.native_match_all`.
@@ -62781,7 +62781,7 @@ const TS_REGEXP_NATIVE_REPLACE_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_native_replace,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_regexp_native_replace_heap, depth: 1, writes: false, callees: &[p::function("18f4899d6fa3c018f6d6c219edb85c06093cc898cd0fc1dda11fce85b80bac7d"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_regexp_native_replace_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("18f4899d6fa3c018f6d6c219edb85c06093cc898cd0fc1dda11fce85b80bac7d"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.regexp.native_replace`.
@@ -62897,7 +62897,7 @@ const TS_REGEXP_NATIVE_SPLIT_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_regexp_native_split,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_regexp_native_split_heap, depth: 1, writes: false, callees: &[p::function("f7136168adc5e679059cd1f9a48f3e78e126cde0932ac0201193c8c3b2c9be18"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_regexp_native_split_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("f7136168adc5e679059cd1f9a48f3e78e126cde0932ac0201193c8c3b2c9be18"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.regexp.native_split`.
@@ -63778,7 +63778,7 @@ const TS_REGEXP_TOSTRING_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_regexp_tostring,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), ], heap: Some(p::HeapTemplate { entry: ts_regexp_tostring_heap, depth: 2, writes: false, callees: &[p::function("3e69ab18f4601aeb45d3cd1d49dd3a82f3929ee7a7de58a6d13ac0cc2255b230"), p::function("6d85a5db708b9eacee39796ab1556021e5310f316a9f5736e5f4c785f6a54324"), p::function("df85fc159a8cabd4b521557da045e4fa9c64115e31a21d9d1f7b0dbf0f180d5d"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), ], heap: Some(p::HeapTemplate { entry: ts_regexp_tostring_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("3e69ab18f4601aeb45d3cd1d49dd3a82f3929ee7a7de58a6d13ac0cc2255b230"), p::function("6d85a5db708b9eacee39796ab1556021e5310f316a9f5736e5f4c785f6a54324"), p::function("df85fc159a8cabd4b521557da045e4fa9c64115e31a21d9d1f7b0dbf0f180d5d"), p::function("ba1c1b7fe1ae760637dddbee3751c5dfbe05ed7b4f3e7792af355dc80d5ff6bb"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.regexp.toString`.
@@ -63905,7 +63905,7 @@ const TS_REGEXP_ARGUMENT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_regexp_argument,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_regexp_argument_heap, depth: 2, writes: false, callees: &[p::function("5d2ea7ac8a98e247840be4d85839cd888f518350b1312e3279e899e733aa6804"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_regexp_argument_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("5d2ea7ac8a98e247840be4d85839cd888f518350b1312e3279e899e733aa6804"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.regexp.argument`.
@@ -64943,7 +64943,7 @@ const TS_STRING_SPLIT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_split,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ], heap: Some(p::HeapTemplate { entry: ts_string_split_heap, depth: 2, writes: false, callees: &[p::function("5553d9b9cada0cd2046e534aefb8e60eed954fdb77cfd60f6b761c15b1dfc9b0"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("34ca055d8b47010f1540ce16c398577f9b6a83e19896e062035424e4f5c8624e"), ], heap: Some(p::HeapTemplate { entry: ts_string_split_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("5553d9b9cada0cd2046e534aefb8e60eed954fdb77cfd60f6b761c15b1dfc9b0"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.string.split`.
@@ -66221,7 +66221,7 @@ const TS_STRING_REPLACE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_replace,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_replace_heap, depth: 2, writes: false, callees: &[p::function("4f0b79bfc729592ce1b8cb27a66bb80790321ccc375e91339cc9103a50d515c0"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_replace_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("4f0b79bfc729592ce1b8cb27a66bb80790321ccc375e91339cc9103a50d515c0"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.string.replace`.
@@ -66293,7 +66293,7 @@ const TS_STRING_REPLACEALL_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_string_replaceall,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_replaceall_heap, depth: 2, writes: false, callees: &[p::function("4f0b79bfc729592ce1b8cb27a66bb80790321ccc375e91339cc9103a50d515c0"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_string_replaceall_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("4f0b79bfc729592ce1b8cb27a66bb80790321ccc375e91339cc9103a50d515c0"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.string.replaceAll`.
@@ -66749,7 +66749,7 @@ const TS_URI_FLUSH_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: ts_uri_flush,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_uri_flush_heap, depth: 1, writes: false, callees: &[p::function("7a80e37aa7ed48e0618fe2cec6b37d406d3481c681652c58cdc91977dff017a3"), p::function("d64d4b3e95df0f66c316f179d617d2bc181e73c129f55757c83d8edcdcd597ca"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_uri_flush_heap, depth: 1, writes: false, element_write: false, callees: &[p::function("7a80e37aa7ed48e0618fe2cec6b37d406d3481c681652c58cdc91977dff017a3"), p::function("d64d4b3e95df0f66c316f179d617d2bc181e73c129f55757c83d8edcdcd597ca"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.uri.flush`.
@@ -67179,7 +67179,7 @@ const TS_URI_ENCODEURI_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_uri_encodeuri,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_uri_encodeuri_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("df85fc159a8cabd4b521557da045e4fa9c64115e31a21d9d1f7b0dbf0f180d5d"), p::function("e619c844468f0cfb53f3a47a20fb7c2ee20a9503e20b92459ad52ac46ab97eb3"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_uri_encodeuri_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("df85fc159a8cabd4b521557da045e4fa9c64115e31a21d9d1f7b0dbf0f180d5d"), p::function("e619c844468f0cfb53f3a47a20fb7c2ee20a9503e20b92459ad52ac46ab97eb3"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.uri.encodeURI`.
@@ -67283,7 +67283,7 @@ const TS_URI_DECODEURI_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_uri_decodeuri,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_uri_decodeuri_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("df85fc159a8cabd4b521557da045e4fa9c64115e31a21d9d1f7b0dbf0f180d5d"), p::function("35e088c67549ba9d69a338952219a6bbd4abd0d0c8a69a99583b1d10e99912e3"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_uri_decodeuri_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("df85fc159a8cabd4b521557da045e4fa9c64115e31a21d9d1f7b0dbf0f180d5d"), p::function("35e088c67549ba9d69a338952219a6bbd4abd0d0c8a69a99583b1d10e99912e3"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.uri.decodeURI`.
@@ -67387,7 +67387,7 @@ const TS_URI_ENCODEURICOMPONENT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_uri_encodeuricomponent,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_uri_encodeuricomponent_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("df85fc159a8cabd4b521557da045e4fa9c64115e31a21d9d1f7b0dbf0f180d5d"), p::function("e619c844468f0cfb53f3a47a20fb7c2ee20a9503e20b92459ad52ac46ab97eb3"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_uri_encodeuricomponent_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("df85fc159a8cabd4b521557da045e4fa9c64115e31a21d9d1f7b0dbf0f180d5d"), p::function("e619c844468f0cfb53f3a47a20fb7c2ee20a9503e20b92459ad52ac46ab97eb3"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.uri.encodeURIComponent`.
@@ -67491,7 +67491,7 @@ const TS_URI_DECODEURICOMPONENT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_uri_decodeuricomponent,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_uri_decodeuricomponent_heap, depth: 2, writes: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("df85fc159a8cabd4b521557da045e4fa9c64115e31a21d9d1f7b0dbf0f180d5d"), p::function("35e088c67549ba9d69a338952219a6bbd4abd0d0c8a69a99583b1d10e99912e3"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[], heap: Some(p::HeapTemplate { entry: ts_uri_decodeuricomponent_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e0b28326c9a016d8b2582249d54b6cdad4191bd6da5bfdc9780c09da0b6024a1"), p::function("df85fc159a8cabd4b521557da045e4fa9c64115e31a21d9d1f7b0dbf0f180d5d"), p::function("35e088c67549ba9d69a338952219a6bbd4abd0d0c8a69a99583b1d10e99912e3"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.uri.decodeURIComponent`.
@@ -68157,7 +68157,7 @@ const TS_IN_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_in,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_in_heap, depth: 2, writes: false, callees: &[p::function("e5b256d5a985b14351b1ef35fb097aff83dc2761f387784c6e78b9edeb4c5e6d"), p::function("802dfd92c69326cab249403280675a5fb1ce4e299a0bf653659123953c8a924a"), p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_in_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("e5b256d5a985b14351b1ef35fb097aff83dc2761f387784c6e78b9edeb4c5e6d"), p::function("802dfd92c69326cab249403280675a5fb1ce4e299a0bf653659123953c8a924a"), p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.in`.
@@ -74290,7 +74290,7 @@ const TS_MEMBER_APPEND_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_append,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_append_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_append_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.append`.
@@ -75464,7 +75464,7 @@ const TS_MEMBER_AT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_at,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_at_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_at_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.at`.
@@ -77173,7 +77173,7 @@ const TS_MEMBER_CATCH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_catch,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_catch_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_catch_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.catch`.
@@ -79062,7 +79062,7 @@ const TS_MEMBER_CONCAT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_concat,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_concat_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_concat_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.concat`.
@@ -79471,7 +79471,7 @@ const TS_MEMBER_CONSTRUCTOR_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_constructor,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_constructor_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_constructor_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.constructor`.
@@ -80350,7 +80350,7 @@ const TS_MEMBER_COPYWITHIN_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_copywithin,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_copywithin_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_copywithin_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.copyWithin`.
@@ -81947,7 +81947,7 @@ const TS_MEMBER_DELETE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_delete,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_delete_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_delete_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.delete`.
@@ -82756,7 +82756,7 @@ const TS_MEMBER_ENTRIES_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_entries,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_entries_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_entries_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.entries`.
@@ -83373,7 +83373,7 @@ const TS_MEMBER_EVERY_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_every,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_every_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_every_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.every`.
@@ -83658,7 +83658,7 @@ const TS_MEMBER_EXEC_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_exec,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_exec_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_exec_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.exec`.
@@ -84348,7 +84348,7 @@ const TS_MEMBER_FILL_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_fill,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_fill_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_fill_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.fill`.
@@ -84636,7 +84636,7 @@ const TS_MEMBER_FILTER_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_filter,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_filter_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_filter_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.filter`.
@@ -84921,7 +84921,7 @@ const TS_MEMBER_FINALLY_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_finally,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_finally_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_finally_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.finally`.
@@ -85177,7 +85177,7 @@ const TS_MEMBER_FIND_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_find,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_find_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_find_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.find`.
@@ -85465,7 +85465,7 @@ const TS_MEMBER_FINDINDEX_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_findindex,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_findindex_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_findindex_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.findIndex`.
@@ -85753,7 +85753,7 @@ const TS_MEMBER_FINDLAST_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_findlast,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_findlast_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_findlast_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.findLast`.
@@ -86041,7 +86041,7 @@ const TS_MEMBER_FINDLASTINDEX_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_findlastindex,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_findlastindex_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_findlastindex_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.findLastIndex`.
@@ -86329,7 +86329,7 @@ const TS_MEMBER_FLAT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_flat,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_flat_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_flat_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.flat`.
@@ -86617,7 +86617,7 @@ const TS_MEMBER_FLATMAP_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_flatmap,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_flatmap_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_flatmap_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.flatMap`.
@@ -87137,7 +87137,7 @@ const TS_MEMBER_FOREACH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_foreach,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_foreach_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_foreach_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.forEach`.
@@ -88825,7 +88825,7 @@ const TS_MEMBER_GET_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_get,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_get_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_get_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.get`.
@@ -89110,7 +89110,7 @@ const TS_MEMBER_GETALL_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_getall,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_getall_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_getall_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.getAll`.
@@ -95248,7 +95248,7 @@ const TS_MEMBER_HAS_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_has,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_has_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_has_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.has`.
@@ -95804,7 +95804,7 @@ const TS_MEMBER_HASOWNPROPERTY_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_hasownproperty,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_hasownproperty_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_hasownproperty_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.hasOwnProperty`.
@@ -96708,7 +96708,7 @@ const TS_MEMBER_INCLUDES_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_includes,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_includes_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_includes_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.includes`.
@@ -97033,7 +97033,7 @@ const TS_MEMBER_INDEXOF_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_indexof,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_indexof_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_indexof_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.indexOf`.
@@ -99578,7 +99578,7 @@ const TS_MEMBER_ISPROTOTYPEOF_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_isprototypeof,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_isprototypeof_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_isprototypeof_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.isPrototypeOf`.
@@ -100947,7 +100947,7 @@ const TS_MEMBER_JOIN_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_join,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_join_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_join_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.join`.
@@ -101255,7 +101255,7 @@ const TS_MEMBER_KEYS_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_keys,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_keys_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_keys_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.keys`.
@@ -101660,7 +101660,7 @@ const TS_MEMBER_LASTINDEXOF_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_lastindexof,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_lastindexof_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_lastindexof_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.lastIndexOf`.
@@ -103324,7 +103324,7 @@ const TS_MEMBER_MAP_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_map,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_map_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_map_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.map`.
@@ -106916,7 +106916,7 @@ const TS_MEMBER_POP_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_pop,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_pop_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_pop_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.pop`.
@@ -108642,7 +108642,7 @@ const TS_MEMBER_PUSH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_push,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_push_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_push_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.push`.
@@ -109581,7 +109581,7 @@ const TS_MEMBER_REDUCE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_reduce,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_reduce_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_reduce_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.reduce`.
@@ -109869,7 +109869,7 @@ const TS_MEMBER_REDUCERIGHT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_reduceright,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_reduceright_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_reduceright_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.reduceRight`.
@@ -111296,7 +111296,7 @@ const TS_MEMBER_REVERSE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_reverse,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_reverse_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_reverse_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.reverse`.
@@ -112255,7 +112255,7 @@ const TS_MEMBER_SET_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_set,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_set_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_set_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.set`.
@@ -116555,7 +116555,7 @@ const TS_MEMBER_SHIFT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_shift,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_shift_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_shift_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.shift`.
@@ -117730,7 +117730,7 @@ const TS_MEMBER_SLICE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_slice,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_slice_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_slice_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.slice`.
@@ -118050,7 +118050,7 @@ const TS_MEMBER_SOME_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_some,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_some_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_some_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.some`.
@@ -118344,7 +118344,7 @@ const TS_MEMBER_SORT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_sort,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_sort_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_sort_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.sort`.
@@ -118664,7 +118664,7 @@ const TS_MEMBER_SPLICE_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_splice,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_splice_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_splice_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.splice`.
@@ -120757,7 +120757,7 @@ const TS_MEMBER_TEST_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_test,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_test_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_test_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.test`.
@@ -121010,7 +121010,7 @@ const TS_MEMBER_THEN_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_then,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_then_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_then_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.then`.
@@ -123027,7 +123027,7 @@ const TS_MEMBER_TOLOCALESTRING_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_tolocalestring,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_tolocalestring_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_tolocalestring_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.toLocaleString`.
@@ -124338,7 +124338,7 @@ const TS_MEMBER_TOREVERSED_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_toreversed,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_toreversed_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_toreversed_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.toReversed`.
@@ -124626,7 +124626,7 @@ const TS_MEMBER_TOSORTED_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_tosorted,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_tosorted_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_tosorted_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.toSorted`.
@@ -124914,7 +124914,7 @@ const TS_MEMBER_TOSPLICED_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_tospliced,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_tospliced_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_tospliced_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.toSpliced`.
@@ -125267,7 +125267,7 @@ const TS_MEMBER_TOSTRING_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_tostring,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_tostring_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_tostring_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.toString`.
@@ -127877,7 +127877,7 @@ const TS_MEMBER_UNSHIFT_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_unshift,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_unshift_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_unshift_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.unshift`.
@@ -128205,7 +128205,7 @@ const TS_MEMBER_VALUEOF_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_valueof,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_valueof_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_valueof_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.valueOf`.
@@ -128801,7 +128801,7 @@ const TS_MEMBER_VALUES_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_values,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_values_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_values_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.values`.
@@ -129418,7 +129418,7 @@ const TS_MEMBER_WITH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_member_with,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_with_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: ts_member_with_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.member.with`.
@@ -130161,7 +130161,7 @@ const TS_PROPERTY_LENGTH_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_property_length,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_property_length_heap, depth: 2, writes: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("1eedc5d3cff76745ae67c92341f596d543a1fab6ca6ac52f0a4659cadb64356d"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_property_length_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("9931f90861773196beede7faf9cf39370d44d72006b4753c2c9e37ff3a98ac42"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("1eedc5d3cff76745ae67c92341f596d543a1fab6ca6ac52f0a4659cadb64356d"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.property.length`.
@@ -137796,7 +137796,7 @@ const TS_GET_COMPUTED_PLAN: p::HelperPlan = p::HelperPlan {
         },
     ],
     run: ts_get_computed,
-    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_get_computed_heap, depth: 2, writes: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("6e33c328d8bc6e82f51a4dc3a877182b656b5ea38d6d616c1140f39976fad197"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: None, depth: 1, callees: &[p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), ], heap: Some(p::HeapTemplate { entry: ts_get_computed_heap, depth: 2, writes: false, element_write: false, callees: &[p::function("1465a1a642da52eba1664711a12c594f155ba2c6cd744344079f5b5018db1578"), p::function("6e33c328d8bc6e82f51a4dc3a877182b656b5ea38d6d616c1140f39976fad197"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
 };
 
 /// `ts.get_computed`.

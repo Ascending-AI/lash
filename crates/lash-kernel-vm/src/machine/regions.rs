@@ -398,6 +398,8 @@ impl KernelMachine {
                 guests: Some(&mut guests),
                 called: None,
                 accumulator: None,
+                keyed: None,
+                absent: None,
             },
             tape,
             admit: Admit {

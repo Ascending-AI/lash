@@ -6,10 +6,10 @@
 //! marks its object dirty, with the card it changed; what it grew by is in
 //! the resident count the capacity meter reads (FIG-6791).
 
-use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, Chunks, LocalCode, Sequence};
+use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, Chunks, LocalCode, Sequence, ShortText};
 use lash_kernel_doc::{NativeError, Retry, Site, Value};
 
-use super::{Arena, CARD, Facts, Key, Summary, malformed, value_summary};
+use super::{Arena, CARD, Facts, Key, Place, Summary, malformed, value_summary};
 
 /// The refusal a value that is no legal key raises (`K-KEY-002`).
 pub fn invalid_key() -> NativeError {
@@ -277,6 +277,27 @@ impl Arena {
             }
         };
         self.mark(handle, Some(seq / CARD))
+    }
+
+    /// Writes `value` over the entry at `place` of the table `handle`,
+    /// which a read found keyed by the short text `key` in the table's
+    /// `version` ([`Self::table_version`]): the write [`Self::table_write`]
+    /// makes there, without finding the entry again. `false`, having
+    /// written nothing, where the table is no longer that version or the
+    /// entry at `place` is keyed otherwise.
+    pub fn table_write_at(
+        &mut self,
+        handle: ArenaHandle,
+        version: (u64, u64),
+        place: Place,
+        key: &ShortText,
+        value: Value,
+    ) -> Result<bool, NativeError> {
+        let Some(seq) = self.table_overwrite_at(handle, version, place, key, value)? else {
+            return Ok(false);
+        };
+        self.mark(handle, Some(seq / CARD))?;
+        Ok(true)
     }
 
     /// Removes the entry under `key` of the table `handle`, if any.

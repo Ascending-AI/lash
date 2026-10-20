@@ -5,7 +5,7 @@
 //! entry's complete key before reusing its position. Caches are
 //! process-local and empty on restore.
 
-use lash_kernel_doc::arena::ArenaHandle;
+use lash_kernel_doc::arena::{ArenaHandle, ShortText};
 use lash_kernel_doc::heap::NormalKey;
 use lash_kernel_doc::{NativeError, Value};
 use lash_kernel_exec::SiteIx;
@@ -74,7 +74,6 @@ pub(crate) fn find(
     slot: Option<PropertySlot>,
     key: &Key,
 ) -> Result<(Option<Value>, Option<PropertySlot>), NativeError> {
-    let version = arena.table_version(record)?;
     let short = match key {
         Key::Text(low, high) => Some(u128::from(*high) << 64 | u128::from(*low)),
         _ => None,
@@ -82,12 +81,20 @@ pub(crate) fn find(
     if let (Some(slot), Some(word)) = (slot, short)
         && slot.key == word
     {
+        // The proof's own version answers from the record's facts alone.
+        let current = arena.table_is(record, slot.version);
         match slot.place {
-            None if Some(slot.version) == version => return Ok((None, Some(slot))),
+            None if current => return Ok((None, Some(slot))),
             None => {}
+            Some(place) if current => {
+                if let Some(pair) = arena.table_at(record, place)? {
+                    return Ok((Some(pair[1]), Some(slot)));
+                }
+            }
             Some(place) => {
+                let version = arena.table_version(record)?;
                 if let Some(pair) = arena.table_at(record, place)?
-                    && (Some(slot.version) == version || keyed(&pair[0], word))
+                    && keyed(&pair[0], word)
                 {
                     return Ok((
                         Some(pair[1]),
@@ -97,6 +104,7 @@ pub(crate) fn find(
             }
         }
     }
+    let version = arena.table_version(record)?;
     let found = arena.table_find(record, key)?;
     let slot = short.and_then(|word| {
         Some(PropertySlot {
@@ -106,6 +114,26 @@ pub(crate) fn find(
         })
     });
     Ok((found.map(|(_, value)| value), slot))
+}
+
+/// Writes `value` under the short text `key` of `record` at the position
+/// `slot` proved, where the record is still the version the proof names
+/// and the entry there is keyed `key`: the write `table_write` makes
+/// there, without hashing the key again. `false`, having written nothing,
+/// where the proof is of an absence, of another key, or of an earlier
+/// version.
+#[inline]
+pub(crate) fn write(
+    arena: &mut Arena,
+    record: ArenaHandle,
+    slot: PropertySlot,
+    key: &ShortText,
+    value: Value,
+) -> Result<bool, NativeError> {
+    match slot.place {
+        Some(place) => arena.table_write_at(record, slot.version, place, key, value),
+        None => Ok(false),
+    }
 }
 
 /// Whether entry key `key` is the short text whose word is `word`.

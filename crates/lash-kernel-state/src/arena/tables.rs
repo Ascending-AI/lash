@@ -689,6 +689,52 @@ impl super::Arena {
         Ok(Some(seq))
     }
 
+    /// Writes `value` over the entry at `place` where the short text `key`
+    /// keys it in the table's `version` ([`Self::table_version`]), as
+    /// [`Self::table_overwrite`] writes over that entry, without finding
+    /// it. Gives the entry's sequence, or `None`, having written nothing,
+    /// where the table is cold or no longer that version, or no resident
+    /// entry at `place` is keyed `key`.
+    pub(super) fn table_overwrite_at(
+        &mut self,
+        handle: ArenaHandle,
+        version: (u64, u64),
+        place: Place,
+        key: &ShortText,
+        value: Value,
+    ) -> Result<Option<u64>, NativeError> {
+        let (Some(body), Some(facts)) = (
+            self.objects.get_mut(handle),
+            self.facts.get(handle.index() as usize),
+        ) else {
+            return Err(NativeError::Malformed("a stale handle reached the machine"));
+        };
+        if facts.cold || !Self::proves(facts, version) {
+            return Ok(None);
+        }
+        let Some(seq) = facts
+            .index
+            .as_ref()
+            .and_then(|index| index.sequences(place.chunk).get(place.at))
+        else {
+            return Ok(None);
+        };
+        let Some(Chunk::Resident(values)) = table_mut(body)?.chunks.get_mut(place.chunk) else {
+            return Ok(None);
+        };
+        let Some([Value::Text(held_key), held]) = values.get_mut(place.at * 2..place.at * 2 + 2)
+        else {
+            return Ok(None);
+        };
+        if held_key != key {
+            return Ok(None);
+        }
+        let old = std::mem::replace(held, value);
+        self.hold(&value);
+        self.unhold(&old);
+        Ok(Some(seq))
+    }
+
     /// Writes `value` under `key`, whose resident key is `resident` and
     /// which the table does not hold, as its last entry: a table on a
     /// layout moves to the layout `resident` leads to, when a table built
@@ -830,6 +876,23 @@ impl super::Arena {
     pub fn table_version(&self, handle: ArenaHandle) -> Result<Option<(u64, u64)>, NativeError> {
         let (_, _, facts) = self.table_facts(handle)?;
         Ok((facts.revision != u64::MAX).then_some((facts.token, facts.revision)))
+    }
+
+    /// Whether `handle` is still the resident table of `version`
+    /// ([`Self::table_version`]), so that the position proofs `version`
+    /// guards still hold: the facts alone answer, without the body.
+    #[inline]
+    pub fn table_is(&self, handle: ArenaHandle, version: (u64, u64)) -> bool {
+        self.facts
+            .get(handle.index() as usize)
+            .is_some_and(|facts| !facts.cold && Self::proves(facts, version))
+    }
+
+    /// Whether `facts` are of the object and revision `version` names,
+    /// unsaturated.
+    #[inline(always)]
+    fn proves(facts: &Facts, version: (u64, u64)) -> bool {
+        facts.revision != u64::MAX && (facts.token, facts.revision) == version
     }
 
     /// The entry at `place`, if the table holds one there: what a read

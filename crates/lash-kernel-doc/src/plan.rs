@@ -128,7 +128,17 @@ pub struct HeapTemplate {
     /// the write is the path's last fallible step, but what runs after
     /// the call in its caller's statement may still fail.
     pub writes: bool,
+    /// Whether the paths on a list, a float that is a whole number at
+    /// least zero and below both the list's length and
+    /// [`ELEMENT_POSITIONS`], and any value are the element write
+    /// `set target[key] = value` answering `value`, which a caller may
+    /// make itself ([`TemplateHeap::set_index`]) in place of the paths.
+    pub element_write: bool,
 }
+
+/// The positions an element-writing template writes at lie below
+/// ([`HeapTemplate::element_write`]): 2³² − 1.
+pub const ELEMENT_POSITIONS: u64 = (1 << 32) - 1;
 
 /// What a heap path reads, builds and writes with: the forms a helper body
 /// performs on the arena, as the machine performs them for the body. Each

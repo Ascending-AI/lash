@@ -58,7 +58,9 @@ mod scopes;
 mod templates;
 pub(crate) use templates::{Entry, INNER, inner as inner_entry};
 pub(crate) mod segments;
-pub(crate) use reads::{Field, PropertySlot, ReadSite, find as find_property};
+pub(crate) use reads::{
+    Field, PropertySlot, ReadSite, find as find_property, write as write_property,
+};
 
 pub(crate) use formula::{Charge, Fast, Plan, ScalarTable, SiteFormula, Source};
 pub(crate) use regions::{

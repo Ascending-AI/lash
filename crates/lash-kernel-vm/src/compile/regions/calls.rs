@@ -32,6 +32,10 @@ enum Declined {
     General,
     /// The template's heap paths, over their general callees.
     Heap(&'static HeapTemplate, Box<[LibId]>),
+    /// The heap paths of a template that declares its element write
+    /// ([`HeapTemplate::element_write`]): the write, where its operands
+    /// are the element write's, and the paths otherwise.
+    Element(&'static HeapTemplate, Box<[LibId]>),
 }
 
 /// An operator site of an allocating plan: library function `id`'s
@@ -73,7 +77,11 @@ impl Site {
                             .iter()
                             .map(|callee| libs.exe.library_lib(callee))
                             .collect::<Option<Box<[_]>>>()?;
-                        Some(Declined::Heap(heap, callees))
+                        Some(if heap.element_write {
+                            Declined::Element(heap, callees)
+                        } else {
+                            Declined::Heap(heap, callees)
+                        })
                     })
                     .unwrap_or(Declined::General);
                 (Answers::Template(template.entry), natives.clone(), declined)
@@ -160,11 +168,17 @@ impl Site {
     /// call.
     #[inline(always)]
     fn declined(&self, values: &[Value], cx: &mut Cx<'_>) -> Option<Value> {
-        let Declined::Heap(heap, callees) = &self.declined else {
-            let function = cx.exe.lib(self.id);
-            return cx.windowed(values, |cx, args| cx.general(function, args));
+        let value = match &self.declined {
+            Declined::General => {
+                let function = cx.exe.lib(self.id);
+                return cx.windowed(values, |cx, args| cx.general(function, args));
+            }
+            Declined::Heap(heap, callees) => cx.heap_paths(heap, callees, &self.natives, values)?,
+            Declined::Element(heap, callees) => match cx.element_write(values) {
+                Some(value) => value,
+                None => cx.heap_paths(heap, callees, &self.natives, values)?,
+            },
         };
-        let value = cx.heap_paths(heap, callees, &self.natives, values)?;
         if cx.charging {
             let units = self.units(values, &value, cx)?;
             cx.meter.measured(units);

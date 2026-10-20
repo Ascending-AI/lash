@@ -26,7 +26,7 @@ use lash_kernel_state::arena::VALUE_BYTES;
 use super::super::expr::{self, Callee, Expr, Kind, Make};
 use super::super::{
     BindingName, BlockId, Constant, Executable, Lib, LibId, LibRun, ReadSite, Source, Stream,
-    find_property,
+    find_property, write_property,
 };
 use super::GuestCall;
 use super::calls;
@@ -1187,10 +1187,11 @@ fn field(field: &super::super::Field, target: Node) -> Node {
             }
             let slot = site.and_then(|site| cx.sites.slot(site));
             let (value, found) = find_property(cx.arena, record, slot, &key).ok()?;
-            if let Some(site) = site
-                && found != slot
-            {
-                cx.sites.keep(site, found);
+            if let Some(site) = site {
+                if found != slot {
+                    cx.sites.keep(site, found);
+                }
+                cx.keep_keyed(site, record);
             }
             Some(value.unwrap_or(Value::Absent))
         }
@@ -1250,7 +1251,7 @@ pub(super) fn read_index(
         Value::Tuple(object) | Value::List(object) => arena.item(object, position(&index)?).ok()?,
         Value::Record(record) => {
             if !matches!(index, Value::Text(_) | Value::LongText(_))
-                || arena.unresolved(record, &index).ok()?.is_some()
+                || (arena.any_cold() && arena.unresolved(record, &index).ok()?.is_some())
             {
                 return None;
             }
@@ -1268,6 +1269,7 @@ pub(super) fn read_index(
             if at != slot {
                 cx.sites.keep(site, at);
             }
+            cx.keep_keyed(site, record);
             Some(found.unwrap_or(Value::Absent))
         }
         Value::Map(map) => {
@@ -1370,8 +1372,45 @@ pub(crate) fn store(
     index: Value,
     value: Value,
 ) -> Option<()> {
+    if let Value::Record(record) = target
+        && cx.keyed.is_some_and(|(read, _)| read == record)
+        && keyed_store(cx, place, record, index, value)
+    {
+        return Some(());
+    }
     let (write, _) = prepare(cx, place, target, index, value)?;
     apply(cx, write)
+}
+
+/// Writes `value` under a record's short key where the record's last
+/// read through a caching site found that key, and the record is still
+/// the version that read proved it in: the write [`prepare`] checks and
+/// [`apply`] makes, its growth admitted as theirs, without finding the
+/// key again. `false`, having written nothing, otherwise. Out of line,
+/// so that the other targets' stores stay [`prepare`]'s and [`apply`]'s.
+#[inline(never)]
+fn keyed_store(
+    cx: &mut Cx<'_>,
+    place: &Place,
+    record: ArenaHandle,
+    index: Value,
+    value: Value,
+) -> bool {
+    let Some((read, site)) = cx.keyed else {
+        return false;
+    };
+    let key = match (place, index) {
+        (Place::Field(Value::Text(name)), _) => *name,
+        (Place::Index, Value::Text(key)) => key,
+        _ => return false,
+    };
+    // With no cold chunk anywhere, no key is unresolved.
+    record == read
+        && !cx.arena.any_cold()
+        && cx.fits(2 * VALUE_BYTES)
+        && cx.sites.slot(site).is_some_and(|slot| {
+            write_property(cx.arena, record, slot, &key, value).is_ok_and(|written| written)
+        })
 }
 
 /// The write of `value` at `place` of `target`, with `index` for an
@@ -1421,7 +1460,8 @@ pub(super) fn prepare(
         _ => return None,
     };
     let bound = 2 * VALUE_BYTES;
-    if cx.arena.unresolved(table, &key).ok()?.is_some() || !cx.fits(bound) {
+    if (cx.arena.any_cold() && cx.arena.unresolved(table, &key).ok()?.is_some()) || !cx.fits(bound)
+    {
         return None;
     }
     Some((
@@ -1435,7 +1475,8 @@ pub(super) fn prepare(
 }
 
 /// Makes `write`, which [`prepare`] checked; `None` where the arena must
-/// decode first.
+/// decode first. A record's short key that a read found still where it
+/// was is written there, without finding it again.
 #[inline(always)]
 pub(super) fn apply(cx: &mut Cx<'_>, write: Prepared) -> Option<()> {
     match write {
@@ -1444,7 +1485,17 @@ pub(super) fn apply(cx: &mut Cx<'_>, write: Prepared) -> Option<()> {
             table,
             key,
             written,
-        } => cx.arena.table_write(table, key, written).ok(),
+        } => {
+            if let (Some((record, site)), Value::Text(text)) = (cx.keyed, key)
+                && record == table
+                && let Some(slot) = cx.sites.slot(site)
+                && write_property(cx.arena, table, slot, &text, written)
+                    .is_ok_and(|written| written)
+            {
+                return Some(());
+            }
+            cx.arena.table_write(table, key, written).ok()
+        }
         Prepared::Unset { set, key } => cx.arena.table_delete(set, &key).ok(),
     }
 }

@@ -7,7 +7,7 @@
 
 use std::ops::Range;
 
-use lash_kernel_doc::arena::ArenaHandle;
+use lash_kernel_doc::arena::{ArenaHandle, ShortText};
 use lash_kernel_doc::heap::{HeapFault, LogicalBytes};
 use lash_kernel_doc::plan::{Collection, HeapTemplate, Table, TemplateHeap};
 use lash_kernel_doc::{
@@ -17,7 +17,8 @@ use lash_kernel_doc::{
 use lash_kernel_state::arena::Arena;
 
 use super::super::{
-    Charge, Entry, Executable, Fast, INNER, Lib, LibId, LibRun, Plan, Source, inner_entry as inner,
+    Charge, Entry, Executable, Fast, INNER, Lib, LibId, LibRun, Plan, ReadSite, Source,
+    inner_entry as inner,
 };
 use super::GuestCall;
 use super::nodes::{
@@ -99,6 +100,24 @@ pub(crate) struct Cx<'a> {
     /// The running statement is a linear text accumulator's
     /// (`CompiledStep::Write::accumulates`) whose slot holds a long text.
     pub(crate) accumulator: Option<Accumulator>,
+    /// The record a caching read site last read a key of: a table write
+    /// of a short key to that record overwrites where the site found it,
+    /// while the record is still the version the site's proof names and
+    /// the entry there is keyed by it ([`super::super::write_property`]).
+    pub(crate) keyed: Option<(ArenaHandle, ReadSite)>,
+    /// The short text a membership test last found absent from a record,
+    /// in the record's version then: a later test of it there answers
+    /// absent without hashing it while the record is still that version.
+    pub(crate) absent: Option<Absent>,
+}
+
+/// A short text a record's version holds no entry under (`Cx::absent`):
+/// an edit that adds an entry revokes the version.
+#[derive(Clone, Copy)]
+pub(crate) struct Absent {
+    table: ArenaHandle,
+    key: ShortText,
+    version: (u64, u64),
 }
 
 /// A running accumulator statement's text (FIG-6795): the long text its
@@ -189,6 +208,17 @@ impl Cx<'_> {
                 apply(self, held.write).is_some()
             }
             None => true,
+        }
+    }
+
+    /// Keeps that read site `site` read a key of `record`, whose proof the
+    /// site holds, for a write of that key to that record. A site whose
+    /// layout misses its cache keeps nothing: its writes find their keys
+    /// again.
+    #[inline(always)]
+    pub(super) fn keep_keyed(&mut self, site: ReadSite, record: ArenaHandle) {
+        if !site.missing {
+            self.keyed = Some((record, site));
         }
     }
 
@@ -411,8 +441,45 @@ impl Cx<'_> {
 
     /// `<table>.contains(target, key)`, looked up as the native's call
     /// looks it up ([`Self::entry`]).
-    fn member(&self, table: Table, target: Value, key: Value) -> Option<Value> {
-        Some(Value::Bool(self.entry(table, target, key)?.is_some()))
+    fn member(&mut self, table: Table, target: Value, key: Value) -> Option<Value> {
+        Some(Value::Bool(self.probe(table, target, key)?.is_some()))
+    }
+
+    /// [`Self::entry`], a record's short key answered absent by the proof
+    /// of the last test that found it absent from this version of the
+    /// record, and that proof kept where the record holds no entry under
+    /// it.
+    #[inline(always)]
+    fn probe(&mut self, table: Table, target: Value, key: Value) -> Option<Option<Value>> {
+        match (table, target, key) {
+            (Table::Record, Value::Record(record), Value::Text(text)) => self.probed(record, text),
+            _ => self.entry(table, target, key),
+        }
+    }
+
+    /// [`Self::probe`] of record `record`'s short key `text`, out of line
+    /// so that the other tables' lookups stay [`Self::entry`]'s.
+    #[inline(never)]
+    fn probed(&mut self, record: ArenaHandle, text: ShortText) -> Option<Option<Value>> {
+        if let Some(absent) = self.absent
+            && absent.table == record
+            && absent.key == text
+            && !self.arena.any_cold()
+            && self.arena.table_is(record, absent.version)
+        {
+            return Some(None);
+        }
+        let found = self.entry(Table::Record, Value::Record(record), Value::Text(text))?;
+        if found.is_none()
+            && let Ok(Some(version)) = self.arena.table_version(record)
+        {
+            self.absent = Some(Absent {
+                table: record,
+                key: text,
+                version,
+            });
+        }
+        Some(found)
     }
 
     /// `target`'s entry under `key`, looked up as `<table>.contains`'s call
@@ -671,6 +738,41 @@ impl Cx<'_> {
         value
     }
 
+    /// The element write of an element-writing template's paths
+    /// ([`HeapTemplate::element_write`]) on `values`, a list, a whole float
+    /// at least zero and below both its length and [`ELEMENT_POSITIONS`],
+    /// and the value, checked and held as the paths' own write is
+    /// ([`HeapCx::set_index`]): the value written. `None`, having held
+    /// nothing, for any other operands, which the paths answer.
+    #[inline(always)]
+    pub(super) fn element_write(&mut self, values: &[Value]) -> Option<Value> {
+        let [Value::List(list), Value::Float(position), value] = *values else {
+            return None;
+        };
+        let at = position.get();
+        if self.held.is_some()
+            || self.concatenated()
+            || !(at >= 0.0
+                && at.fract() == 0.0
+                && at < ELEMENT_POSITIONS
+                && at < self.arena.len(list).ok()? as f64)
+        {
+            return None;
+        }
+        let (write, bound) = prepare(
+            self,
+            &Place::Index,
+            Value::List(list),
+            Value::Float(position),
+            value,
+        )?;
+        if self.memory {
+            self.transient += bound;
+        }
+        self.held = Some(Held { write, bound });
+        Some(value)
+    }
+
     /// `function`'s prepared `answer` on `args`, charged as the
     /// reference's prepared answer is ([`Self::units`]).
     #[inline(always)]
@@ -804,6 +906,10 @@ fn measures_object(plan: &Plan, args: &[Value], result: Option<&Value>) -> bool 
         value.is_some_and(|value| value.handle().is_some() && !matches!(value, Value::LongText(_)))
     })
 }
+
+/// The positions an element-writing template's paths write at
+/// ([`lash_kernel_doc::plan::HeapTemplate::element_write`]) lie below.
+const ELEMENT_POSITIONS: f64 = lash_kernel_doc::plan::ELEMENT_POSITIONS as f64;
 
 /// The most parameters a heap path's callee takes.
 const HEAP_ARITY: usize = 8;
@@ -1006,7 +1112,7 @@ impl TemplateHeap for HeapCx<'_, '_> {
         if self.cx.held.is_some() || self.cx.concatenated() {
             return None;
         }
-        self.cx.entry(table, target, key)
+        self.cx.probe(table, target, key)
     }
 }
 
