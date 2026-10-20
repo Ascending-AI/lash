@@ -209,7 +209,9 @@ pub(super) fn cut_laws(mode: Mode, cut: &Cut, seen: &Seen) -> Vec<String> {
         | Mode::MaterialLost
         | Mode::MaterialStale
         | Mode::CollidingCommit
-        | Mode::OutsideWriterRange => {}
+        | Mode::OutsideWriterRange
+        | Mode::CheckpointFault
+        | Mode::CancelWhileDeriving => {}
     }
     violations
 }

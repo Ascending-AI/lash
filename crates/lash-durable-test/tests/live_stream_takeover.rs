@@ -8,7 +8,10 @@
 //!   and one opened after A died both follow the turn to its commit without
 //!   a replay gap: the live stream retracts A's partial prose with one
 //!   `ModelAttemptReset` before B's attempt streams, so the text a follower
-//!   holds is B's answer alone.
+//!   holds is B's answer alone. An answer the provider did not stream is
+//!   published whole by A's derivation before anything durable holds it, as
+//!   a final answer and as an answer A dies at the `model.answer` its tool
+//!   round commits first: the reset retracts those blocks too (FIG-6969).
 //! - **Discontinuity:** a feed whose live replay is invalidated reports one
 //!   gap and follows on from a cursor the replay continues, even when the
 //!   snapshot the gap carries trails the discontinuity.
@@ -52,22 +55,73 @@ const SESSION: &str = "live-stream-takeover";
 const ABANDONED: &str = "the abandoned attempt's answer";
 /// What B's re-sent attempt answers.
 const RESENT: &str = "the re-sent attempt's answer";
+/// What the model answers once a tool round answered the call.
+const AFTER_THE_TOOL: &str = ", and then the tool's answer";
+
+/// How A's answer reaches the live stream, and where A dies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Shape {
+    /// A streamed final answer: A dies at the `turn.commit` that carries its
+    /// receipt.
+    Streamed,
+    /// A final answer the provider did not stream, which the derivation
+    /// publishes as whole blocks: A dies at the same `turn.commit`.
+    Unstreamed,
+    /// An unstreamed answer beside a call to the echo tool: A dies at the
+    /// `model.answer` its tool round commits first, after the derivation
+    /// published it.
+    UnstreamedBeforeATool,
+}
+
+impl Shape {
+    /// The text a follower holds once the turn committed.
+    fn followed(self) -> String {
+        match self {
+            Self::Streamed | Self::Unstreamed => RESENT.to_owned(),
+            Self::UnstreamedBeforeATool => format!("{RESENT}{AFTER_THE_TOOL}"),
+        }
+    }
+}
 
 fn session() -> SessionId {
     SessionId::try_from(SESSION.to_owned()).unwrap()
 }
 
-/// The model: each attempt streams its answer as one delta, A's the
-/// abandoned answer, every later one the re-sent answer.
-fn model(attempts: Arc<AtomicUsize>) -> lash_core::facade_support::ProviderHandle {
+/// The model: each attempt answers as `shape` says, A's the abandoned
+/// answer, every later one the re-sent answer; a streamed one streams it as
+/// one delta.
+fn model(attempts: Arc<AtomicUsize>, shape: Shape) -> lash_core::facade_support::ProviderHandle {
     lash_core::testing::TestProvider::builder()
         .kind("live-stream-takeover")
-        .requires_streaming(true)
+        .requires_streaming(shape == Shape::Streamed)
         .complete(move |request: LlmRequest| {
             let attempt = attempts.fetch_add(1, Ordering::SeqCst);
             async move {
                 let text = if attempt == 0 { ABANDONED } else { RESENT };
-                Ok(served::text(&request, text))
+                let answered = request
+                    .messages
+                    .iter()
+                    .any(|message| message.role == lash_core::llm::types::LlmRole::Assistant);
+                let prose = |text: &str| {
+                    served::response(vec![LlmOutputPart::Text {
+                        text: text.to_owned(),
+                        response_meta: None,
+                    }])
+                };
+                Ok(match shape {
+                    Shape::Streamed => served::text(&request, text),
+                    Shape::Unstreamed => prose(text),
+                    Shape::UnstreamedBeforeATool if answered => prose(AFTER_THE_TOOL),
+                    Shape::UnstreamedBeforeATool => {
+                        let mut response = prose(text);
+                        response.parts.push(served::call(
+                            "echo",
+                            "echo_tool",
+                            serde_json::json!({ "value": "echo" }),
+                        ));
+                        response
+                    }
+                })
             }
         })
         .build()
@@ -173,14 +227,15 @@ fn streamed(events: &[Arc<SessionObservationEvent>], text: &str) -> bool {
 }
 
 /// One session served by sim nodes over `dialect`'s database, its turn's
-/// model streaming [`ABANDONED`] on A's attempt and [`RESENT`] on every
-/// later one.
+/// model answering [`ABANDONED`] on A's attempt and [`RESENT`] on every
+/// later one, as `shape` says.
 struct Takeover {
     clock: Arc<SimClock>,
     nodes: SimNodes,
     durable: lash::DurableSession,
     observed: lash::LashSession,
     attempts: Arc<AtomicUsize>,
+    shape: Shape,
     keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
 }
 
@@ -191,6 +246,15 @@ impl Takeover {
         dialect: Dialect,
         postgres_url: Option<String>,
         live: Option<Arc<dyn LiveReplayStore>>,
+    ) -> Self {
+        Self::shaped(dialect, postgres_url, live, Shape::Streamed).await
+    }
+
+    async fn shaped(
+        dialect: Dialect,
+        postgres_url: Option<String>,
+        live: Option<Arc<dyn LiveReplayStore>>,
+        shape: Shape,
     ) -> Self {
         let clock = SimClock::new();
         let keep = Mutex::new(Vec::new());
@@ -205,7 +269,13 @@ impl Takeover {
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
             .execution_budgets(lash::ExecutionBudgets::recommended())
             .delta_coalescing(lash::DeltaCoalescing::recommended())
-            .serve_test_llm_profile(model(Arc::clone(&attempts)), served::metadata());
+            .serve_test_llm_profile(model(Arc::clone(&attempts), shape), served::metadata());
+        if shape == Shape::UnstreamedBeforeATool {
+            builder = builder.tools(
+                lash::tool_provider_key!("tools"),
+                Arc::new(lash_core::testing::runtime_helpers::EchoTool),
+            );
+        }
         if let Some(live) = live {
             builder = builder.live_replay_store(live);
         }
@@ -217,9 +287,14 @@ impl Takeover {
             .expect("the core builds");
         let script = Script::new();
         // The call's receipt owes no callback, so it commits with the
-        // turn's commit (FIG-6955): A dies there, its answer derived and
-        // published but never durable.
-        script.cut_on("a", CommitLabel::TURN_COMMIT, 1, Fault::Abort);
+        // turn's commit (FIG-6955), or before the tool round its answer
+        // calls: A dies there, its answer derived and published but never
+        // durable.
+        let receipt = match shape {
+            Shape::Streamed | Shape::Unstreamed => CommitLabel::TURN_COMMIT,
+            Shape::UnstreamedBeforeATool => CommitLabel::MODEL_ANSWER,
+        };
+        script.cut_on("a", receipt, 1, Fault::Abort);
         let nodes = SimNodes::new(
             database,
             Arc::clone(&clock),
@@ -252,6 +327,7 @@ impl Takeover {
             durable,
             observed,
             attempts,
+            shape,
             keep,
         }
     }
@@ -325,8 +401,12 @@ impl Takeover {
         self.nodes.quiesce().await;
         assert_eq!(
             self.attempts.load(Ordering::SeqCst),
-            2,
-            "A's attempt and B's re-sent one"
+            if self.shape == Shape::UnstreamedBeforeATool {
+                3
+            } else {
+                2
+            },
+            "A's attempt and B's re-sent one, then the call after the tool"
         );
     }
 
@@ -433,8 +513,9 @@ async fn a_second_model_call_reset_preserves_the_first_calls_blocks_on_sqlite_me
 async fn a_takeover_resend_streams_on_without_a_gap(
     dialect: Dialect,
     postgres_url: Option<String>,
+    shape: Shape,
 ) {
-    let takeover = Takeover::new(dialect, postgres_url, None).await;
+    let takeover = Takeover::shaped(dialect, postgres_url, None, shape).await;
     let (before, opened_at) = takeover.follow().await;
     takeover.a_streams_and_dies(&before).await;
     let (mid, _) = takeover.follow().await;
@@ -459,8 +540,8 @@ async fn a_takeover_resend_streams_on_without_a_gap(
         );
         assert_eq!(
             followed_prose(&events),
-            RESENT,
-            "the {name} feed's follower holds B's answer alone"
+            shape.followed(),
+            "{shape:?}: the {name} feed's follower holds B's answer alone"
         );
     }
     takeover.end();
@@ -468,12 +549,34 @@ async fn a_takeover_resend_streams_on_without_a_gap(
 
 #[tokio::test]
 async fn a_takeover_resend_streams_on_without_a_gap_on_sqlite_memory() {
-    a_takeover_resend_streams_on_without_a_gap(Dialect::SqliteMemory, None).await;
+    a_takeover_resend_streams_on_without_a_gap(Dialect::SqliteMemory, None, Shape::Streamed).await;
 }
 
 #[tokio::test]
 async fn a_takeover_resend_streams_on_without_a_gap_on_sqlite_file() {
-    a_takeover_resend_streams_on_without_a_gap(Dialect::SqliteFile, None).await;
+    a_takeover_resend_streams_on_without_a_gap(Dialect::SqliteFile, None, Shape::Streamed).await;
+}
+
+/// FIG-6969: A's final answer did not stream; the blocks its derivation
+/// published are retracted by B's reset.
+#[tokio::test]
+async fn an_unstreamed_answer_resent_after_a_takeover_leaves_the_resent_answer_alone() {
+    a_takeover_resend_streams_on_without_a_gap(Dialect::SqliteMemory, None, Shape::Unstreamed)
+        .await;
+}
+
+/// FIG-6969: A's unstreamed answer calls a tool and A dies at the
+/// `model.answer` the round commits first, after its derivation published
+/// the answer.
+#[tokio::test]
+async fn an_unstreamed_answer_before_a_tool_resent_after_a_takeover_leaves_the_resent_answer_alone()
+{
+    a_takeover_resend_streams_on_without_a_gap(
+        Dialect::SqliteMemory,
+        None,
+        Shape::UnstreamedBeforeATool,
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -482,7 +585,7 @@ async fn a_takeover_resend_streams_on_without_a_gap_on_postgres() {
         eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
         return;
     };
-    a_takeover_resend_streams_on_without_a_gap(Dialect::Postgres, Some(url)).await;
+    a_takeover_resend_streams_on_without_a_gap(Dialect::Postgres, Some(url), Shape::Streamed).await;
 }
 
 /// The prose a follower holds at the end of `items`: each delta's text

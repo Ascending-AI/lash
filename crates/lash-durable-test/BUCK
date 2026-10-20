@@ -866,6 +866,7 @@ lash_rust_integration_test(
     declared_features = [],
     srcs_patterns = [
         "tests/model_answer_receipt_laws.rs",
+        "tests/model_answer_receipt_laws/fused_receipt.rs",
         "tests/support/sim.rs",
     ],
     data_patterns = [],
@@ -1686,6 +1687,7 @@ lash_rust_integration_test(
         "tests/support/sim.rs",
         "tests/turn_phases.rs",
         "tests/turn_phases/head_commits.rs",
+        "tests/turn_phases/held_receipts.rs",
         "tests/turn_phases/model_receipts.rs",
         "tests/turn_phases/parks.rs",
         "tests/turn_phases/slots.rs",

@@ -136,26 +136,49 @@ effect the checkpoint names.
   a restore after it derives the response again from the receipt and never
   re-sends the call. A crash before the receipt commits re-sends the pinned
   request as the next attempt while the deadline allows, even if the
-  provider already answered and charged for it. A final answer whose
-  receipt owes no callback, in a turn no checkpoint or after-turn callback
-  runs in, derives in memory and commits its receipt with the turn's
-  `turn.commit` (FIG-6955); any other effect before that commit, a
-  cancel, a failure or a `turn.commit` that wrote nothing commits the
-  receipt on its own first. A cell may hold the derived
-  response until its first save
+  provider already answered and charged for it. An answer whose receipt
+  owes no callback, in a turn no checkpoint or after-turn callback runs in,
+  derives in memory before its receipt commits, and its receipt is held
+  (FIG-6955). A final answer's receipt then commits with the turn's
+  `turn.commit`. Any other answer's commits as `model.answer` before the
+  next effect that is not an emission, the progress boundary or a
+  callback-free checkpoint: before its tool round, its cell or the next
+  call. A held receipt also commits on its own, as `model.answer`,
+  whenever the turn leaves its phases without a `turn.commit` that carried
+  it (FIG-6969): a failed derivation, an error in a local effect, a
+  stalled machine, an `Immediate` cancel read at `turn.commit`'s open (the
+  turn then stops from its last checkpoint on the next pass; an
+  `AfterStep` cancel lets the turn commit, carrying the receipt), and a
+  `turn.commit` that failed, whether or not its outcome is known. No error
+  is classified as having written nothing. The store's fence decides
+  instead: `TurnWrite::Answer` needs the run's phase row in its model
+  phase, which a landed `turn.commit` pruned, so a receipt after a commit
+  that landed (its acknowledgement lost, or a PostgreSQL `COMMIT` whose
+  outcome the connection lost) is refused `TurnNotOpen` and its
+  transaction writes nothing, and an owner that lost the session is
+  refused by its epoch. A node killed or reaped before a held receipt
+  commits leaves the call unanswered at `model.start`, as a crash before
+  `model.answer` does, and the call is sent again. A cell may hold the
+  derived response until its first save
   ([ADR 0142](0142-a-cells-first-save-carries-its-turns-model-response.md)).
   The call's sealed fact and `model_call_records` row commit beside a sealed
-  receipt, or in the existing commit that settles an accepted cell's tail.
+  receipt, in the `turn.commit` that carries a held receipt, or in the
+  existing commit that settles an accepted cell's tail.
   The receipt carries `call_id`; consuming it retains the call record.
   Dispatch reservations retain every attempt ordinal before sending. A
   restoring owner records lost observations as `Interrupted`/`Unobserved`,
   with unknown usage. An accepted tail's pending identity survives receipt
   consumption until its settlement commits.
 - Streaming is not durable. Deltas go to the live replay store; a re-sent call
-  retracts what its earlier attempts streamed with one `ModelAttemptReset`
+  retracts what its earlier attempts published with one `ModelAttemptReset`
   read back from the live replay, then streams under ids of its own
   ([ADR 0040](0040-retried-model-attempts-retract-live-text-by-correlation.md)),
-  so clients discard the abandoned stream and keep their cursors. The
+  so clients discard the abandoned stream and keep their cursors. Every
+  block an attempt published is correlated under that attempt's stream
+  key: its streamed deltas, and the whole blocks a derivation publishes
+  for text the answer did not stream. A held receipt derives before
+  anything durable holds it, so the reset retracts those whole blocks too
+  (FIG-6969). The
   receipt records the visible chunks the stream hooks saw since the
   answering attempt began, so a derivation on any node replays them through
   the same hooks. The derived response commits with the next checkpoint and

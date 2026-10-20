@@ -64,6 +64,12 @@
 //!   attempt alone, so a resend after a crash on an owner whose builder
 //!   would lower other bytes sends the admitted literals with a fresh
 //!   delivery, and nothing else delivers.
+//! - **Held receipt (FIG-6969):** the final answer's receipt, held for the
+//!   turn's commit (FIG-6955), commits on its own as `model.answer` when the
+//!   turn leaves its phases without that commit: after a failed
+//!   `BeforeCompletion` checkpoint the next pass derives the receipt and
+//!   never sends the call again, and an `Immediate` cancel accepted while
+//!   the answer derives ends the turn with the paid receipt committed.
 //! - **Admitted-slot hold (ADR 0135 §7, FIG-5445):** an attachment only an
 //!   admitted call names is held by the turn's execution: its upload ended
 //!   and a sweep ran before every attempt, every attempt still delivers it,
@@ -84,6 +90,8 @@ mod matrix;
 
 #[path = "turn_phases/head_commits.rs"]
 mod head_commits;
+#[path = "turn_phases/held_receipts.rs"]
+mod held_receipts;
 #[path = "turn_phases/parks.rs"]
 mod parks;
 #[path = "turn_phases/slots.rs"]
@@ -213,6 +221,14 @@ enum Mode {
     /// rolling deploy does before `lashctl finalize`: the store refuses it
     /// with `PluginWriterOutsideRange` on every pass (FIG-5398).
     OutsideWriterRange,
+    /// As [`Mode::Plain`], with the final answer finishing through a
+    /// `BeforeCompletion` checkpoint whose first run fails, after the answer
+    /// derived with its receipt held for the turn's commit (FIG-6969).
+    CheckpointFault,
+    /// As [`Mode::Plain`], with an `Immediate` cancel of the turn accepted
+    /// while its final answer derives, its receipt held for the turn's
+    /// commit (FIG-6969).
+    CancelWhileDeriving,
 }
 
 const QUEUED_RUN: &str = "l3-queued-turn";
@@ -222,9 +238,12 @@ fn queued_run() -> TurnId {
 }
 
 /// The scripted protocol: an "again" answer closes the iteration and calls
-/// the model again; any other answer finishes the turn with it.
+/// the model again; any other answer finishes the turn with it, through a
+/// `BeforeCompletion` checkpoint when `checkpointed_finish` says so.
 #[derive(Debug)]
-struct ScriptedProtocol;
+struct ScriptedProtocol {
+    checkpointed_finish: bool,
+}
 
 fn response_text(response: &LlmResponse) -> String {
     response
@@ -259,9 +278,14 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for ScriptedProtocol {
     ) -> Vec<DriverAction> {
         let text = response_text(&llm_response);
         if text != AGAIN {
-            return vec![DriverAction::Finish(TurnOutcome::Finished(
-                TurnFinish::AssistantMessage { text },
-            ))];
+            let finish = TurnOutcome::Finished(TurnFinish::AssistantMessage { text });
+            if self.checkpointed_finish {
+                return vec![DriverAction::Start(PendingWork::Checkpoint {
+                    checkpoint: lash_core::CheckpointKind::BeforeCompletion,
+                    on_empty: lash_core::sansio::CheckpointResumeAction::Finish(finish),
+                })];
+            }
+            return vec![DriverAction::Finish(finish)];
         }
         let id = format!("{AGAIN_MARKER}{}", ctx.protocol_iteration());
         let message = Message {
@@ -390,6 +414,9 @@ struct Seen {
     /// What the turns told the host: every effect the drive does not
     /// answer, and every finished turn's outcome.
     told: Vec<String>,
+    /// Whether a held receipt's turn met its fault: the failed checkpoint,
+    /// or the cancel accepted while it derived.
+    held_fault: bool,
 }
 
 #[derive(Clone)]
@@ -410,10 +437,12 @@ fn route() -> ProviderRouteIdentity {
     }
 }
 
-fn machine_config(session: &SessionId, run: &TurnId) -> TurnMachineConfig {
+fn machine_config(session: &SessionId, run: &TurnId, mode: Mode) -> TurnMachineConfig {
     TurnMachineConfig {
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
-        protocol_driver: Arc::new(ScriptedProtocol),
+        protocol_driver: Arc::new(ScriptedProtocol {
+            checkpointed_finish: mode == Mode::CheckpointFault,
+        }),
         projector: Arc::new(ChatContextProjector::default()),
         model: lash_protocol_types::llm_profile::LlmProfileConfig::new(
             lash_protocol_types::llm_profile::RecordedLlmProfile::mint(
@@ -467,7 +496,9 @@ impl TurnServices for L3Services {
             | Mode::AdapterSlots
             | Mode::SlotHold
             | Mode::CollidingCommit
-            | Mode::OutsideWriterRange => ExecutionBudgets::recommended(),
+            | Mode::OutsideWriterRange
+            | Mode::CheckpointFault
+            | Mode::CancelWhileDeriving => ExecutionBudgets::recommended(),
         }
     }
 
@@ -482,7 +513,7 @@ impl TurnServices for L3Services {
         let window = head.window()?;
         let messages = window.then(seed::admitted_messages(&self.backend(), row).await?);
         let machine = TurnMachine::in_window(
-            machine_config(&row.session, &row.run),
+            machine_config(&row.session, &row.run, self.mode),
             window,
             messages,
             Vec::new(),
@@ -498,7 +529,7 @@ impl TurnServices for L3Services {
     ) -> Result<OpenTurn, TurnError> {
         let row = restore.row().clone();
         let restored = restore
-            .restore(machine_config(&row.session, &row.run))
+            .restore(machine_config(&row.session, &row.run, self.mode))
             .await?;
         Ok(OpenTurn {
             drive: self.drive(&restored.row, restored.machine, restored.answered),
@@ -565,6 +596,7 @@ impl TurnDrive for L3Drive {
             .owed
             .take()
             .ok_or_else(|| TurnError::Exec(format!("model call {id:?} owes no derivation")))?;
+        held_receipts::cancel_while_deriving(&self.services).await;
         self.machine
             .handle_response(answer.into_response_for_test(id));
         Ok(())
@@ -602,7 +634,8 @@ impl TurnDrive for L3Drive {
                         result: Ok(ExecutionEnvironmentSync::default()),
                     });
             }
-            Effect::Checkpoint { id, .. } => {
+            Effect::Checkpoint { id, checkpoint } => {
+                held_receipts::checkpoint_fault(&self.services, checkpoint)?;
                 self.machine.handle_response(Response::Checkpoint {
                     id,
                     delivery: Default::default(),
@@ -1248,6 +1281,9 @@ impl Scenario for L3 {
             }
             // Its own scenario checks it: the turn never ends.
             Mode::OutsideWriterRange | Mode::MaterialStale => {}
+            Mode::CheckpointFault | Mode::CancelWhileDeriving => {
+                violations.extend(held_receipts::laws(self.mode, &seen, &committed));
+            }
         }
 
         if self.mode == Mode::HeadMovesUnderTheTurn {
@@ -1683,6 +1719,34 @@ async fn an_after_step_cancel_lets_the_streaming_call_finish_and_stops_at_the_ne
     prove(Mode::AfterStepWhileStreaming, CANCEL, Dialect::Postgres).await;
 }
 
+/// Held receipt (FIG-6969): a failed checkpoint after the final answer
+/// derived leaves its receipt committed, and the next pass derives it
+/// without sending the call again.
+#[tokio::test]
+async fn a_held_receipt_whose_checkpoint_failed_is_derived_again_without_a_send() {
+    prove_on(
+        matrix().labels(&[]),
+        Mode::CheckpointFault,
+        &[],
+        Dialect::SqliteMemory,
+    )
+    .await;
+}
+
+/// Held receipt (FIG-6969): an `Immediate` cancel accepted while the final
+/// answer derives ends the turn `Cancelled` with the paid receipt
+/// committed, and the call is never sent again.
+#[tokio::test]
+async fn an_immediate_cancel_while_a_held_receipt_derives_commits_the_receipt() {
+    prove_on(
+        matrix().labels(&[]),
+        Mode::CancelWhileDeriving,
+        &[],
+        Dialect::SqliteMemory,
+    )
+    .await;
+}
+
 /// The labels the queued withdraw is cut at: the running turn's commit,
 /// after which the session's next drain finds the withdrawn input.
 const QUEUED: &[CommitLabel] = &[CommitLabel::TURN_COMMIT];
@@ -1905,7 +1969,7 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
         .expect("the head loads");
     let window = head.window().expect("the head's window");
     let mut machine = TurnMachine::in_window(
-        machine_config(&session(), &run()),
+        machine_config(&session(), &run(), Mode::Plain),
         window.clone(),
         window.then(vec![session_message(
             "l3-input",
@@ -1991,7 +2055,7 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
     let cx = ActorContext::detached(backend.clone());
     let mut heads = HeadCache::default();
     let restored = TurnRestore::new(&cx, &row, &mut heads)
-        .restore(machine_config(&session(), &run()))
+        .restore(machine_config(&session(), &run(), Mode::Plain))
         .await
         .expect("the turn restores over its pinned window");
     assert_eq!(

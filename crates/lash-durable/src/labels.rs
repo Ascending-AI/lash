@@ -36,9 +36,11 @@ impl CommitLabel {
     /// recorded beside its model phase before anything derives from it, so
     /// every derivation and every restore reads it and the call is never
     /// sent again (FIG-6230). The receipt is its own root; the phase stays
-    /// as `model.start` committed it (FIG-6253). A final answer whose
-    /// receipt owes no callback, in a turn no checkpoint or after-turn
-    /// callback runs in, commits with `turn.commit` instead (FIG-6955).
+    /// as `model.start` committed it (FIG-6253). An answer whose receipt
+    /// owes no callback, in a turn no checkpoint or after-turn callback runs
+    /// in, derives first: its receipt commits here before its tool round,
+    /// cell or next call, and a final answer's with `turn.commit` instead
+    /// (FIG-6955, FIG-6969).
     pub const MODEL_ANSWER: Self = Self::new("model.answer");
     /// `round.present+model.start`: A round's presentation and the next model start, fused (C6).
     pub const ROUND_PRESENT_MODEL_START: Self = Self::new("round.present+model.start");
