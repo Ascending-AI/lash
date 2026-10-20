@@ -170,6 +170,36 @@ impl KernelDocumentProvider {
 
 #[async_trait::async_trait]
 impl lash_execution_contracts::process::ProcessDocumentProvider for KernelDocumentProvider {
+    async fn start_requirements(
+        &self,
+        payload: &serde_json::Value,
+    ) -> Result<
+        Option<lash_kernel_doc::ExecutionRequirements>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
+        let definition = super::payload_definition(payload)?;
+        let Ok((document, _)) = self.engine.entry(&definition).await.map_err(store_fault)? else {
+            return Ok(None);
+        };
+        // The record its code derives over the set it is linked under: the
+        // node's own registry, or a stored set's, read once per set, never
+        // per declaration.
+        let (_, functions) = self
+            .engine
+            .linked_packages(definition.packages)
+            .await
+            .map_err(|message| {
+                lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                    "the package surface a start is linked under is not read: {message}"
+                ))
+            })?;
+        Ok(
+            lash_kernel_doc::CheckedDeclarations::required(document.document(), functions.as_ref())
+                .ok()
+                .map(|checked| checked.requirements(document.document())),
+        )
+    }
+
     async fn owned_operations(
         &self,
         payload: &serde_json::Value,
@@ -184,24 +214,15 @@ impl lash_execution_contracts::process::ProcessDocumentProvider for KernelDocume
     fn definition_packages(
         &self,
         payload: &serde_json::Value,
-    ) -> Result<Option<lash_kernel_doc::PackageSetDigest>, lash_execution_contracts::PluginError>
-    {
-        let pin = super::payload_definition(payload)?.packages;
-        if let Some(pin) = pin {
-            self.package_view(pin)?;
-        }
-        Ok(pin)
+    ) -> Result<lash_kernel_doc::PackageSetDigest, lash_execution_contracts::PluginError> {
+        Ok(super::payload_definition(payload)?.packages)
     }
 
     fn initial_packages(
         &self,
     ) -> Result<lash_execution_contracts::CellPackages, lash_execution_contracts::PluginError> {
         let held = self.held_packages()?;
-        lash_execution_contracts::CellPackages::held(&held, &held.own()).ok_or_else(|| {
-            lash_execution_contracts::PluginError::Registration(
-                "the producer's packages lack their own set".into(),
-            )
-        })
+        Ok(lash_execution_contracts::CellPackages::held(&held))
     }
 
     fn held_packages(
@@ -214,30 +235,26 @@ impl lash_execution_contracts::process::ProcessDocumentProvider for KernelDocume
             .map_err(|error| lash_execution_contracts::PluginError::Registration(error.to_string()))
     }
 
-    fn package_view(
+    async fn package_view(
         &self,
         packages: lash_kernel_doc::PackageSetDigest,
     ) -> Result<
         Arc<dyn lash_kernel_dialect::ExportView + Send + Sync>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
-        let held = self
-            .engine
-            .workers
-            .config()
-            .packages
-            .clone()
-            .map_or_else(lash_vm_releases::lash_packages, Ok)
-            .map_err(|error| {
-                lash_execution_contracts::plugin_error::PluginError::Registration(error.to_string())
-            })?;
-        lash_kernel_package::SharedPackageView::new(held, packages)
-            .map(|view| Arc::new(view) as Arc<dyn lash_kernel_dialect::ExportView + Send + Sync>)
-            .map_err(
-                |_| lash_execution_contracts::plugin_error::PluginError::PackagesNotHeld {
-                    packages,
-                },
-            )
+        let (surface, functions) =
+            self.engine
+                .linked_packages(packages)
+                .await
+                .map_err(|message| {
+                    lash_execution_contracts::plugin_error::PluginError::Session(format!(
+                        "the package surface {packages} is not read: {message}"
+                    ))
+                })?;
+        Ok(Arc::new(lash_kernel_package::SharedPackageView::stored(
+            surface, functions,
+        ))
+            as Arc<dyn lash_kernel_dialect::ExportView + Send + Sync>)
     }
 
     async fn document(
@@ -365,11 +382,11 @@ impl lash_execution_contracts::process::ProcessDocumentProvider for KernelDocume
             })?;
         let mut boundary = HostBoundary::of_catalog(&request.tool_catalog)
             .map_err(|error| unresolvable(error.to_string()))?;
-        boundary.in_packages(self.package_view(request.packages.digest())?.as_ref());
+        boundary.in_packages(&request.packages.view());
         Ok(lash_execution_contracts::process::ProcessDocument::new(
             WorkflowEnvironment {
                 operations: boundary.operations().clone(),
-                functions: Arc::clone(&self.engine.functions),
+                functions: Arc::clone(request.packages.catalog()),
                 workers: self.engine.workers.clone(),
             },
         ))
@@ -432,10 +449,13 @@ impl lash_execution_contracts::process::ProcessDocumentProvider for KernelDocume
                 });
             }
         };
-        boundary.in_packages(self.package_view(request.packages.digest())?.as_ref());
+        boundary.in_packages(&request.packages.view());
         let identified = request.document;
+        // A document written under a stored set is checked, and held, against
+        // that set's definitions.
+        let functions = Arc::clone(request.packages.catalog());
         let admission = {
-            let mut environment = Environment::new(self.engine.functions.as_ref());
+            let mut environment = Environment::new(functions.as_ref());
             environment.effects = requirements(boundary.operations());
             environment.internal = Box::new(|effect| {
                 boundary.effect(effect).is_some_and(|(_, offered)| {
@@ -463,16 +483,14 @@ impl lash_execution_contracts::process::ProcessDocumentProvider for KernelDocume
             document.document(),
             document.identity(),
             request.entry.clone(),
-            Some(request.packages.digest()),
+            request.packages.digest(),
         ))
         .map_err(|error| unresolvable(error.to_string()))?;
         // Only an admitted document is held, with the declarations it was
         // admitted against.
-        let declarations = lash_kernel_doc::CheckedDeclarations::required(
-            document.document(),
-            self.engine.functions.as_ref(),
-        )
-        .map_err(|refusal| store_fault(refusal.into()))?;
+        let declarations =
+            lash_kernel_doc::CheckedDeclarations::required(document.document(), functions.as_ref())
+                .map_err(|refusal| store_fault(refusal.into()))?;
         self.engine
             .documents
             .publish(claim, &identified, &declarations)

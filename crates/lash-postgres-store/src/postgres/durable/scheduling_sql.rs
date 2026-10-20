@@ -12,37 +12,24 @@ lash_store_sql::statements! {
         await_owner_commit = "SELECT 1 FROM actors WHERE actor_key = ?1 FOR SHARE";
 
         /// Give up to `?5` actors claimable at `?1` in a format set of `?4`
-        /// whose claim requirements are served by `?7`, including retired
-        /// owners, and whose package set node `?2` holds (CLAIM-HOLDS);
-        /// process actors in
+        /// whose claim requirements, hard requirements among them, are
+        /// served by `?7`, including retired owners; process actors in
         /// another set or with another requirement with mail of kind `?6`
         /// (a cancel) pending; and session actors in a set of `?4` with
         /// another requirement whose open turn holds an `immediate` cancel
         /// request, with mail of kind `?8` (a close) pending, or whose close
         /// has not reached its tombstone (FIG-6072); to boot `?3` of node
         /// `?2`, oldest first, bumping each epoch; returns each with the
-        /// state that made it claimable, its format set, its requirements
-        /// and whether the node holds its package set. A claim that finds no commit advanced the actor
+        /// state that made it claimable, its format set and its
+        /// requirements. A claim that finds no commit advanced the actor
         /// since the previous claim counts one more failed activation; any
         /// such commit resets the count.
         claim = "WITH c AS (
-                 SELECT p.actor_key, p.state, p.formats, p.requires,
-                     (p.packages IS NULL OR (
-                     EXISTS (SELECT 1 FROM package_sets AS ps WHERE ps.digest = p.packages)
-                     AND NOT EXISTS (SELECT 1 FROM package_set_members AS pm
-                         WHERE pm.set_digest = p.packages
-                           AND NOT EXISTS (SELECT 1 FROM node_artifacts AS nh
-                               WHERE nh.node_id = ?2 AND nh.artifact = pm.artifact)))) AS holds
+                 SELECT p.actor_key, p.state, p.formats, p.requires
                  FROM actors p
                  WHERE ((p.state = 'ready' AND p.ready_at_ms <= ?1)
                      OR (p.state = 'waiting' AND p.next_due_ms <= ?1))
-                   AND (((p.packages IS NULL OR (
-                         EXISTS (SELECT 1 FROM package_sets AS ps WHERE ps.digest = p.packages)
-                         AND NOT EXISTS (SELECT 1 FROM package_set_members AS pm
-                             WHERE pm.set_digest = p.packages
-                               AND NOT EXISTS (SELECT 1 FROM node_artifacts AS nh
-                                   WHERE nh.node_id = ?2 AND nh.artifact = pm.artifact))))
-                         AND p.formats = ANY(?4)
+                   AND ((p.formats = ANY(?4)
                          AND (p.requires IS NULL
                              OR NOT EXISTS (
                                  SELECT 1 FROM jsonb_array_elements_text(p.requires::jsonb) r(value)
@@ -82,7 +69,7 @@ lash_store_sql::statements! {
                  claimed_revision = a.state_revision
              FROM c
              WHERE a.actor_key = c.actor_key
-             RETURNING a.actor_key, a.epoch, c.state, c.formats, c.requires, c.holds";
+             RETURNING a.actor_key, a.epoch, c.state, c.formats, c.requires";
 
         /// What a claim could find now (FIG-7044), at injected store time
         /// `?1` or else the server's: that time, whether some actor is ready

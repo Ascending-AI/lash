@@ -1,12 +1,12 @@
-//! The package laws (FIG-6918, S1-F2, FIG-6991): what a store keeps of
-//! package artifacts and sets and their surfaces, what a node advertises
-//! it holds and offers, and CLAIM-HOLDS.
+//! The package laws (FIG-6918, S1-F2, FIG-6991, FIG-6993): what a store
+//! keeps of package artifacts and sets and their surfaces, what a node
+//! advertises it offers, and CLAIM-BY-REQUIREMENTS.
 
 use std::collections::BTreeSet;
 
 use super::{LawBroken, LawOutcome};
 use crate::domain::CANCEL_MAIL;
-use crate::packages::{ArtifactInstall, HeldArtifact, SetInstall, held_sets};
+use crate::packages::{ArtifactInstall, PackageArtifact, SetInstall};
 use crate::packages::{EffectName, FunctionId};
 use crate::{
     ActorKey, ArtifactDigest, ClaimPurpose, CommitLabel, DurableError, DurableStore,
@@ -14,14 +14,14 @@ use crate::{
     NodeSpec, PackageSetDigest, Release,
 };
 
-fn artifact(path: &str, byte: u8) -> HeldArtifact {
-    HeldArtifact {
+fn artifact(path: &str, byte: u8) -> PackageArtifact {
+    PackageArtifact {
         digest: ArtifactDigest::from_bytes([byte; 32]),
         path: path.to_owned(),
     }
 }
 
-fn install(artifact: &HeldArtifact) -> ArtifactInstall {
+fn install(artifact: &PackageArtifact) -> ArtifactInstall {
     ArtifactInstall {
         artifact: artifact.clone(),
         header: format!("{{\"path\":\"{}\"}}", artifact.path),
@@ -31,7 +31,7 @@ fn install(artifact: &HeldArtifact) -> ArtifactInstall {
     }
 }
 
-fn set(byte: u8, members: &[&HeldArtifact]) -> SetInstall {
+fn set(byte: u8, members: &[&PackageArtifact]) -> SetInstall {
     SetInstall {
         digest: PackageSetDigest::from_bytes([byte; 32]),
         members: members.iter().map(|member| (*member).clone()).collect(),
@@ -156,7 +156,6 @@ pub async fn a_store_keeps_each_sets_first_surface_and_indexes_its_definitions(
             node: NodeId::new("offers"),
             decodes: vec![FormatSet::new("law:packages")],
             serves: Vec::new(),
-            held: [lib].into_iter().collect(),
             capabilities: capabilities.clone(),
             ttl_millis: 15_000,
         })
@@ -186,15 +185,14 @@ pub async fn a_store_keeps_each_sets_first_surface_and_indexes_its_definitions(
 async fn node(
     store: &dyn DurableStore,
     name: &str,
-    held: &[&HeldArtifact],
+    capabilities: NodeCapabilities,
 ) -> Result<NodeLease, LawBroken> {
     Ok(store
         .register_node(&NodeSpec {
             node: NodeId::new(name),
             decodes: vec![FormatSet::new("law:packages")],
             serves: Vec::new(),
-            held: held.iter().map(|artifact| (*artifact).clone()).collect(),
-            capabilities: Default::default(),
+            capabilities,
             ttl_millis: 15_000,
         })
         .await?)
@@ -203,16 +201,12 @@ async fn node(
 /// A store keeps each artifact and set once, by digest: an artifact takes
 /// the next ordinal on its package line, a set the next install sequence,
 /// and installing either again changes nothing. A set naming an artifact
-/// the store does not hold is refused, whole. A live node's held artifacts
-/// are what it registered, and the sets it holds are derived from them,
-/// newest first, with no set row naming the node.
+/// the store does not hold is refused, whole.
 ///
 /// # Errors
 ///
 /// The first rule broken.
-pub async fn a_store_keeps_artifacts_and_sets_by_digest_and_derives_what_a_node_holds(
-    store: &dyn DurableStore,
-) -> LawOutcome {
+pub async fn a_store_keeps_artifacts_and_sets_by_digest(store: &dyn DurableStore) -> LawOutcome {
     let p1 = artifact("p", 1);
     let q1 = artifact("q", 2);
     let q2 = artifact("q", 3);
@@ -261,7 +255,7 @@ pub async fn a_store_keeps_artifacts_and_sets_by_digest_and_derives_what_a_node_
             ],
         "the stored artifacts and their ordinals are {ordinals:?}"
     );
-    let sets: Vec<(PackageSetDigest, u64, BTreeSet<HeldArtifact>)> = catalog
+    let sets: Vec<(PackageSetDigest, u64, BTreeSet<PackageArtifact>)> = catalog
         .sets
         .iter()
         .map(|stored| (stored.digest, stored.sequence, stored.members.clone()))
@@ -273,77 +267,93 @@ pub async fn a_store_keeps_artifacts_and_sets_by_digest_and_derives_what_a_node_
         ],
         "the stored sets are {sets:?}"
     );
-
-    node(store, "holds-both", &[&p1, &q1, &p2, &q2]).await?;
-    node(store, "holds-old", &[&p1, &q1]).await?;
-    let live = store.live_nodes().await?;
-    super::ensure!(
-        live.len() == 2,
-        "live_nodes answered {} nodes, not 2",
-        live.len()
-    );
-    let held: Vec<Vec<PackageSetDigest>> = live
-        .iter()
-        .map(|node| {
-            held_sets(&catalog, node)
-                .iter()
-                .map(|set| set.digest)
-                .collect()
-        })
-        .collect();
-    super::ensure!(
-        held == vec![vec![new.digest, old.digest], vec![old.digest]],
-        "the nodes hold the sets {held:?}"
-    );
     Ok(())
 }
 
-/// CLAIM-HOLDS (S1-F2): a node claims an actor to run it only when it
-/// decodes the actor's format set and holds the package set its code was
-/// linked under. A node that decodes the set but lacks a member does not
-/// run it, and claims it only for a pending cancel; an actor stamped as
-/// pinning no code is claimed as its formats alone allow.
+/// CLAIM-BY-REQUIREMENTS (FIG-6993): a node claims an actor to run it only
+/// when its capabilities serve every hard requirement the actor's record
+/// names (a native it reached, a kernel version, a linked provider, a
+/// codec version), whatever package set its code was linked under. A node
+/// that lacks one claims it only for a pending cancel, and the strand read
+/// names what the closest live node lacks; an owned recovery judges by the
+/// same predicate, so an owner whose actor's record grew past its
+/// capabilities adopts it only to cancel; and once the actor's record no
+/// longer names what the node lacks, the node runs it.
 ///
 /// # Errors
 ///
 /// The first rule broken.
-pub async fn a_node_claims_only_actors_whose_package_set_it_holds(
+pub async fn a_node_claims_only_actors_whose_hard_requirements_it_meets(
     store: &dyn DurableStore,
 ) -> LawOutcome {
-    let base = artifact("base", 21);
-    let s1 = artifact("lib", 22);
-    let s2 = artifact("lib", 23);
-    let first = set(30, &[&base, &s1]);
-    let second = set(31, &[&base, &s2]);
-    store
-        .install_packages(
-            &[install(&base), install(&s1), install(&s2)],
-            &[first.clone(), second.clone()],
-        )
-        .await?;
-    let newer = node(store, "holds-s2", &[&base, &s1, &s2]).await?;
+    use lash_core_store::obligations::ObligationToken;
+    let reached = function(41);
+    let record = ExecutionRequirements {
+        natives: [reached].into_iter().collect(),
+        kernels: [1].into_iter().collect(),
+        providers: ["host/inbox".to_owned()].into_iter().collect(),
+        codecs: [("host/inbox".to_owned(), 2)].into_iter().collect(),
+    };
+    let mut requires: Vec<String> = ObligationToken::for_requirements(&record)
+        .map(String::from)
+        .collect();
+    // The store answers a record's tokens in their order.
+    requires.sort();
+    let lacking = NodeCapabilities {
+        natives: BTreeSet::new(),
+        kernels: [1].into_iter().collect(),
+        providers: ["host/inbox".to_owned()].into_iter().collect(),
+        codecs: [("host/inbox".to_owned(), 1)].into_iter().collect(),
+        surface: None,
+    };
+    let capable = NodeCapabilities {
+        natives: [reached, function(42)].into_iter().collect(),
+        codecs: [("host/inbox".to_owned(), 1), ("host/inbox".to_owned(), 2)]
+            .into_iter()
+            .collect(),
+        ..lacking.clone()
+    };
+    let older = node(store, "lacks-native-and-codec", lacking.clone()).await?;
     let process =
-        ActorKey::process("pinned-to-s2").map_err(|error| LawBroken(error.to_string()))?;
+        ActorKey::process("requires-a-native").map_err(|error| LawBroken(error.to_string()))?;
     let mut create = MailTx::new();
     create.create_actor(process.clone(), FormatSet::new("law:packages"));
     store
         .commit_mail(create, CommitLabel::new("law.create"))
         .await?;
-    let claimed = store.claim(&newer, 8).await?;
+    let claimed = store.claim(&older, 8).await?;
     super::ensure!(
         claimed.len() == 1 && claimed[0].purpose == ClaimPurpose::Run,
-        "the holding node's first claim was {claimed:?}"
+        "an actor requiring nothing was not claimed to run: {claimed:?}"
     );
-    let mut stamp = store.begin(&process, claimed[0].epoch).await?;
-    stamp
-        .stamp_packages(Some(second.digest))
+    let mut record_write = store.begin(&process, claimed[0].epoch).await?;
+    record_write
+        .set_requires(requires.clone())
         .give_up(Release::Ready);
-    store.commit(stamp, CommitLabel::new("law.stamp")).await?;
+    store
+        .commit(record_write, CommitLabel::new("law.record"))
+        .await?;
 
-    let older = node(store, "holds-s1", &[&base, &s1]).await?;
     super::ensure!(
         store.claim(&older, 8).await?.is_empty(),
-        "a node lacking the actor's package set claimed it, though it decodes its formats"
+        "a node lacking a native and a codec version the record names claimed it"
+    );
+    let stranded = store.actor_requirements(None, 8).await?;
+    let unmet: Vec<_> = stranded
+        .iter()
+        .filter_map(|(actor, requires)| {
+            crate::packages::strand(requires, &store_nodes(&[&lacking]))
+                .map(|unmet| (actor.clone(), unmet))
+        })
+        .collect();
+    let expected = ExecutionRequirements {
+        natives: [reached].into_iter().collect(),
+        codecs: [("host/inbox".to_owned(), 2)].into_iter().collect(),
+        ..ExecutionRequirements::default()
+    };
+    super::ensure!(
+        unmet == vec![(process.clone(), expected)],
+        "the strand read named {unmet:?}"
     );
     let mut cancel = MailTx::new();
     cancel.append(process.clone(), MailKind::new(CANCEL_MAIL), "{}");
@@ -355,26 +365,184 @@ pub async fn a_node_claims_only_actors_whose_package_set_it_holds(
         claimed.len() == 1 && claimed[0].purpose == ClaimPurpose::CancelOnly,
         "the lacking node's claim of the cancelled actor was {claimed:?}"
     );
-    let mut back = store.begin(&process, claimed[0].epoch).await?;
-    back.stamp_packages(None).give_up(Release::Ready);
-    store.commit(back, CommitLabel::new("law.unpin")).await?;
-    let claimed = store.claim(&older, 8).await?;
-    super::ensure!(
-        claimed.len() == 1 && claimed[0].purpose == ClaimPurpose::Run,
-        "an actor pinning no code was not claimed to run: {claimed:?}"
-    );
-    let adopted = store.owned(&older).await?;
-    super::ensure!(
-        adopted.len() == 1 && adopted[0].purpose == ClaimPurpose::Run,
-        "the owner's adoption read {adopted:?}"
-    );
-    let mut repin = store.begin(&process, claimed[0].epoch).await?;
-    repin.stamp_packages(Some(second.digest));
-    store.commit(repin, CommitLabel::new("law.repin")).await?;
     let adopted = store.owned(&older).await?;
     super::ensure!(
         adopted.len() == 1 && adopted[0].purpose == ClaimPurpose::CancelOnly,
-        "an owner lacking the set its actor now pins adopted it as {adopted:?}"
+        "the lacking owner's recovery read {adopted:?}"
+    );
+    let mut back = store.begin(&process, claimed[0].epoch).await?;
+    back.ack_seen().give_up(Release::Ready);
+    store.commit(back, CommitLabel::new("law.back")).await?;
+
+    let newer = node(store, "meets-the-record", capable).await?;
+    let claimed = store.claim(&newer, 8).await?;
+    super::ensure!(
+        claimed.len() == 1
+            && claimed[0].purpose == ClaimPurpose::Run
+            && claimed[0].requires == requires,
+        "the capable node's claim was {claimed:?}"
+    );
+    let adopted = store.owned(&newer).await?;
+    super::ensure!(
+        adopted.len() == 1 && adopted[0].purpose == ClaimPurpose::Run,
+        "the capable owner's recovery read {adopted:?}"
+    );
+    // The record shrinks once the work that reached the native settles:
+    // the lacking node runs it again.
+    let mut settle = store.begin(&process, claimed[0].epoch).await?;
+    settle
+        .set_requires(
+            ObligationToken::for_requirements(&ExecutionRequirements {
+                kernels: [1].into_iter().collect(),
+                ..ExecutionRequirements::default()
+            })
+            .map(String::from)
+            .collect(),
+        )
+        .give_up(Release::Ready);
+    store.commit(settle, CommitLabel::new("law.settle")).await?;
+    store.release_node(&newer).await?;
+    let claimed = store.claim(&older, 8).await?;
+    super::ensure!(
+        claimed.len() == 1 && claimed[0].purpose == ClaimPurpose::Run,
+        "once its record names nothing the node lacks, the actor was claimed as {claimed:?}"
+    );
+    Ok(())
+}
+
+fn store_nodes(capabilities: &[&NodeCapabilities]) -> Vec<crate::NodeCapability> {
+    capabilities
+        .iter()
+        .map(|capabilities| crate::NodeCapability {
+            decodes: vec![FormatSet::new("law:packages")],
+            capabilities: (*capabilities).clone(),
+        })
+        .collect()
+}
+
+/// CRASH-ATOMIC (FIG-6993): an actor's hard record is written by the owner
+/// commit that changes the work it describes, inside that commit's
+/// transaction. A commit the store refuses after its record and its other
+/// writes were staged, here by a stale execution root as its last write,
+/// leaves the stored record as it stood: a node lacking the native the
+/// refused record names still claims the actor to run, and the strand read
+/// still answers the old record. The commit that lands writes both.
+pub async fn a_hard_record_lands_with_its_owner_commit_or_not_at_all(
+    store: &dyn DurableStore,
+) -> LawOutcome {
+    use crate::domain::graph::ExecRootWrite;
+    use crate::domain::snapshots::SnapshotRev;
+    use crate::domain::{DomainRefusal, DomainWrite, ExecKey};
+    use lash_core_store::obligations::ObligationToken;
+    let tokens = |record: &ExecutionRequirements| -> Vec<String> {
+        let mut tokens: Vec<String> = ObligationToken::for_requirements(record)
+            .map(String::from)
+            .collect();
+        tokens.sort();
+        tokens
+    };
+    let kernel_only = ExecutionRequirements {
+        kernels: [1].into_iter().collect(),
+        ..ExecutionRequirements::default()
+    };
+    let with_native = ExecutionRequirements {
+        natives: [function(51)].into_iter().collect(),
+        ..kernel_only.clone()
+    };
+    let writer = node(
+        store,
+        "kernel-only-writer",
+        NodeCapabilities {
+            kernels: [1].into_iter().collect(),
+            ..NodeCapabilities::default()
+        },
+    )
+    .await?;
+    let id = "p_000000000000700080000000000000a1";
+    let process = ActorKey::process(id).map_err(|error| LawBroken(error.to_string()))?;
+    let mut create = MailTx::new();
+    create.create_actor(process.clone(), FormatSet::new("law:packages"));
+    store
+        .commit_mail(create, CommitLabel::new("law.create"))
+        .await?;
+    let claimed = store.claim(&writer, 8).await?;
+    super::ensure!(
+        claimed.len() == 1,
+        "the new actor was claimed as {claimed:?}"
+    );
+    let mut first = store.begin(&process, claimed[0].epoch).await?;
+    first
+        .set_requires(tokens(&kernel_only))
+        .give_up(Release::Ready);
+    store.commit(first, CommitLabel::new("law.first")).await?;
+
+    let claimed = store.claim(&writer, 8).await?;
+    super::ensure!(
+        claimed.len() == 1 && claimed[0].purpose == ClaimPurpose::Run,
+        "the kernel-only record was claimed as {claimed:?}"
+    );
+    let exec = ExecKey::Process(
+        lash_protocol_types::ProcessId::parse(id).map_err(|error| LawBroken(error.to_string()))?,
+    );
+    let (root, staged) = super::tagged_node(&exec.stored());
+    let (stale, _) = super::tagged_node("never-put");
+    let mut refused = store.begin(&process, claimed[0].epoch).await?;
+    refused.set_requires(tokens(&with_native)).stage([staged]);
+    refused.write(DomainWrite::ExecRoot(ExecRootWrite::Put {
+        exec: exec.clone(),
+        expected: Some(SnapshotRev(7)),
+        expected_root: Some(stale),
+        root,
+        commit_id: lash_core_store::checkpoint_graph::CommitId([5; 32]),
+    }));
+    let answer = store.commit(refused, CommitLabel::new("law.refused")).await;
+    super::ensure!(
+        matches!(
+            answer,
+            Err(DurableError::Domain(
+                DomainRefusal::SnapshotRevConflict { .. }
+            ))
+        ),
+        "the stale root's commit answered {answer:?}"
+    );
+    let stored = store.actor_requirements(None, 8).await?;
+    super::ensure!(
+        stored == vec![(process.clone(), tokens(&kernel_only))],
+        "a refused commit moved the record: {stored:?}"
+    );
+    let mut release = store.begin(&process, claimed[0].epoch).await?;
+    release.give_up(Release::Ready);
+    store
+        .commit(release, CommitLabel::new("law.release"))
+        .await?;
+    let claimed = store.claim(&writer, 8).await?;
+    super::ensure!(
+        claimed.len() == 1
+            && claimed[0].purpose == ClaimPurpose::Run
+            && claimed[0].requires == tokens(&kernel_only),
+        "after the refused commit the actor was claimed as {claimed:?}"
+    );
+
+    let (root, staged) = super::tagged_node(&exec.stored());
+    let mut landed = store.begin(&process, claimed[0].epoch).await?;
+    landed.set_requires(tokens(&with_native)).stage([staged]);
+    landed.write(DomainWrite::ExecRoot(ExecRootWrite::Put {
+        exec,
+        expected: None,
+        expected_root: None,
+        root,
+        commit_id: lash_core_store::checkpoint_graph::CommitId([6; 32]),
+    }));
+    landed.give_up(Release::Ready);
+    store.commit(landed, CommitLabel::new("law.landed")).await?;
+    let stored = store.actor_requirements(None, 8).await?;
+    super::ensure!(
+        stored == vec![(process, tokens(&with_native))],
+        "the landed commit's record is {stored:?}"
+    );
+    super::ensure!(
+        store.claim(&writer, 8).await?.is_empty(),
+        "a node lacking the landed record's native claimed it"
     );
     Ok(())
 }

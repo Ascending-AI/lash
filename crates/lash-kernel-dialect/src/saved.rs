@@ -674,8 +674,8 @@ impl<'a> Installing<'_, 'a> {
             }
         }
         // Everything one cell runs comes from its one package set
-        // (CURRENT-RELEASE): each function the saved one lists is the
-        // set's of its name, as relinking at the cell's start left it.
+        // (RELINK-CLOSURE): each function the saved one lists is the set's
+        // of its name, as relinking at the cell's start left it.
         for (listed_function, listed) in &function.document.manifest.functions {
             match self.library.resolve(listed.as_str()) {
                 Some(held) if held == *listed_function => {}

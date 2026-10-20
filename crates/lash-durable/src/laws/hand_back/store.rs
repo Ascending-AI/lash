@@ -72,6 +72,14 @@ impl DurableStore for ObservedStore {
         self.inner.live_nodes().await
     }
 
+    async fn actor_requirements(
+        &self,
+        after: Option<&crate::ActorKey>,
+        limit: usize,
+    ) -> Result<Vec<(crate::ActorKey, Vec<String>)>, DurableError> {
+        self.inner.actor_requirements(after, limit).await
+    }
+
     async fn install_packages(
         &self,
         artifacts: &[crate::packages::ArtifactInstall],

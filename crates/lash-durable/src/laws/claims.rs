@@ -330,7 +330,6 @@ pub async fn a_retired_owner_claims_only_its_registry_callbacks(
                 ObligationToken::for_retired_owner(RegistryKind::Session, "retired/nested")
                     .into_string(),
             ],
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: TTL_MILLIS,
         })

@@ -52,7 +52,13 @@ impl ContributionKey {
 }
 #[derive(Clone, Debug)]
 pub enum ContributionDetails {
-    Callback { stream_state_from: Option<HookKey> },
+    Callback {
+        stream_state_from: Option<HookKey>,
+        /// For a tool provider, the execution binding formats it reads,
+        /// declared with its key (S8): what its node offers as the codec of
+        /// those versions (FIG-6993). Empty for every other callback.
+        reads: &'static [crate::FormatVersion],
+    },
     Operation(PluginOperationDef),
     PromptSection(PromptSectionSpec),
     PromptFamily(PromptSectionFamilySpec),
@@ -101,6 +107,36 @@ impl InstalledInventory {
             ContributionKey::Callback(key) => Some(key),
             _ => None,
         })
+    }
+
+    /// What these registrations offer running code (FIG-6993): each ready
+    /// tool provider, by key, and the codec of each binding format it
+    /// declares it reads. What a node advertises beside its package code.
+    pub fn offers(&self) -> lash_kernel_doc::NodeCapabilities {
+        let prefix = format!("{}:", CallbackSlot::ToolProvider.key_prefix());
+        let mut offers = lash_kernel_doc::NodeCapabilities::default();
+        for (entry, readiness) in self.entries.iter().zip(&self.readiness) {
+            let (
+                ContributionKey::Callback(identity),
+                ContributionReadiness::Ready,
+                ContributionDetails::Callback { reads, .. },
+            ) = (&entry.key, readiness, &entry.details)
+            else {
+                continue;
+            };
+            if entry.kind != ContributionKind::Callback(CallbackSlot::ToolProvider) {
+                continue;
+            }
+            let Some(key) = identity.key.strip_prefix(&prefix) else {
+                continue;
+            };
+            let provider = format!("{}/{key}", identity.owner);
+            offers
+                .codecs
+                .extend(reads.iter().map(|format| (provider.clone(), format.get())));
+            offers.providers.insert(provider);
+        }
+        offers
     }
 
     /// The claim tokens these registrations serve (S7): one for every ready
@@ -428,7 +464,7 @@ macro_rules! keyed_facet {
         impl<T: Send + Sync + 'static, R: Registry> $facet<'_, T, R> {
             $(pub fn $name(self, key: HookKey, binder: impl Fn(&T, &PluginStateView) -> Result<$ty, PluginError> + Send + Sync + 'static) -> Result<(), PluginError>
             where R: Admits<contribution::$slot> {
-                self.reg.callback::<contribution::$slot>(Some(key), None, ContributionDetails::Callback { stream_state_from: None },
+                self.reg.callback::<contribution::$slot>(Some(key), None, ContributionDetails::Callback { stream_state_from: None, reads: &[] },
                     Arc::new(move |owner, state, reg| reg.$bound_method().$name(key, binder(owner, state)?)))
             })+
         }
@@ -447,7 +483,7 @@ macro_rules! singleton {
         impl<T: Send + Sync + 'static, R: Registry> $facet<'_, T, R> {
             $(pub fn $name(self, binder: impl Fn(&T, &PluginStateView) -> Result<$ty, PluginError> + Send + Sync + 'static) -> Result<(), PluginError>
             where R: Admits<contribution::$slot> {
-                self.reg.callback::<contribution::$slot>(None, None, ContributionDetails::Callback { stream_state_from: None },
+                self.reg.callback::<contribution::$slot>(None, None, ContributionDetails::Callback { stream_state_from: None, reads: &[] },
                     Arc::new(move |owner, state, reg| reg.$method().$name(binder(owner, state)?)))
             })+
         }
@@ -471,7 +507,10 @@ impl<T: Send + Sync + 'static, R: Registry> OutputRegistrations<'_, T, R> {
         self.reg.callback::<contribution::AssistantResponse>(
             Some(key),
             None,
-            ContributionDetails::Callback { stream_state_from },
+            ContributionDetails::Callback {
+                stream_state_from,
+                reads: &[],
+            },
             Arc::new(move |owner, state, reg| {
                 reg.output()
                     .response(key, stream_state_from, binder(owner, state)?)
@@ -496,6 +535,7 @@ impl<T: Send + Sync + 'static, R: Registry> OutputRegistrations<'_, T, R> {
             None,
             ContributionDetails::Callback {
                 stream_state_from: None,
+                reads: &[],
             },
             Arc::new(move |owner, state, reg| {
                 reg.output()
@@ -520,6 +560,7 @@ impl<T: Send + Sync + 'static, R: Registry> ToolResultRegistrations<'_, T, R> {
             None,
             ContributionDetails::Callback {
                 stream_state_from: None,
+                reads: &[],
             },
             Arc::new(move |owner, state, reg| reg.tool_results().presenter(binder(owner, state)?)),
         )
@@ -551,6 +592,7 @@ impl<T: Send + Sync + 'static, R: Registry> ContextRegistrations<'_, T, R> {
             Some(priority),
             ContributionDetails::Callback {
                 stream_state_from: None,
+                reads: &[],
             },
             Arc::new(move |owner, state, reg| {
                 reg.context().pressure(key, priority, binder(owner, state)?)
@@ -574,6 +616,7 @@ impl<T: Send + Sync + 'static, R: Registry> ContextRegistrations<'_, T, R> {
             Some(priority),
             ContributionDetails::Callback {
                 stream_state_from: None,
+                reads: &[],
             },
             Arc::new(move |owner, state, reg| {
                 reg.context().compact(key, priority, binder(owner, state)?)
@@ -597,6 +640,7 @@ impl<T: Send + Sync + 'static, R: Registry> ContextRegistrations<'_, T, R> {
             Some(priority),
             ContributionDetails::Callback {
                 stream_state_from: None,
+                reads: &[],
             },
             Arc::new(move |owner, state, reg| {
                 reg.context()
@@ -629,7 +673,31 @@ impl<T: Send + Sync + 'static, R: Registry> ToolRegistrations<'_, T, R> {
             PluginError::Registration("a provider handle requires its declared owner".into())
         })?;
         let handle = ToolProviderHandle::new(R::KIND, owner, key);
-        self.record_provider(key, binder)?;
+        self.record_provider(key, &[], binder)?;
+        Ok(handle)
+    }
+    /// Declare the provider `key` reading execution bindings in `reads`,
+    /// the formats its instances answer from
+    /// [`ToolProvider::readable_binding_formats`]: a node that installs it
+    /// offers the codec of each (FIG-6993). Binding refuses an instance
+    /// that reads other formats.
+    pub fn provider_reading(
+        self,
+        key: ToolProviderKey,
+        reads: &'static [crate::FormatVersion],
+        binder: impl Fn(&T, &PluginStateView) -> Result<Arc<dyn ToolProvider>, PluginError>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Result<ToolProviderHandle, PluginError>
+    where
+        R: Admits<contribution::ToolProvider>,
+    {
+        let owner = self.reg.owner.clone().ok_or_else(|| {
+            PluginError::Registration("a provider handle requires its declared owner".into())
+        })?;
+        let handle = ToolProviderHandle::new(R::KIND, owner, key);
+        self.record_provider(key, reads, binder)?;
         Ok(handle)
     }
     /// Declare the provider `key` with the reader its `Read` tools need:
@@ -652,12 +720,13 @@ impl<T: Send + Sync + 'static, R: Registry> ToolRegistrations<'_, T, R> {
             PluginError::Registration("a provider handle requires its declared owner".into())
         })?;
         let handle = ToolProviderHandle::new(R::KIND, owner, key);
-        self.record_provider_with_reads(key, binder)?;
+        self.record_provider_with_reads(key, &[], binder)?;
         Ok(handle)
     }
     pub(crate) fn record_provider_with_reads(
         self,
         key: ToolProviderKey,
+        reads: &'static [crate::FormatVersion],
         binder: impl Fn(&T, &PluginStateView) -> Result<crate::ToolProviderRegistration, PluginError>
         + Send
         + Sync
@@ -671,9 +740,12 @@ impl<T: Send + Sync + 'static, R: Registry> ToolRegistrations<'_, T, R> {
             None,
             ContributionDetails::Callback {
                 stream_state_from: None,
+                reads,
             },
             Arc::new(move |owner, state, reg| {
-                reg.tools().provider_with_reads(key, binder(owner, state)?)
+                let registration = binder(owner, state)?;
+                declared_reads(key, reads, registration.provider.as_ref())?;
+                reg.tools().provider_with_reads(key, registration)
             }),
         )?;
         // The reader binds with its provider, above: this entry declares it.
@@ -682,6 +754,7 @@ impl<T: Send + Sync + 'static, R: Registry> ToolRegistrations<'_, T, R> {
             None,
             ContributionDetails::Callback {
                 stream_state_from: None,
+                reads: &[],
             },
             Arc::new(|_, _, _| Ok(())),
         )
@@ -689,6 +762,7 @@ impl<T: Send + Sync + 'static, R: Registry> ToolRegistrations<'_, T, R> {
     pub(crate) fn record_provider(
         self,
         key: ToolProviderKey,
+        reads: &'static [crate::FormatVersion],
         binder: impl Fn(&T, &PluginStateView) -> Result<Arc<dyn ToolProvider>, PluginError>
         + Send
         + Sync
@@ -702,8 +776,13 @@ impl<T: Send + Sync + 'static, R: Registry> ToolRegistrations<'_, T, R> {
             None,
             ContributionDetails::Callback {
                 stream_state_from: None,
+                reads,
             },
-            Arc::new(move |owner, state, reg| reg.tools().provider(key, binder(owner, state)?)),
+            Arc::new(move |owner, state, reg| {
+                let provider = binder(owner, state)?;
+                declared_reads(key, reads, provider.as_ref())?;
+                reg.tools().provider(key, provider)
+            }),
         )
     }
     pub fn deferred(
@@ -724,12 +803,37 @@ impl<T: Send + Sync + 'static, R: Registry> ToolRegistrations<'_, T, R> {
             PluginError::Registration("a provider handle requires its declared owner".into())
         })?;
         let handle = ToolProviderHandle::new(R::KIND, owner, key);
-        self.record_deferred(key, binder)?;
+        self.record_deferred(key, &[], binder)?;
+        Ok(handle)
+    }
+    /// [`Self::deferred`], the provider reading execution bindings in
+    /// `reads`, as [`Self::provider_reading`] declares them (FIG-6993).
+    pub fn deferred_reading(
+        self,
+        key: ToolProviderKey,
+        reads: &'static [crate::FormatVersion],
+        binder: impl Fn(
+            &T,
+            &PluginStateView,
+        ) -> Result<crate::DeferredToolProviderRegistration, PluginError>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Result<ToolProviderHandle, PluginError>
+    where
+        R: Admits<contribution::ToolProvider>,
+    {
+        let owner = self.reg.owner.clone().ok_or_else(|| {
+            PluginError::Registration("a provider handle requires its declared owner".into())
+        })?;
+        let handle = ToolProviderHandle::new(R::KIND, owner, key);
+        self.record_deferred(key, reads, binder)?;
         Ok(handle)
     }
     pub(crate) fn record_deferred(
         self,
         key: ToolProviderKey,
+        reads: &'static [crate::FormatVersion],
         binder: impl Fn(
             &T,
             &PluginStateView,
@@ -746,10 +850,30 @@ impl<T: Send + Sync + 'static, R: Registry> ToolRegistrations<'_, T, R> {
             None,
             ContributionDetails::Callback {
                 stream_state_from: None,
+                reads,
             },
-            Arc::new(move |owner, state, reg| reg.tools().deferred(key, binder(owner, state)?)),
+            Arc::new(move |owner, state, reg| {
+                let registration = binder(owner, state)?;
+                declared_reads(key, reads, registration.provider.as_ref())?;
+                reg.tools().deferred(key, registration)
+            }),
         )
     }
+}
+/// Refuses a bound provider whose instance reads binding formats other
+/// than `declared`, what its registration offers (S8, FIG-6993).
+fn declared_reads(
+    key: ToolProviderKey,
+    declared: &'static [crate::FormatVersion],
+    provider: &(impl ToolProvider + ?Sized),
+) -> Result<(), PluginError> {
+    let reads = provider.readable_binding_formats();
+    if reads == declared {
+        return Ok(());
+    }
+    Err(PluginError::Registration(format!(
+        "provider `{key}` reads binding formats {reads:?}, and its registration declares {declared:?}"
+    )))
 }
 pub struct PromptRecipeRegistrations<'a, T = (), R = Session> {
     reg: &'a mut PluginRegistrar<T, R>,

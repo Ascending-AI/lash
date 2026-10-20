@@ -70,7 +70,6 @@ async fn owned(name: &'static str) -> Option<Owned> {
             node: NodeId::new("round-trips"),
             decodes: vec![formats.clone()],
             serves: Vec::new(),
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: 15_000,
         })

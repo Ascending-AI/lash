@@ -178,6 +178,13 @@ pub enum RuntimeErrorCause {
     MaxToolCallsExceeded {
         exceeded: Box<crate::ToolCallLimitExceeded>,
     },
+    /// No live serving node's own package surface is one every live
+    /// serving node can run (FIG-6993): the typed half of
+    /// [`RuntimeErrorCode::NoCompatibleSnapshot`]. Each candidate names what
+    /// the serving nodes lack to run it.
+    NoCompatibleSnapshot {
+        candidates: Vec<super::SnapshotCandidate>,
+    },
     /// Why a run's shape was refused (FIG-4652): the typed half of
     /// [`RuntimeErrorCode::RunShapeRefused`] and, for a refused reasoning,
     /// of [`RuntimeErrorCode::ReasoningRefused`].

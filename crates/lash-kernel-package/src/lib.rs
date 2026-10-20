@@ -31,7 +31,7 @@ pub mod testing;
 mod laws;
 
 pub use build::PackageSources;
-pub use held::{HeldPackages, PackageView, SetNotHeld, SharedPackageView};
+pub use held::{HeldPackages, PackageView, SharedPackageView};
 pub use install::PackageInstall;
 pub use lash_kernel_dialect::{
     Export, Intent, Member, MemberPath, OperationExport, PackagePath, QualifiedOperation, Segment,

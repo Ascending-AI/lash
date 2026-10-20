@@ -238,9 +238,9 @@ pub mod vm;
 /// natives only, by function identity.
 #[cfg(any(feature = "codemode", feature = "workflow-view"))]
 pub mod package {
-    /// The rows a node installs before it serves, and the artifacts of its
-    /// own set (FIG-6918): for a host that runs its own node runner.
-    pub use crate::packages::{install_rows, own_artifacts};
+    /// The rows a node installs before it serves (FIG-6918): for a host
+    /// that runs its own node runner.
+    pub use crate::packages::install_rows;
     pub use lash_execution_contracts::{CellPackages, PackageGate};
     pub use lash_kernel_package::*;
     /// lash's own packages as this build holds them, and why they did not
@@ -1017,6 +1017,7 @@ pub mod runtime {
     /// wall-clock default; tests open a backend on their own to make expiry
     /// deterministic.
     pub use lash_core::{Clock, ClockWallTime, facade_support::SystemClock};
+    pub use lash_core_store::runtime_error::SnapshotCandidate;
     pub use lash_execution_contracts::session_types::SessionHandle;
     pub use lash_execution_contracts::turn_prelude::TurnPreludeRef;
 }

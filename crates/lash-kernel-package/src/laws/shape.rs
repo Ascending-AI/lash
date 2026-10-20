@@ -10,7 +10,7 @@ use lash_kernel_doc::{ErrorDatum, FunctionId, FunctionRegistry};
 
 use super::{SHOUT, finished, functions, kernel, kernel_with, literal, raised, run, runtime};
 use crate::testing::{DATAFRAME, RELEASE, dataframe};
-use crate::{HeldPackages, Package, PackageSet, PackageSources, STALE_VALUE, StaleValue};
+use crate::{HeldPackages, Package, PackageSources, STALE_VALUE, StaleValue};
 
 const MEMBERS: &[&str] = &[
     "dataframe.col",
@@ -167,17 +167,14 @@ fn pkg_shape_a_stale_value_names_both_artifacts_by_label() {
         assert_eq!(stale.built, older.function("dataframe.make_expr"));
         assert_eq!(stale.at, "self.name");
 
-        let own = fixture.held.sets()[&fixture.held.own()].clone();
-        let retained = PackageSet::new([&older_kernel, &older]).unwrap();
-        let artifacts: Vec<Arc<Package>> = fixture
+        let known: Vec<&Package> = fixture
             .held
             .artifacts()
             .values()
-            .cloned()
-            .chain([Arc::new(older_kernel.clone()), Arc::new(older.clone())])
+            .map(AsRef::as_ref)
+            .chain([&older_kernel, &older])
             .collect();
-        let held = HeldPackages::new(artifacts, [own.clone(), retained], own.digest()).unwrap();
-        let message = stale.message(&held);
+        let message = stale.message_among(&known);
         let expected = if short {
             format!(
                 "({release} {}; current {RELEASE} {})",
@@ -244,24 +241,17 @@ fn pkg_shape_a_constructor_two_releases_share_names_both() {
         ),
     ));
     let stale = StaleValue::of(&error).expect("a stale value's data");
-    let own = fixture.held.sets()[&fixture.held.own()].clone();
-    let sets = [
-        own.clone(),
-        PackageSet::new([&other_kernel, &sharing]).unwrap(),
-        PackageSet::new([&other_kernel, &reshaped]).unwrap(),
-    ];
-    let artifacts: Vec<Arc<Package>> = fixture
+    let known: Vec<&Package> = fixture
         .held
         .artifacts()
         .values()
-        .cloned()
-        .chain([other_kernel, sharing.clone(), reshaped.clone()].map(Arc::new))
+        .map(AsRef::as_ref)
+        .chain([&other_kernel, &sharing, &reshaped])
         .collect();
-    let held = HeldPackages::new(artifacts, sets, own.digest()).unwrap();
     let mut both = [&fixture.built, &sharing];
     both.sort_by_key(|package| package.digest());
     assert_eq!(
-        stale.message(&held),
+        stale.message_among(&known),
         format!(
             "`dataframe.expr` at `self.title` was built by another release of `dataframe` (one of {} {}, {} {}; current 0.4.0 {}); rebuild it",
             both[0].release(),

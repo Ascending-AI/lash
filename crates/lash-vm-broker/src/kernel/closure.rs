@@ -117,8 +117,9 @@ pub enum ClosureRefusal {
 impl From<ClosureRefusal> for KernelRestoreRefusal {
     fn from(refusal: ClosureRefusal) -> Self {
         match refusal {
-            ClosureRefusal::Missing { function } => Self::MissingFunction {
+            ClosureRefusal::Missing { function } => Self::DefinitionRefused {
                 function: function.to_string(),
+                problem: "it is neither held here nor stored".to_owned(),
             },
             ClosureRefusal::Graph(refusal) => Self::Malformed {
                 problem: refusal.to_string(),

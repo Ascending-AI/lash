@@ -29,11 +29,11 @@
 //!   would strand it (ADR 0115 §3.5). It refuses with
 //!   [`DurableError::Unmigrated`], naming how many and the command that
 //!   carries them forward.
-//! - **Packages** (FIG-6918): the node installs the package code its
-//!   backend holds, keeps each retained artifact a dependent still lists,
-//!   and advertises what it holds, so it claims only actors whose package
-//!   set it holds. It does not start while a dependent lists an identity no
-//!   artifact it holds declares ([`DurableError::RetiredDependents`]).
+//! - **Packages** (FIG-6918, FIG-6993): the node installs the package code
+//!   its backend runs and advertises what it offers running code (natives,
+//!   kernels, providers, codec versions), so it claims to run only actors
+//!   whose hard requirements it meets. Work no live node can run stays
+//!   parked and is named by the strand report; the node starts regardless.
 //! - **Drain:** once the host starts [`NodeServe::drain`], the node claims
 //!   nothing more, each activation releases its actor `ready` at its next
 //!   committed phase, and `serve` returns [`Stopped::Drained`] when none is
@@ -78,6 +78,10 @@ pub struct NodeServe {
     /// it runs a process only when it serves every requirement the process
     /// carries (FIG-6034 D3).
     pub serves: Vec<String>,
+    /// What the node's registrations offer running code: the providers
+    /// its plugins register and the codec versions they read, advertised
+    /// beside its package code's natives and kernels (FIG-6993).
+    pub offers: lash_durable::NodeCapabilities,
 }
 
 /// Serve `backend` as one node until `stop` completes or the node loses its
@@ -86,9 +90,8 @@ pub struct NodeServe {
 /// # Errors
 ///
 /// [`DurableError::Unmigrated`] when an actor is still in a format set the
-/// backend's build retires, [`DurableError::RetiredDependents`] when a
-/// dependent lists an identity no artifact the node holds declares,
-/// and the store's refusal of the node's registration.
+/// backend's build retires, and the store's refusal of the node's package
+/// install or its registration.
 pub async fn serve(
     backend: &Backend,
     serve: NodeServe,
@@ -124,6 +127,7 @@ pub async fn serve(
             node: serve.node,
             decodes,
             serves: serve.serves,
+            offers: serve.offers,
             lease: backend.config().lease(),
             max_active: settings.max_active,
             claim_batch: settings.claim_batch,

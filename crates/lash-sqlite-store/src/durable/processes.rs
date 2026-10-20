@@ -119,7 +119,6 @@ pub(super) fn claim_within(
                 CANCEL_MAIL,
                 serves,
                 lash_durable::domain::SESSION_CLOSE_MAIL,
-                owner.node.as_str()
             ],
             |row| {
                 Ok((
@@ -127,7 +126,6 @@ pub(super) fn claim_within(
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, Option<String>>(3)?,
-                    row.get::<_, bool>(4)?,
                 ))
             },
         )?
@@ -136,8 +134,8 @@ pub(super) fn claim_within(
     // actor. RETURNING has no ordering guarantee, so retain identity with
     // each cause, purpose and requirement through the batched mutation.
     let mut selected = Vec::with_capacity(candidates.len());
-    for (key, state, stored_formats, requires, holds) in candidates {
-        let purpose = ClaimPurpose::of_stored(lease, &stored_formats, requires.as_deref(), holds);
+    for (key, state, stored_formats, requires) in candidates {
+        let purpose = ClaimPurpose::of_stored(lease, &stored_formats, requires.as_deref());
         let purpose = match purpose {
             Ok(purpose) => purpose,
             Err(error) => return Ok(Err(error)),

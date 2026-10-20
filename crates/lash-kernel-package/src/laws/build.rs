@@ -1,8 +1,6 @@
 //! What a package build and an install refuse, and what an artifact's
 //! identity is.
 
-use std::sync::Arc;
-
 use lash_kernel_doc::{Datum, Type};
 
 use super::{SHOUT, finished, functions, kernel, kernel_with, run, runtime};
@@ -263,31 +261,15 @@ fn pkg_digest_unchanged_source_over_another_kernel_is_another_artifact() {
         Some(constructor)
     );
 
-    let sets = [
-        PackageSet::new([&first, &over_first]).unwrap(),
-        PackageSet::new([&second, &over_second]).unwrap(),
-    ];
-    let own = sets[0].digest();
-    let retained = sets[1].digest();
-    let held = HeldPackages::new(
-        [first, second, over_first.clone(), over_second.clone()].map(Arc::new),
-        sets,
-        own,
-    )
-    .unwrap();
-    assert!(held.artifacts().contains_key(&over_first.key()));
-    assert!(held.artifacts().contains_key(&over_second.key()));
+    let held = HeldPackages::install([first, over_first.clone()]).unwrap();
+    let other = HeldPackages::install([second, over_second.clone()]).unwrap();
     let path = over_first.path().clone();
     assert_eq!(
-        held.view(&own).unwrap().package(&path).unwrap().digest(),
+        held.view().package(&path).unwrap().digest(),
         over_first.digest()
     );
     assert_eq!(
-        held.view(&retained)
-            .unwrap()
-            .package(&path)
-            .unwrap()
-            .digest(),
+        other.view().package(&path).unwrap().digest(),
         over_second.digest()
     );
 }

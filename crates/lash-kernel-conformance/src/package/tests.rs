@@ -110,14 +110,14 @@ fn sample(ty: &Type, variant: usize) -> String {
 #[test]
 fn conf_native_six_packages_and_dataframe() {
     let (held, registry) = installed();
-    let view = held.view(&held.own()).unwrap();
+    let view = held.view();
     let mut owners = BTreeSet::new();
     let mut both = 0;
     let mut native_only = 0;
     let registry = Arc::new(registry);
     let kit = Kit::new(view, registry.clone());
     let mut witnesses = vec![];
-    for package in held.view(&held.own()).unwrap().packages() {
+    for package in held.view().packages() {
         owners.insert(package.path().to_string());
         for id in package.ids() {
             let function = registry.get(&id).unwrap();
@@ -235,7 +235,7 @@ fn conf_native_wrong_native_names_the_difference() {
     })
     .unwrap();
     let registry = Arc::new(registry);
-    let kit = Kit::new(held.view(&held.own()).unwrap(), registry.clone());
+    let kit = Kit::new(held.view(), registry.clone());
     let witness = Witness {
         function: id,
         law: Law::Native,
@@ -277,7 +277,7 @@ fn conf_shape_skipped_check_names_the_difference() {
     })
     .unwrap();
     let registry = Arc::new(registry);
-    let kit = Kit::new(held.view(&held.own()).unwrap(), registry.clone());
+    let kit = Kit::new(held.view(), registry.clone());
     let witness = Witness {
         function: id,
         law: Law::Shape,
@@ -380,7 +380,7 @@ fn conf_meter_unbounded_performing_loop_names_the_difference() {
         labels: "",
     }, &[&kernel]).unwrap();
     let held = HeldPackages::install([kernel, package]).unwrap();
-    let error = super::audit_metering(&held.view(&held.own()).unwrap(), &super::LoopBounds::new())
+    let error = super::audit_metering(&held.view(), &super::LoopBounds::new())
         .unwrap_err()
         .to_string();
     assert!(
@@ -409,7 +409,7 @@ fn conf_meter_performing_callback_plan_emits_the_bodys_events() {
         })
         .collect();
     let registry = Arc::new(registry);
-    let kit = Kit::new(held.view(&held.own()).unwrap(), registry);
+    let kit = Kit::new(held.view(), registry);
     let (reference, tape) = super::observe(
         &kit.bodies,
         &case,
@@ -449,7 +449,7 @@ fn conf_shape_both_members_check_nested_values_with_their_own_artifacts() {
     })
     .unwrap();
     let registry = Arc::new(registry);
-    let kit = Kit::new(held.view(&held.own()).unwrap(), registry.clone());
+    let kit = Kit::new(held.view(), registry.clone());
     let good = "{name: \"good\", __lash_brand: (\"nested\", \"item\"), __lash_built: b\"01\"}";
     let stale = "{name: 3, __lash_brand: (\"nested\", \"item\"), __lash_built: b\"01\"}";
     for (item, children, expected_path) in [
@@ -733,7 +733,7 @@ impl Traversal {
 fn conf_meter_live_alias_traversals_charge_every_visit_of_a_grown_and_cleared_input() {
     let (held, registry) = installed();
     let registry = Arc::new(registry);
-    let kit = Kit::new(held.view(&held.own()).unwrap(), registry.clone());
+    let kit = Kit::new(held.view(), registry.clone());
     let mut failures = vec![];
     for traversal in TRAVERSALS {
         let uses = traversal.uses();
@@ -768,7 +768,7 @@ fn conf_meter_live_alias_traversals_charge_every_visit_of_a_grown_and_cleared_in
 fn conf_meter_bounded_traversals_stop_at_the_reference_visit() {
     let (held, registry) = installed();
     let registry = Arc::new(registry);
-    let kit = Kit::new(held.view(&held.own()).unwrap(), registry.clone());
+    let kit = Kit::new(held.view(), registry.clone());
     for traversal in TRAVERSALS {
         let uses = traversal
             .uses()
@@ -822,7 +822,7 @@ fn conf_meter_bounded_traversals_stop_at_the_reference_visit() {
 fn conf_meter_coerced_text_trip_counts_charge_every_test() {
     let (held, registry) = installed();
     let registry = Arc::new(registry);
-    let kit = Kit::new(held.view(&held.own()).unwrap(), registry.clone());
+    let kit = Kit::new(held.view(), registry.clone());
     let slope = metered_slope(
         &kit,
         &registry,
@@ -852,7 +852,7 @@ fn conf_meter_coerced_text_trip_counts_charge_every_test() {
 fn conf_meter_task_joins_charge_every_collected_result() {
     let (held, registry) = installed();
     let registry = Arc::new(registry);
-    let kit = Kit::new(held.view(&held.own()).unwrap(), registry.clone());
+    let kit = Kit::new(held.view(), registry.clone());
     let slope = metered_slope(
         &kit,
         &registry,
@@ -922,7 +922,7 @@ fn stopping(
 fn conf_meter_ratio_of_a_non_finite_number_raises_at_entry() {
     let (held, registry) = installed();
     let registry = Arc::new(registry);
-    let kit = Kit::new(held.view(&held.own()).unwrap(), registry.clone());
+    let kit = Kit::new(held.view(), registry.clone());
     for value in ["nan", "inf", "-inf"] {
         let main = format!("main {{ let r = invoke ts.number.ratio({value}) finish r }}");
         let body = stopping(&kit, &registry, "ts.number.ratio", &main, 1_000_000);
@@ -939,7 +939,7 @@ fn conf_meter_ratio_of_a_non_finite_number_raises_at_entry() {
 fn conf_meter_padding_to_an_infinite_count_stops_at_the_charge_bound() {
     let (held, registry) = installed();
     let registry = Arc::new(registry);
-    let kit = Kit::new(held.view(&held.own()).unwrap(), registry.clone());
+    let kit = Kit::new(held.view(), registry.clone());
     let body = stopping(
         &kit,
         &registry,
@@ -964,7 +964,7 @@ fn conf_meter_padding_to_an_infinite_count_stops_at_the_charge_bound() {
 fn conf_meter_loops_before_guest_code_charge_inputs_detached_later() {
     let (held, registry) = installed();
     let registry = Arc::new(registry);
-    let kit = Kit::new(held.view(&held.own()).unwrap(), registry.clone());
+    let kit = Kit::new(held.view(), registry.clone());
     let slope = metered_slope(
         &kit,
         &registry,

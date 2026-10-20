@@ -56,7 +56,9 @@ pub use lash_vm_client::packages::refusal as package_refusal;
 /// fixed system-call allowlist, under which it opens nothing and never maps
 /// memory writable and executable at once, and an address-space ceiling. A
 /// native escape keeps only what that allowlist grants.
-pub use lash_vm_client::service::{DialectRefusal, Service as WorkerService, SourceServiceError};
+pub use lash_vm_client::service::{
+    DialectRefusal, Service as WorkerService, SourceServiceError, StoredSurface, SurfaceRef,
+};
 /// The worker pool [`WorkerService::pool`] starts, which a host prewarms at
 /// startup, and the counts it reports.
 pub use lash_vm_client::{PoolStats as WorkerPoolStats, WorkerPool};
@@ -138,7 +140,3 @@ pub use lash_vm_runtime::{
     ParkedRefusal as KernelParkedRefusal, RefusedKernelCell, RefusedKernelProcess,
     UnmigratedKernelSession, migrate_function_value,
 };
-/// What a node keeps of the package artifacts it holds beside its own set,
-/// and the dependents that pin them (FIG-6918, RETAIN-SURVEY).
-#[cfg(feature = "codemode")]
-pub use lash_vm_runtime::{RetainDependent, RetainSurvey, StrandedDependent};

@@ -303,3 +303,56 @@ mod tests {
         PostgresHostConfig::standard().validate().expect("standard");
     }
 }
+
+/// One unfinished actor no live node can run (FIG-6993): what the live
+/// node closest to running it lacks, or its whole hard record when no
+/// node is live.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct StrandedWork {
+    /// The actor's stored key.
+    pub actor: String,
+    /// What it requires and no live node offers it all of.
+    pub lacks: ExecutionRequirements,
+}
+
+/// One page of the strand report: the stranded work among the unfinished
+/// actors after `after`, scanning at most `limit`, and the key to resume
+/// from when more may follow.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct StrandPage {
+    pub stranded: Vec<StrandedWork>,
+    pub next: Option<String>,
+}
+
+/// The strand report (FIG-6993): of the unfinished actors with a claim
+/// record after `after`, at most `limit` scanned in key order, each no live
+/// node can run, with what it lacks. Work stays parked rather than failing
+/// while no node registers what it needs, so this is where an operator
+/// finds it: a deploy that offers what it lacks lets it run. It writes
+/// nothing.
+///
+/// # Errors
+///
+/// The store's failure to answer.
+pub async fn strand_report(
+    backend: &Backend,
+    after: Option<&ActorKey>,
+    limit: usize,
+) -> Result<StrandPage, DurableError> {
+    let durable = backend.durable();
+    let live = durable.live_nodes().await?;
+    let rows = durable.actor_requirements(after, limit).await?;
+    let next = (rows.len() == limit && limit > 0)
+        .then(|| rows.last().map(|(key, _)| key.as_str().to_owned()))
+        .flatten();
+    let stranded = rows
+        .into_iter()
+        .filter_map(|(actor, requires)| {
+            lash_core::durable_port::packages::strand(&requires, &live).map(|lacks| StrandedWork {
+                actor: actor.as_str().to_owned(),
+                lacks,
+            })
+        })
+        .collect();
+    Ok(StrandPage { stranded, next })
+}

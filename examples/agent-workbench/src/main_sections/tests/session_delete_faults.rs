@@ -335,6 +335,14 @@ impl DurableStore for DeleteDurableStore {
         self.inner.live_nodes().await
     }
 
+    async fn actor_requirements(
+        &self,
+        after: Option<&lash::durable::ActorKey>,
+        limit: usize,
+    ) -> Result<Vec<(lash::durable::ActorKey, Vec<String>)>, DurableError> {
+        self.inner.actor_requirements(after, limit).await
+    }
+
     async fn install_packages(
         &self,
         artifacts: &[lash::durable::packages::ArtifactInstall],

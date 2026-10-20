@@ -522,6 +522,9 @@ fn inline_request(
     lash_execution_contracts::process::ProcessStartRequest::inline(
         lash::process::LASH_VM_ENGINE_KIND,
         transport(value),
+        lash::package::lash_packages()
+            .expect("the shipped library assembles")
+            .digest(),
         args,
         launch.clone(),
         lash_execution_contracts::process::ProcessOriginator::host(),

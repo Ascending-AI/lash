@@ -708,10 +708,11 @@ impl KernelEffects for CellHost<'_> {
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect();
-        // What the cell's static links require of a node that resumes it:
-        // the reader of every provider its read plan reads through
-        // (FIG-6985). Its deferred matches are dynamic, recorded by their
-        // commits.
+        // What the cell's links require of a node that resumes it: the
+        // reader of every provider its read plan reads through (FIG-6985),
+        // and the provider and codec version of every match it committed,
+        // which a later call of the parked cell runs on (FIG-6993). A match
+        // joins the record with the commit that adds it to the envelope.
         let mut links = lash_kernel_doc::ExecutionRequirements::default();
         links.providers.extend(
             self.envelope
@@ -719,6 +720,9 @@ impl KernelEffects for CellHost<'_> {
                 .values()
                 .map(lash_core_store::tool_surface::provider_key),
         );
+        for grant in self.envelope.grants.values() {
+            grant.link().require(&mut links);
+        }
         Ok(HostParts {
             host: Some(host),
             envelope: Some(envelope),

@@ -389,5 +389,5 @@ await control.finish(fetched.url);
 fn test_packages() -> lash::package::PackageView<'static> {
     static HELD: std::sync::LazyLock<std::sync::Arc<lash::package::HeldPackages>> =
         std::sync::LazyLock::new(|| lash::package::lash_packages().unwrap());
-    HELD.view(&HELD.own()).unwrap()
+    HELD.view()
 }

@@ -88,9 +88,6 @@ plugin_error_samples! {
         process: process(),
         refusal: Box::new(crate::process::ProcessSuccessorRefusal::Ended),
     },
-    PackagesNotHeld { .. } => PluginError::PackagesNotHeld {
-        packages: lash_kernel_doc::PackageSetDigest::from_bytes([7; 32]),
-    },
     PackageNamespace { .. } => PluginError::PackageNamespace { path: "dataframe.unknown".into() },
     InternalOperation { .. } => PluginError::InternalOperation {
         operation: "dataframe.run".to_owned(),

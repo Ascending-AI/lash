@@ -161,9 +161,14 @@ impl ProcessActivation {
             &waits,
         )
         .map_err(|error| corrupt("component cut obligations", error))?;
-        let requires =
-            super::step_admission::outstanding_work(&record.id, environment, driver, Some(&fold))
-                .requires();
+        let requires = super::step_admission::outstanding_work(
+            &record.id,
+            environment,
+            &live.record,
+            driver,
+            Some(&fold),
+        )
+        .requires();
         let mut driver = driver.clone();
         tracing::info!(process_id = %record.id, formats = ?cut.state.plugins.iter().map(|(id, namespace)| (id, namespace.format_version)).collect::<Vec<_>>(), requires = ?requires, "recording component format postimage");
         driver.component_formats = Some(cut);
@@ -174,7 +179,6 @@ impl ProcessActivation {
         }));
         tx.set_requires(requires.clone());
         owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
-        live.requires = requires;
         Ok(Err(Pass::Again))
     }
 }

@@ -951,14 +951,6 @@ CREATE TABLE IF NOT EXISTS lash_package_internal_operations (
     PRIMARY KEY (operation, path)
 );
 
--- The artifacts a live node holds, gone with its row.
-CREATE TABLE IF NOT EXISTS lash_node_artifacts (
-    node_id TEXT NOT NULL REFERENCES lash_nodes (node_id) ON DELETE CASCADE,
-    artifact TEXT NOT NULL REFERENCES lash_package_artifacts (artifact),
-    path TEXT NOT NULL,
-    PRIMARY KEY (node_id, artifact)
-);
-
 -- One scheduling row per session and per process: the only row a claim, a
 -- wake or a fence touches. `epoch` changes only by claim, reap and release,
 -- and every owner write is fenced on it; an actor has mail exactly when
@@ -975,7 +967,6 @@ CREATE TABLE IF NOT EXISTS lash_actors (
     next_due_ms BIGINT,
     formats TEXT NOT NULL,
     requires TEXT,
-    packages TEXT,
     state_revision BIGINT NOT NULL,
     mail_seq BIGINT NOT NULL,
     acked_seq BIGINT NOT NULL,

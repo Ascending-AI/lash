@@ -140,10 +140,11 @@ impl PluginSpec {
         key: super::ToolProviderKey,
         provider: Arc<dyn ToolProvider>,
     ) -> Self {
-        let result = self
-            .registrations
-            .tools()
-            .record_provider(key, move |_, _| Ok(Arc::clone(&provider)));
+        let result = self.registrations.tools().record_provider(
+            key,
+            provider.readable_binding_formats(),
+            move |_, _| Ok(Arc::clone(&provider)),
+        );
         self.admit(result);
         self
     }
@@ -155,10 +156,11 @@ impl PluginSpec {
         key: super::ToolProviderKey,
         registration: crate::ToolProviderRegistration,
     ) -> Self {
-        let result = self
-            .registrations
-            .tools()
-            .record_provider_with_reads(key, move |_, _| Ok(registration.clone()));
+        let result = self.registrations.tools().record_provider_with_reads(
+            key,
+            registration.provider.readable_binding_formats(),
+            move |_, _| Ok(registration.clone()),
+        );
         self.admit(result);
         self
     }
@@ -169,10 +171,11 @@ impl PluginSpec {
         key: super::ToolProviderKey,
         registration: crate::DeferredToolProviderRegistration,
     ) -> Self {
-        let result = self
-            .registrations
-            .tools()
-            .record_deferred(key, move |_, _| Ok(registration.clone()));
+        let result = self.registrations.tools().record_deferred(
+            key,
+            registration.provider.readable_binding_formats(),
+            move |_, _| Ok(registration.clone()),
+        );
         self.admit(result);
         self
     }

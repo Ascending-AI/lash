@@ -2189,7 +2189,6 @@ async fn claim_and_admit(
             node: lash_durable::NodeId::new(format!("owner-of-{session}")),
             decodes: vec![snapshot.formats.clone()],
             serves: Vec::new(),
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: 15_000,
         })

@@ -33,7 +33,7 @@ mod snapshot;
 mod trace;
 
 pub(crate) use carry::KernelCarry;
-pub use carry::{cell_migration_refusal, cell_snapshot_functions};
+pub use carry::cell_migration_refusal;
 pub(crate) use envelope::{
     check_cell_snapshot, recorded_call, recorded_cell_ledger, snapshot_tool_calls,
 };
@@ -166,14 +166,6 @@ pub(crate) async fn execute_cell(
     // outputs. The activation that ends it does.
     if response.suspended {
         return response;
-    }
-    // A cell that stood parked under a set, an earlier activation's or
-    // this one's, has answered: the capture after it clears the stamp its
-    // parks left. A cell still parked keeps it.
-    if let Some((packages, committed)) = snapshots.park_stamp()
-        && (resumes || committed)
-    {
-        state.parked_under(packages);
     }
     // A cell that answers has no runs left to lose (FIG-6806).
     if !seal_ctx.has_nested_effect_error() {
@@ -468,8 +460,11 @@ async fn run_linked_cell(
     };
     // A process the cell starts captures the tools its committed deferred
     // matches resolved from them, with their bindings, never resolving
-    // again; a resumed cell's are its envelope's.
-    let ctx = ctx.with_recorded_grants(Arc::new(linked.envelope.recorded_grants()));
+    // again, and a function it starts inline is linked under the cell's
+    // own set; a resumed cell's are its envelope's.
+    let ctx = ctx
+        .with_recorded_grants(Arc::new(linked.envelope.recorded_grants()))
+        .with_linked_packages(linked.envelope.packages);
 
     // Every call the cell makes is its own admitted execution, run from
     // these bodies (ADR 0132 §5): a resumed cell knows each call its ledger
@@ -898,6 +893,7 @@ async fn run_linked_cell(
                     error,
                     &state.not_carried(),
                     services.kernel.packages().ok().as_deref(),
+                    &state.read_surfaces(),
                 );
                 respond(lash_core::CellOutcome::Failed(observation.failure(
                     code,

@@ -43,10 +43,9 @@
 //! steps already running to commit their outcomes, then releases the actor
 //! `ready` under `drain.release`, for a node of the next build to claim.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
 
-use lash_core_store::tool_run::{AvailableEvidence, CompletionSource};
 use lash_durable::domain::{
     CANCEL_MAIL, ExecRootRow, ProcessActorRow, ProcessWrite, RunFacts, RunSeq, ScopeKey, WaitState,
     WaitWrite,
@@ -60,9 +59,10 @@ use tokio_util::sync::CancellationToken;
 
 use super::driver::{Blocked, Driver, Immediate, InFlight, StoredWaitId};
 use super::effects::{record_effect, record_omitted_effects, record_ran};
-use super::node_trace::{NodeCloses, StepCall, StepToolSpans};
+use super::node_trace::{NodeCloses, StepToolSpans};
 use super::session_turn::SessionTurns;
 use super::step_admission::{Consumed, Handoff};
+use super::step_bodies::StepBodies;
 use super::succession::{Current, Succession};
 use super::terminal::cancelled;
 use super::terminal::record_park;
@@ -73,16 +73,11 @@ use crate::ActorContext;
 use crate::AdmittedScope;
 use crate::CancelOrigin;
 use crate::ProcessId;
-use crate::ToolCallId;
 use crate::runtime::actor::activation_loop;
 use crate::runtime::actor::round::lifecycle::{Act, Idle, Lifecycle};
-use crate::runtime::actor::round::{
-    self, AdmittedExecution, MemberBodies, MemberBody, PolicyView, RoundError, RunFold,
-};
+use crate::runtime::actor::round::{self, MemberBodies, PolicyView, RoundError, RunFold};
 use crate::runtime::actor::waits;
-use crate::runtime::actor::waits::Resolution;
 use crate::runtime::process::steps::{ProcessSteps, StepRefusal, StepRuntime};
-use lash_core_store::tool_run::Material;
 use lash_core_store::tool_run::SettledOutput;
 use lash_durable::domain::WaitKind;
 use lash_execution_contracts::backend::Backend;
@@ -92,7 +87,6 @@ use lash_execution_contracts::process::EngineEvent;
 use lash_execution_contracts::process::EngineState;
 use lash_execution_contracts::process::ProcessEngine;
 use lash_execution_contracts::process::ProcessInput;
-use lash_execution_contracts::process::ProcessRecord;
 use lash_execution_contracts::process::StepRequest;
 
 /// The activation of claimed process actors: one per node, routed by
@@ -215,8 +209,10 @@ pub(super) struct Live {
     /// where publication starts past this node's own mark. `None` until a
     /// pass read the row.
     published: Option<u64>,
-    /// The `requires` the actor's row holds: claimed, then as written.
-    pub(super) requires: Vec<String>,
+    /// The hard requirements record of the engine state this pass read,
+    /// or of the state its last commit wrote: what every rewrite of
+    /// `requires` keeps (FIG-6993).
+    pub(super) record: lash_kernel_doc::ExecutionRequirements,
     /// What this activation keeps of its own acknowledged commits.
     continuation: super::continuation::Continuation,
 }
@@ -266,11 +262,14 @@ impl Activation for ProcessActivation {
         self.forget_published(&owned, &process).await;
         exit
     }
-    /// The package code the backend's node holds (FIG-6918).
-    async fn hold(&self) -> Result<lash_durable::NodeHolding, lash_durable::DurableError> {
+    /// What the backend's node's package code offers running code
+    /// (FIG-6993), once installed.
+    async fn capabilities(
+        &self,
+    ) -> Result<lash_durable::NodeCapabilities, lash_durable::DurableError> {
         match self.backend.packages() {
-            Some(packages) => packages.hold(&self.backend).await,
-            None => Ok(lash_durable::NodeHolding::default()),
+            Some(packages) => packages.install(&self.backend).await,
+            None => Ok(lash_durable::NodeCapabilities::default()),
         }
     }
 }
@@ -303,7 +302,7 @@ impl ProcessActivation {
             history_restored: false,
             ended_refused: false,
             published: None,
-            requires: owned.requires().to_vec(),
+            record: lash_kernel_doc::ExecutionRequirements::default(),
             continuation: super::continuation::Continuation::default(),
         };
         loop {
@@ -600,6 +599,7 @@ impl ProcessActivation {
                 return self.park(owned, tx, &reason).await;
             }
         };
+        live.record = state.requirements.clone();
         let tx = match self
             .component_format_cut(owned, tx, &record, &row, &driver, live)
             .await?
@@ -651,6 +651,7 @@ impl ProcessActivation {
             record: &record,
             engine: engine.as_ref(),
             root: root.as_ref(),
+            requirements: &state.requirements,
         };
         let mut tx = match self.record_successor(owned, tx, &current, &driver).await? {
             Succession::Ended(pass) => return Ok(pass),
@@ -704,6 +705,23 @@ impl ProcessActivation {
             .publish_committed(&fold)
             .map_err(steps_failure)?;
         live.history_restored = true;
+        let environment = self
+            .steps
+            .requirements(
+                &live.bodies.runtime,
+                &record,
+                &super::step_admission::step_requests(&driver),
+            )
+            .await?
+            .unwrap_or_default();
+        let work = super::step_admission::outstanding_work(
+            process,
+            environment,
+            &live.record,
+            &driver,
+            Some(&fold),
+        );
+        live.bodies.saw(&record, &driver, work);
         // A previously admitted call can drift on takeover or before a retry.
         // Settle at its existing ordinal; do not turn the drift into a policy
         // veto, restart a body, or write a new x_start. Admitted waits and
@@ -731,6 +749,7 @@ impl ProcessActivation {
             }
         }
         if settled_links {
+            live.bodies.stage_commit(&mut tx, owned.epoch())?;
             let appended = RunFacts::appended(tx.domain(), tx.graph(), owned.epoch());
             let committed = owned.commit(tx, CommitLabel::STEP_OUTCOME).await?;
             live.continuation
@@ -739,7 +758,6 @@ impl ProcessActivation {
             return Ok(Pass::Again);
         }
         live.lifecycle.declare(policies);
-        live.bodies.saw(&record, &driver);
         live.lifecycle.observe(&fold);
         // A draining node advances nothing more: it waits for the steps
         // that run to commit their outcomes, then hands the process to the
@@ -946,8 +964,10 @@ impl ProcessActivation {
             driver_json: driver_json.clone(),
         }));
         self.record_published(&mut tx, process, &row);
-        let requires = self
-            .rewrite_requires(&mut tx, &record, &driver, &fold, &fresh, live)
+        // The state this commit writes states the record its `requires`
+        // keeps, in the same commit (FIG-6993).
+        live.record = next.requirements.clone();
+        self.rewrite_requires(&mut tx, &record, &driver, &fold, &fresh, live)
             .await?;
         if (row.state_rev == 0 || next.format != written)
             && let Some(formats) = self.backend.formats().process_in(&next.format)
@@ -964,9 +984,6 @@ impl ProcessActivation {
             super::state_graph::write_engine_state(&mut tx, process, kind, &next, root.as_ref())?;
         let committed = owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
         nodes.publish(self.tracing.as_ref(), &record, millis(now));
-        if let Some(requires) = requires {
-            live.requires = requires;
-        }
         live.continuation
             .committed(reads, committed.revision, appended, &driver)
             .await?;
@@ -1478,128 +1495,6 @@ fn steps_failure(error: RoundError) -> DurableError {
     match error {
         RoundError::Durable(error) => error,
         other => corrupt("a process's steps", other),
-    }
-}
-
-/// The bodies of a process's steps, from the host's [`ProcessSteps`]: what
-/// the lifecycle runs, for the process record and the in-flight steps as
-/// the last pass read them.
-pub(super) struct StepBodies {
-    steps: Arc<dyn ProcessSteps>,
-    /// What step bodies run under: the process actor's claimed context, and
-    /// the process's namespaces, which this activation's committed step
-    /// outcomes publish into.
-    pub(super) runtime: Arc<StepRuntime>,
-    seen: Mutex<SeenSteps>,
-    /// What the steps' tool spans are reported through; none on a node
-    /// given no tracing.
-    tracing: Option<crate::trace::TraceRuntime>,
-    spans: StepToolSpans,
-}
-
-/// The process and its in-flight steps' requests, by call, as a pass read
-/// them.
-#[derive(Default)]
-struct SeenSteps {
-    record: Option<Arc<ProcessRecord>>,
-    requests: BTreeMap<ToolCallId, StepRequest>,
-}
-
-impl StepBodies {
-    /// Note `record` and `driver`'s in-flight steps, as this pass read them.
-    fn saw(&self, record: &Arc<ProcessRecord>, driver: &Driver) {
-        let mut seen = self.seen.lock().unwrap_or_else(PoisonError::into_inner);
-        seen.record = Some(Arc::clone(record));
-        seen.requests = driver
-            .steps
-            .values()
-            .map(|step| (step.call.clone(), step.request.clone()))
-            .collect();
-    }
-
-    /// The process and the request of the step `call` names.
-    fn step(&self, call: &ToolCallId) -> Option<(Arc<ProcessRecord>, StepRequest)> {
-        let seen = self.seen.lock().unwrap_or_else(PoisonError::into_inner);
-        Some((
-            Arc::clone(seen.record.as_ref()?),
-            seen.requests.get(call)?.clone(),
-        ))
-    }
-}
-
-fn unknown_step() -> SettledOutput {
-    SettledOutput::Cancelled {
-        evidence: AvailableEvidence::default(),
-    }
-}
-
-impl MemberBodies for StepBodies {
-    fn observe(
-        &self,
-        round: &round::RoundView,
-        admitted_here: &BTreeSet<lash_durable::domain::AdmittedId>,
-        settled_here: &BTreeSet<lash_durable::domain::AdmittedId>,
-    ) {
-        self.spans.observe(
-            self.tracing.as_ref(),
-            round,
-            admitted_here,
-            settled_here,
-            |call, tool| {
-                let (record, request) = self.step(call)?;
-                let name = self
-                    .runtime
-                    .built_tools()
-                    .and_then(|built| {
-                        built
-                            .catalog
-                            .entries()
-                            .iter()
-                            .find(|entry| entry.manifest.id == *tool)
-                            .map(|entry| entry.manifest.tool())
-                    })
-                    .unwrap_or_else(|| tool.to_string());
-                Some(StepCall {
-                    process: record.id.clone(),
-                    request,
-                    tool: name,
-                })
-            },
-        );
-    }
-
-    fn body(&self, execution: &AdmittedExecution) -> MemberBody {
-        match self.step(execution.call()) {
-            Some((record, step)) => self.steps.body(&self.runtime, &record, &step, execution),
-            // The lifecycle runs only admitted steps; a body for any other
-            // is never asked for. Answer as a stop rather than run anything.
-            None => Box::new(|_| Box::pin(async { unknown_step().into() })),
-        }
-    }
-
-    fn stop_grace(&self) -> std::time::Duration {
-        self.steps.stop_grace()
-    }
-
-    fn resolved(
-        &self,
-        execution: &AdmittedExecution,
-        parked: &Material<CompletionSource>,
-        resolution: Resolution,
-    ) -> SettledOutput {
-        match self.step(execution.call()) {
-            Some((record, step)) => self
-                .steps
-                .resolved(&record, &step, execution, parked, resolution),
-            None => unknown_step(),
-        }
-    }
-
-    fn publish_state(
-        &self,
-        state: &[crate::plugin::StateResolution],
-    ) -> Result<(), crate::RuntimeEffectControllerError> {
-        self.runtime.publish_state(state)
     }
 }
 

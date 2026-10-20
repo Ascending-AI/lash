@@ -45,7 +45,6 @@ async fn predicate_law(backend: Backend) {
             node: NodeId::new(format!("writer-{case}")),
             decodes: vec![format.clone()],
             serves: vec!["unserved".into()],
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: 60000,
         };
@@ -139,7 +138,6 @@ async fn predicate_law(backend: Backend) {
                 vec![format]
             },
             serves: Vec::new(),
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: 60000,
         };
@@ -240,7 +238,6 @@ async fn retained_expiry_check_attribution_survives_removal() {
             node: NodeId::new("expiry-writer"),
             decodes: vec![format.clone()],
             serves: Vec::new(),
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: 60000,
         })

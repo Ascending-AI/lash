@@ -46,7 +46,6 @@ table lash_actors
   column next_due_ms bigint nullable
   column owner_boot text nullable
   column owner_node text nullable
-  column packages text nullable
   column park_json text nullable
   column ready_at_ms bigint nullable
   column requires text nullable
@@ -244,13 +243,6 @@ table lash_model_call_records
   unique (session_id, run, call_id)
   primary-key (session_id, run, call)
   foreign-key (record_ref) references lash_blobs (hash) on delete restrict
-table lash_node_artifacts
-  column artifact text not-null
-  column node_id text not-null
-  column path text not-null
-  primary-key (node_id, artifact)
-  foreign-key (artifact) references lash_package_artifacts (artifact) on delete no action
-  foreign-key (node_id) references lash_nodes (node_id) on delete cascade
 table lash_nodes
   column boot_id text not-null
   column capabilities_json text not-null

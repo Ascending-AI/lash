@@ -974,7 +974,7 @@ impl BackendRunner {
         self.lifecycle_backend
             .packages()
             .expect("the standard core registers its workers' packages")
-            .hold(&self.lifecycle_backend)
+            .install(&self.lifecycle_backend)
             .await
             .expect("install the lifecycle core's package definitions");
         core

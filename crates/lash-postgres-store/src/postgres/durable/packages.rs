@@ -1,12 +1,10 @@
-//! Package artifacts, sets and the artifacts each node holds (FIG-6918):
+//! Package artifacts and sets, and what each live node offers (FIG-6918):
 //! the PostgreSQL side of `lash_store_sql::durable::packages`.
 
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
-use lash_durable::packages::{
-    ArtifactInstall, HeldArtifact, NodeCapability, PackageCatalog, SetInstall,
-};
+use lash_durable::packages::{ArtifactInstall, NodeCapability, PackageCatalog, SetInstall};
 use lash_durable::{DurableError, DurableInstant};
 use lash_store_sql::Dialect;
 use lash_store_sql::durable::packages::PackageStatements;
@@ -30,25 +28,6 @@ lash_store_sql::statements! {
 static POSTGRES: LazyLock<PostgresPackageStatements> =
     LazyLock::new(|| PostgresPackageStatements::render(Dialect::postgres()));
 
-/// Records that `node` holds each of `held`, in the registration's
-/// transaction.
-pub(super) async fn hold(
-    tx: &mut PgConnection,
-    node: &str,
-    held: &BTreeSet<HeldArtifact>,
-) -> Result<(), DurableError> {
-    for artifact in held {
-        crate::observed_sql::query(SQL.hold.sql())
-            .bind(node)
-            .bind(artifact.digest.to_string())
-            .bind(artifact.path.as_str())
-            .execute(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(sqlx_failure)?;
-    }
-    Ok(())
-}
-
 /// Every node live at `now`, by node id.
 pub(super) async fn live_nodes(
     tx: &mut PgConnection,
@@ -61,6 +40,22 @@ pub(super) async fn live_nodes(
             .await
             .map_err(sqlx_failure)?;
     lash_durable::packages::nodes_of(rows)
+}
+
+/// Up to `limit` actors that have not ended and carry claim requirements,
+/// by key after `after`.
+pub(super) async fn actor_requirements(
+    tx: &mut PgConnection,
+    after: Option<&lash_durable::ActorKey>,
+    limit: usize,
+) -> Result<Vec<(lash_durable::ActorKey, Vec<String>)>, DurableError> {
+    let rows: Vec<(String, String)> = crate::observed_sql::query_as(SQL.actor_requirements.sql())
+        .bind(after.map_or("", lash_durable::ActorKey::as_str))
+        .bind(i64::try_from(limit).unwrap_or(i64::MAX))
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(sqlx_failure)?;
+    lash_durable::packages::requirement_rows(rows)
 }
 
 /// Installs `artifacts`, then `sets`, keeping what is stored. A set naming

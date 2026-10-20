@@ -255,7 +255,7 @@ pub fn render(root: &Path) -> Result<BTreeMap<String, String>> {
 pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<Lifted>)> {
     let mut report = Vec::new();
     let packages = lash::package::lash_packages()?;
-    let package_view = packages.view(&packages.own())?;
+    let package_view = packages.view();
     let embedding = lash_vm_worker::built_embedding(&Default::default())?;
     let registry = embedding.registry()?;
     let mut boundary = lash::vm::HostBoundary::new();

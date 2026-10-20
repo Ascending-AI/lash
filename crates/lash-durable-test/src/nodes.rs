@@ -46,9 +46,9 @@ struct InstallingActivation {
 
 #[async_trait::async_trait]
 impl Activation for InstallingActivation {
-    async fn hold(&self) -> Result<lash_durable::NodeHolding, DurableError> {
+    async fn capabilities(&self) -> Result<lash_durable::NodeCapabilities, DurableError> {
         let _hold = self.clock.hold();
-        self.inner.hold().await
+        self.inner.capabilities().await
     }
 
     async fn activate(&self, owned: Owned) -> Exit {
@@ -195,6 +195,7 @@ impl SimNodes {
                 node: NodeId::new(node),
                 decodes,
                 serves,
+                offers: Default::default(),
                 lease: self.config.lease,
                 max_active: self.config.max_active,
                 claim_batch: self.config.max_active,
@@ -604,7 +605,7 @@ mod tests {
     /// Package installation uses the activation's backend before registration,
     /// outside the fault store. It must still keep virtual time from converging.
     #[tokio::test]
-    async fn package_holding_finishes_before_virtual_time_can_converge() {
+    async fn capability_installation_finishes_before_virtual_time_can_converge() {
         #[derive(Default)]
         struct Installing {
             entered: tokio::sync::Notify,
@@ -613,7 +614,7 @@ mod tests {
 
         #[async_trait::async_trait]
         impl Activation for Installing {
-            async fn hold(&self) -> Result<lash_durable::NodeHolding, DurableError> {
+            async fn capabilities(&self) -> Result<lash_durable::NodeCapabilities, DurableError> {
                 self.entered.notify_one();
                 self.finish.notified().await;
                 Ok(Default::default())

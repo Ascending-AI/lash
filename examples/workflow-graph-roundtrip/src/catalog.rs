@@ -89,9 +89,7 @@ impl Catalog {
     ) -> Result<Self, RunError> {
         let packages =
             lash::package::lash_packages().map_err(|error| RunError::Invalid(error.to_string()))?;
-        let package_view = packages
-            .view(&packages.own())
-            .map_err(|error| RunError::Invalid(error.to_string()))?;
+        let package_view = packages.view();
         let cases: Vec<Case> = serde_json::from_str(workflow_corpus::CATALOG_JSON)?;
         let mut workflows = Vec::new();
         for case in cases {

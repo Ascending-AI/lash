@@ -83,7 +83,6 @@ async fn every_role_refuses_its_first_lock(storage: &crate::PostgresStorage, url
             node: NodeId::new("guarded-renewal"),
             decodes: vec![FormatSet::new("law-formats")],
             serves: Vec::new(),
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: 15_000,
         })
@@ -198,7 +197,6 @@ async fn every_role_names_itself_in_pg_stat_activity() {
             node: NodeId::new("named"),
             decodes: vec![FormatSet::new("law-formats")],
             serves: Vec::new(),
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: 15_000,
         })

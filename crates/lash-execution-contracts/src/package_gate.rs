@@ -6,9 +6,9 @@
 //! answers the surface each cell is written under, and the answer is the
 //! cell's one key (P3): the prompt shows that surface, the worker lowers
 //! against its names, the cell's saved functions relink to it, and its
-//! declared operations judge the cell's runners. A node that does not hold
-//! the set's artifacts reads the surface from its stored snapshot and the
-//! definitions the store holds for it.
+//! declared operations judge the cell's runners. A node built with another
+//! set reads the surface from its stored snapshot and the definitions the
+//! store holds for it.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -22,12 +22,12 @@ use lash_kernel_package::{HeldPackages, PackageView, SurfaceSnapshot};
 pub struct CellPackages {
     surface: Arc<SurfaceSnapshot>,
     catalog: Arc<FunctionRegistry>,
-    /// `None` for a set the node holds; else what it read from the store.
+    /// `None` for the node's own set; else what it read from the store.
     stored: Option<Arc<Stored>>,
 }
 
-/// A stored surface the node does not hold: the definitions it names that
-/// the node lacks, and both as a worker is sent them.
+/// A stored surface not the node's own: the definitions it names that the
+/// node lacks, and both as a worker is sent them.
 struct Stored {
     definitions: BTreeMap<FunctionId, Arc<FunctionDefinition>>,
     surface: Vec<u8>,
@@ -35,17 +35,17 @@ struct Stored {
 }
 
 impl CellPackages {
-    /// The held set `packages`, over the node's registry.
+    /// The node's own set, over its registry.
     #[must_use]
-    pub fn held(held: &HeldPackages, packages: &PackageSetDigest) -> Option<Self> {
-        Some(Self {
-            surface: Arc::clone(held.surface(packages)?),
+    pub fn held(held: &HeldPackages) -> Self {
+        Self {
+            surface: Arc::clone(held.surface()),
             catalog: Arc::clone(held.functions()),
             stored: None,
-        })
+        }
     }
 
-    /// A stored surface the node does not hold, over `catalog`, the node's
+    /// A stored surface not the node's own, over `catalog`, the node's
     /// registry with `stored` registered over it
     /// ([`HeldPackages::catalog_with`]).
     #[must_use]
@@ -85,6 +85,13 @@ impl CellPackages {
         &self.surface
     }
 
+    /// The registry a document written under the set is checked against:
+    /// the node's own, with a stored surface's definitions over it.
+    #[must_use]
+    pub fn catalog(&self) -> &Arc<FunctionRegistry> {
+        &self.catalog
+    }
+
     /// The definitions the surface names that the node does not hold.
     pub fn stored_definitions(&self) -> &BTreeMap<FunctionId, Arc<FunctionDefinition>> {
         static NONE: BTreeMap<FunctionId, Arc<FunctionDefinition>> = BTreeMap::new();
@@ -95,7 +102,8 @@ impl CellPackages {
 
     /// For a stored surface, its encoded snapshot and the token bodies of
     /// the definitions the node lacks: what a worker lowering under it is
-    /// sent. `None` for a held set, which a worker is sent by digest.
+    /// sent. `None` for the node's own set, which a worker is sent by
+    /// digest.
     pub fn stored_wire(&self) -> Option<(&[u8], &[Vec<u8>])> {
         self.stored
             .as_ref()

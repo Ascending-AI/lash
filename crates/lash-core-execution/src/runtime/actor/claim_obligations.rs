@@ -4,11 +4,15 @@
 //!
 //! [`RecordedWork`] is the one traversal. It reads an actor's outstanding
 //! records as uses of claim tokens ([`ObligationUse`]): each call admitted
-//! and not settled owes its binding's callbacks, a parked cell owes the
-//! providers and codecs of the deferred matches it committed, the turn's
-//! phase owes the callbacks of the model-call receipt beside it, a
-//! session's head owes the observers of the config change it has not
-//! delivered, and a process owes its environment's component configs.
+//! and not settled owes its binding's callbacks, and a dynamic match's the
+//! provider and codec version it linked; a parked execution (a cell or a
+//! process) owes its root's hard requirements record, the natives its code
+//! reached, its kernel version and its links' providers and codecs
+//! (FIG-6993), and a cell the callbacks of the deferred matches it
+//! committed; the turn's phase owes the callbacks of the model-call receipt
+//! beside it, a session's head owes the observers of the config change it
+//! has not delivered, and a process owes its environment's component
+//! configs.
 //! `requires` is the union of their tokens. A token stays required while any one of its uses is
 //! outstanding: settling one of two calls to a provider leaves it required.
 //!
@@ -46,8 +50,9 @@ pub enum ObligationSite {
     /// A call admitted under `owner`, a turn's rounds, a cell or a process,
     /// and not settled: its admission's bound callbacks.
     Call { owner: OwnerKey, call: ToolCallId },
-    /// A parked execution's root: the deferred matches its cell committed,
-    /// whose later calls run on their providers and codecs, until it ends.
+    /// A parked execution's root: its hard requirements record, and the
+    /// deferred matches its cell committed, whose later calls run on their
+    /// providers and codecs, until it ends.
     Execution { exec: ExecKey },
     /// The unfinished turn's phase: the callbacks of the model-call
     /// receipt beside it, until the next phase consumes the receipt or the
@@ -108,12 +113,14 @@ pub struct RequiresMismatch {
 }
 
 /// What the root a commit publishes for `exec` owes, as its writer staged
-/// it: the root's `owed` callbacks. The root is not decoded again; it
-/// shares nodes with the roots the store already holds.
+/// it: the root's `owed` callbacks and its hard requirements record. The
+/// root is not decoded again; it shares nodes with the roots the store
+/// already holds.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExecutionDebts {
     pub exec: ExecKey,
     pub owed: Vec<PluginCallbackIdentity>,
+    pub requirements: lash_kernel_doc::ExecutionRequirements,
 }
 
 /// An actor's outstanding recorded work, as the claim tokens each record
@@ -139,16 +146,27 @@ impl RecordedWork {
         }
     }
 
-    /// A process's work under an environment whose components' configs are
-    /// `environment`, owing nothing else yet.
+    /// The work of `process` under an environment whose components'
+    /// configs are `environment`, its engine state's root recording
+    /// `record`, owing nothing else yet.
     #[must_use]
-    pub fn process(environment: impl IntoIterator<Item = ObligationToken>) -> Self {
+    pub fn process(
+        process: &crate::ProcessId,
+        environment: impl IntoIterator<Item = ObligationToken>,
+        record: &lash_kernel_doc::ExecutionRequirements,
+    ) -> Self {
         let mut work = Self {
             registry: RegistryKind::Process,
             uses: BTreeMap::new(),
             carried_head: BTreeSet::new(),
         };
         work.put(ObligationSite::Environment, environment);
+        work.put(
+            ObligationSite::Execution {
+                exec: ExecKey::Process(process.clone()),
+            },
+            ObligationToken::for_requirements(record),
+        );
         work
     }
 
@@ -374,14 +392,32 @@ impl RecordedWork {
     /// Record that `owner` admitted `call`, bound to `binding`'s callbacks;
     /// a call bound to none owes nothing.
     pub fn admit(&mut self, owner: OwnerKey, call: ToolCallId, binding: Option<&AdmittedBinding>) {
+        self.admit_linked(owner, call, binding, None);
+    }
+
+    /// Record that `owner` admitted `call`, bound to `binding`'s callbacks,
+    /// a dynamic match's call also owing the provider and codec version of
+    /// the link `matched` committed (FIG-6993): what a node must offer
+    /// until the call settles and its committed outcome is reused.
+    pub fn admit_linked(
+        &mut self,
+        owner: OwnerKey,
+        call: ToolCallId,
+        binding: Option<&AdmittedBinding>,
+        matched: Option<&lash_core_store::tool_surface::OperationLink>,
+    ) {
         let registry = self.registry;
-        self.put(
-            ObligationSite::Call { owner, call },
-            binding
-                .into_iter()
-                .flat_map(AdmittedBinding::callbacks)
-                .map(|callback| ObligationToken::for_callback(registry, callback)),
-        );
+        let mut linked = lash_kernel_doc::ExecutionRequirements::default();
+        if let Some(link) = matched {
+            link.require(&mut linked);
+        }
+        let tokens: Vec<ObligationToken> = binding
+            .into_iter()
+            .flat_map(AdmittedBinding::callbacks)
+            .map(|callback| ObligationToken::for_callback(registry, callback))
+            .chain(ObligationToken::for_requirements(&linked))
+            .collect();
+        self.put(ObligationSite::Call { owner, call }, tokens);
     }
 
     /// Record that `owner`'s `call` settled.
@@ -417,7 +453,7 @@ impl RecordedWork {
                 // it does not state is read from the nodes `tx` stages.
                 DomainWrite::ExecRoot(ExecRootWrite::Put { exec, root, .. }) => {
                     match owing.filter(|owing| owing.exec == *exec) {
-                        Some(owing) => self.owe(exec, &owing.owed),
+                        Some(owing) => self.owe(exec, &owing.owed, &owing.requirements),
                         None => self.apply_root(exec, &staged, *root, limits)?,
                     }
                 }
@@ -519,7 +555,9 @@ impl RecordedWork {
     }
 
     /// Take what `exec`'s root `root`, read from `source`, owes: a parked
-    /// cell's committed matches, nothing once it ended.
+    /// cell's hard requirements record and committed matches, nothing once
+    /// it ended. A process's root is its engine state's, whose record the
+    /// process's own traversal takes ([`Self::process`]).
     fn apply_root(
         &mut self,
         exec: &ExecKey,
@@ -533,11 +571,16 @@ impl RecordedWork {
         let body: ExecRoot = GraphDecoder::new(source, limits)
             .decode(root, NodeKind::EXEC_ROOT)
             .map_err(|refusal| corrupt("a cell's root", &refusal.to_string()))?;
-        let owed: &[PluginCallbackIdentity] = match body.status {
-            ExecStatus::Parked => &body.owed,
-            ExecStatus::Ended => &[],
-        };
-        self.owe(exec, owed);
+        match body.status {
+            ExecStatus::Parked => self.owe(exec, &body.owed, &body.requirements),
+            ExecStatus::Ended => {
+                self.owe(
+                    exec,
+                    &[],
+                    &lash_kernel_doc::ExecutionRequirements::default(),
+                );
+            }
+        }
         Ok(())
     }
 
@@ -600,14 +643,21 @@ impl RecordedWork {
         });
     }
 
-    /// `exec`'s root owes `owed`, and nothing it owed before.
-    fn owe(&mut self, exec: &ExecKey, owed: &[PluginCallbackIdentity]) {
+    /// `exec`'s root owes `owed` and `requirements`, and nothing it owed
+    /// before.
+    fn owe(
+        &mut self,
+        exec: &ExecKey,
+        owed: &[PluginCallbackIdentity],
+        requirements: &lash_kernel_doc::ExecutionRequirements,
+    ) {
         let registry = self.registry;
-        self.put(
-            ObligationSite::Execution { exec: exec.clone() },
-            owed.iter()
-                .map(|callback| ObligationToken::for_callback(registry, callback)),
-        );
+        let tokens: Vec<ObligationToken> = owed
+            .iter()
+            .map(|callback| ObligationToken::for_callback(registry, callback))
+            .chain(ObligationToken::for_requirements(requirements))
+            .collect();
+        self.put(ObligationSite::Execution { exec: exec.clone() }, tokens);
     }
 
     /// `exec` ended: its root and its records owe nothing more.

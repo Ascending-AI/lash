@@ -22,6 +22,8 @@ pub use cause::{RuntimeErrorCause, StoredDataCorruption};
 pub use controller::RuntimeEffectControllerError;
 pub use recorded_refusal::RecordedRefusal;
 pub(crate) mod llm_profile_unavailable;
+mod package_gate;
+pub use package_gate::SnapshotCandidate;
 mod run_shape;
 mod tool_call_limit;
 pub(crate) use classification::RuntimeErrorClass;
@@ -404,6 +406,13 @@ runtime_error_codes! {
         OutputRetentionRefused = "output_retention_refused" => Terminal,
         /// A canonical recorded result is unavailable or fails its material binding.
         RetainedResultRefused = "retained_result_refused" => Terminal,
+        // the live fleet runs no candidate surface whole; a deploy changes it.
+        /// No live serving node's own package surface is one every live
+        /// serving node meets the requirements of (FIG-6993): a new cell has
+        /// no surface to be written under, and fails. It is the fleet, not
+        /// the cell: a deploy that brings the nodes into agreement clears
+        /// it, and the gate never answers a partial surface instead.
+        NoCompatibleSnapshot = "no_compatible_snapshot" => Terminal,
         // a registered definition refuses the same context the same way.
         /// A registered run definition refused the spec's context (FIG-3838):
         /// deterministic, so it is recorded as the run's failure.
@@ -1123,6 +1132,7 @@ impl RuntimeError {
             | RuntimeErrorCause::StoredDataCorrupt { .. }
             | RuntimeErrorCause::ModuleArtifactRefused { .. }
             | RuntimeErrorCause::RunShapeRefused { .. }
+            | RuntimeErrorCause::NoCompatibleSnapshot { .. }
             | RuntimeErrorCause::ConfigRefused { .. }
             | RuntimeErrorCause::MissingRecordedProcessConfig { .. }
             | RuntimeErrorCause::StoreRefusal { .. }

@@ -29,31 +29,27 @@ enum Database {
 }
 
 impl Fixture {
-    /// Exact permanent roots of the registered package sets, derived from
+    /// Exact permanent roots of the registered package set, derived from
     /// their definitions rather than from whichever host pins happen to exist.
     pub fn installed_edges(&self) -> std::collections::BTreeSet<Edge> {
         let Some(node_packages) = self.backend.packages() else {
             return Default::default();
         };
         let packages = node_packages.packages();
-        packages
-            .sets()
-            .iter()
-            .flat_map(|(digest, set)| {
-                let mut bytes = [0_u8; 16];
-                bytes.copy_from_slice(&digest.as_bytes()[..16]);
-                bytes[6] = (bytes[6] & 0x0f) | 0x40;
-                bytes[8] = (bytes[8] & 0x3f) | 0x80;
-                let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
-                let id = format!("host-pin:v1:{hex}");
-                set.keys()
-                    .flat_map(|key| packages.artifacts()[&key].code().ids().iter().copied())
-                    .map(move |function| Edge {
-                        artifact_ref: format!("function:{function}"),
-                        kind: "host_pin".to_owned(),
-                        id: id.clone(),
-                    })
-                    .collect::<Vec<_>>()
+        let digest = packages.digest();
+        let set = packages.set();
+        let mut bytes = [0_u8; 16];
+        bytes.copy_from_slice(&digest.as_bytes()[..16]);
+        bytes[6] = (bytes[6] & 0x0f) | 0x40;
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+        let id = format!("host-pin:v1:{hex}");
+        set.keys()
+            .flat_map(|key| packages.artifacts()[&key].code().ids().iter().copied())
+            .map(move |function| Edge {
+                artifact_ref: format!("function:{function}"),
+                kind: "host_pin".to_owned(),
+                id: id.clone(),
             })
             .collect()
     }

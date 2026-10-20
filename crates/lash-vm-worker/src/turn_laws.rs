@@ -255,7 +255,7 @@ fn lower() -> EncodedPayload {
         packages: lash_vm_client::service::SurfaceRef::held(
             lash_vm_releases::lash_packages()
                 .expect("the parent's packages")
-                .own(),
+                .digest(),
         ),
     };
     EncodedPayload(rmp_serde::to_vec_named(&request).expect("request"))

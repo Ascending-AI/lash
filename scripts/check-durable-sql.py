@@ -6,8 +6,8 @@ the runtime lanes add to the fenced commit: `run_records`, `exec_snapshots`,
 `waits`, `turn_phases`, `turn_namespaces`, `session_close`, `session_scope_ends`,
 `prompt_snapshots`, `prompt_texts`, `prompt_snapshot_texts`, and the checkpoint graph's
 `effect_admissions`, the persistent heap's `root_leases` and
-`retirement_holds`, and the package rows `package_artifacts`, `package_sets`,
-`package_set_members` and `node_artifacts`;
+`retirement_holds`, and the package rows `package_artifacts`, `package_sets`
+and `package_set_members`;
 `lash_`-prefixed on PostgreSQL) are written by one
 neutral statement set and one module per dialect. Since I0 (FIG-5194) each
 of those is a directory. Any file in the durable module directory belongs
@@ -65,7 +65,6 @@ TABLES = (
     "package_artifacts",
     "package_sets",
     "package_set_members",
-    "node_artifacts",
     "owner_commit_latches",
     "root_leases",
     "retirement_holds",

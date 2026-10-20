@@ -345,15 +345,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
                                 let held = self
                                     .packages()
                                     .map_err(|error| PluginError::Session(error.to_string()))?;
-                                Arc::new(super::OneSet(
-                                    super::CellPackages::held(&held, &held.own()).ok_or_else(
-                                        || {
-                                            PluginError::Session(
-                                                "the node does not hold its own set".to_owned(),
-                                            )
-                                        },
-                                    )?,
-                                ))
+                                Arc::new(super::OneSet(super::CellPackages::held(&held)))
                             }
                         }),
                     };

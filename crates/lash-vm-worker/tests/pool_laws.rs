@@ -646,7 +646,7 @@ fn a_typescript_cell_lowered_in_the_worker_parks_and_resumes() {
         packages: lash_vm_client::service::SurfaceRef::held(
             lash_vm_releases::lash_packages()
                 .expect("the parent's packages")
-                .own(),
+                .digest(),
         ),
     };
     let mut worker = checkout(&pool);
@@ -787,7 +787,7 @@ fn a_python_cell_lowered_in_the_worker_runs_under_its_confinement() {
         packages: lash_vm_client::service::SurfaceRef::held(
             lash_vm_releases::lash_packages()
                 .expect("the parent's packages")
-                .own(),
+                .digest(),
         ),
     };
     let mut worker = checkout(&pool);
@@ -2024,7 +2024,7 @@ fn authored_workflow_import_is_worker_owned_and_preserves_source_policy() {
                 typescript,
                 source,
                 &environment,
-                lash_vm_releases::lash_packages().unwrap().own(),
+                service::SurfaceRef::held(lash_vm_releases::lash_packages().unwrap().digest()),
                 limits(1024),
             )
             .await
@@ -2035,7 +2035,7 @@ fn authored_workflow_import_is_worker_owned_and_preserves_source_policy() {
                 typescript,
                 source,
                 &environment,
-                lash_vm_releases::lash_packages().unwrap().own(),
+                service::SurfaceRef::held(lash_vm_releases::lash_packages().unwrap().digest()),
                 limits(1),
             )
             .await;
@@ -2048,7 +2048,7 @@ fn authored_workflow_import_is_worker_owned_and_preserves_source_policy() {
                 typescript,
                 "export const broken = ;",
                 &environment,
-                lash_vm_releases::lash_packages().unwrap().own(),
+                service::SurfaceRef::held(lash_vm_releases::lash_packages().unwrap().digest()),
                 limits(1024),
             )
             .await;
@@ -2085,28 +2085,14 @@ fn pool_package(kernel: &str, release: &str) -> Arc<lash_kernel_package::Package
     )
 }
 
-fn pool_holdings(
-    own: Arc<lash_kernel_package::Package>,
-    retained: Option<Arc<lash_kernel_package::Package>>,
-) -> Arc<lash_kernel_package::HeldPackages> {
+fn pool_holdings(own: Arc<lash_kernel_package::Package>) -> Arc<lash_kernel_package::HeldPackages> {
     use lash_kernel_package::{HeldPackages, PackageSet};
     let shipped = lash_vm_releases::lash_packages().expect("parent's shipped packages");
-    let mut artifacts: Vec<_> = shipped.artifacts().values().cloned().collect();
-    let mut sets: Vec<_> = shipped.sets().values().cloned().collect();
-    if let Some(retained) = retained {
-        let mut members: Vec<_> = artifacts.iter().map(Arc::as_ref).collect();
-        members.push(retained.as_ref());
-        sets.push(PackageSet::new(members.iter().copied()).expect("retained set"));
-        artifacts.push(retained);
-    }
-    // Each set holds one fixture release. The artifact map holds both.
     let mut members: Vec<_> = shipped.artifacts().values().map(Arc::as_ref).collect();
     members.push(own.as_ref());
     let set = PackageSet::new(members.iter().copied()).expect("own set");
-    let own_set = set.digest();
-    sets.push(set);
-    artifacts.push(own);
-    Arc::new(HeldPackages::new(artifacts, sets, own_set).expect("parent's holdings"))
+    let artifacts = shipped.artifacts().values().cloned().chain([own]);
+    Arc::new(HeldPackages::new(artifacts, set).expect("parent's holdings"))
 }
 
 fn pool_call(worker: &mut Checkout, definition: &str) -> (EndWire, Option<u64>) {
@@ -2140,7 +2126,7 @@ fn pool_call(worker: &mut Checkout, definition: &str) -> (EndWire, Option<u64>) 
 #[test]
 fn a_shipped_both_function_without_its_native_answers_by_its_body_with_the_same_value_and_charge() {
     HOST_DIALECTS.set("typescript");
-    let packages = pool_holdings(pool_package(pool_package::BOTH, "1"), None);
+    let packages = pool_holdings(pool_package(pool_package::BOTH, "1"));
     let mut native = config("package_native");
     native.packages = Some(packages.clone());
     let native = WorkerPool::new(native).expect("native-enabled worker");
@@ -2195,35 +2181,31 @@ fn a_shipped_packages_native_is_pure_across_warm_and_cold_workers() {
     worker.release().expect("reset cold");
 }
 
-/// POOL-FRAME: retained definitions arrive from the parent too. Reset and
-/// process replacement preserve the pool-start frame for the pool's life.
+/// POOL-FRAME: reset and process replacement preserve the pool-start
+/// frame for the pool's life.
 #[test]
 fn a_workers_registry_is_the_pool_start_frame_unchanged_for_its_life() {
     HOST_DIALECTS.set("typescript");
     let later = pool_package::BOTH.replace("return x", "return 99");
-    let held = pool_holdings(
-        pool_package(&later, "2"),
-        Some(pool_package(pool_package::BOTH, "1")),
-    );
+    let held = pool_holdings(pool_package(&later, "2"));
     let mut config =
         PoolConfig::standard(WorkerEntry::helper(env!("CARGO_BIN_EXE_lash-vm-worker")));
     config.packages = Some(held);
-    let pool = WorkerPool::new(config).expect("parent's own and retained frame");
+    let pool = WorkerPool::new(config).expect("parent's own frame");
     let mut worker = checkout(&pool);
     let pid = worker.pid();
-    let retained = pool_call(&mut worker, pool_package::BOTH);
-    assert!(matches!(&retained.0, EndWire::Finished { result, .. } if *result == int(7)));
+    let own = pool_call(&mut worker, &later);
+    assert!(matches!(&own.0, EndWire::Finished { result, .. } if *result == int(99)));
     worker.release().expect("reset");
     let mut worker = checkout(&pool);
     assert_eq!(worker.pid(), pid);
-    let own = pool_call(&mut worker, &later);
-    assert!(matches!(own.0, EndWire::Finished { result, .. } if result == int(99)));
+    assert_eq!(pool_call(&mut worker, &later), own);
     // Dropping a checkout discards its worker. Its replacement gets the
     // original frame rather than rebuilding from the worker binary.
     drop(worker);
     let mut worker = checkout(&pool);
     assert_ne!(worker.pid(), pid);
-    assert_eq!(pool_call(&mut worker, pool_package::BOTH), retained);
+    assert_eq!(pool_call(&mut worker, &later), own);
     worker.release().expect("reset replacement");
 }
 
@@ -2236,7 +2218,7 @@ fn a_frame_holding_a_native_only_function_the_shipped_worker_lacks_is_refused_at
     let mut config =
         PoolConfig::standard(WorkerEntry::helper(env!("CARGO_BIN_EXE_lash-vm-worker")));
     config.min_workers = 0;
-    config.packages = Some(pool_holdings(pool_package(&source, "1"), None));
+    config.packages = Some(pool_holdings(pool_package(&source, "1")));
     let error = WorkerPool::new(config)
         .err()
         .expect("refused before checkout");

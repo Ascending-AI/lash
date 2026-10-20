@@ -1,8 +1,8 @@
 //! IDLE-RUN-NEVER-STRANDED (law 13, process arm; S7): a process requires a
-//! provider's callback only while a step it admitted under that provider is
-//! unsettled. A process whose environment links a provider a node does not
-//! serve, but which holds no unsettled call to it, is claimed and run there;
-//! settling one of two calls to the provider leaves it required.
+//! provider's callback while a step it admitted under that provider is
+//! unsettled; settling one of two calls to the provider leaves it
+//! required. A provider its environment links statically is a hard
+//! requirement for the whole run (FIG-6993).
 
 use super::*;
 
@@ -12,19 +12,6 @@ fn write_token() -> String {
     let provider = WRITE_COMPONENT.tool_provider(lash::tool_provider_key!("tools"));
     lash_core::ObligationToken::for_callback(provider.registry(), &provider.callback_identity())
         .to_string()
-}
-
-/// The write component's id and format with no tool provider: a node
-/// that installs it serves the component's config and not the write tool.
-fn write_component_without_tool() -> Arc<dyn lash::process::ProcessComponentFactory> {
-    Arc::new(
-        lash_core::plugin::StaticPluginFactory::new(
-            lash_core::plugin::PluginDeclaration::initial(WRITE_COMPONENT.component()),
-            lash_core::facade_support::PluginSpec::new(),
-        )
-        .as_component(WRITE_COMPONENT.format())
-        .expect("the bare write component is a process component"),
-    )
 }
 
 /// A write step named `step` on `x`.
@@ -105,103 +92,6 @@ fn wall_millis() -> i64 {
     .expect("milliseconds fit")
 }
 
-/// A process whose environment links the write tool, its one write settled
-/// and asleep, is claimed and answered by a node whose write component
-/// contributes no tool: it holds no unsettled call to the provider.
-async fn a_process_holding_no_call_to_an_unserved_provider_still_runs(tier: Tier) {
-    let world = Arc::new(World::default());
-    let (stores, _keep) = stores(tier).await;
-    let engine = || -> Vec<Arc<dyn lash_execution_contracts::process::ProcessEngine>> {
-        vec![Arc::new(ScriptEngine {
-            kind: IDLE_ENGINE,
-            advance: idle_engine_advance,
-            performs: writes,
-        })]
-    };
-    let (backend, first) = node_over(
-        Arc::clone(&stores),
-        lash_core_execution::DurableSettings::default(),
-        engine(),
-        |backend| {
-            lash::LashCore::standard_builder(backend.clone())
-                .process_component(write_component(&world), WRITE_COMPONENT)
-        },
-    );
-    let process = start_under(
-        &first,
-        &write_environment(),
-        IDLE_ENGINE,
-        serde_json::json!({ "until_ms": wall_millis() + 5_000 }),
-        |request| request,
-    )
-    .await;
-    // The write's body running is not its settlement: until the process's
-    // sleep commits, the write is unsettled and the process requires its
-    // provider, which the bare node does not serve.
-    tokio::time::timeout(Duration::from_secs(60), async {
-        loop {
-            let record = backend
-                .process_registry()
-                .get_process(&process)
-                .await
-                .expect("the process is read")
-                .expect("the process exists");
-            assert!(
-                !record.is_terminal(),
-                "the process ended before its sleep: {record:?}"
-            );
-            if record.waits().iter().any(|wait| {
-                matches!(
-                    wait.kind,
-                    lash_execution_contracts::process::WaitKind::Sleep { .. }
-                )
-            }) {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("the write settles and the process sleeps within a minute");
-    assert_eq!(world.writes.lock().unwrap().len(), 1, "the write ran");
-    first.shutdown().await.expect("the first node stops");
-    drop(first);
-    assert!(
-        !backend
-            .process_registry()
-            .get_process(&process)
-            .await
-            .expect("the process is read")
-            .expect("the process exists")
-            .is_terminal(),
-        "the process sleeps when its first node stops"
-    );
-
-    let (_, bare) = node_over(
-        stores,
-        lash_core_execution::DurableSettings::default(),
-        engine(),
-        |backend| {
-            lash::LashCore::standard_builder(backend.clone())
-                .process_component(write_component_without_tool(), WRITE_COMPONENT)
-        },
-    );
-    let serves = lash::testing::node_serves(&bare);
-    assert!(
-        !serves.contains(&write_token()),
-        "the bare node does not serve the write tool: {serves:?}"
-    );
-    assert_eq!(
-        success(&ended(&bare, &process).await),
-        serde_json::json!({ "woke": true }),
-        "the bare node claims the process and runs it to its answer"
-    );
-    assert_eq!(world.writes.lock().unwrap().len(), 1, "one write");
-    bare.shutdown().await.expect("the bare node stops");
-}
-
-on_every_tier!(a_process_holding_no_call_to_an_unserved_provider_still_runs);
-
 /// What the process actor `process` carried as its claim requirements,
 /// read by a probe node that serves `serves` and claims it once released.
 async fn claimed_requirements(
@@ -216,7 +106,6 @@ async fn claimed_requirements(
             node: NodeId::new("law-requirement-probe"),
             decodes: backend.formats().decodes(),
             serves,
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: 15_000,
         })
@@ -514,7 +403,6 @@ async fn component_state_format_fences_old_nodes_on_sqlite_memory() {
             node: NodeId::new("format-one-probe"),
             decodes: backend.formats().decodes(),
             serves: old_serves,
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: 15_000,
         })

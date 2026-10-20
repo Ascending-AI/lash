@@ -505,7 +505,6 @@ async fn postgres_matrix_guards_allow_slow_registration_and_claim() {
             node: NodeId::new("slow-matrix-node"),
             decodes: Vec::new(),
             serves: Vec::new(),
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: 15_000,
         })

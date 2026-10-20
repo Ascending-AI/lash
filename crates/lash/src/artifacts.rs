@@ -307,6 +307,13 @@ impl HostArtifacts {
                 .await
                 .map_err(|error| lash_execution_contracts::PluginError::from(error).into());
         }
+        self.producer_packages()
+    }
+
+    /// The kernel engine's producer set: what a start with no parent cell
+    /// is linked under.
+    #[cfg(feature = "codemode")]
+    fn producer_packages(&self) -> Result<lash_execution_contracts::CellPackages> {
         let provider = self
             .engines
             .document_provider(lash_vm_runtime::LASH_VM_ENGINE_KIND)
@@ -545,9 +552,11 @@ impl HostArtifacts {
     }
 
     /// Start a held function value with explicit arguments, idempotency key
-    /// and launch. Nothing is published until the start is realized. An
-    /// exact retry returns the same process; changed code, captures,
-    /// arguments or launch under the key refuse with `StartKeyConflict`.
+    /// and launch. Nothing is published until the start is realized. The
+    /// start is linked under this core's producer set, read now and
+    /// recorded on it (FIG-6993). An exact retry returns the same process;
+    /// changed code, captures, set, arguments or launch under the key
+    /// refuse with `StartKeyConflict`.
     #[cfg(feature = "codemode")]
     pub async fn start_function(
         &self,
@@ -559,12 +568,14 @@ impl HostArtifacts {
         let payload = value.transport_json().map_err(|error| {
             lash_execution_contracts::plugin_error::PluginError::Invoke(error.to_string())
         })?;
+        let packages = self.producer_packages()?.digest();
         self.core
             .processes()
             .start(
                 lash_execution_contracts::process::ProcessStartRequest::inline(
                     lash_vm_runtime::LASH_VM_ENGINE_KIND,
                     payload,
+                    packages,
                     args,
                     launch,
                     lash_execution_contracts::process::ProcessOriginator::host(),

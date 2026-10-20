@@ -107,23 +107,6 @@ pub enum DurableError {
         /// The operator command that carries them forward.
         command: String,
     },
-    /// The node holds no artifact declaring `retired`, an identity that
-    /// `dependents` unfinished dependents (parked roots, processes, saved
-    /// functions, published definitions) still list (FIG-6918,
-    /// RETAIN-SURVEY): serving, it would strand them, so it does not start.
-    /// Each ends, or is ended by an operator, first; `command` lists them
-    /// with a node that holds the artifact serving.
-    #[error(
-        "{dependents} unfinished dependents still list {retired}, which this node does not hold: run `{command}` with a node that holds it serving, then start this one"
-    )]
-    RetiredDependents {
-        /// The identity no held artifact declares, and its name.
-        retired: String,
-        /// How many dependents list it.
-        dependents: u64,
-        /// The operator command that lists them.
-        command: String,
-    },
     /// The database permanently refused package installation. Node startup
     /// ends with this error, observable through the facade's node_stopped().
     /// Retrying the same install cannot make it serve.

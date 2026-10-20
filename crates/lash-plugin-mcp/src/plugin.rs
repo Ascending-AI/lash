@@ -222,8 +222,9 @@ impl McpSessionPlugin {
     fn declare(
         reg: &mut lash_core::plugin::PluginRegistrar<Self>,
     ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
-        reg.tools().provider(
+        reg.tools().provider_reading(
             lash_core::tool_provider_key!("servers"),
+            &[MCP_BINDING_FORMAT],
             move |this, _state| {
                 Ok(Arc::new(McpToolProvider {
                     pool: Arc::clone(&this.pool),

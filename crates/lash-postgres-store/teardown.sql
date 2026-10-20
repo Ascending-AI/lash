@@ -124,8 +124,6 @@ DROP TABLE IF EXISTS lash_package_labels CASCADE;
 
 DROP TABLE IF EXISTS lash_package_internal_operations CASCADE;
 
-DROP TABLE IF EXISTS lash_node_artifacts CASCADE;
-
 DROP TABLE IF EXISTS lash_actors CASCADE;
 
 DROP TABLE IF EXISTS lash_actor_mail CASCADE;

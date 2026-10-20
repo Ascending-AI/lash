@@ -299,7 +299,6 @@ async fn a_retained_model_answer_requires_its_response_hook_until_it_is_derived(
         },
         decodes: backend.formats().session_decodes(),
         serves,
-        held: Default::default(),
         capabilities: Default::default(),
         ttl_millis: 1,
         expires_at: DurableInstant(0),
@@ -310,17 +309,12 @@ async fn a_retained_model_answer_requires_its_response_hook_until_it_is_derived(
         .cloned()
         .collect();
     assert_eq!(
-        ClaimPurpose::of(
-            &node(without_hook),
-            row.formats.as_str(),
-            &row.requires,
-            true
-        ),
+        ClaimPurpose::of(&node(without_hook), row.formats.as_str(), &row.requires),
         ClaimPurpose::CancelOnly,
         "a decoded node without the hook never claims the retained answer to run it"
     );
     assert_eq!(
-        ClaimPurpose::of(&node(serves), row.formats.as_str(), &row.requires, true),
+        ClaimPurpose::of(&node(serves), row.formats.as_str(), &row.requires),
         ClaimPurpose::Run,
         "a node that installs the hook claims it to run"
     );

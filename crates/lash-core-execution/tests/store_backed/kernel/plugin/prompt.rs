@@ -242,7 +242,6 @@ async fn an_admitted_calls_snapshot_reads_back_byte_for_byte_without_any_rendere
             node: NodeId::new("prompt-owner"),
             decodes: vec![formats],
             serves: Vec::new(),
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: 15_000,
         },

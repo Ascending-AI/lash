@@ -80,7 +80,7 @@ fn fixture() -> &'static Fixture {
             .expect("the worker binds to the registration");
         let registry: Arc<FunctionRegistry> =
             Arc::clone(embedding.registry().expect("the worker registry"));
-        let view = held.view(&held.own()).expect("the node's own set");
+        let view = held.view();
         let mut operations =
             Namespaces::of_effects(&effects(), &ContractId::new("1"), super::controls())
                 .expect("the laws' tools are operations")

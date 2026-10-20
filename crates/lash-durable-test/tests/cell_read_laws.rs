@@ -741,14 +741,14 @@ async fn fifty_reads_commit_what_one_read_does_on_sqlite_memory() {
     );
 }
 
-/// What a probe node serving `serves` and holding `holding` reads as the session's claim
+/// What a probe node serving `serves` and offering `capabilities` reads as the session's claim
 /// requirements when it claims it; `None` when it cannot claim it. A
 /// claimed session is released ready, untouched.
 async fn probe(
     database: &Arc<dyn DurableStore>,
     decodes: Vec<lash_durable::FormatSet>,
     serves: Vec<String>,
-    holding: lash_durable::NodeHolding,
+    capabilities: lash_durable::NodeCapabilities,
 ) -> Option<Vec<String>> {
     use lash_durable::{NodeId, NodeSpec, Release};
     let node = database
@@ -756,8 +756,7 @@ async fn probe(
             node: NodeId::new("cell-read-probe"),
             decodes,
             serves,
-            held: holding.held,
-            capabilities: holding.capabilities,
+            capabilities,
             ttl_millis: 15_000,
         })
         .await
@@ -837,12 +836,12 @@ async fn a_cell_that_reads_is_claimed_only_where_its_reader_is_served_on_sqlite_
     nodes.kill("a");
     nodes.quiesce().await;
     let backend = turn.backend();
-    let holding = backend
+    let capabilities = backend
         .packages()
         .expect("the executing nodes' installed packages")
-        .hold(&backend)
+        .install(&backend)
         .await
-        .expect("the probe holds the executing nodes' packages");
+        .expect("the probe installs the executing nodes' packages");
     let deadline = u64::try_from(due.0).unwrap() - SimClock::timestamp_ms_at(0);
     clock.advance_to(deadline + 1_000).await;
     let without: Vec<String> = serves
@@ -851,11 +850,11 @@ async fn a_cell_that_reads_is_claimed_only_where_its_reader_is_served_on_sqlite_
         .cloned()
         .collect();
     assert_eq!(
-        probe(&database, decodes.clone(), without, holding.clone()).await,
+        probe(&database, decodes.clone(), without, capabilities.clone()).await,
         None,
         "a node that does not serve the reader does not claim the cell that plans reads"
     );
-    let requires = probe(&database, decodes, serves, holding)
+    let requires = probe(&database, decodes, serves, capabilities)
         .await
         .expect("a node that serves the reader claims the cell");
     assert!(

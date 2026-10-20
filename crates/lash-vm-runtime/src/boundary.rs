@@ -399,7 +399,7 @@ mod tests {
         let held =
             lash_kernel_package::HeldPackages::install(lash.iter().cloned().chain([dataframe]))
                 .expect("one registration");
-        let view = held.view(&held.own()).expect("the node's own set");
+        let view = held.view();
         let effect = EffectName::new("dataframe.run").expect("an effect name");
         let owner = owned_operation(&view, &effect).expect("the fixture owns `run`");
         assert_eq!(owner.package, "dataframe");

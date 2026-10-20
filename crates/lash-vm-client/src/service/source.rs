@@ -21,12 +21,6 @@ pub enum SourceServiceError {
     Dialect(DialectRefusal),
     #[error("the worker has no `{dialect}` dialect")]
     UnknownDialect { dialect: String },
-    /// The worker does not hold the package set the source was to resolve
-    /// against.
-    #[error("the worker does not hold package set {packages}")]
-    PackagesNotHeld {
-        packages: lash_kernel_doc::PackageSetDigest,
-    },
 }
 
 impl Service {
@@ -64,8 +58,8 @@ impl Service {
     }
 
     /// Lower a whole authored workflow module in the dialect of `language`,
-    /// against the names of the package set `packages` (the worker's own
-    /// set), under the host's
+    /// against the names of the package surface `packages` (the worker's
+    /// own set, or a stored one sent whole), under the host's
     /// source limits or, without them, the dialect's
     /// standard policy. Exported source is read back against its base
     /// document with [`Self::read_exported`] instead.
@@ -74,7 +68,7 @@ impl Service {
         language: lash_kernel_doc::SourceLanguage,
         source: &str,
         operations: &lash_kernel_dialect::Operations,
-        packages: lash_kernel_doc::PackageSetDigest,
+        packages: super::SurfaceRef,
         limits: Option<lash_kernel_dialect::workflow::WorkflowSourceLimits>,
     ) -> Result<(Document, lash_kernel_doc::SourceMap, Captions), SourceServiceError> {
         let response = self
@@ -168,7 +162,6 @@ fn refused(response: Response) -> SourceServiceError {
     match response {
         Response::DialectRefused(refusal) => SourceServiceError::Dialect(refusal),
         Response::UnknownDialect { dialect } => SourceServiceError::UnknownDialect { dialect },
-        Response::PackagesNotHeld { packages } => SourceServiceError::PackagesNotHeld { packages },
         _ => PoolError::breach(SequenceFault::UnexpectedServiceResponse).into(),
     }
 }

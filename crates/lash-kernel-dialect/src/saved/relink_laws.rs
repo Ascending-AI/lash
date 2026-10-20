@@ -1,13 +1,10 @@
-//! RELINK-CLOSURE (K-LIB-009) and CURRENT-RELEASE for carried saved
-//! functions: relinked by name to the cell's package set, with an earlier
-//! release of the same names still held beside it.
+//! RELINK-CLOSURE (K-LIB-009) for carried saved functions: relinked by
+//! name to the cell's package set.
 
 use super::*;
 use crate::Library as _;
 use crate::{Export, ExportView, NamedLibrary, OperationExport, PackagePath, Segment, Visibility};
-use lash_kernel_doc::{
-    ContractId, FunctionId, FunctionRegistry, NumberPolicy, parse_definition, parse_document,
-};
+use lash_kernel_doc::{ContractId, FunctionId, FunctionRegistry, parse_definition, parse_document};
 
 const RUN: &str = "effect dataframe.run(plan: Any) -> List(Any) contract";
 
@@ -145,87 +142,6 @@ fn keep(library: &NamedLibrary) -> SavedFunction {
         held: None,
         against,
     }
-}
-
-/// The library functions `function`'s code holds.
-fn held(function: &SavedFunction) -> BTreeSet<FunctionId> {
-    let code = function.definition().expect("its code");
-    CodeReads::of(&code.params, &code.body).library
-}
-
-/// RELINK-CLOSURE: a saved function calling `dataframe.col` relinks to the
-/// cell's set's `col`, a new identity, while the earlier release is still
-/// held under the same names: its code and its listing name that set's
-/// identities only (CURRENT-RELEASE), and installing it into a cell of
-/// that set holds.
-#[test]
-fn a_saved_function_relinks_to_the_cell_set_with_the_earlier_one_retained() {
-    let r1 = Release::of("1");
-    let r2 = Release::of("2");
-    let earlier = library(&r2, &r1);
-    let saved = keep(&earlier);
-    let cell = library(&r1, &r2);
-    let relinked =
-        relink_saved(&saved, &cell, &Owns::run("plan: Any", "dataframe.run/1")).expect("relinked");
-    let col = cell.resolve("dataframe.col").expect("col");
-    assert_ne!(earlier.resolve("dataframe.col"), Some(col));
-    assert!(held(&saved).contains(&earlier.resolve("dataframe.col").expect("col")));
-    assert!(held(&relinked).contains(&col));
-    let set: BTreeSet<FunctionId> = cell.iter().map(|(_, function)| function).collect();
-    assert!(
-        relinked
-            .document
-            .manifest
-            .functions
-            .keys()
-            .all(|function| set.contains(function)),
-        "{:?}",
-        relinked.document.manifest.functions
-    );
-    assert_eq!(relinked.document.manifest.functions.len(), 3);
-    assert_ne!(relinked.document.identity(), saved.document.identity());
-    // Relinking again to the same set changes nothing.
-    let again = relink_saved(&relinked, &cell, &Owns::run("plan: Any", "dataframe.run/1"))
-        .expect("relinked again");
-    assert_eq!(again.document.identity(), relinked.document.identity());
-
-    let mut document = Document::new(NumberPolicy::Float, Vec::new());
-    let functions = BTreeMap::from([(relinked.name.clone(), relinked)]);
-    let roots = BTreeSet::from([Name::new("keep")]);
-    let namespaces = crate::Namespaces::of_requirements(
-        &BTreeMap::from([(
-            EffectName::new("dataframe.run").expect("an effect"),
-            Owns::run("plan: Any", "dataframe.run/1").requirement(),
-        )]),
-        &BTreeMap::new(),
-    )
-    .expect("operations");
-    install(
-        &mut document,
-        &functions,
-        &roots,
-        &lash_kernel_doc::FunctionRepresentation::Bare,
-        &namespaces,
-        &cell,
-    )
-    .expect("a relinked function installs into a cell of its set");
-    // An unrelinked one does not: it lists the earlier set's identities.
-    let mut document = Document::new(NumberPolicy::Float, Vec::new());
-    let functions = BTreeMap::from([(saved.name.clone(), saved)]);
-    assert!(matches!(
-        install(
-            &mut document,
-            &functions,
-            &roots,
-            &lash_kernel_doc::FunctionRepresentation::Bare,
-            &namespaces,
-            &cell,
-        ),
-        Err(Unusable::Relink {
-            gap: RelinkGap::Unlinked,
-            ..
-        })
-    ));
 }
 
 /// RELINK-CLOSURE: a saved function whose callee the cell's set removed,

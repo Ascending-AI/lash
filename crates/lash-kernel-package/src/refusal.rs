@@ -146,9 +146,10 @@ pub enum PackageRefusal {
     /// A set or a node names an artifact it is not given.
     #[error("{key} is not held")]
     ArtifactNotHeld { key: ArtifactKey },
-    /// A node's own set is not among the sets it holds.
-    #[error("the node's own set is not among its sets")]
-    OwnNotHeld,
+    /// A node is given an artifact its set does not name: a node is built
+    /// with one set and nothing beside it.
+    #[error("{key} is not a member of the node's set")]
+    NotMember { key: ArtifactKey },
     /// The package's sources do not read.
     #[error("package `{package}`: {message}")]
     Source {

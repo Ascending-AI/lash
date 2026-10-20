@@ -687,20 +687,6 @@ impl DurableSnapshotStore {
                 .ok_or_else(|| refused("a first save carries a response its turn holds"))?;
             tx.append(held);
         }
-        // A park pins the code its document was linked under: the actor is
-        // stamped with that set, so only a node holding it claims the actor
-        // while the run stands parked (CLAIM-HOLDS).
-        let stamp = match &phase {
-            SavePhase::Parked { .. } => self
-                .stamp
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .owed(),
-            SavePhase::Ended { .. } => None,
-        };
-        if let Some(packages) = stamp {
-            tx.stamp_packages(Some(packages));
-        }
         // A sleep is a timer wait of the run's scope, pinned with the park
         // that admits it: the owner that holds only sleeps releases until
         // the earliest, and the scope's end revokes them.
@@ -898,6 +884,9 @@ impl DurableSnapshotStore {
             } else {
                 Vec::new()
             },
+            // The record the root states, joined to the actor's claim
+            // requirements in this same commit (FIG-6993).
+            requirements: requirements.clone(),
         };
         let commit = CommitId::mint();
         let (root, write) = stage_exec_root(
@@ -965,12 +954,6 @@ impl DurableSnapshotStore {
         // published now, before anything it admitted starts.
         if let Some(response) = response {
             response.committed(label);
-        }
-        if stamp.is_some() {
-            self.stamp
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .committed = true;
         }
         let stopped = response.is_some_and(|response| response.stops_in(&committed));
         host.host_committed();

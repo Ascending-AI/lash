@@ -52,9 +52,8 @@ pub struct CellEnvelope {
     /// or read back, with its identity and token body.
     pub document: IdentifiedDocument,
     /// The package set the document was lowered against, the cell's
-    /// `CellPackages`: what a resumed cell is written under, so every park
-    /// of it stamps its session with the same set (CLAIM-HOLDS). The
-    /// document's closure lists identities, which do not name their set.
+    /// `CellPackages`: what a resumed cell is written under. The document's
+    /// closure lists identities, which do not name their set.
     pub packages: lash_kernel_doc::PackageSetDigest,
     /// Where each statement of the document came from in the source, when
     /// the dialect gave a map: what a failure locates its tasks by, at

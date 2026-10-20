@@ -1010,6 +1010,7 @@ fn a_process_admits_exactly_the_callback_slots_it_runs() {
             &ContributionKind::Callback(*slot),
             &ContributionDetails::Callback {
                 stream_state_from: None,
+                reads: &[],
             },
             RegistryKind::Process,
         );

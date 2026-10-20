@@ -136,11 +136,12 @@ impl ProcessStartDeclaration {
         originator: super::ProcessOriginator,
         lifetime: impl Into<LifetimeDecision>,
     ) -> Self {
-        let (engine_kind, payload, launch) = launch.into_parts();
+        let (engine_kind, payload, packages, launch) = launch.into_parts();
         Self::of_target(
             ProcessStartTarget::Inline {
                 engine_kind,
                 payload,
+                packages,
                 args,
                 launch,
             },
@@ -311,7 +312,9 @@ impl ProcessStartRequest {
 
     /// A host's start of a function carried inline, `payload` being the
     /// `engine_kind` engine's value of it (for the kernel engine, a function
-    /// value's `{"$lash_function": ..}` form), with `args`, under `launch`.
+    /// value's `{"$lash_function": ..}` form), linked under the package set
+    /// `packages` (its producer's, recorded on the start: FIG-6993), with
+    /// `args`, under `launch`.
     /// Realization checks and publishes the function under the start's
     /// referrer, then starts the definition it is; nothing is published
     /// before. An exact retry under the same host key answers the same
@@ -320,6 +323,7 @@ impl ProcessStartRequest {
     pub fn inline(
         engine_kind: impl Into<String>,
         payload: serde_json::Value,
+        packages: lash_kernel_doc::PackageSetDigest,
         args: serde_json::Map<String, serde_json::Value>,
         launch: EngineLaunch,
         originator: super::ProcessOriginator,
@@ -329,6 +333,7 @@ impl ProcessStartRequest {
             ProcessStartTarget::Inline {
                 engine_kind: engine_kind.into(),
                 payload,
+                packages,
                 args,
                 launch,
             },

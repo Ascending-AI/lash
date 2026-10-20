@@ -71,8 +71,7 @@ pub use dialect::{
 pub use driver::{RlmProjectorConfig, build_rlm_preamble};
 pub use executor::{
     CODEMODE_SNAPSHOT_VERSION, CONTROL_REFUSED, SessionOpenError, TOOL_ARGUMENTS, TOOL_CALL_LIMIT,
-    TOOL_FAILED, UNKNOWN_EFFECT, cell_migration_refusal, cell_snapshot_functions,
-    saved_function_pins,
+    TOOL_FAILED, UNKNOWN_EFFECT, cell_migration_refusal, saved_function_pins,
 };
 #[cfg(feature = "testing")]
 pub use executor::{CodeModeCheckpointPerfFixture, CodeModeCheckpointPerfPublisher};

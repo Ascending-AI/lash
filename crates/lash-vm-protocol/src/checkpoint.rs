@@ -45,8 +45,6 @@ pub enum KernelRestoreRefusal {
         "the state was parked under kernel version {parked}; the document is written for {supported}"
     )]
     KernelVersion { parked: u32, supported: u32 },
-    #[error("function {function}, which the run pins, is neither held here nor stored")]
-    MissingFunction { function: String },
     #[error("a parked wait names effect {effect}, which no admission under this execution holds")]
     AdmissionUnresolved { effect: String },
     #[error("the parked state is malformed: {problem}")]
@@ -56,8 +54,10 @@ pub enum KernelRestoreRefusal {
     #[error("function {function} needs a native implementation this worker lacks")]
     MissingNative { function: String },
     /// The run's stored definition of a function is refused at admission:
-    /// it does not decode, is another function's, is written for another
-    /// kernel version, or the checker refuses it.
+    /// it is not stored, does not decode, is another function's, is written
+    /// for another kernel version, or the checker refuses it. Every
+    /// definition a run pins is stored before it parks, so one neither held
+    /// nor stored is a store that lost it.
     #[error("the stored definition of function {function} is refused: {problem}")]
     DefinitionRefused { function: String, problem: String },
     /// The admission under this execution holds a request of another kind

@@ -49,6 +49,10 @@ pub(super) enum SurfaceMethod {
     /// [`DurableStore::readiness`](lash_core::durable_port::DurableStore::readiness):
     /// whether a claim could find work, and whether a due time is ahead.
     Readiness,
+    /// [`DurableStore::actor_requirements`](lash_core::durable_port::DurableStore::actor_requirements)
+    /// paged whole, read for the case's session actor: the stored claim
+    /// requirements the strand report reads (FIG-6993).
+    ActorRequirements,
     /// Test authority refuses an absent actor without changing durable state.
     AcquireIdleForTesting,
     ListPendingTurnInputs,
@@ -204,6 +208,7 @@ impl SurfaceMethod {
             Self::ModelCallPins => "surface:model_call_pins",
             Self::ClaimFacts => "surface:claim_facts",
             Self::Readiness => "surface:readiness",
+            Self::ActorRequirements => "surface:actor_requirements",
             Self::AcquireIdleForTesting => "surface:acquire_idle_for_testing",
             Self::ListPendingTurnInputs => "surface:list_pending_turn_inputs",
             Self::PendingTurnInput { known: true } => "surface:pending_turn_input",
@@ -454,6 +459,7 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             surface(SurfaceMethod::ModelCallPins),
             surface(SurfaceMethod::ClaimFacts),
             surface(SurfaceMethod::Readiness),
+            surface(SurfaceMethod::ActorRequirements),
             surface(SurfaceMethod::AcquireIdleForTesting),
             surface(SurfaceMethod::ReadSessionStateVersion),
             surface(SurfaceMethod::AdmitSessionState),
@@ -693,7 +699,6 @@ impl BackendRunner {
                         )),
                         decodes: Vec::new(),
                         serves: Vec::new(),
-                        held: Default::default(),
                         capabilities: Default::default(),
                         ttl_millis: 60_000,
                     })
@@ -752,6 +757,30 @@ impl BackendRunner {
                     readiness.due,
                     readiness.next_due.is_some()
                 )
+            }
+            SurfaceMethod::ActorRequirements => {
+                let actor = lash_core::durable_port::ActorKey::session(session_id.as_str())
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                // Other cases share the PostgreSQL database: page every actor
+                // that carries requirements and keep the case's own.
+                let mut after = None;
+                let mut found = None;
+                loop {
+                    let page = self
+                        .lifecycle_backend
+                        .durable()
+                        .actor_requirements(after.as_ref(), 256)
+                        .await
+                        .map_err(|error| StoreError::Backend(error.to_string()))?;
+                    let Some((last, _)) = page.last().cloned() else {
+                        break;
+                    };
+                    if let Some((_, requires)) = page.into_iter().find(|(key, _)| *key == actor) {
+                        found = Some(requires);
+                    }
+                    after = Some(last);
+                }
+                format!("requires={found:?}")
             }
             SurfaceMethod::DurableRead(method) => {
                 durable_read_coverage::drive(

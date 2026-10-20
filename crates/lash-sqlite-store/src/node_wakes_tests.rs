@@ -880,7 +880,6 @@ async fn run_grouped_child(cut: &str, database: &Path) {
             node: NodeId::new("grouped"),
             decodes: vec![formats()],
             serves: Vec::new(),
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: 15_000,
         })
@@ -1073,7 +1072,6 @@ async fn an_owned_mail_hint_is_already_committed_with_its_mail() {
             node: NodeId::new("hint-owner"),
             decodes: vec![formats()],
             serves: Vec::new(),
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: 15_000,
         })

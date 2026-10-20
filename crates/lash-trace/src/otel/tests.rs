@@ -901,28 +901,6 @@ fn failed_cells_export_their_reason_without_failing_a_recovered_turn() {
     );
     let events = [
         (
-            TraceEvent::ExecCodeCompleted {
-                trailing_discarded: 0,
-                code: String::new(),
-                language: "python".to_string(),
-                started_at_ms: 0,
-                duration_ms: 10,
-                output: String::new(),
-                output_chars: 0,
-                observation_count: 0,
-                observation_projections: Vec::new(),
-                error: Some(crate::CellFailure::new(
-                    crate::CellFailureKind::PackagesNotHeld {
-                        packages: lash_kernel_doc::PackageSetDigest::from_bytes([7; 32]),
-                    },
-                    "the worker does not hold the package set",
-                )),
-                terminal_finish: None,
-                tool_calls: Vec::new(),
-            },
-            "packages_not_held",
-        ),
-        (
             TraceEvent::ExecCodeFailed {
                 trailing_discarded: 0,
                 code: String::new(),

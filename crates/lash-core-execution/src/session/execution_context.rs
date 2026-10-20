@@ -210,6 +210,10 @@ pub struct RuntimeExecutionContext<'run> {
     /// captures an effect the run's surface does not offer from. Empty
     /// outside a cell.
     recorded_grants: RecordedGrants,
+    /// The package set the cell this context runs is linked under: what a
+    /// start its calls declare carries a function inline under, recorded on
+    /// the start (FIG-6993). `None` outside a cell.
+    linked_packages: Option<lash_kernel_doc::PackageSetDigest>,
     /// Where the protocol or code-executor body this context runs stands in
     /// the trace ([`trace`](Self::trace)): bound by the wrapper that runs it.
     extension_trace: crate::trace::ExtensionTrace,
@@ -521,6 +525,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             tool_requests: Arc::clone(&self.tool_requests),
             tool_call_limit_refusal: Arc::clone(&self.tool_call_limit_refusal),
             recorded_grants: Arc::clone(&self.recorded_grants),
+            linked_packages: self.linked_packages,
             extension_trace: self.extension_trace.clone(),
         })
     }
@@ -535,6 +540,21 @@ impl<'run> RuntimeExecutionContext<'run> {
     ) -> Self {
         self.recorded_grants = grants;
         self
+    }
+
+    /// This context running a cell linked under the package set
+    /// `packages`: what an inline start its calls declare is linked under.
+    #[must_use]
+    pub fn with_linked_packages(mut self, packages: lash_kernel_doc::PackageSetDigest) -> Self {
+        self.linked_packages = Some(packages);
+        self
+    }
+
+    /// The set of [`with_linked_packages`](Self::with_linked_packages);
+    /// `None` outside a cell.
+    #[must_use]
+    pub fn linked_packages(&self) -> Option<lash_kernel_doc::PackageSetDigest> {
+        self.linked_packages
     }
 
     /// The grants of [`with_recorded_grants`](Self::with_recorded_grants);

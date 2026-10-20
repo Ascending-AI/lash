@@ -216,7 +216,6 @@ async fn page_transcript(store: &dyn PageStore) -> Transcript {
             node: lash_durable::NodeId::new("fig-6191-node"),
             decodes: vec![FormatSet::new("pages-formats")],
             serves: Vec::new(),
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: 60_000,
         })

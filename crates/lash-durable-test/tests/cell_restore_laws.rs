@@ -1760,7 +1760,7 @@ async fn deferred_grant_across_a_crash(dialect: Dialect, postgres_url: Option<St
 /// provider with a binding that provider reads, and the call settles; the
 /// cell then sleeps before calling it again. While it sleeps, the
 /// session's requirements still name the matched provider, though no call
-/// to it is admitted.
+/// to it is admitted, and the codec version its binding is in.
 async fn a_parked_cells_committed_match_is_required(dialect: Dialect) {
     let turn = CellTurn::new(Cell::Deferred, dialect, None);
     *turn.world.binding.lock_recover() = Some(lash_core::FormatVersion::ONE);
@@ -1824,6 +1824,64 @@ async fn a_parked_cells_committed_match_is_required(dialect: Dialect) {
         requires.contains(&matched),
         "the sleeping cell's committed match keeps `{matched}` required: {requires:?}\n{}",
         nodes.script().rendered_trace()
+    );
+    // DYNAMIC-MATCH across a crash (FIG-6993): the match introduced the
+    // codec version of its binding, which the session's record names while
+    // the cell sleeps. Past the deadline, a node offering everything else
+    // does not take the session over; a node that offers the codec does,
+    // and the cell ends there, its first call's outcome reused.
+    let codecs: Vec<String> = requires
+        .iter()
+        .filter(|token| token.starts_with("codec:"))
+        .cloned()
+        .collect();
+    assert!(
+        !codecs.is_empty(),
+        "the committed match's codec version is required: {requires:?}"
+    );
+    // Past the sleep's deadline and the dead node's lease.
+    clock
+        .advance_to(clock.logical_ms() + SLEEP_MS + 1_000)
+        .await;
+    let lacking: Vec<String> = turn
+        .config()
+        .serves
+        .into_iter()
+        .filter(|served| !codecs.contains(served))
+        .collect();
+    nodes.serve_on("b", lacking);
+    nodes.start("b");
+    let horizon = clock.logical_ms() + SLEEP_MS;
+    while clock.logical_ms() < horizon && nodes.step().await.is_some() {}
+    nodes.quiesce().await;
+    assert!(
+        !turn.done(&nodes).await,
+        "a node lacking the matched codec version took the session over:\n{}",
+        nodes.script().rendered_trace()
+    );
+    nodes.kill("b");
+    nodes.quiesce().await;
+    nodes.start("c");
+    let horizon = clock.logical_ms() + 3 * SLEEP_MS;
+    while !turn.done(&nodes).await {
+        assert!(
+            clock.logical_ms() < horizon && nodes.step().await.is_some(),
+            "the node offering the codec did not end the turn:\n{}",
+            nodes.script().rendered_trace()
+        );
+    }
+    nodes.quiesce().await;
+    assert_eq!(turn_ended(&nodes).await, Vec::<String>::new());
+    let granted_calls = turn
+        .world
+        .entries()
+        .into_values()
+        .flatten()
+        .filter(|(name, _)| name == GRANTED)
+        .count();
+    assert_eq!(
+        granted_calls, 2,
+        "the call before the sleep ran once and its outcome was reused; the one after it ran on C"
     );
 }
 

@@ -323,7 +323,9 @@ impl KernelSteps {
             .await
             .map_err(|error| format!("publish the document: {error}"))?;
         let payload = serde_json::to_value(lash_vm_runtime::KernelProcessInput {
-            packages: None,
+            packages: lash_vm_runtime::lash_packages()
+                .expect("lash's packages")
+                .digest(),
             document: identity,
             functions: document.manifest.functions.keys().copied().collect(),
             entry: lash::workflow::document::Name::new("worker"),

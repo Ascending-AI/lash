@@ -70,8 +70,7 @@ pub(super) async fn select(
         }
         None => {
             let held = held(services).map_err(host_failure)?;
-            crate::CellPackages::held(&held, &held.own())
-                .ok_or_else(|| host_failure("the node's packages lack their own set"))
+            Ok(crate::CellPackages::held(&held))
         }
     }
 }

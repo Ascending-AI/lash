@@ -93,6 +93,7 @@ impl NodeSlot {
             sessions,
             processes,
             serves,
+            offers,
         } = core.node_activations(Arc::new(lash_core::durable_port::NoProbe));
         let processes = match processes {
             Ok(processes) => Some(processes),
@@ -120,6 +121,7 @@ impl NodeSlot {
                         sessions: Arc::clone(&sessions),
                         processes: processes.clone(),
                         serves: serves.clone(),
+                        offers: offers.clone(),
                     },
                     stop.clone().cancelled_owned(),
                 )
@@ -254,6 +256,9 @@ pub(crate) struct NodeActivations {
     pub(crate) processes: crate::Result<Arc<dyn Activation>>,
     /// The claim tokens the core's node serves.
     pub(crate) serves: Vec<String>,
+    /// What the core's registrations offer running code: its providers and
+    /// the codec versions they read.
+    pub(crate) offers: lash_core::durable_port::NodeCapabilities,
 }
 
 impl LashCore {
@@ -299,6 +304,7 @@ impl LashCore {
             sessions,
             processes,
             serves: self.node_serves(),
+            offers: self.node_offers(),
         }
     }
 
@@ -306,6 +312,13 @@ impl LashCore {
     /// installed registrations when the core was built.
     pub(crate) fn node_serves(&self) -> Vec<String> {
         self.serves.to_vec()
+    }
+
+    /// What the core's node's registrations offer running code
+    /// (FIG-6993): projected from its installed registrations when the
+    /// core was built.
+    pub(crate) fn node_offers(&self) -> lash_core::durable_port::NodeCapabilities {
+        lash_core::durable_port::NodeCapabilities::clone(&self.offers)
     }
 
     /// The hub that ticks when a commit grew a process's log, on this

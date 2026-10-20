@@ -93,7 +93,6 @@ async fn node(backend: &Backend, name: &str, ttl_millis: i64) -> Result<NodeLeas
             node: NodeId::new(name),
             decodes: vec![formats()],
             serves: Vec::new(),
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis,
         })
@@ -578,6 +577,7 @@ pub async fn a_waiting_actor_past_its_deadline_times_out_within_the_claim_poll(
             node: NodeId::new("t1-serving"),
             decodes: vec![formats()],
             serves: Vec::new(),
+            offers: Default::default(),
             lease: backend.config().lease(),
             max_active: 4,
             claim_batch: 4,

@@ -39,6 +39,15 @@ pub(super) enum Command {
     /// build carries it forward: what an operator runs before rolling out
     /// the build that closes the window. Idempotent; run again to resume.
     KernelMigrationRun,
+    /// The strand report (FIG-6993): each unfinished actor no live node
+    /// can run, with what the closest live node lacks of its hard
+    /// requirements (natives, kernels, providers, codecs). Such work stays
+    /// parked; a deploy that offers what it lacks runs it. It writes
+    /// nothing.
+    Stranded {
+        after: Option<String>,
+        limit: NonZeroUsize,
+    },
 }
 
 impl Command {
@@ -49,6 +58,7 @@ impl Command {
             Self::DeploymentStatus { .. } => "deployment-status",
             Self::KernelMigrationList => "kernel-migration-list",
             Self::KernelMigrationRun => "kernel-migration-run",
+            Self::Stranded { .. } => "stranded-list",
         }
     }
 }
@@ -106,6 +116,13 @@ pub(super) fn parse(verb: &str, rest: &[String]) -> Result<Invocation, CliError>
         },
         ("kernel-migration", ["list"]) => Command::KernelMigrationList,
         ("kernel-migration", ["run"]) => Command::KernelMigrationRun,
+        ("stranded", ["list", options @ ..]) => {
+            let (after, limit) = page(options)?;
+            Command::Stranded {
+                after: after.map(str::to_owned),
+                limit,
+            }
+        }
         _ => return Err(usage()),
     };
     Ok(Invocation {
@@ -204,6 +221,10 @@ impl Invocation {
             let backend = durable_backend(open_stores(self.sqlite_path.as_deref()).await?)?;
             return kernel_migration(&backend, &self.command).await;
         }
+        if let Command::Stranded { after, limit } = &self.command {
+            let backend = durable_backend(open_stores(self.sqlite_path.as_deref()).await?)?;
+            return stranded(&backend, after.as_deref(), *limit).await;
+        }
         let core = self.core().await?;
         execute(&core, &self.command).await
     }
@@ -228,7 +249,9 @@ async fn execute(core: &lash::LashCore, command: &Command) -> Result<Value, CliE
                 .map_err(core_error)?
         ),
         // Answered from the backend, before a core is built.
-        Command::KernelMigrationList | Command::KernelMigrationRun => return Err(usage()),
+        Command::KernelMigrationList | Command::KernelMigrationRun | Command::Stranded { .. } => {
+            return Err(usage());
+        }
     })
 }
 
@@ -257,6 +280,22 @@ async fn kernel_migration(backend: &lash::Backend, command: &Command) -> Result<
         Some(swept) => Ok(json!({"woken": swept, "survey": survey})),
         None => serde_json::to_value(&survey).map_err(|error| unexpected(&error)),
     }
+}
+
+/// One page of `backend`'s strand report, after the actor key `after`.
+async fn stranded(
+    backend: &lash::Backend,
+    after: Option<&str>,
+    limit: NonZeroUsize,
+) -> Result<Value, CliError> {
+    let after = after
+        .map(lash::durable::ActorKey::parse)
+        .transpose()
+        .map_err(|_| usage())?;
+    let page = lash::durable::strand_report(backend, after.as_ref(), limit.get())
+        .await
+        .map_err(|error| CliError::new(Exit::Unexpected, error.to_string()))?;
+    serde_json::to_value(&page).map_err(|error| CliError::new(Exit::Unexpected, error.to_string()))
 }
 
 pub(super) fn core_error(error: lash::EmbedError) -> CliError {

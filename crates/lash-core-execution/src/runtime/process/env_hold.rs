@@ -266,6 +266,7 @@ pub(crate) async fn hold_launch_performing(
     };
     let linked = engines
         .link_package_namespaces(kind, payload, env.clone())
+        .await
         .map_err(HoldEnvError::Fault)?;
     let (selection, held) = if linked == env {
         (selection, held)

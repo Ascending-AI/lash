@@ -6,9 +6,9 @@
 //! package `slow`, whose helper `slow.wait` sleeps twice and answers its
 //! argument and 1; build B holds release 2 of the same line, whose helper
 //! answers its argument and 2, and none of release 1's registrations.
-//! The law runs below the claim layer: a process pins no package set, and
-//! the simulated nodes start without the node's package survey, which the
-//! claims lane replaces (FIG-6993).
+//! Both builds install their packages and serve: B claims A's work
+//! because B's capabilities meet the work's hard requirements, whatever
+//! set A linked it under (FIG-6993).
 //!
 //! - A process A started performs `slow.wait`'s first sleep, whose result
 //!   A commits and delivers, and parks on its second; A stops; B resumes
@@ -65,14 +65,9 @@ fn held(slow: Package) -> Arc<HeldPackages> {
             .chain([slow.as_ref()]),
     )
     .expect("a closed set");
-    let own = set.digest();
     Arc::new(
-        HeldPackages::new(
-            shipped.artifacts().values().cloned().chain([slow]),
-            [set],
-            own,
-        )
-        .expect("the node's packages"),
+        HeldPackages::new(shipped.artifacts().values().cloned().chain([slow]), set)
+            .expect("the node's packages"),
     )
 }
 
@@ -84,57 +79,14 @@ fn document(wait: FunctionId) -> lash_kernel_doc::Document {
     .expect("the document parses")
 }
 
-/// The claim layer's stand-in for a build that starts beside work it
-/// holds no registration of: it installs and surveys nothing and
-/// advertises no artifact, so its node starts. Until the claims lane
-/// (FIG-6993) replaces it, the node's package survey refuses such a start
-/// (`RetiredDependents`); a process pins no package set, so the node
-/// claims it either way.
-struct Unsurveyed(Arc<HeldPackages>);
-
-#[async_trait::async_trait]
-impl lash_execution_contracts::backend::NodePackages for Unsurveyed {
-    fn candidates(
-        &self,
-        _catalog: &lash_durable::PackageCatalog,
-    ) -> Vec<(
-        lash_durable::PackageSetDigest,
-        std::collections::BTreeSet<lash_durable::HeldArtifact>,
-    )> {
-        Vec::new()
-    }
-
-    fn surface_view(&self) -> Arc<dyn lash::dialect::ExportView + Send + Sync> {
-        Arc::new(lash::package::SharedPackageView::declared(Arc::clone(
-            &self.0,
-        )))
-    }
-
-    fn packages(&self) -> &Arc<HeldPackages> {
-        &self.0
-    }
-
-    async fn hold(
-        &self,
-        _backend: &lash::Backend,
-    ) -> Result<lash_durable::packages::NodeHolding, lash_durable::DurableError> {
-        Ok(lash_durable::packages::NodeHolding::default())
-    }
-}
-
-/// One build's core over the shared store set; an `unsurveyed` one starts
-/// below the claim layer ([`Unsurveyed`]).
+/// One build's core over the shared store set.
 fn core(
     stores: &Arc<dyn StoreSet>,
     clock: &Arc<SimClock>,
     packages: &Arc<HeldPackages>,
     name: &str,
-    unsurveyed: bool,
 ) -> lash::LashCore {
     let backend = served::configured_backend(Arc::clone(stores), sim::settings(), Vec::new());
-    if unsurveyed {
-        assert!(backend.hold_packages(Arc::new(Unsurveyed(Arc::clone(packages)))));
-    }
     lash::LashCore::rlm_builder(
         backend.clone(),
         served::rlm(&backend, sim::workers(clock)).with_packages(Arc::clone(packages)),
@@ -178,7 +130,7 @@ async fn start(
         document: identity,
         functions: document.manifest.functions.keys().copied().collect(),
         entry: lash::workflow::document::Name::new("worker"),
-        packages: None,
+        packages: packages.digest(),
         args: serde_json::Map::new(),
     })
     .expect("the input encodes");
@@ -266,8 +218,8 @@ async fn a_build_without_the_writers_registrations_resumes_and_starts_its_pinned
         "build B holds none of release 1's helper"
     );
     let (core_a, core_b) = (
-        core(&stores, &clock, &a, "a", false),
-        core(&stores, &clock, &b, "b", true),
+        core(&stores, &clock, &a, "a"),
+        core(&stores, &clock, &b, "b"),
     );
     let activation = |core: &lash::LashCore| {
         lash::testing::node_activation(core, Arc::new(Tripwire::default()))

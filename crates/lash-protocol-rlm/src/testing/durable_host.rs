@@ -8,18 +8,12 @@
 //! whose context serves the cells a law runs. [`DurableHost::kill_and_resume`]
 //! is a node kill followed by resume on another node: the dead boot is
 //! fenced, the actor is claimed again under a new epoch, and a cell resumed
-//! there sees only what committed. [`DurableHost::open_holding`] stores one
-//! package set whose artifact every node of the host holds, so an actor
-//! stamped with it stays claimable by them and by no node lacking it.
+//! there sees only what committed.
 
 use std::sync::Arc;
 
-use std::collections::BTreeSet;
-
-use lash_core::durable_port::packages::{ArtifactInstall, SetInstall};
 use lash_core::durable_port::{
-    ActorKey, ArtifactDigest, CommitLabel, FormatSet, HeldArtifact, MailTx, NodeId, NodeLease,
-    NodeSpec, PackageSetDigest,
+    ActorKey, CommitLabel, FormatSet, MailTx, NodeId, NodeLease, NodeSpec,
 };
 
 /// The format set the host's nodes decode and its actor is created in.
@@ -62,8 +56,6 @@ pub(crate) struct DurableHost {
     lease: NodeLease,
     context: lash_core::ActorContext,
     probe: Arc<dyn lash_core::durable_port::DurableProbe>,
-    /// The package artifacts every node of the host holds.
-    held: BTreeSet<HeldArtifact>,
     nodes: usize,
     /// The working state the host's turn row holds; none before its first
     /// [`Self::commit_working`], which admits the turn.
@@ -82,58 +74,16 @@ impl DurableHost {
         admitted: lash_core::AdmittedScope,
         probe: Arc<dyn lash_core::durable_port::DurableProbe>,
     ) -> Self {
-        Self::open_on(admitted, probe, BTreeSet::new(), &[]).await
-    }
-
-    /// [`Self::open`], its store holding the package set `packages`, of one
-    /// artifact every node of the host holds.
-    pub(crate) async fn open_holding(
-        admitted: lash_core::AdmittedScope,
-        packages: PackageSetDigest,
-    ) -> Self {
-        let artifact = HeldArtifact {
-            digest: ArtifactDigest::from_bytes(*packages.as_bytes()),
-            path: "law".to_owned(),
-        };
-        let set = SetInstall {
-            digest: packages,
-            members: BTreeSet::from([artifact.clone()]),
-            surface: Vec::new(),
-            requirements: Default::default(),
-        };
-        Self::open_on(
-            admitted,
-            Arc::new(lash_core::durable_port::NoProbe),
-            BTreeSet::from([artifact]),
-            &[set],
-        )
-        .await
+        Self::open_on(admitted, probe).await
     }
 
     async fn open_on(
         admitted: lash_core::AdmittedScope,
         probe: Arc<dyn lash_core::durable_port::DurableProbe>,
-        held: BTreeSet<HeldArtifact>,
-        sets: &[SetInstall],
     ) -> Self {
         let backend = lash_execution_contracts::backend::Backend::for_testing(
             super::sqlite_memory_store_set().await,
         );
-        let artifacts: Vec<ArtifactInstall> = held
-            .iter()
-            .map(|artifact| ArtifactInstall {
-                artifact: artifact.clone(),
-                header: "{}".to_owned(),
-                definitions: BTreeSet::new(),
-                internal: BTreeSet::new(),
-                labels: "{}".to_owned(),
-            })
-            .collect();
-        backend
-            .durable()
-            .install_packages(&artifacts, sets)
-            .await
-            .expect("install the law's package set");
         let actor = match admitted.scope() {
             lash_core::ExecutionScope::Process { process_id } => {
                 ActorKey::process(process_id.as_str())
@@ -155,7 +105,7 @@ impl DurableHost {
             .commit_mail(created, CommitLabel::new("law.create"))
             .await
             .expect("create the law's session actor");
-        let lease = register(&backend, 0, &held).await;
+        let lease = register(&backend, 0).await;
         let context = claim(&backend, &lease, &actor, &admitted, &probe).await;
         Self {
             backend,
@@ -164,7 +114,6 @@ impl DurableHost {
             lease,
             context,
             probe,
-            held,
             nodes: 1,
             working: std::sync::Mutex::new(None),
         }
@@ -296,21 +245,7 @@ impl DurableHost {
     /// node claims it: the dead boot's epoch is fenced, and the new context
     /// sees only what committed.
     pub(crate) async fn kill_and_resume(&mut self) {
-        self.kill_and_resume_past(None).await;
-    }
-
-    /// [`Self::kill_and_resume`], a node that decodes the actor's formats
-    /// and holds none of the host's packages asking to claim it first:
-    /// whether that node claimed the actor to run it. Nothing resumes when
-    /// it did.
-    pub(crate) async fn kill_and_resume_past_a_lacking_node(&mut self) -> bool {
-        let lacking = register(&self.backend, self.nodes, &BTreeSet::new()).await;
-        self.nodes += 1;
-        self.kill_and_resume_past(Some(&lacking)).await
-    }
-
-    async fn kill_and_resume_past(&mut self, first: Option<&NodeLease>) -> bool {
-        let next = register(&self.backend, self.nodes, &self.held).await;
+        let next = register(&self.backend, self.nodes).await;
         // The dead node's lease is ended for it, as its expiry and a reap
         // would: its actors are released with their epochs bumped.
         self.backend
@@ -318,22 +253,6 @@ impl DurableHost {
             .release_node(&self.lease)
             .await
             .expect("fence the dead node");
-        if let Some(first) = first {
-            let claimed = self
-                .backend
-                .durable()
-                .claim(first, 16)
-                .await
-                .expect("the first node's claim")
-                .iter()
-                .any(|claimed| {
-                    claimed.actor == self.actor
-                        && claimed.purpose == lash_core::durable_port::ClaimPurpose::Run
-                });
-            if claimed {
-                return true;
-            }
-        }
         self.context = claim(
             &self.backend,
             &next,
@@ -344,22 +263,16 @@ impl DurableHost {
         .await;
         self.lease = next;
         self.nodes += 1;
-        false
     }
 }
 
-async fn register(
-    backend: &lash_execution_contracts::backend::Backend,
-    index: usize,
-    held: &BTreeSet<HeldArtifact>,
-) -> NodeLease {
+async fn register(backend: &lash_execution_contracts::backend::Backend, index: usize) -> NodeLease {
     backend
         .durable()
         .register_node(&NodeSpec {
             node: NodeId::new(format!("rlm-cell-law-{index}")),
             decodes: vec![FormatSet::new(FORMATS)],
             serves: Vec::new(),
-            held: held.clone(),
             capabilities: Default::default(),
             ttl_millis: 600_000,
         })

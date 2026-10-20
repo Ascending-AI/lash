@@ -243,6 +243,14 @@ impl DurableStore for CloseDuringRead {
         self.inner.live_nodes().await
     }
 
+    async fn actor_requirements(
+        &self,
+        after: Option<&lash_durable::ActorKey>,
+        limit: usize,
+    ) -> Result<Vec<(lash_durable::ActorKey, Vec<String>)>, DurableError> {
+        self.inner.actor_requirements(after, limit).await
+    }
+
     async fn install_packages(
         &self,
         artifacts: &[lash_durable::packages::ArtifactInstall],
@@ -397,7 +405,6 @@ async fn an_accepted_close_stays_pending_when_its_mail_is_acknowledged_between_r
             node: NodeId::new("close-observer-law"),
             decodes: vec![formats],
             serves: Vec::new(),
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: 60_000,
         })

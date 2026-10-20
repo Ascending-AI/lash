@@ -68,6 +68,9 @@ pub struct LashCore {
     /// The claim tokens the core's node serves (S7), projected once from
     /// its installed registrations when it was built.
     pub(crate) serves: Arc<[String]>,
+    /// What the core's registrations offer running code: its providers
+    /// and the codec versions they read (FIG-6993).
+    pub(crate) offers: Arc<lash_core::durable_port::NodeCapabilities>,
     transcript_decoders: crate::transcript::TranscriptDecoders,
     /// The tracing policies in effect on this core, after validation.
     pub(crate) trace_policy: Arc<crate::tracing::TracePolicySnapshot>,
@@ -280,14 +283,14 @@ impl LashCore {
         factory: crate::rlm::RlmProtocolPluginFactory,
     ) -> LashCoreBuilder {
         // The node installs and advertises the package code the host
-        // registered, and while a live serving node lacks a set, cells are
-        // written under the first set every one holds (FIG-6918).
+        // registered, and cells are written under the newest live surface
+        // every live serving node can run (FIG-6993).
         let factory = match factory.packages() {
             Ok(packages) => {
-                let hold = Arc::new(crate::packages::NodeHold::new(packages));
+                let hold = Arc::new(crate::packages::NodeInstall::new(packages));
                 // A node built twice over one backend keeps its first
                 // registration; this gate then reads its own set alone.
-                let _ = backend.hold_packages(Arc::clone(&hold) as _);
+                let _ = backend.register_packages(Arc::clone(&hold) as _);
                 if factory.has_package_gate() {
                     factory
                 } else {
@@ -1325,8 +1328,9 @@ impl LashCoreBuilder {
         let host_process_engines = default_plugin_host
             .install_process_engine_contributions(core.clone(), process_lifecycle_available)?
             .process_engines;
-        // Every builder advertises the code its workers hold before the node
-        // starts. RLM may already have installed the hold shared with its gate.
+        // Every builder installs and advertises the code its workers run
+        // before the node starts. RLM may already have registered the
+        // install shared with its gate.
         #[cfg(feature = "codemode")]
         if backend.packages().is_none() {
             let packages = match host_process_engines
@@ -1337,14 +1341,26 @@ impl LashCoreBuilder {
                     lash_execution_contracts::PluginError::Registration(error.to_string())
                 })?,
             };
-            let _ = backend.hold_packages(Arc::new(crate::packages::NodeHold::new(packages)));
+            let _ =
+                backend.register_packages(Arc::new(crate::packages::NodeInstall::new(packages)));
         }
         // What the core's node serves (S7): every callback its installed
         // plugins and process components register, and the config formats
         // its components read. A projection that fails refuses the build,
         // so no node advertises less than it installed.
         let mut serves = core.process_engines.components().served_tokens();
-        serves.extend(default_plugin_host.installed_inventory()?.served_tokens());
+        let installed = default_plugin_host.installed_inventory()?;
+        serves.extend(installed.served_tokens());
+        // What its registrations offer running code (FIG-6993): the
+        // providers they install and the binding formats each reads.
+        let mut offers = installed.offers();
+        offers.extend(
+            &core
+                .process_engines
+                .components()
+                .installed_inventory()
+                .offers(),
+        );
         serves.extend(
             default_plugin_host
                 .retired_session_plugins()
@@ -1387,6 +1403,7 @@ impl LashCoreBuilder {
             trace_policy,
             observer_pacing: Arc::new(self.observer_pacing),
             serves,
+            offers: Arc::new(offers),
             transcript_decoders,
             diagnostic_hosts: Arc::default(),
             runtime_owner,

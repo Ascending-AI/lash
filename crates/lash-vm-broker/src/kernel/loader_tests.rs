@@ -13,7 +13,7 @@ use lash_kernel_doc::{
     Document, FunctionDefinition, FunctionId, FunctionName, FunctionRegistry, KernelDataLimits,
     NumberPolicy,
 };
-use lash_kernel_package::{HeldPackages, Package, PackageSet, PackageSources};
+use lash_kernel_package::{HeldPackages, Package, PackageSources};
 
 use super::{Definitions, LoadRefusal, assemble, declare, requirements};
 
@@ -48,19 +48,10 @@ fn p(q: &Package) -> Package {
 }
 
 fn held(lines: &[&[&Package]]) -> HeldPackages {
-    let sets: Vec<PackageSet> = lines
-        .iter()
-        .map(|line| PackageSet::new(line.iter().copied()).expect("a closed set"))
-        .collect();
-    let own = sets.last().expect("an own set").digest();
-    HeldPackages::new(
-        lines
-            .iter()
-            .flat_map(|line| line.iter().map(|package| Arc::new((*package).clone()))),
-        sets,
-        own,
-    )
-    .expect("the held lines")
+    let [line] = lines else {
+        panic!("a node holds one set")
+    };
+    HeldPackages::install(line.iter().map(|package| (*package).clone())).expect("the held line")
 }
 
 /// A document listing `functions`, with `registry`'s names for them.

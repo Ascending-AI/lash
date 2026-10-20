@@ -21,7 +21,7 @@ fn member(name: &str) -> MemberPath {
 
 /// The packages of `held`'s own set, the kernel first.
 fn own_packages(held: &HeldPackages) -> Vec<Package> {
-    let view = held.view(&held.own()).unwrap();
+    let view = held.view();
     let mut packages: Vec<Package> = view
         .packages()
         .map(|package| held.artifacts()[&package.key()].as_ref().clone())
@@ -59,7 +59,7 @@ fn comparison_package(name: &str, title: &str, kernel: &Package) -> Package {
 #[test]
 fn labels_are_keyed_by_package_and_member_in_the_selected_set() {
     let built = lash_vm_releases::lash_packages().unwrap();
-    let built_view = built.view(&built.own()).unwrap();
+    let built_view = built.view();
     for (name, title) in [
         ("ts.array.map", "TypeScript array map"),
         ("py.str", "Python str"),
@@ -108,7 +108,7 @@ fn labels_are_keyed_by_package_and_member_in_the_selected_set() {
         comparison_package("other", "Compare values", &kernel),
     ]);
     let held = HeldPackages::install(packages).unwrap();
-    let selected = held.view(&held.own()).unwrap();
+    let selected = held.view();
     for (package, title) in [("demo", "Compare items"), ("other", "Compare values")] {
         assert_eq!(
             selected
@@ -130,12 +130,12 @@ fn labels_are_keyed_by_package_and_member_in_the_selected_set() {
 #[test]
 fn comparisons_come_from_the_supplied_package_set() {
     let built = lash_vm_releases::lash_packages().unwrap();
-    let built_view = built.view(&built.own()).unwrap();
+    let built_view = built.view();
     let mut packages = own_packages(&built);
     let package = comparison_package("demo", "Compare items", &packages[0]);
     packages.push(package);
     let held = HeldPackages::install(packages).unwrap();
-    let selected = held.view(&held.own()).unwrap();
+    let selected = held.view();
     let name = FunctionName::new("demo.compare").unwrap();
     let id = held
         .functions()

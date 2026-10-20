@@ -240,6 +240,7 @@ impl Deployment {
                         counters: process_counters,
                     })),
                     serves,
+                    offers: Default::default(),
                 },
                 async move {
                     let _ = stopped.await;

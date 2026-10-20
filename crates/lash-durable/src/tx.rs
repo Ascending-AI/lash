@@ -93,7 +93,6 @@ pub struct ActorTx {
     release: Option<Release>,
     formats: Option<FormatSet>,
     requires: Option<Vec<String>>,
-    packages: Option<Option<crate::PackageSetDigest>>,
     graph: BTreeMap<NodeId, EncodedNode>,
     reads: BTreeSet<NodeId>,
     budget: Option<GraphCommitBudget>,
@@ -143,7 +142,6 @@ impl ActorTx {
             release: None,
             formats: None,
             requires: None,
-            packages: None,
             graph: BTreeMap::new(),
             reads: BTreeSet::new(),
             budget: None,
@@ -375,7 +373,6 @@ impl ActorTx {
             || self.ack.is_some()
             || self.formats.is_some()
             || self.requires.is_some()
-            || self.packages.is_some()
     }
 
     /// How this transaction releases the actor, if it does.
@@ -395,22 +392,6 @@ impl ActorTx {
     /// commit on: from then, only a node that decodes `formats` claims it.
     pub fn stamp_formats(&mut self, formats: FormatSet) -> &mut Self {
         self.formats = Some(formats);
-        self
-    }
-
-    /// The package set this transaction records the actor's code as linked
-    /// under, if it rewrites it: `Some(None)` when the actor's state pins no
-    /// code from this commit on.
-    #[must_use]
-    pub fn packages(&self) -> Option<Option<crate::PackageSetDigest>> {
-        self.packages
-    }
-
-    /// Record that, from this commit on, the code the actor's state pins was
-    /// linked under `packages`, or that it pins none: only a node that holds
-    /// that whole set claims the actor to run it (CLAIM-HOLDS).
-    pub fn stamp_packages(&mut self, packages: Option<crate::PackageSetDigest>) -> &mut Self {
-        self.packages = Some(packages);
         self
     }
 

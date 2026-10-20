@@ -119,25 +119,14 @@ crate::statements! {
              RETURNING actor_key, epoch";
 
         /// Every actor boot `?2` of node `?1` owns, with its epoch, format
-        /// set, claim requirements and whether the node holds the package
-        /// set its code was linked under (`packages`, CLAIM-HOLDS).
-        owned_by = "SELECT a.actor_key, a.epoch, a.formats, a.requires,
-                    (a.packages IS NULL OR (
-                        EXISTS (SELECT 1 FROM package_sets AS ps WHERE ps.digest = a.packages)
-                        AND NOT EXISTS (SELECT 1 FROM package_set_members AS pm
-                            WHERE pm.set_digest = a.packages
-                              AND NOT EXISTS (SELECT 1 FROM node_artifacts AS nh
-                                  WHERE nh.node_id = ?1 AND nh.artifact = pm.artifact))))
+        /// set and claim requirements.
+        owned_by = "SELECT a.actor_key, a.epoch, a.formats, a.requires
              FROM actors AS a
              WHERE a.owner_node = ?1 AND a.owner_boot = ?2 AND a.state = 'owned'
              ORDER BY a.actor_key";
 
         /// Record that actor `?1`'s state is written in format set `?2`.
         stamp_formats = "UPDATE actors SET formats = ?2 WHERE actor_key = ?1";
-
-        /// Record that actor `?1`'s code was linked under package set `?2`,
-        /// or, for `NULL`, that its state pins none.
-        stamp_packages = "UPDATE actors SET packages = ?2 WHERE actor_key = ?1";
 
         /// Record actor `?1`'s claim requirements: the canonical JSON array
         /// `?2`, or `NULL` for none (FIG-6034 D3).

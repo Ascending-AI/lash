@@ -396,7 +396,7 @@ fn requirements(packages: &[&Package], registry: &FunctionRegistry) -> Execution
     requirements
 }
 
-/// What a node holding `packages` offers running code: the native of
+/// What a node built with `packages` offers running code: the native of
 /// every held definition with no body, which its pool binds at start or
 /// refuses to start, every kernel version its build interprets, and its own
 /// set. The providers and codecs are its host's, which no package names.
@@ -406,7 +406,7 @@ pub fn node_capabilities(packages: &crate::HeldPackages) -> NodeCapabilities {
             .iter()
             .map(|version| version.number())
             .collect(),
-        surface: Some(packages.own()),
+        surface: Some(packages.digest()),
         ..NodeCapabilities::default()
     };
     for package in packages.artifacts().values() {

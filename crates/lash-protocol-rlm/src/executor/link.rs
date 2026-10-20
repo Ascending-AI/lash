@@ -46,9 +46,6 @@ pub(super) async fn link_cell(
                 })?;
             state.note_pages(ended_root_pages(snapshots, resumed.root).as_ref());
         }
-        if services.packages.is_some() {
-            snapshots.stamp_parks_with(envelope.packages);
-        }
         return Ok(LinkedCell {
             document: envelope.document.clone(),
             boundary: envelope.boundary().map_err(host_failure)?,
@@ -108,13 +105,9 @@ pub(super) async fn link_cell(
         .await
         .map_err(|error| host_failure(format!("the session's state is not readable: {error}")))?;
     let packages = packages::select(state, services).await?;
-    if services.packages.is_some() {
-        snapshots.stamp_parks_with(packages.digest());
-    }
     // Every carried saved function is relinked by name to the cell's
     // surface, or dropped naming it (RELINK-CLOSURE): what the cell lowers
-    // and what it calls of the session come from the one surface
-    // (CURRENT-RELEASE).
+    // and what it calls of the session come from the one surface.
     state.relink(&packages).await.map_err(|error| {
         host_failure(format!(
             "the session's saved functions are not relinked: {error}"
@@ -259,12 +252,6 @@ pub(super) async fn link_cell(
             return Err(host_failure(format!(
                 "this session's cells are written in `{dialect}`, and no worker has that dialect installed"
             )));
-        }
-        Ok(Response::PackagesNotHeld { packages }) => {
-            return Err(lash_core::CellFailure::new(
-                lash_core::CellFailureKind::PackagesNotHeld { packages },
-                format!("this cell is written under package set {packages}, and the worker does not hold it"),
-            ).into());
         }
         Ok(Response::Printed(_) | Response::Read { .. } | Response::ToolCalls(_)) => {
             return Err(Refused::Worker(Box::new(

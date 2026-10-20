@@ -36,7 +36,6 @@ async fn node(
             node: NodeId::new(name),
             decodes,
             serves: Vec::new(),
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: TTL_MILLIS,
         })

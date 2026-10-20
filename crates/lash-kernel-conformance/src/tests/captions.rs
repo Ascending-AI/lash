@@ -1118,5 +1118,5 @@ fn closes(node: Node<'_>) -> bool {
 fn test_packages() -> lash_kernel_package::PackageView<'static> {
     static HELD: std::sync::LazyLock<lash_kernel_package::HeldPackages> =
         std::sync::LazyLock::new(|| lash_kernel_package::HeldPackages::install([]).unwrap());
-    HELD.view(&HELD.own()).unwrap()
+    HELD.view()
 }

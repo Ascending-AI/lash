@@ -376,11 +376,7 @@ impl SessionDialect {
                 .map_err(|error| SessionError::Plugin(error.into())),
             None => lash_vm_runtime::lash_packages()
                 .map_err(|error| SessionError::Protocol(error.to_string()))
-                .and_then(|held| {
-                    crate::plugin::CellPackages::held(&held, &held.own()).ok_or_else(|| {
-                        SessionError::Protocol("lash's packages lack their own set".to_owned())
-                    })
-                }),
+                .map(|held| crate::plugin::CellPackages::held(&held)),
         }
     }
 

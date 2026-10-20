@@ -1259,7 +1259,7 @@ fn an_installed_collect_lists_its_performs_and_every_surface_member() {
     };
     let package = Package::build("dataframe", "1.0", &sources, &[]).unwrap();
     let held = HeldPackages::install([package]).unwrap();
-    let packages = held.view(&held.own()).unwrap();
+    let packages = held.view();
     let id = *held
         .functions()
         .iter()

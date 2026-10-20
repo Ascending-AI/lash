@@ -275,14 +275,6 @@ CREATE TABLE IF NOT EXISTS package_internal_operations (
     PRIMARY KEY (operation, path)
 );
 
--- The artifacts a live node holds, gone with its row.
-CREATE TABLE IF NOT EXISTS node_artifacts (
-    node_id TEXT NOT NULL REFERENCES nodes (node_id) ON DELETE CASCADE,
-    artifact TEXT NOT NULL REFERENCES package_artifacts (artifact),
-    path TEXT NOT NULL,
-    PRIMARY KEY (node_id, artifact)
-);
-
 CREATE TABLE IF NOT EXISTS actors (
     actor_key TEXT PRIMARY KEY,
     kind TEXT NOT NULL CONSTRAINT ck_actors_kind CHECK (kind IN ('session', 'process')),
@@ -295,7 +287,6 @@ CREATE TABLE IF NOT EXISTS actors (
     next_due_ms INTEGER,
     formats TEXT NOT NULL,
     requires TEXT,
-    packages TEXT,
     state_revision INTEGER NOT NULL,
     mail_seq INTEGER NOT NULL,
     acked_seq INTEGER NOT NULL,
@@ -767,13 +758,6 @@ fn apply_owner(
     if let Some(requires) = write.requires() {
         processes::stamp_requires(tx, &actor, requires)?;
     }
-    if let Some(packages) = write.packages() {
-        cached_execute(
-            tx,
-            SQL.actor.stamp_packages.sql(),
-            rusqlite::params![actor, packages.map(|digest| digest.to_string())],
-        )?;
-    }
     if let Some(through) = write.ack() {
         cached_execute(tx, SQL.actor.ack.sql(), rusqlite::params![actor, through.0])?;
         cached_execute(
@@ -1158,12 +1142,10 @@ impl DurableStore for SqliteDurableStore {
                         capabilities
                     ],
                 )?;
-                packages::hold(tx, lease_owner.node.as_str(), &spec.held)?;
                 commit(NodeLease {
                     owner: lease_owner,
+                    serves: spec.served(),
                     decodes: spec.decodes,
-                    serves: spec.serves.clone(),
-                    held: spec.held.clone(),
                     capabilities: spec.capabilities.clone(),
                     ttl_millis: spec.ttl_millis,
                     expires_at,
@@ -1307,13 +1289,12 @@ impl DurableStore for SqliteDurableStore {
                         row.get::<_, i64>(1)?,
                         row.get::<_, String>(2)?,
                         row.get::<_, Option<String>>(3)?,
-                        row.get::<_, bool>(4)?,
                     ))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows
                 .into_iter()
-                .map(|(key, epoch, stored_formats, requires, holds)| {
+                .map(|(key, epoch, stored_formats, requires)| {
                     Ok(Claimed {
                         actor: actor_key(&key)?,
                         epoch: Epoch(epoch),
@@ -1322,7 +1303,6 @@ impl DurableStore for SqliteDurableStore {
                             &lease,
                             &stored_formats,
                             requires.as_deref(),
-                            holds,
                         )?,
                         // `of_stored` refused a corrupt spelling above.
                         requires: lash_durable::parse_requires(requires.as_deref())
@@ -1354,6 +1334,17 @@ impl DurableStore for SqliteDurableStore {
     async fn live_nodes(&self) -> Result<Vec<lash_durable::NodeCapability>, DurableError> {
         let now = self.instant()?;
         self.read(move |tx| packages::live_nodes(tx, now)).await
+    }
+
+    async fn actor_requirements(
+        &self,
+        after: Option<&lash_durable::ActorKey>,
+        limit: usize,
+    ) -> Result<Vec<(lash_durable::ActorKey, Vec<String>)>, DurableError> {
+        let after = after.map(lash_durable::ActorKey::to_string);
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        self.read(move |tx| packages::actor_requirements(tx, after.as_deref(), limit))
+            .await
     }
 
     async fn install_packages(

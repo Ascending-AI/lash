@@ -280,11 +280,12 @@ impl CellObservation {
     /// that names a binding the session lost to `K-SES-003` is that rule's
     /// refusal.
     /// A `package.stale_value` names the two artifacts it compares by the
-    /// release labels `held` holds for them.
+    /// release labels `held` holds for them, or one of `surfaces` does.
     pub(crate) fn of_run_error(
         error: RunError,
         not_carried: &BTreeMap<Name, String>,
         held: Option<&lash_kernel_package::HeldPackages>,
+        surfaces: &[&lash_kernel_package::SurfaceSnapshot],
     ) -> Self {
         if let RunError::Uncaught {
             error: Datum::Error(error),
@@ -294,7 +295,7 @@ impl CellObservation {
             && let Some(stale) = lash_kernel_package::StaleValue::of(error)
         {
             return Self::StaleValue {
-                message: stale.message(held),
+                message: stale.message_with(held, surfaces),
             };
         }
         match error {
@@ -597,10 +598,6 @@ fn imperative(kind: CellFailureKind, cell_noun: &str) -> String {
         CellFailureKind::Host => format!(
             "Next: the host failed while handling this {cell_noun}. Retry it; if the failure persists, report the host problem."
         ),
-        CellFailureKind::PackagesNotHeld { packages } => format!(
-            "Next: ask the host to serve this {cell_noun} on a node that holds package set {}.",
-            packages.short()
-        ),
     }
 }
 
@@ -797,7 +794,7 @@ mod tests {
             let End::Error(error) = end else {
                 panic!("bound error");
             };
-            let observation = CellObservation::of_run_error(error, &BTreeMap::new(), None);
+            let observation = CellObservation::of_run_error(error, &BTreeMap::new(), None, &[]);
             let prompts = crate::CellDialect::typescript().prompts();
             let failure =
                 observation.failure("", None, crate::plugin::RlmChannel::Cell, prompts.as_ref());

@@ -170,50 +170,79 @@ impl lash_execution_contracts::module_artifacts::ModuleArtifactStore for NoArtif
     }
 }
 
-/// PKG-RUNNER (FIG-6985): a start's runners are judged by the declarations
-/// of the package set it was linked under, read from the store where the
-/// node does not hold it, not by the node's own set. A node holding lash's
-/// packages alone starts a definition linked under a set that adds
-/// `dataframe`: `dataframe` owns `run` there, under its declared contract.
-/// A start naming no set is linked under the node's own, where no package
-/// owns it, and one naming a set the store keeps no surface of is refused.
-#[tokio::test]
-async fn a_start_is_judged_by_the_declarations_of_the_set_it_was_linked_under() {
+/// Two sets of lash's packages: the writer's, which adds `dataframe`, and
+/// the lash-only set of a node that does not hold it.
+struct TwoSets {
+    lash: Vec<lash_kernel_package::Package>,
+    writer: Arc<lash_kernel_package::HeldPackages>,
+    node: Arc<lash_kernel_package::HeldPackages>,
+}
+
+fn two_sets() -> TwoSets {
     let lash = lash_vm_releases::built().expect("lash's packages");
     let kernel = lash
         .iter()
         .find(|package| package.path().to_string() == "kernel")
         .expect("the kernel package");
     let dataframe = lash_kernel_package::testing::dataframe(kernel).expect("the fixture builds");
-    let writer =
+    let writer = Arc::new(
         lash_kernel_package::HeldPackages::install(lash.iter().cloned().chain([dataframe]))
-            .expect("the writer's packages");
-    let linked = writer.own();
+            .expect("the writer's packages"),
+    );
     let node = Arc::new(
         lash_kernel_package::HeldPackages::install(lash.iter().cloned())
             .expect("the node's packages"),
     );
-    assert!(node.surface(&linked).is_none(), "the node does not hold it");
-    let run = EffectName::new("dataframe.run").expect("an operation");
-    let declared = crate::owned_operation(&writer.view(&linked).expect("the writer's set"), &run)
-        .expect("the fixture owns `run`");
+    assert_ne!(node.digest(), writer.digest(), "the node does not hold it");
+    TwoSets { lash, writer, node }
+}
+
+/// A kernel engine whose own set is `packages`, over a store that keeps
+/// `stored`'s surface.
+fn engine_holding(
+    packages: &Arc<lash_kernel_package::HeldPackages>,
+    stored: &lash_kernel_package::HeldPackages,
+) -> crate::KernelProcessEngine {
     let config =
         lash_vm_client::PoolConfig::codemode(lash_vm_client::WorkerEntry::helper("unused"));
-    let engine = crate::process_plugin::KernelProcessPluginFactory::new(
+    crate::process_plugin::KernelProcessPluginFactory::new(
         lash_vm_client::service::Service::new(config.clone()),
         lash_vm_releases::TYPESCRIPT,
         config.run_bounds,
     )
-    .with_packages(node)
+    .with_packages(Arc::clone(packages))
     .engine(Arc::new(NoArtifacts))
     .expect("the engine")
     .with_internal_authority(Arc::new(Snapshots {
-        surfaces: BTreeMap::from([(
-            linked,
-            writer.surface(&linked).expect("its surface").encode(),
-        )]),
+        surfaces: BTreeMap::from([(stored.digest(), stored.surface().encode())]),
         ..Snapshots::default()
-    }));
+    }))
+}
+
+/// `dataframe.run`, which the writer's set declares, with that declaration.
+fn run_declared(
+    writer: &lash_kernel_package::HeldPackages,
+) -> (
+    EffectName,
+    lash_execution_contracts::process::OwnedOperation,
+) {
+    let run = EffectName::new("dataframe.run").expect("an operation");
+    let declared = crate::owned_operation(&writer.view(), &run).expect("the fixture owns `run`");
+    (run, declared)
+}
+
+/// PKG-RUNNER (FIG-6985): a start's runners are judged by the declarations
+/// of the set it was linked under, read from the store where the node does
+/// not hold it, not by the node's own set. A node holding lash's packages
+/// alone starts a definition linked under a set that adds `dataframe`:
+/// `dataframe` owns `run` there, under its declared contract. One naming a
+/// set the store keeps no surface of is refused.
+#[tokio::test]
+async fn a_start_is_judged_by_the_declarations_of_the_set_it_was_linked_under() {
+    let sets = two_sets();
+    let linked = sets.writer.digest();
+    let engine = engine_holding(&sets.node, &sets.writer);
+    let (run, declared) = run_declared(&sets.writer);
     let document =
         lash_kernel_doc::parse_document("kernel 1\nnumbers float\nmain { }").expect("a document");
     let start = |packages| {
@@ -229,24 +258,106 @@ async fn a_start_is_judged_by_the_declarations_of_the_set_it_was_linked_under() 
     let performed = BTreeMap::from([(run.clone(), declared.requirement.clone())]);
 
     let owned = engine
-        .owned_operations(&start(Some(linked)), &performed)
+        .owned_operations(&start(linked), &performed)
         .await
         .expect("the linked set's declarations read");
     assert_eq!(owned.get(&run), Some(&declared));
     assert!(
         engine
-            .owned_operations(&start(None), &performed)
-            .await
-            .expect("the node's own set")
-            .is_empty(),
-        "no package of the node's own set owns `run`"
-    );
-    assert!(
-        engine
-            .owned_operations(&start(Some(unstored_digest(&lash))), &performed)
+            .owned_operations(&start(unstored_digest(&sets.lash)), &performed)
             .await
             .is_err(),
         "a set the store keeps no surface of judges no runner"
+    );
+}
+
+/// A function value whose entry `run` answers its argument.
+fn identity_function() -> lash_kernel_doc::FunctionValue {
+    use lash_kernel_doc::{
+        Document, Entry, Expr, Function, Name, NumberPolicy, Param, Signature, StartConvention,
+        Stmt, Type,
+    };
+    let run = Name::new(lash_kernel_doc::FUNCTION_VALUE_ENTRY);
+    let mut document = Document::new(NumberPolicy::Float, Vec::new());
+    document.functions.insert(
+        run.clone(),
+        Function {
+            params: vec![Name::new("x")],
+            body: vec![Stmt::Return {
+                value: Expr::Variable(Name::new("x")),
+            }],
+            start: None,
+        },
+    );
+    document.entries.insert(
+        run.clone(),
+        Entry {
+            signature: Signature {
+                params: vec![Param {
+                    name: Name::new("x"),
+                    ty: Type::Any,
+                    optional: false,
+                }],
+                result: Type::Any,
+            },
+            convention: StartConvention::Direct,
+        },
+    );
+    lash_kernel_doc::FunctionValue {
+        captions: lash_kernel_doc::Captions::empty(document.identity()),
+        document,
+        entry: run,
+    }
+}
+
+/// INLINE-LINKED (FIG-6993): a function a cell linked under set A starts
+/// inline records A on its start, and a node whose own set is B that takes
+/// the start over resolves its owned operations under A, as the starting
+/// node does: which node reads a start never changes what it runs under.
+#[tokio::test]
+async fn an_inline_start_resolves_its_operations_under_its_starters_set_on_any_node() {
+    let sets = two_sets();
+    let linked = sets.writer.digest();
+    let starter = engine_holding(&sets.writer, &sets.writer);
+    let taker = engine_holding(&sets.node, &sets.writer);
+    let (run, declared) = run_declared(&sets.writer);
+    let starts = lash_core::ProcessEngineRegistry::new()
+        .with_registration(crate::kernel_process_engine_registration(starter))
+        .inline_starts(crate::LASH_VM_ENGINE_KIND)
+        .expect("the kernel engine starts functions inline");
+    let payload = identity_function()
+        .transport_json()
+        .expect("the value encodes");
+    let inline = starts
+        .inspect(&payload, linked)
+        .await
+        .expect("the function checks under the cell's set");
+    let resolved = lash_execution_contracts::process::ResolvedProcessDefinition {
+        definition: lash_execution_contracts::process::ProcessDefinition::new(
+            inline.draft.id(),
+            inline.signature,
+        ),
+        draft: inline.draft,
+    };
+    let start = resolved
+        .start_payload(&serde_json::Map::new())
+        .expect("a start payload");
+    assert_eq!(
+        crate::KernelProcessInput::from_payload(&start)
+            .expect("the kernel's start")
+            .packages,
+        linked,
+        "the start records its starter's set"
+    );
+    let performed = BTreeMap::from([(run.clone(), declared.requirement.clone())]);
+    let owned = taker
+        .owned_operations(&start, &performed)
+        .await
+        .expect("the starter's set's declarations read");
+    assert_eq!(
+        owned.get(&run),
+        Some(&declared),
+        "the taking node resolves under the starter's set, not its own"
     );
 }
 
@@ -269,5 +380,5 @@ fn unstored_digest(lash: &[lash_kernel_package::Package]) -> lash_kernel_doc::Pa
     .expect("other builds");
     lash_kernel_package::HeldPackages::install(lash.iter().cloned().chain([other]))
         .expect("another set")
-        .own()
+        .digest()
 }

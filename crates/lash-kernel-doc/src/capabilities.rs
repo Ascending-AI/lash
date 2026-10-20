@@ -63,6 +63,20 @@ pub struct NodeCapabilities {
     pub surface: Option<PackageSetDigest>,
 }
 
+impl NodeCapabilities {
+    /// Add every capability `other` offers; this node's own package set
+    /// stays, unless it names none.
+    pub fn extend(&mut self, other: &Self) {
+        self.natives.extend(other.natives.iter().copied());
+        self.kernels.extend(other.kernels.iter().copied());
+        self.providers.extend(other.providers.iter().cloned());
+        self.codecs.extend(other.codecs.iter().cloned());
+        if self.surface.is_none() {
+            self.surface = other.surface;
+        }
+    }
+}
+
 impl ExecutionRequirements {
     /// Whether `node` offers every requirement.
     #[must_use]

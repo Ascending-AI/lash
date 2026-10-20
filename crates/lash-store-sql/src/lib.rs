@@ -120,7 +120,6 @@ pub const TABLES: &[&str] = &[
     durable::packages::INTERNAL_OPERATIONS_TABLE,
     durable::packages::LABELS_TABLE,
     durable::packages::MEMBERS_TABLE,
-    durable::packages::NODE_ARTIFACTS_TABLE,
     durable::packages::SETS_TABLE,
     durable::pages::FRONTIER_TABLE,
     durable::pages::HOLDS_TABLE,

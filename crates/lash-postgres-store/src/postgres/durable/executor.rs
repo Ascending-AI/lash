@@ -406,10 +406,9 @@ impl Call {
         hints: &head_commit::SessionHints,
         fleet: lash_core_store::store::FleetFormat,
     ) -> Option<Self> {
-        // A claim-requirement or package-set rewrite takes the
-        // explicit-transaction form, which stamps it (FIG-6034 D3,
-        // FIG-6918).
-        if tx.requires().is_some() || tx.packages().is_some() {
+        // A claim-requirement rewrite takes the explicit-transaction form,
+        // which stamps it (FIG-6034 D3).
+        if tx.requires().is_some() {
             return None;
         }
         let mut call = Self {

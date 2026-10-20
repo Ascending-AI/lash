@@ -735,8 +735,10 @@ impl lash_durable::runner::Activation for MeasuredActivation {
             .await
     }
 
-    async fn hold(&self) -> Result<lash_durable::NodeHolding, lash_durable::DurableError> {
-        self.inner.hold().await
+    async fn capabilities(
+        &self,
+    ) -> Result<lash_durable::NodeCapabilities, lash_durable::DurableError> {
+        self.inner.capabilities().await
     }
 }
 
@@ -789,6 +791,7 @@ async fn sequential_effect_occurrences_decode_constant_facts_per_occurrence() {
                 lease: lash_durable::LeaseConfig::default(),
                 decodes: node_backend.formats().decodes(),
                 serves: lash::testing::node_serves(&core),
+                offers: Default::default(),
                 max_active: 1,
                 claim_batch: 1,
                 retirement: lash_durable::RetirementSettings::standard(),

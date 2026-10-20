@@ -88,6 +88,7 @@ impl DeclaredDefinitionLaunch {
 pub struct DeclaredInlineLaunch {
     engine_kind: String,
     payload: serde_json::Value,
+    packages: lash_kernel_doc::PackageSetDigest,
     launch: DeclaredLaunch,
 }
 
@@ -102,12 +103,30 @@ impl DeclaredInlineLaunch {
         &self.payload
     }
 
+    /// The package set the function is linked under: its starter's,
+    /// recorded when the start was declared (FIG-6993).
+    pub fn packages(&self) -> lash_kernel_doc::PackageSetDigest {
+        self.packages
+    }
+
     pub fn launch(&self) -> &EngineLaunch {
         self.launch.launch()
     }
 
-    pub(crate) fn into_parts(self) -> (String, serde_json::Value, EngineLaunch) {
-        (self.engine_kind, self.payload, self.launch.into_launch())
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        String,
+        serde_json::Value,
+        lash_kernel_doc::PackageSetDigest,
+        EngineLaunch,
+    ) {
+        (
+            self.engine_kind,
+            self.payload,
+            self.packages,
+            self.launch.into_launch(),
+        )
     }
 }
 
@@ -131,11 +150,13 @@ pub fn held_definition_launch(
 pub fn held_inline_launch(
     engine_kind: String,
     payload: serde_json::Value,
+    packages: lash_kernel_doc::PackageSetDigest,
     launch: DeclaredLaunch,
 ) -> DeclaredInlineLaunch {
     DeclaredInlineLaunch {
         engine_kind,
         payload,
+        packages,
         launch,
     }
 }

@@ -19,7 +19,6 @@ mod inline;
 mod migrate;
 mod pages;
 mod replay;
-mod retain;
 mod run;
 mod state;
 mod succession;
@@ -53,7 +52,6 @@ pub use replay::{
     ProcessReplayRequest, ReplayFault, ReplayPath, ReplaySegments, SegmentAnswer, SegmentReplay,
     TaskPath, Unreplayable,
 };
-pub use retain::{RetainDependent, RetainSurvey, StrandedDependent, retained_processes};
 pub use state::{KERNEL_RUN_STEP, KernelProcessDefinition, KernelProcessInput};
 pub use workflow::{
     AdmittedWorkflow, WorkflowAdmissionOutcome, WorkflowAdmissionRefusal, WorkflowAdmissionRequest,
@@ -302,12 +300,10 @@ pub fn definition_draft(
     lash_execution_contracts::process::ProcessDefinitionDraftError,
 > {
     let mut value = serde_json::json!({
+        "packages": definition.packages,
         "document": definition.document,
         "entry": definition.entry,
     });
-    if let Some(packages) = definition.packages {
-        value["packages"] = serde_json::json!(packages);
-    }
     if !definition.functions.is_empty() {
         value["functions"] = serde_json::json!(definition.functions);
     }
@@ -329,12 +325,14 @@ pub fn entry_signature(
     }
 }
 
-/// The definition an explicit publication of `function` of `document`
-/// would have: a pure id and signature derivation, with no storage or registry read.
+/// The definition an explicit publication of `function` of `document`,
+/// linked under `packages`, would have: a pure id and signature derivation,
+/// with no storage or registry read.
 pub fn definition_of_entry(
     document: &Document,
     identity: DocumentId,
     function: &Name,
+    packages: lash_kernel_doc::PackageSetDigest,
 ) -> Result<serde_json::Value, String> {
     let signature = document.entries.get(function).ok_or_else(|| {
         format!("`{function}` is not an entry of the document, so no process starts from it")
@@ -343,7 +341,7 @@ pub fn definition_of_entry(
         document,
         identity,
         function.clone(),
-        None,
+        packages,
     ))
     .map_err(|error| error.to_string())?;
     serde_json::to_value(lash_execution_contracts::process::ProcessDefinition::new(
@@ -442,8 +440,8 @@ impl KernelProcessEngine {
     /// package set a start of `payload` is linked under, with what each
     /// package declares (PKG-RUNNER): that set's surface snapshot, as this
     /// node holds it or, for a set it does not hold, as the store keeps it
-    /// (FIG-6985). A start that names no set is linked under this node's
-    /// own.
+    /// (FIG-6985). Every start names its set, recorded when it was made
+    /// (FIG-6993), so every node answers the same.
     ///
     /// # Errors
     ///
@@ -464,28 +462,78 @@ impl KernelProcessEngine {
         };
         let linked = KernelProcessInput::from_payload(payload)
             .map_err(|error| fault(error.to_string()))?
-            .packages
-            .unwrap_or_else(|| self.packages.own());
-        let surface = match self.packages.surface(&linked) {
-            Some(surface) => Arc::clone(surface),
-            None => {
-                let bytes = self
-                    .authority
-                    .package_surface(&linked)
-                    .await
-                    .map_err(|unread| fault(unread.to_string()))?
-                    .ok_or_else(|| fault(format!("package set {linked} has no stored surface")))?;
-                Arc::new(
-                    lash_kernel_package::SurfaceSnapshot::decode(linked, &bytes)
-                        .map_err(|refusal| fault(refusal.to_string()))?,
-                )
-            }
-        };
+            .packages;
+        let surface = self.linked_surface(linked).await.map_err(fault)?;
         let view = lash_kernel_package::PackageView::new(&surface, self.packages.functions());
         Ok(performed
             .keys()
             .filter_map(|effect| Some((effect.clone(), crate::owned_operation(&view, effect)?)))
             .collect())
+    }
+
+    /// The surface of the package set `linked`: the node's own set's, or
+    /// the stored one (FIG-6993), which any node reads the same.
+    ///
+    /// # Errors
+    ///
+    /// The store does not answer, holds no surface for `linked`, or holds
+    /// one that does not read as it.
+    pub(crate) async fn linked_surface(
+        &self,
+        linked: lash_kernel_doc::PackageSetDigest,
+    ) -> Result<Arc<lash_kernel_package::SurfaceSnapshot>, String> {
+        if linked == self.packages.digest() {
+            return Ok(Arc::clone(self.packages.surface()));
+        }
+        let bytes = self
+            .authority
+            .package_surface(&linked)
+            .await
+            .map_err(|unread| unread.to_string())?
+            .ok_or_else(|| format!("package set {linked} has no stored surface"))?;
+        lash_kernel_package::SurfaceSnapshot::decode(linked, &bytes)
+            .map(Arc::new)
+            .map_err(|refusal| refusal.to_string())
+    }
+
+    /// The surface of the package set `linked` and the registry its code is
+    /// linked against: the node's own, or for a stored set the node's with
+    /// the definitions it lacks read from the store over it (FIG-6993).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::linked_surface`], or the store holds no definition the
+    /// stored surface names that the node lacks.
+    pub(crate) async fn linked_packages(
+        &self,
+        linked: lash_kernel_doc::PackageSetDigest,
+    ) -> Result<
+        (
+            Arc<lash_kernel_package::SurfaceSnapshot>,
+            Arc<lash_kernel_doc::FunctionRegistry>,
+        ),
+        String,
+    > {
+        let surface = self.linked_surface(linked).await?;
+        if linked == self.packages.digest() {
+            return Ok((surface, Arc::clone(self.packages.functions())));
+        }
+        let missing: Vec<_> = surface
+            .functions()
+            .into_iter()
+            .filter(|function| self.packages.functions().get(function).is_none())
+            .collect();
+        let stored = self
+            .documents
+            .stored_functions(missing)
+            .await
+            .map_err(|error| error.to_string())?
+            .map_err(|unretained| format!("package set {linked}'s definitions: {unretained:?}"))?;
+        let catalog = self
+            .packages
+            .catalog_with(&stored)
+            .map_err(|refusal| refusal.to_string())?;
+        Ok((surface, catalog))
     }
 
     /// The engine that runs the documents in `documents`, written in
@@ -651,13 +699,28 @@ impl lash_execution_contracts::process::ProcessEngine for KernelProcessEngine {
             .await
             .map_err(|error| uncertified(error.to_string()))?
             .map_err(uncertified)?;
+        // A document written under a stored set names definitions the node
+        // may lack: they are certified as its pin stored them (FIG-6985).
+        // Where the store keeps none, the node's own registry answers, and
+        // names what it lacks.
+        let functions = match self
+            .documents
+            .stored_definitions(&document, &self.functions)
+            .await
+        {
+            Ok(Ok(stored)) if !stored.is_empty() => self
+                .packages
+                .catalog_with(&stored)
+                .map_err(|refusal| uncertified(refusal.to_string()))?,
+            _ => Arc::clone(&self.functions),
+        };
         self.effect_preparations
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .effects(
                 definition.document,
                 &document,
-                &self.functions,
+                &functions,
                 &definition.entry,
             )
     }

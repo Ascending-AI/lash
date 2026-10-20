@@ -131,10 +131,13 @@ pub enum ProcessStartTarget {
     /// publish what it runs under the start's referrer, then publishes its
     /// descriptor and starts that definition exactly as a
     /// [`Self::Definition`] start does (FIG-6382). The committed start
-    /// carries the bytes, so every redrive realizes the same definition.
+    /// carries the bytes and the package set its starter linked it under,
+    /// so every redrive, on any node, realizes the same definition
+    /// (FIG-6993).
     Inline {
         engine_kind: String,
         payload: serde_json::Value,
+        packages: lash_kernel_doc::PackageSetDigest,
         #[serde(default)]
         args: serde_json::Map<String, serde_json::Value>,
         launch: EngineLaunch,

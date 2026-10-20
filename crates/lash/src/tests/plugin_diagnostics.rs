@@ -53,7 +53,6 @@ async fn recorded_attribution_survives_removal() {
             node: NodeId::new("retained-writer"),
             decodes: vec![format.clone()],
             serves: Vec::new(),
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: 60000,
         })

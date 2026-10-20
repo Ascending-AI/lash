@@ -440,18 +440,8 @@ mod rlm_step_serde_tests {
     /// message, with no rendered guidance and no host detail.
     #[test]
     fn a_failed_step_reads_back_as_its_kind_and_message() {
-        for (failure, kind) in [
-            (program_failure(), serde_json::json!("program")),
-            (
-                CellFailure::new(
-                    CellFailureKind::PackagesNotHeld {
-                        packages: lash_kernel_doc::PackageSetDigest::from_bytes([7; 32]),
-                    },
-                    "missing packages",
-                ),
-                serde_json::json!({"packages_not_held": {"packages": "07".repeat(32)}}),
-            ),
-        ] {
+        {
+            let (failure, kind) = (program_failure(), serde_json::json!("program"));
             let message = failure.message.clone();
             let item = history(&CellRecord {
                 result: CellOutcome::Failed(failure),

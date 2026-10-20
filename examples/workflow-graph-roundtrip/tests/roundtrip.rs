@@ -618,5 +618,5 @@ async fn corpus_catalog_imports_both_dialects_and_draws_the_stored_read() {
 fn test_packages() -> lash::package::PackageView<'static> {
     static HELD: std::sync::LazyLock<std::sync::Arc<lash::package::HeldPackages>> =
         std::sync::LazyLock::new(|| lash::package::lash_packages().expect("the test packages"));
-    HELD.view(&HELD.own()).expect("the selected test set")
+    HELD.view()
 }

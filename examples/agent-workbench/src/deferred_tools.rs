@@ -31,7 +31,7 @@ pub(crate) const DEFERRED_PROVIDER_KEY: lash::plugins::ToolProviderKey =
 /// `{"kind": "agent_workbench_deferred", "call_path": <path>}`.
 /// version_surface = "coexist"
 /// version_guard(items(BINDING_FORMAT, binding_for))
-const BINDING_FORMAT: lash::plugins::FormatVersion = lash::plugins::FormatVersion::ONE;
+pub(crate) const BINDING_FORMAT: lash::plugins::FormatVersion = lash::plugins::FormatVersion::ONE;
 
 /// The provider every deferred match executes through: the workbench
 /// plugin's deferred provider.

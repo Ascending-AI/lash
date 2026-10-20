@@ -28,7 +28,6 @@ async fn a_wake_capture_is_read_only_when_a_trigger_captured() {
             node: NodeId::new("capture-owner"),
             decodes: vec![formats()],
             serves: Vec::new(),
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: 15_000,
         })
@@ -238,7 +237,6 @@ pub(super) async fn lost_hint_reaches_the_claim_poll() {
             node: NodeId::new("doomed"),
             decodes: vec![formats()],
             serves: Vec::new(),
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: 15_000,
         })

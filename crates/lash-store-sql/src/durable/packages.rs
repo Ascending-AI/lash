@@ -1,5 +1,5 @@
-//! Package artifacts and sets, and the artifacts each live node holds
-//! (FIG-6918, S1-F2): the neutral statements of the `packages` domain.
+//! Package artifacts and sets, and what each live node offers (FIG-6918,
+//! S1-F2, FIG-6993): the neutral statements of the `packages` domain.
 //!
 //! An artifact row is keyed by the artifact's digest, which its path is
 //! among the facts of, and carries the ordinal the store assigned it on its
@@ -7,24 +7,10 @@
 //! carries the store's install sequence, the only key behind "newest
 //! first", its surface snapshot and its execution requirements, written
 //! once by the install that first stores it (FIG-6991); its members are
-//! rows of their own. A node's held artifacts are rows of the node, deleted
-//! with it, and its capabilities a column of its row. "Node N holds set S" is derived from
-//! them and never stored. Each claim statement that decides whether a node
-//! runs an actor spells it over the actor's `packages` column, as
-//!
-//! ```text
-//! a.packages IS NULL OR (
-//!     EXISTS (SELECT 1 FROM package_sets AS ps WHERE ps.digest = a.packages)
-//!     AND NOT EXISTS (SELECT 1 FROM package_set_members AS pm
-//!         WHERE pm.set_digest = a.packages
-//!           AND NOT EXISTS (SELECT 1 FROM node_artifacts AS nh
-//!               WHERE nh.node_id = <node> AND nh.artifact = pm.artifact)))
-//! ```
-//!
-//! (CLAIM-HOLDS): the set is installed and the node holds every member.
-
-/// `node_artifacts`: one row per package artifact a live node holds.
-pub const NODE_ARTIFACTS_TABLE: &str = "node_artifacts";
+//! rows of their own. A node's capabilities are a column of its row,
+//! deleted with it. No claim reads a package table: an actor's hard
+//! requirements are tokens of its `requires`, and a node serves its
+//! capabilities' tokens (FIG-6993).
 
 /// `package_artifacts`: one row per installed artifact, with its bytes.
 pub const ARTIFACTS_TABLE: &str = "package_artifacts";
@@ -54,19 +40,20 @@ pub const LABELS_TABLE: &str = "package_labels";
 crate::statements! {
     /// Package statements both backends issue verbatim.
     pub struct PackageStatements @ "durable_packages" {
-        /// Record that node `?1` holds artifact `?2` of package path `?3`.
-        hold = "INSERT INTO node_artifacts (node_id, artifact, path) VALUES (?1, ?2, ?3)";
-
         /// Every node whose lease is live at `?1`, with its decoded format
-        /// sets as a JSON array, its capabilities (its own set among them)
-        /// as JSON and each artifact
-        /// it holds, one row per artifact (one row with NULL artifact
-        /// columns when it holds none), by node and artifact.
-        live_nodes = "SELECT n.node_id, n.formats_json, n.capabilities_json, h.artifact, h.path
+        /// sets as a JSON array and its capabilities (its own set among
+        /// them) as JSON, by node.
+        live_nodes = "SELECT n.node_id, n.formats_json, n.capabilities_json
              FROM nodes AS n
-             LEFT JOIN node_artifacts AS h ON h.node_id = n.node_id
              WHERE n.heartbeat_expires_at_ms >= ?1
-             ORDER BY n.node_id, h.artifact";
+             ORDER BY n.node_id";
+
+        /// Up to `?2` actors that have not ended and carry claim
+        /// requirements, by key after `?1`, each with its requirements.
+        actor_requirements = "SELECT actor_key, requires FROM actors
+             WHERE state <> 'terminal' AND requires IS NOT NULL AND actor_key > ?1
+             ORDER BY actor_key
+             LIMIT ?2";
 
         /// Install artifact `?1` of package path `?2`, with header `?3`, at
         /// the next ordinal of its line; nothing when it is installed.

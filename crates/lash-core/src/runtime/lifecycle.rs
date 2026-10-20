@@ -498,7 +498,7 @@ impl LashRuntime {
                             )
                             .into());
                         }
-                        selected = Some((packages, provider.package_view(packages)?));
+                        selected = Some((packages, provider.package_view(packages).await?));
                     }
                 }
                 selected

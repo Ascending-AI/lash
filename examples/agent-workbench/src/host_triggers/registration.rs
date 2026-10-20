@@ -27,7 +27,7 @@ fn definition(
         &value.document,
         value.document.identity(),
         value.entry.clone(),
-        Some(packages.digest()),
+        packages.digest(),
     );
     let draft = lash::process::ProcessDefinitionDraft::new(
         lash::process::LASH_VM_ENGINE_KIND,
@@ -165,8 +165,12 @@ impl HostTriggers {
             .parse()
             .map_err(|error: lash::package::InvalidDigest| error.to_string())?;
         let held = lash::package::lash_packages().map_err(|error| error.to_string())?;
-        let packages = lash::package::CellPackages::held(&held, &packages)
-            .ok_or_else(|| format!("subscription {id}'s package set {packages} is not held"))?;
+        if held.digest() != packages {
+            return Err(format!(
+                "subscription {id}'s package set {packages} is not this build's"
+            ));
+        }
+        let packages = lash::package::CellPackages::held(&held);
         let environment = delivered_process_environment().map_err(|error| error.to_string())?;
         let outcome = core
             .host_artifacts()

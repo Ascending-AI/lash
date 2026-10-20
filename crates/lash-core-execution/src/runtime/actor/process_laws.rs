@@ -1075,7 +1075,6 @@ async fn crash_claims(backend: &Backend, process: &ProcessId, count: u32) -> Law
                 node: NodeId::new(NODE),
                 decodes: backend.formats().decodes(),
                 serves: Vec::new(),
-                held: Default::default(),
                 capabilities: Default::default(),
                 ttl_millis: TTL_MILLIS,
             })

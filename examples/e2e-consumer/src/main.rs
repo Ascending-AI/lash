@@ -581,7 +581,6 @@ mod commit_cut_laws {
             node: NodeId::new("node-a"),
             decodes: vec![formats],
             serves: Vec::new(),
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: 15_000,
         };

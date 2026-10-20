@@ -15,7 +15,8 @@ pub(super) async fn link(
     };
     let linked = stores
         .engines
-        .link_package_namespaces(kind, payload, env.clone())?;
+        .link_package_namespaces(kind, payload, env.clone())
+        .await?;
     if linked == env {
         return Ok(Some(env));
     }

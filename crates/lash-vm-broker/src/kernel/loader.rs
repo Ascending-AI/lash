@@ -106,13 +106,11 @@ impl From<ClosureRefusal> for LoadRefusal {
 impl From<LoadRefusal> for lash_vm_protocol::KernelRestoreRefusal {
     fn from(refusal: LoadRefusal) -> Self {
         match refusal {
-            LoadRefusal::Missing { function } => Self::MissingFunction {
-                function: function.to_string(),
-            },
             LoadRefusal::NativeMissing { function } => Self::MissingNative {
                 function: function.to_string(),
             },
-            LoadRefusal::Undecodable { function, .. }
+            LoadRefusal::Missing { function }
+            | LoadRefusal::Undecodable { function, .. }
             | LoadRefusal::Identity { function, .. }
             | LoadRefusal::Unlisted { function }
             | LoadRefusal::KernelVersion { function, .. }

@@ -250,15 +250,6 @@ define_plugin_errors! {
         => Self::ProcessSuccessorRefused { .. }
         => "process_successor_refused"
         => crate::ToolFailureClass::InvalidRequest;
-/// The definition names a surface snapshot absent from this node.
-    #[error("package set {packages} is not held by this node")]
-    PackagesNotHeld { packages: lash_kernel_doc::PackageSetDigest }
-        => PluginError::PackagesNotHeld { packages }
-        => { packages: lash_kernel_doc::PackageSetDigest }
-        => Self::PackagesNotHeld { packages: *packages }
-        => Self::PackagesNotHeld { .. }
-        => "packages_not_held"
-        => crate::ToolFailureClass::Execution;
 /// An installed package's namespace is closed to deferred resolution.
     #[error("package path `{path}` cannot be resolved dynamically; use a public member offered by its surface (no such member is offered by a deferred provider)")]
     PackageNamespace { path: String }
@@ -1004,9 +995,7 @@ impl PluginError {
             ),
             // the substrate faulted, or the owning shift releases the head
             // at its boundary.
-            Self::PackagesNotHeld { .. }
-            | Self::StoreUnavailable { .. }
-            | Self::SessionHeadOwned { .. } => Retryable,
+            Self::StoreUnavailable { .. } | Self::SessionHeadOwned { .. } => Retryable,
             Self::Runtime(error) => {
                 if error.is_retryable() {
                     Retryable
@@ -1299,7 +1288,6 @@ impl From<PluginError> for lash_protocol_types::PluginOperationFailure {
         let runtime = match &error {
             PluginError::PackageNamespace { .. }
             | PluginError::InternalOperation { .. }
-            | PluginError::PackagesNotHeld { .. }
             | PluginError::Preflight(_)
             | PluginError::ProviderConfig { .. }
             | PluginError::ProviderRegistryMismatch { .. } => {

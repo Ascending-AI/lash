@@ -396,6 +396,14 @@ mod tool_call_reads {
             self.inner.live_nodes().await
         }
 
+        async fn actor_requirements(
+            &self,
+            after: Option<&lash_durable::ActorKey>,
+            limit: usize,
+        ) -> Result<Vec<(lash_durable::ActorKey, Vec<String>)>, DurableError> {
+            self.inner.actor_requirements(after, limit).await
+        }
+
         async fn install_packages(
             &self,
             artifacts: &[lash_durable::packages::ArtifactInstall],

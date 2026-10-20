@@ -64,7 +64,13 @@ pub(crate) async fn import(
     limits: Option<WorkflowSourceLimits>,
 ) -> crate::Result<WorkflowImport> {
     let (document, source_map, captions) = match workers
-        .import_workflow(language, source, operations, packages.digest(), limits)
+        .import_workflow(
+            language,
+            source,
+            operations,
+            lash_vm_client::service::SurfaceRef::of(packages.digest(), packages.stored_wire()),
+            limits,
+        )
         .await
     {
         Ok(imported) => imported,

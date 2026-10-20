@@ -1019,8 +1019,9 @@ fn heap_fault(fault: lash_kernel_doc::heap::HeapFault) -> PoolError {
 /// The kernel's refusal of a root as the protocol carries it.
 fn restore_refusal(error: OpenError) -> KernelRestoreRefusal {
     match error {
-        OpenError::MissingFunction { function } => KernelRestoreRefusal::MissingFunction {
+        OpenError::MissingFunction { function } => KernelRestoreRefusal::DefinitionRefused {
             function: function.to_string(),
+            problem: "the worker's library lacks it".to_owned(),
         },
         OpenError::NotAdmitted(invalid) => KernelRestoreRefusal::NotAdmitted {
             reason: invalid.to_string(),

@@ -4,7 +4,7 @@ use std::ops::Range;
 use std::sync::{Arc, OnceLock};
 
 use lash_kernel_dialect::{MemberPath, PackagePath};
-use lash_kernel_doc::{ArtifactDigest, FunctionName, FunctionRegistry, PackageSetDigest};
+use lash_kernel_doc::{ArtifactDigest, FunctionName, FunctionRegistry};
 use lash_kernel_vm::PreparedLibrary;
 use serde::{Deserialize, Serialize};
 
@@ -20,8 +20,7 @@ struct Artifact {
 #[derive(Serialize, Deserialize)]
 struct Holdings {
     artifacts: Vec<Artifact>,
-    sets: Vec<BTreeMap<PackagePath, ArtifactDigest>>,
-    own: PackageSetDigest,
+    set: BTreeMap<PackagePath, ArtifactDigest>,
 }
 
 fn refuse(message: impl std::fmt::Display) -> PackageRefusal {
@@ -82,12 +81,7 @@ pub(crate) fn build(
         .collect();
     let metadata = rmp_serde::to_vec_named(&Holdings {
         artifacts,
-        sets: held
-            .sets()
-            .values()
-            .map(|set| set.members().clone())
-            .collect(),
-        own: held.own(),
+        set: held.set().members().clone(),
     })
     .map_err(refuse)?;
     let mut bytes = Vec::with_capacity(image.len() + library.len() + metadata.len() + 16);
@@ -182,23 +176,12 @@ impl HeldPackages {
                 Ok((package.key(), Arc::new(package)))
             })
             .collect::<Result<BTreeMap<_, _>, PackageRefusal>>()?;
-        let sets: BTreeMap<_, _> = holdings
-            .sets
-            .into_iter()
-            .map(|members| {
-                let set = PackageSet::from_members(members);
-                (set.digest(), set)
-            })
-            .collect();
-        if !sets.contains_key(&holdings.own) {
-            return Err(PackageRefusal::OwnNotHeld);
-        }
-        let surfaces = crate::held::surfaces(&artifacts, &sets, &functions);
+        let set = PackageSet::from_members(holdings.set);
+        let surface = crate::held::surface(&artifacts, &set, &functions);
         Ok(Self {
             artifacts,
-            sets,
-            own: holdings.own,
-            surfaces,
+            set,
+            surface,
             functions,
             frame,
             live_frame: OnceLock::from(bytes),

@@ -124,6 +124,7 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             tool_requests: Arc::default(),
             tool_call_limit_refusal: Arc::default(),
             recorded_grants: Arc::default(),
+            linked_packages: None,
             extension_trace: crate::trace::ExtensionTrace::untraced(),
             parent_invocation: None,
             turn_phase_probe: None,
@@ -229,8 +230,11 @@ fn enclosing_process(
     process: &lash_execution_contracts::process::ProcessRecord,
     env: Option<Arc<crate::ProcessEnv>>,
 ) -> Option<Arc<crate::EnclosingProcess>> {
-    let lash_execution_contracts::process::ProcessInput::Engine { kind, launch, .. } =
-        process.input.as_ref()
+    let lash_execution_contracts::process::ProcessInput::Engine {
+        kind,
+        payload,
+        launch,
+    } = process.input.as_ref()
     else {
         return None;
     };
@@ -239,6 +243,7 @@ fn enclosing_process(
         env_ref: launch.env.clone(),
         env: Arc::unwrap_or_clone(env?),
         engine_kind: kind.clone(),
+        payload: payload.clone(),
         settings: launch.settings.clone(),
     }))
 }

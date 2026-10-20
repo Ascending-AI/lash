@@ -124,8 +124,6 @@ struct Pending {
     closures: BTreeSet<NodeId>,
     /// The held runs whose carries the capture owns once committed.
     runs: usize,
-    /// Whether the capture's commit clears the session's package stamp.
-    clears: bool,
 }
 
 /// Why a cell's saved functions could not be relinked to its package set.
@@ -158,17 +156,14 @@ pub struct CodeModeExecutionState {
     closures: BTreeMap<NodeId, Closure>,
     /// The closures an acknowledged capture installed.
     installed_closures: BTreeSet<NodeId>,
-    /// The package stamp the session's row holds, when known: a parked
-    /// cell's parks stamp it with the set the cell was written under, so
-    /// only a node holding that set claims the turn (FIG-6918,
-    /// CLAIM-HOLDS), and a capture between cells clears it. A capture
-    /// rewrites it only when it changes, since a stamping commit takes the
-    /// store's explicit-transaction path.
-    stamped: Option<Option<lash_kernel_doc::PackageSetDigest>>,
     /// The package set the session's latest prompt showed: the fleet
     /// gate's answer for its round, which the round's cell is written
     /// under while this node holds it (P3).
     shown: Option<crate::plugin::CellPackages>,
+    /// The surface of every set this state's cells were written under, by
+    /// digest: the releases a stale value's message names beside the
+    /// node's own (FIG-6993).
+    read: BTreeMap<lash_kernel_doc::PackageSetDigest, Arc<lash_kernel_package::SurfaceSnapshot>>,
     pending: Option<Pending>,
     /// Whether the state as it stands is a turn's working state no session
     /// revision publishes yet: the turn's final capture owes it even when
@@ -215,8 +210,8 @@ impl CodeModeExecutionState {
             installed: None,
             closures: BTreeMap::new(),
             installed_closures: BTreeSet::new(),
-            stamped: None,
             shown: None,
+            read: BTreeMap::new(),
             pending: None,
             final_owed: false,
             active: None,
@@ -575,6 +570,9 @@ impl CodeModeExecutionState {
         cell: &crate::plugin::CellPackages,
     ) -> Result<(), RelinkError> {
         let packages = cell.digest();
+        self.read
+            .entry(packages)
+            .or_insert_with(|| Arc::clone(cell.surface()));
         if self.current.linked == Some(packages) {
             return Ok(());
         }
@@ -1002,7 +1000,6 @@ impl CodeModeExecutionState {
             purpose,
             closures: BTreeSet::new(),
             runs: self.pages.held(),
-            clears: false,
         });
         Ok(ExecutionGraphCapture::Replace(graph))
     }
@@ -1038,10 +1035,9 @@ impl CodeModeExecutionState {
         self.shown.clone()
     }
 
-    /// Notes that a park of this state's cell stamped the session with
-    /// `packages`: the next capture between cells clears it.
-    pub(crate) fn parked_under(&mut self, packages: lash_kernel_doc::PackageSetDigest) {
-        self.stamped = Some(Some(packages));
+    /// The surfaces of the sets this state's cells were written under.
+    pub(crate) fn read_surfaces(&self) -> Vec<&lash_kernel_package::SurfaceSnapshot> {
+        self.read.values().map(AsRef::as_ref).collect()
     }
 
     /// The session's descriptor as it stands, if it holds one.
@@ -1057,9 +1053,7 @@ impl CodeModeExecutionState {
     /// spool holds it: a candidate of the same capture built before is
     /// withdrawn first. Every execution closure of a cell this state ran
     /// that the pages name and no acknowledged capture installed is staged
-    /// in `tx`. None when the store holds `root`'s pages. A capture between
-    /// cells clears the package stamp a parked cell left in `tx`, either
-    /// way.
+    /// in `tx`. None when the store holds `root`'s pages.
     ///
     /// # Errors
     ///
@@ -1073,13 +1067,6 @@ impl CodeModeExecutionState {
         let Some(pending) = self.pending.as_mut().filter(|pending| pending.root == root) else {
             return Ok(None);
         };
-        // A parked cell's own parks stamp the session with the set it was
-        // written under; a session between cells relinks its next one and
-        // pins none, whether or not the commit publishes pages.
-        pending.clears = self.active.is_none() && self.stamped != Some(None);
-        if pending.clears {
-            tx.stamp_packages(None);
-        }
         let Some(mut spool) = self.pages.staged().cloned() else {
             return Ok(None);
         };
@@ -1121,9 +1108,6 @@ impl CodeModeExecutionState {
             return;
         };
         self.installed = Some(pending.root);
-        if pending.clears {
-            self.stamped = Some(None);
-        }
         for closure in &pending.closures {
             self.closures.remove(closure);
         }
@@ -1205,8 +1189,6 @@ impl CodeModeExecutionState {
         };
         self.installed = Some(graph.root);
         self.final_owed = purpose == ExecutionGraphPurpose::Working;
-        // What the restored session's row is stamped with is not known here.
-        self.stamped = None;
         self.withdraw_pending();
         self.active = None;
         self.response_returned = false;

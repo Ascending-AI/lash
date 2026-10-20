@@ -224,6 +224,7 @@ pub async fn run(config: NodeConfig) -> Result<Stopped, String> {
             // The SQL-defined workers install no process component: the
             // node serves its core's session callbacks.
             serves: lash::testing::node_serves(&core),
+            offers: Default::default(),
         },
         stop,
     )

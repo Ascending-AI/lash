@@ -22,45 +22,8 @@ use super::registrar::PluginContributions;
 use super::*;
 use crate::{ProcessId, SessionId, ToolProvider};
 
-/// What a component declares about itself: its id and formats for stored state and config.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ProcessComponentDeclaration {
-    pub id: ProcessComponentId,
-    /// The format of stored state and config the component reads natively.
-    pub format_version: FormatVersion,
-    /// Every state and config format it reads. Contains `format_version`.
-    pub readable_formats: Vec<FormatVersion>,
-    /// Every state and config format it writes. Contains `format_version`.
-    pub writable_formats: Vec<FormatVersion>,
-}
-
-impl ProcessComponentDeclaration {
-    /// The declaration of a component that reads and writes only `format_version`.
-    ///
-    /// # Errors
-    ///
-    /// The id is refused.
-    pub fn initial(id: &str, format_version: FormatVersion) -> Result<Self, PluginError> {
-        Ok(Self {
-            id: ProcessComponentId::new(id)
-                .map_err(|error| PluginError::Registration(error.to_string()))?,
-            format_version,
-            readable_formats: vec![format_version],
-            writable_formats: vec![format_version],
-        })
-    }
-
-    /// The claim requirements a process under `env` carries from its
-    /// start: one format token for every component `env` names.
-    pub fn env_requirements(env: &ProcessEnv) -> BTreeSet<crate::ObligationToken> {
-        env.components()
-            .iter()
-            .map(|entry| {
-                crate::ObligationToken::for_component(entry.id(), entry.config().format_version())
-            })
-            .collect()
-    }
-}
+mod declaration;
+pub use declaration::ProcessComponentDeclaration;
 
 /// A process component as a host installs it.
 pub trait ProcessComponentFactory: Send + Sync {
@@ -155,70 +118,8 @@ pub trait ProcessSessionReads: Send + Sync {
     fn session(&self, session: &SessionId) -> Result<Arc<dyn SessionReadService>, PluginError>;
 }
 
-/// The host services every component of a deployment builds against.
-#[derive(Clone)]
-pub struct ProcessComponentHost {
-    pub tracing: crate::trace::TraceRuntime,
-    pub extensions: PluginExtensions,
-    pub sessions: Option<Arc<dyn ProcessSessionReads>>,
-}
-
-impl ProcessComponentHost {
-    pub fn new(tracing: crate::trace::TraceRuntime) -> Self {
-        Self {
-            tracing,
-            extensions: PluginExtensions::default(),
-            sessions: None,
-        }
-    }
-
-    #[must_use]
-    pub fn with_session_reads(mut self, sessions: Arc<dyn ProcessSessionReads>) -> Self {
-        self.sessions = Some(sessions);
-        self
-    }
-
-    /// The ports `entry` grants.
-    pub fn ports(&self, entry: &ProcessComponentEntry) -> ProcessComponentPorts {
-        ProcessComponentPorts {
-            tracing: self.tracing.clone(),
-            extensions: self.extensions.clone(),
-            granted: entry.sessions().clone(),
-            reads: self.sessions.clone(),
-        }
-    }
-}
-
-/// The live services a component binds lazily.
-pub struct ProcessComponentPorts {
-    pub tracing: crate::trace::TraceRuntime,
-    pub extensions: PluginExtensions,
-    granted: BTreeSet<SessionId>,
-    reads: Option<Arc<dyn ProcessSessionReads>>,
-}
-
-impl ProcessComponentPorts {
-    /// A read service for `session` when this component's env entry grants
-    /// it (D17).
-    ///
-    /// # Errors
-    ///
-    /// The entry does not grant `session`, or the host serves no session
-    /// reads.
-    pub fn session(&self, session: &SessionId) -> Result<Arc<dyn SessionReadService>, PluginError> {
-        if !self.granted.contains(session) {
-            return Err(PluginError::Session(format!(
-                "this component's environment entry grants no read of session `{session}`"
-            )));
-        }
-        let Some(reads) = self.reads.as_ref() else {
-            return Err(PluginError::Session(
-                "this deployment serves no session reads to process components".into(),
-            ));
-        };
-        reads.session(session)
-    }
-}
+mod ports;
+pub use ports::{ProcessComponentHost, ProcessComponentPorts};
 
 /// Ergonomic static component entries in the shared registration model.
 #[derive(Clone, Default)]
@@ -240,10 +141,11 @@ impl ProcessComponentSpec {
         key: ToolProviderKey,
         provider: Arc<dyn ToolProvider>,
     ) -> Self {
-        let result = self
-            .registrations
-            .tools()
-            .record_provider(key, move |_, _| Ok(Arc::clone(&provider)));
+        let result = self.registrations.tools().record_provider(
+            key,
+            provider.readable_binding_formats(),
+            move |_, _| Ok(Arc::clone(&provider)),
+        );
         self.admit(result);
         self
     }
@@ -945,6 +847,12 @@ pub enum StepLink {
         tool: crate::ToolId,
         kind: crate::ToolSurfaceDriftKind,
     },
+    /// The link's provider is not registered on this node (FIG-6993):
+    /// the call's process parks before it is admitted, claimable to run
+    /// only by a node that registers it, and the strand report names the
+    /// provider while no live node does. It is the deployment, not the
+    /// call: nothing settles.
+    ProviderUnregistered { provider: crate::ProviderKey },
     /// A link's codec payload cannot be read here (S8): its codec is not
     /// registered, or does not read its format. The call's process parks
     /// before it is admitted.
@@ -1022,6 +930,11 @@ impl ProcessComposition {
             tool: link.tool.clone(),
             kind,
         };
+        if !self.registers(&link.provider) {
+            return StepLink::ProviderUnregistered {
+                provider: link.provider.clone(),
+            };
+        }
         let served = match self.served_link(env, link) {
             Ok(served) => served,
             Err((codec, reason)) => return StepLink::Unreadable { codec, reason },
@@ -1049,16 +962,30 @@ impl ProcessComposition {
         }
     }
 
+    /// Whether `provider` is registered on this node, as a provider or as
+    /// the deferred one.
+    fn registers(&self, provider: &crate::ProviderKey) -> bool {
+        self.registry.provider(provider).is_some()
+            || self.registry.deferred_provider(provider).is_some()
+    }
+
     /// How this node serves the call of the tool `matched` resolved a
     /// granted tool's call path to (P6): the provider the match records, by its
     /// key, bound as the match routes it, under the policy its link
-    /// recorded. One not registered here settles the call typed, without a
-    /// body, as a missing linked tool does (D3).
+    /// recorded. One whose provider is not registered here parks the call's
+    /// process ([`StepLink::ProviderUnregistered`], FIG-6993); one whose
+    /// provider no longer binds the tool settles typed, without a body, as a
+    /// missing linked tool does (D3).
     #[must_use]
     pub fn matched_link(&self, matched: &crate::DeferredMatch) -> StepLink {
         let Some(link) = matched.resolved() else {
             return StepLink::Unlinked;
         };
+        if !self.registers(&link.provider) {
+            return StepLink::ProviderUnregistered {
+                provider: link.provider.clone(),
+            };
+        }
         let Some(definition) = link.admitted(None) else {
             return StepLink::Unlinked;
         };

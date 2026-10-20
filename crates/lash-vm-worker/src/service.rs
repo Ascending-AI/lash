@@ -25,10 +25,7 @@ pub(crate) fn perform(
             operations,
             packages,
         } => {
-            let surface = match surface_of(embedding, &packages)? {
-                Ok(surface) => surface,
-                Err(not_held) => return respond(&not_held),
-            };
+            let surface = surface_of(embedding, &packages)?;
             let namespaces = match embedding.namespaces(operations, &surface) {
                 Ok(namespaces) => namespaces,
                 Err(refused) => return respond(&namespace_refused(refused)),
@@ -68,13 +65,13 @@ pub(crate) fn perform(
             bindings,
             functions,
             packages,
-        } => match surface_of(embedding, &packages)?.map(|surface| {
-            let namespaces = embedding.namespaces(operations, &surface);
-            (surface, namespaces)
-        }) {
-            Err(not_held) => not_held,
-            Ok((_, Err(refused))) => namespace_refused(refused),
-            Ok((surface, Ok(namespaces))) => match embedding.lower(
+        } => {
+            let surface = surface_of(embedding, &packages)?;
+            let namespaces = match embedding.namespaces(operations, &surface) {
+                Ok(namespaces) => namespaces,
+                Err(refused) => return respond(&namespace_refused(refused)),
+            };
+            match embedding.lower(
                 &dialect,
                 &source,
                 &lash_kernel_dialect::Environment::new(surface.library(), &namespaces),
@@ -112,8 +109,8 @@ pub(crate) fn perform(
                         .and_then(|package| package.function_values.clone()),
                 },
                 Some(Err(diagnostic)) => Response::DialectRefused(refusal(diagnostic)),
-            },
-        },
+            }
+        }
         Request::ImportWorkflow {
             language,
             source,
@@ -121,11 +118,7 @@ pub(crate) fn perform(
             packages,
             limits,
         } => {
-            let packages = lash_vm_client::service::SurfaceRef::held(packages);
-            let surface = match surface_of(embedding, &packages)? {
-                Ok(surface) => surface,
-                Err(not_held) => return respond(&not_held),
-            };
+            let surface = surface_of(embedding, &packages)?;
             let namespaces = match embedding.namespaces(operations, &surface) {
                 Ok(namespaces) => namespaces,
                 Err(refused) => return respond(&namespace_refused(refused)),
@@ -216,24 +209,21 @@ fn namespace_refused(refused: crate::embedding::Namespaces) -> Response {
     })
 }
 
-/// The names and surface of `packages`, or the answer that the worker
-/// neither holds it nor was sent what it lacks of it (FIG-6918, FIG-6991).
+/// The names and surface of `packages`: the worker's own set, or a stored
+/// surface sent with what the worker lacks of it (FIG-6991, FIG-6993).
 ///
 /// # Errors
 ///
-/// A surface whose names do not assemble, or a stored one that does not
-/// read as what it claims to be.
+/// A set neither the worker's nor sent, a surface whose names do not
+/// assemble, or a stored one that does not read as what it claims to be:
+/// each a defect of the parent.
 fn surface_of<'a>(
     embedding: &'a Embedding,
     packages: &lash_vm_client::service::SurfaceRef,
-) -> Result<Result<crate::embedding::Surface<'a>, Response>, PoolError> {
-    match embedding.surface(packages) {
-        Ok(surface) => Ok(Ok(surface)),
-        Err(crate::embedding::EmbedError::PackagesNotHeld { packages }) => {
-            Ok(Err(Response::PackagesNotHeld { packages }))
-        }
-        Err(error) => Err(PoolError::payload(PayloadKind::ServiceRequest, error)),
-    }
+) -> Result<crate::embedding::Surface<'a>, PoolError> {
+    embedding
+        .surface(packages)
+        .map_err(|error| PoolError::payload(PayloadKind::ServiceRequest, error))
 }
 
 /// The installed dialect's name for source in `language`.
@@ -391,7 +381,7 @@ mod tests {
             operations: Default::default(),
             bindings: Default::default(),
             functions,
-            packages: lash_vm_client::service::SurfaceRef::held(embedding.packages().own()),
+            packages: lash_vm_client::service::SurfaceRef::held(embedding.packages().digest()),
         };
         let encoded =
             EncodedPayload(rmp_serde::to_vec_named(&lower(Default::default())).expect("request"));
@@ -437,52 +427,6 @@ mod tests {
             panic!("a lowering request");
         };
         assert_eq!(functions[&name].document.id(), identified.id());
-    }
-
-    /// S1-F1: a request names the cell's package set, and a worker that
-    /// does not hold it lowers nothing: it answers which set it lacks, for
-    /// a cell, a tool-call discovery and a workflow import alike.
-    #[test]
-    fn a_worker_lacking_the_cells_package_set_answers_which() {
-        let embedding =
-            crate::embedding::tests::every_dialect(&Default::default()).expect("embedding");
-        let unheld = lash_kernel_doc::PackageSetDigest::from_bytes([7; 32]);
-        assert!(embedding.packages().view(&unheld).is_err());
-        let source = "function advance(value) { return value + 2; }".to_owned();
-        for request in [
-            Request::Lower {
-                dialect: "typescript".to_owned(),
-                source: source.clone(),
-                operations: Default::default(),
-                bindings: Default::default(),
-                functions: Default::default(),
-                packages: lash_vm_client::service::SurfaceRef::held(unheld),
-            },
-            Request::ToolCalls {
-                dialect: "typescript".to_owned(),
-                source: source.clone(),
-                bindings: Default::default(),
-                functions: Default::default(),
-                operations: Default::default(),
-                packages: lash_vm_client::service::SurfaceRef::held(unheld),
-            },
-            Request::ImportWorkflow {
-                language: SourceLanguage::TypeScript,
-                source: source.clone(),
-                operations: Default::default(),
-                packages: unheld,
-                limits: None,
-            },
-        ] {
-            let encoded = EncodedPayload(rmp_serde::to_vec_named(&request).expect("request"));
-            let response: Response =
-                rmp_serde::from_slice(&perform(&embedding, &encoded).expect("answered").0)
-                    .expect("response");
-            assert!(
-                matches!(response, Response::PackagesNotHeld { packages } if packages == unheld),
-                "a request under an unheld set answered {response:?}"
-            );
-        }
     }
 
     std::thread_local! {

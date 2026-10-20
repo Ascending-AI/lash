@@ -46,6 +46,7 @@ impl RuntimeErrorCause {
             | Self::SessionDeleted { .. }
             | Self::ArtifactReferrerEnded { .. }
             | Self::RunShapeRefused { .. }
+            | Self::NoCompatibleSnapshot { .. }
             | Self::ConfigRefused { .. }
             | Self::MaxToolCallsExceeded { .. }
             | Self::PluginStateUnrecorded { .. }

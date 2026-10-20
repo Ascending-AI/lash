@@ -77,8 +77,7 @@ pub(super) enum Admission {
 impl ProcessActivation {
     /// Rewrite on `tx` the requirements of the process `record` once it
     /// holds `driver`'s steps (S7): what its outstanding work owes, with the
-    /// steps `fresh` admits. The requirements written, or `None` when they
-    /// are unchanged.
+    /// steps `fresh` admits. Every write is projected from the current records.
     pub(super) async fn rewrite_requires(
         &self,
         tx: &mut ActorTx,
@@ -87,26 +86,31 @@ impl ProcessActivation {
         fold: &RunFold,
         fresh: &[AdmittedExecution],
         live: &Live,
-    ) -> Result<Option<Vec<String>>, DurableError> {
+    ) -> Result<(), DurableError> {
         let environment = self
             .steps
             .requirements(&live.bodies.runtime, record, &step_requests(driver))
             .await?
             .unwrap_or_default();
-        let mut work = outstanding_work(&record.id, environment, driver, Some(fold));
+        let mut work = outstanding_work(&record.id, environment, &live.record, driver, Some(fold));
         for execution in fresh {
-            work.admit(
+            work.admit_linked(
                 OwnerKey::Process(record.id.clone()),
                 execution.draft().call().clone(),
                 execution.draft().binding(),
+                driver
+                    .steps
+                    .values()
+                    .find(|step| step.call == *execution.draft().call())
+                    .and_then(|step| step.request.matched())
+                    .and_then(crate::DeferredMatch::resolved),
             );
         }
         let requires = work.requires();
-        if requires == live.requires {
-            return Ok(None);
-        }
-        tx.set_requires(requires.clone());
-        Ok(Some(requires))
+        // A lifecycle outcome may have changed the stored obligations
+        // since the last engine transition; always publish this projection.
+        tx.set_requires(requires);
+        Ok(())
     }
 
     /// Consume `handoff`'s resolution, a granted tool's call's resolution
@@ -192,13 +196,9 @@ impl ProcessActivation {
             driver_json: driver.encode(),
         }));
         self.record_published(&mut tx, process, row);
-        let requires = self
-            .rewrite_requires(&mut tx, record, &driver, fold, &fresh, live)
+        self.rewrite_requires(&mut tx, record, &driver, fold, &fresh, live)
             .await?;
         owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
-        if let Some(requires) = requires {
-            live.requires = requires;
-        }
         live.lifecycle.admitted(&fresh);
         Ok(Pass::Again)
     }
@@ -420,20 +420,43 @@ pub(super) fn step_requests(driver: &Driver) -> Vec<StepRequest> {
 pub(super) fn outstanding_work(
     process: &ProcessId,
     environment: BTreeSet<crate::ObligationToken>,
+    record: &lash_kernel_doc::ExecutionRequirements,
     driver: &Driver,
     fold: Option<&RunFold>,
 ) -> crate::runtime::actor::claim_obligations::RecordedWork {
-    let mut work = crate::runtime::actor::claim_obligations::RecordedWork::process(environment);
+    let mut work = crate::runtime::actor::claim_obligations::RecordedWork::process(
+        process,
+        environment,
+        record,
+    );
     for step in driver.steps.values() {
         let member = fold
             .and_then(|fold| fold.round(RunSeq(step.run)))
             .and_then(|round| round.members().get(usize::try_from(step.member).ok()?));
         if let Some(member) = member {
-            work.admit(
-                OwnerKey::Process(process.clone()),
-                member.call().clone(),
-                member.draft().binding(),
-            );
+            if let Some(outcome) = member.outcome() {
+                // Until handoff consumes a resolution, its committed match
+                // owns the target link, even though the resolver settled.
+                if step.resolves
+                    && let Some(matched) = crate::runtime::process::steps::resolved_match(outcome)
+                {
+                    work.admit_linked(
+                        OwnerKey::Process(process.clone()),
+                        member.call().clone(),
+                        None,
+                        matched.resolved(),
+                    );
+                }
+            } else {
+                work.admit_linked(
+                    OwnerKey::Process(process.clone()),
+                    member.call().clone(),
+                    member.draft().binding(),
+                    step.request
+                        .matched()
+                        .and_then(crate::DeferredMatch::resolved),
+                );
+            }
         }
     }
     work

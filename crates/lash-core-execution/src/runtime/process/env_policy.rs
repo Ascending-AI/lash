@@ -64,6 +64,9 @@ pub struct ResolvedInlineStart {
     pub target: ResolvedStartTarget,
     /// The function, as its engine's payload.
     pub payload: serde_json::Value,
+    /// The package set the function is linked under: its starter's, which
+    /// the start records (FIG-6993).
+    pub packages: lash_kernel_doc::PackageSetDigest,
 }
 
 /// The process a start is made inside: its recorded environment and
@@ -74,6 +77,9 @@ pub struct EnclosingProcess {
     pub env_ref: ProcessEnvRef,
     pub env: ProcessEnv,
     pub engine_kind: String,
+    /// The process's start payload: what its engine reads the package set
+    /// it is linked under from.
+    pub payload: serde_json::Value,
     pub settings: Option<EngineSettings>,
 }
 
@@ -292,6 +298,7 @@ impl ProcessEngineRegistry {
             })?;
         let env = self
             .link_package_namespaces(kind, payload, env)
+            .await
             .map_err(|error| ProcessEnvRefusal::Uncertified {
                 reason: error.to_string(),
             })?;

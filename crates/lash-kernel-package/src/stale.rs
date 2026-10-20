@@ -59,6 +59,44 @@ impl StaleValue {
     /// that several hold, unchanged across them, names every one of them,
     /// since it cannot tell which built the value.
     pub fn message(&self, held: &HeldPackages) -> String {
+        self.message_with(held, &[])
+    }
+
+    /// [`Self::message`], naming releases among the node's own artifacts
+    /// and the packages of `surfaces`, the stored sets the reader read
+    /// (FIG-6993).
+    pub fn message_with(
+        &self,
+        held: &HeldPackages,
+        surfaces: &[&crate::SurfaceSnapshot],
+    ) -> String {
+        let known = held
+            .artifacts()
+            .values()
+            .map(|package| Known::of(package))
+            .chain(surfaces.iter().flat_map(|surface| {
+                surface.packages().map(|package| Known {
+                    key: package.key(),
+                    release: package.release(),
+                    holds: Box::new(|function: &FunctionId| {
+                        surface
+                            .package_definitions(package.path())
+                            .is_some_and(|definitions| definitions.contains(function))
+                    }),
+                })
+            }))
+            .collect();
+        self.describe(known)
+    }
+
+    /// [`Self::message`], naming releases among `packages`: the artifacts
+    /// of every release a reader knows, the node's own set's and any other
+    /// build's it read.
+    pub fn message_among(&self, packages: &[&crate::Package]) -> String {
+        self.describe(packages.iter().map(|package| Known::of(package)).collect())
+    }
+
+    fn describe(&self, packages: Vec<Known<'_>>) -> String {
         let package = self
             .ty
             .rsplit_once('.')
@@ -66,7 +104,7 @@ impl StaleValue {
         let path = PackagePath::parse(package).ok();
         let releases = |function: &FunctionId| {
             path.as_ref()
-                .map_or_else(Vec::new, |path| releases(held, path, function))
+                .map_or_else(Vec::new, |path| releases(&packages, path, function))
         };
         let current = releases(&self.current);
         let built = self.built.as_ref().map_or_else(Vec::new, releases);
@@ -112,17 +150,41 @@ fn one<'a>(releases: &[Release<'a>]) -> Option<&'a str> {
     }
 }
 
+/// A release a reader knows: its artifact's key, its label, and whether
+/// its code holds a function.
+struct Known<'a> {
+    key: crate::ArtifactKey,
+    release: &'a str,
+    holds: Box<dyn Fn(&FunctionId) -> bool + 'a>,
+}
+
+impl<'a> Known<'a> {
+    fn of(package: &'a crate::Package) -> Self {
+        Self {
+            key: package.key(),
+            release: package.release(),
+            holds: Box::new(|function: &FunctionId| package.code().ids().contains(function)),
+        }
+    }
+}
+
 /// Every release of the package at `path` whose code holds `function`, in
 /// artifact key order: the one place the diagnosis finds which releases
 /// hold a constructor or a check.
 fn releases<'a>(
-    held: &'a HeldPackages,
+    packages: &[Known<'a>],
     path: &PackagePath,
     function: &FunctionId,
 ) -> Vec<Release<'a>> {
-    held.artifacts()
+    let mut found: Vec<(&crate::ArtifactKey, &'a str)> = packages
         .iter()
-        .filter(|(key, package)| key.path == *path && package.code().ids().contains(function))
-        .map(|(key, package)| (package.release(), key.digest))
+        .filter(|known| known.key.path == *path && (known.holds)(function))
+        .map(|known| (&known.key, known.release))
+        .collect();
+    found.sort_by_key(|(key, _)| *key);
+    found.dedup_by(|(a, _), (b, _)| a == b);
+    found
+        .into_iter()
+        .map(|(key, release)| (release, key.digest))
         .collect()
 }

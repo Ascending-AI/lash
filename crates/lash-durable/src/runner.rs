@@ -108,6 +108,10 @@ pub struct RunnerConfig {
     pub decodes: Vec<FormatSet>,
     /// The claim requirements this build serves.
     pub serves: Vec<String>,
+    /// What this build's registrations offer running code: the providers
+    /// it registers and the codec versions they read. The node advertises
+    /// them beside its package code's capabilities (FIG-6993).
+    pub offers: crate::NodeCapabilities,
     /// The node-lease timings.
     pub lease: LeaseConfig,
     /// How many actors the node keeps at once. An owner with nothing to
@@ -128,6 +132,13 @@ impl RunnerConfig {
         self
     }
 
+    /// This config, its node's registrations offering `offers`.
+    #[must_use]
+    pub fn with_offers(mut self, offers: crate::NodeCapabilities) -> Self {
+        self.offers = offers;
+        self
+    }
+
     /// Run as `node`, decoding `decodes`, with `config`'s validated lease,
     /// capacity and claim batch.
     #[must_use]
@@ -137,6 +148,7 @@ impl RunnerConfig {
             node,
             decodes,
             serves: Vec::new(),
+            offers: crate::NodeCapabilities::default(),
             lease: config.lease(),
             max_active: settings.max_active,
             claim_batch: settings.claim_batch,
@@ -360,20 +372,20 @@ pub trait Activation: Send + Sync + 'static {
     /// The runner drops this future, mid-await, when the node stops serving.
     async fn activate(&self, owned: Owned) -> Exit;
 
-    /// The package code the node holds (FIG-6918): its activation installs
-    /// it in the store and answers the artifacts and capabilities the node
-    /// advertises before it registers, so a node claims an actor only when
-    /// it holds the set the actor's code was linked under (CLAIM-HOLDS), and
-    /// a set's surface is promoted only once every live serving node meets
-    /// its requirements (FIG-6991). An activation that runs no package code
-    /// holds none.
+    /// What the node's package code offers running code (FIG-6991,
+    /// FIG-6993): its activation installs the code in the store and
+    /// answers the natives, kernels and own package set the node
+    /// advertises before it registers. A node claims an actor to run it
+    /// only when its capabilities meet the actor's hard requirements, and a
+    /// set's surface is promoted only once every live serving node meets
+    /// its requirements. An activation that runs no package code offers
+    /// none.
     ///
     /// # Errors
     ///
-    /// The refusal that keeps the node from starting, such as
-    /// [`DurableError::RetiredDependents`], or the store's.
-    async fn hold(&self) -> Result<crate::NodeHolding, DurableError> {
-        Ok(crate::NodeHolding::default())
+    /// The store's refusal of the install.
+    async fn capabilities(&self) -> Result<crate::NodeCapabilities, DurableError> {
+        Ok(crate::NodeCapabilities::default())
     }
 }
 
@@ -737,17 +749,17 @@ impl Runner {
     pub async fn run(self, stop: impl Future<Output = ()> + Send) -> Result<Stopped, DurableError> {
         let settings = self.config.lease.settings();
         tokio::pin!(stop);
-        let held = tokio::select! {
+        let mut capabilities = tokio::select! {
             biased;
             () = &mut stop => return Ok(Stopped::Requested),
-            held = self.activation.hold() => held?,
+            capabilities = self.activation.capabilities() => capabilities?,
         };
+        capabilities.extend(&self.config.offers);
         let spec = NodeSpec {
             node: self.config.node.clone(),
             decodes: self.config.decodes.clone(),
             serves: self.config.serves.clone(),
-            held: held.held,
-            capabilities: held.capabilities,
+            capabilities,
             ttl_millis: self.config.lease.ttl_millis(),
         };
         let mut register_delay = settings.claim_backoff;

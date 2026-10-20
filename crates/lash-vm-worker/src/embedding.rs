@@ -20,9 +20,9 @@
 //! opens its parent's merged image and binds its build's natives.
 //!
 //! Names resolve against one package set's functions: the set the parent's
-//! fleet gate chose for the cell (FIG-6918), the node's own or a retained
-//! one it wholly holds. Every held function stays reachable by identity, so
-//! a document written under another set reads as written.
+//! fleet gate chose for the cell (FIG-6993), from the node's registration
+//! or a stored surface. Definitions stay reachable by identity, so a
+//! document written under another set reads as written.
 
 use std::collections::BTreeMap;
 #[cfg(test)]
@@ -30,7 +30,7 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, OnceLock};
 
 use lash_kernel_dialect::{Diagnostic, Dialect, Environment, Lowered, Mode, NamedLibrary};
-use lash_kernel_doc::{FunctionId, FunctionRegistry, NativeFunction, PackageSetDigest};
+use lash_kernel_doc::{FunctionId, FunctionRegistry, NativeFunction};
 use lash_kernel_package::{HeldPackages, PackageInstall, PackageRefusal};
 use lash_kernel_vm::PreparedLibrary;
 
@@ -56,17 +56,6 @@ pub enum EmbedError {
          `Embedder::new().dialect(typescript(tuning)?)?.finish(&packages)`"
     )]
     NoDialect,
-    /// A writer asked for the names of a package set the embedding does
-    /// not hold.
-    #[error("package set {packages} is not held by this embedding")]
-    PackagesNotHeld { packages: PackageSetDigest },
-}
-
-fn cached<T>(
-    slot: &OnceLock<Result<T, EmbedError>>,
-    init: impl FnOnce() -> Result<T, EmbedError>,
-) -> Result<&T, EmbedError> {
-    slot.get_or_init(init).as_ref().map_err(Clone::clone)
 }
 
 /// What a worker holds from its parent's pool-start frame.
@@ -78,10 +67,8 @@ pub struct Embedding {
     /// The names of the node's own set.
     pub(crate) library: NamedLibrary,
     pub(crate) dialects: BTreeMap<String, Dialect>,
-    /// The packages the parent holds, as it registered them.
+    /// The packages the parent registered.
     held: HeldPackages,
-    /// Each retained set's names, made when a writer first asks for them.
-    retained: BTreeMap<PackageSetDigest, OnceLock<Result<NamedLibrary, EmbedError>>>,
     /// The stored definitions runs supplied, decoded and checked once.
     stored: lash_vm_broker::kernel::loader::Definitions,
     /// The libraries assembled for runs that reach a function the frame
@@ -111,27 +98,6 @@ impl Embedding {
     #[must_use]
     pub fn installs(&self, dialect: &str) -> bool {
         self.dialects.contains_key(dialect)
-    }
-
-    /// The names a writer of the cell's package set `packages` resolves
-    /// against: that set's functions, over every function the embedding
-    /// holds by identity.
-    ///
-    /// # Errors
-    ///
-    /// [`EmbedError::PackagesNotHeld`], and [`EmbedError::Registry`] when
-    /// the set's names cannot be assembled: a defect of the build.
-    pub fn library_of(&self, packages: &PackageSetDigest) -> Result<&NamedLibrary, EmbedError> {
-        if *packages == self.held.own() {
-            return Ok(&self.library);
-        }
-        let library = self
-            .retained
-            .get(packages)
-            .ok_or(EmbedError::PackagesNotHeld {
-                packages: *packages,
-            })?;
-        cached(library, || set_library(&self.written, &self.held, packages))
     }
 
     /// The fixed registry a machine runs documents against, interpreted by
@@ -169,31 +135,33 @@ impl Embedding {
         Some(dialect.front_end.lower(source, environment, mode))
     }
 
-    /// The names and surface a writer of `packages` resolves against: a
-    /// held set's, or a stored surface's, sent whole with the definitions
-    /// it names that the embedding does not hold (FIG-6991).
+    /// The names and surface a writer of `packages` resolves against: the
+    /// embedding's own set's, or a stored surface's, sent whole with the
+    /// definitions it names that the embedding does not hold (FIG-6991).
     ///
     /// # Errors
     ///
-    /// [`EmbedError::PackagesNotHeld`] for a held set the embedding does not
-    /// hold, or a stored surface naming a definition neither held nor sent;
-    /// [`EmbedError::Registry`] for a surface or definition that does not
-    /// read as what it claims to be.
+    /// [`EmbedError::Registry`] for a set that is neither the embedding's
+    /// nor sent, a stored surface naming a definition neither held nor sent,
+    /// or a surface or definition that does not read as what it claims to
+    /// be: each a defect of the parent, which sends what its worker lacks.
     pub(crate) fn surface(
         &self,
         packages: &lash_vm_client::service::SurfaceRef,
     ) -> Result<Surface<'_>, EmbedError> {
+        let refused = |message: String| EmbedError::Registry(message);
         let Some(stored) = &packages.stored else {
+            if packages.digest != self.held.digest() {
+                return Err(refused(format!(
+                    "package set {} is neither this embedding's nor sent",
+                    packages.digest
+                )));
+            }
             return Ok(Surface::Held {
-                library: self.library_of(&packages.digest)?,
-                view: self.held.view(&packages.digest).map_err(|refusal| {
-                    EmbedError::PackagesNotHeld {
-                        packages: refusal.packages,
-                    }
-                })?,
+                library: &self.library,
+                view: self.held.view(),
             });
         };
-        let refused = |message: String| EmbedError::Registry(message);
         let surface =
             lash_kernel_package::SurfaceSnapshot::decode(packages.digest, &stored.surface)
                 .map_err(|refusal| refused(refusal.to_string()))?;
@@ -217,9 +185,10 @@ impl Embedding {
                 .map_err(|error| refused(error.to_string()))?;
         }
         if !missing.is_empty() {
-            return Err(EmbedError::PackagesNotHeld {
-                packages: packages.digest,
-            });
+            return Err(refused(format!(
+                "the stored surface {} names definitions neither held nor sent",
+                packages.digest
+            )));
         }
         Ok(Surface::Stored(Box::new(StoredNames { surface, library })))
     }
@@ -446,7 +415,10 @@ impl Embedder {
         registry
             .bind_frame_plans(packages.frame_positions()?, lash_ext_py_core::PLANS)
             .map_err(|error| EmbedError::Registry(error.to_string()))?;
-        let library = set_library(&registry, packages, &packages.own())?;
+        let library = packages
+            .view()
+            .library(&registry)
+            .map_err(|error| EmbedError::Registry(error.to_string()))?;
         let registry = Arc::new(registry);
         let prepared =
             PreparedLibrary::over_frame(registry.clone(), lash_kernel_vm::Charge::Exact, index)
@@ -456,33 +428,11 @@ impl Embedder {
             written: registry,
             prepared: OnceLock::from(prepared),
             dialects: self.dialects,
-            retained: packages
-                .sets()
-                .keys()
-                .filter(|set| **set != packages.own())
-                .map(|set| (*set, OnceLock::new()))
-                .collect(),
             held: packages.clone(),
             stored: lash_vm_broker::kernel::loader::Definitions::default(),
             loaded: lash_vm_broker::kernel::loader::Libraries::new(16),
         })
     }
-}
-
-/// The functions of the held set `packages` by name, over every function
-/// of `registry` by identity.
-fn set_library(
-    registry: &FunctionRegistry,
-    held: &HeldPackages,
-    packages: &PackageSetDigest,
-) -> Result<NamedLibrary, EmbedError> {
-    let view = held
-        .view(packages)
-        .map_err(|refusal| EmbedError::PackagesNotHeld {
-            packages: refusal.packages,
-        })?;
-    view.library(registry)
-        .map_err(|error| EmbedError::Registry(error.to_string()))
 }
 
 /// The TypeScript dialect, its parser's stack sized by the parent's working

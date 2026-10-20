@@ -160,8 +160,9 @@ impl WorkbenchSessionPlugin {
             move |this, _state| Ok(this.deferred_tools.search_provider()),
         )?;
 
-        reg.tools().deferred(
+        reg.tools().deferred_reading(
             crate::deferred_tools::DEFERRED_PROVIDER_KEY,
+            &[crate::deferred_tools::BINDING_FORMAT],
             move |this, _state| {
                 Ok(lash::tools::DeferredToolProviderRegistration::new(
                     this.deferred_tools.deferred_provider(),

@@ -352,6 +352,24 @@ pub enum ProcessDocumentRefRead {
 /// document, answer `Unsupported`.
 #[async_trait::async_trait]
 pub trait ProcessDocumentProvider: Send + Sync {
+    /// What running a start of `payload` requires of a node before its
+    /// first activation (FIG-6993): the natives and kernel versions its
+    /// stored code was published with. The start's actor is created with
+    /// them among its claim requirements, so only a node that meets them
+    /// claims it to run; the first activation's record replaces them.
+    /// `None` when the code has no published record (an inline document),
+    /// which the first activation writes.
+    ///
+    /// # Errors
+    ///
+    /// The definition does not read, or the store fails to answer.
+    async fn start_requirements(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<Option<lash_kernel_doc::ExecutionRequirements>, crate::PluginError> {
+        Ok(None)
+    }
+
     /// The operations among `performed` whose paths a package owns, in the
     /// package set a start of `payload` is linked under, each with what its
     /// package declares (PKG-RUNNER).
@@ -365,11 +383,17 @@ pub trait ProcessDocumentProvider: Send + Sync {
         performed: &PerformedEffects,
     ) -> Result<OwnedOperations, crate::PluginError>;
 
-    /// The producer's package set for a host start with no parent cell.
+    /// The package set a start of `payload` is linked under: recorded on
+    /// the start when it was made, so every node reads the same one
+    /// (FIG-6993).
+    ///
+    /// # Errors
+    ///
+    /// A payload that is not this engine's.
     fn definition_packages(
         &self,
         payload: &serde_json::Value,
-    ) -> Result<Option<lash_kernel_doc::PackageSetDigest>, crate::PluginError>;
+    ) -> Result<lash_kernel_doc::PackageSetDigest, crate::PluginError>;
     /// The producer's own package set, over its registry.
     fn initial_packages(&self) -> Result<crate::CellPackages, crate::PluginError>;
     /// The package code the producer's workers hold. Core installs this
@@ -377,8 +401,9 @@ pub trait ProcessDocumentProvider: Send + Sync {
     fn held_packages(
         &self,
     ) -> Result<std::sync::Arc<lash_kernel_package::HeldPackages>, crate::PluginError>;
-    /// Resolve the definition's selected surface snapshot.
-    fn package_view(
+    /// Resolve the definition's selected surface snapshot: the producer's
+    /// own set's, or a stored one (FIG-6993).
+    async fn package_view(
         &self,
         packages: lash_kernel_doc::PackageSetDigest,
     ) -> Result<std::sync::Arc<dyn lash_kernel_dialect::ExportView + Send + Sync>, crate::PluginError>;
@@ -461,7 +486,9 @@ pub struct InlineDefinition {
 /// function, which it checks itself.
 #[async_trait::async_trait]
 pub trait InlineStarts: Send + Sync {
-    /// Check `payload` and derive what a start of it runs. Stores nothing.
+    /// Check `payload` and derive what a start of it, linked under the
+    /// package set `packages` its starter recorded (FIG-6993), runs. Stores
+    /// nothing.
     ///
     /// # Errors
     ///
@@ -469,6 +496,7 @@ pub trait InlineStarts: Send + Sync {
     async fn inspect(
         &self,
         payload: &serde_json::Value,
+        packages: lash_kernel_doc::PackageSetDigest,
     ) -> Result<InlineDefinition, crate::PluginError>;
 
     /// [`Self::inspect`], then hold what the definition executes under
@@ -484,6 +512,7 @@ pub trait InlineStarts: Send + Sync {
         &self,
         claim: &crate::ReferrerClaim,
         payload: &serde_json::Value,
+        packages: lash_kernel_doc::PackageSetDigest,
     ) -> Result<InlineDefinition, crate::PluginError>;
 }
 

@@ -58,8 +58,9 @@ pub enum Request {
         /// The operations the workflow is offered.
         #[serde(with = "lash_kernel_dialect::operation_keys")]
         operations: lash_kernel_dialect::Operations,
-        /// The gate's package set whose names the module resolves against.
-        packages: PackageSetDigest,
+        /// The gate's package surface whose names the module resolves
+        /// against: the worker's own set, or a stored one sent whole.
+        packages: SurfaceRef,
         limits: Option<lash_kernel_dialect::workflow::WorkflowSourceLimits>,
     },
     /// Print `document` (its token body) in the selected generated format,
@@ -83,9 +84,9 @@ pub enum Request {
     },
 }
 
-/// The package surface a source resolves against: a set the worker holds,
-/// by its digest, or a stored surface the worker's packages do not hold,
-/// sent whole with the definitions it names that they lack (FIG-6991).
+/// The package surface a source resolves against: the worker's own set, by
+/// its digest, or a stored surface that is not, sent whole with the
+/// definitions it names that the worker lacks (FIG-6991).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SurfaceRef {
@@ -120,12 +121,25 @@ impl StoredSurface {
 }
 
 impl SurfaceRef {
-    /// The held set `digest`.
+    /// The worker's own set `digest`.
     #[must_use]
     pub fn held(digest: PackageSetDigest) -> Self {
         Self {
             digest,
             stored: None,
+        }
+    }
+
+    /// The set `digest`, sent as its stored `surface` with the token body
+    /// of each definition it names that the worker lacks, or by digest
+    /// alone when it is the worker's own (`stored` is `None`).
+    #[must_use]
+    pub fn of(digest: PackageSetDigest, stored: Option<(&[u8], &[Vec<u8>])>) -> Self {
+        Self {
+            digest,
+            stored: stored.map(|(surface, definitions)| {
+                StoredSurface::new(surface.to_vec(), definitions.iter().cloned())
+            }),
         }
     }
 }
@@ -317,10 +331,6 @@ pub enum Response {
     /// The worker has no such dialect installed.
     UnknownDialect {
         dialect: String,
-    },
-    /// The worker holds no such package set.
-    PackagesNotHeld {
-        packages: PackageSetDigest,
     },
 }
 

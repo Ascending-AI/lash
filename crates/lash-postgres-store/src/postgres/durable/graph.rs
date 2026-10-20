@@ -42,7 +42,6 @@ use std::sync::LazyLock;
 
 use futures_util::TryStreamExt;
 
-use lash_core_store::checkpoint_graph::node::{immutable_catalog_heads, immutable_closure};
 use lash_core_store::checkpoint_graph::{
     BlobEncoding, DecodeDimension, DecodeLimits, GraphRefusal, InstalledGraphMeasurement, NodeId,
     NodeSource, StoredNode, check_envelope, node::is_semantic,
@@ -109,20 +108,17 @@ lash_store_sql::statements! {
              FROM UNNEST(?1::bytea[], ?2::bytea[]) AS staged(parent, child)";
 
         /// Every blob the roots `?1` reach along stored edges, the roots
-        /// included, with its encoding and bytes, short of the build
-        /// catalog's heads `?2`: one read of a whole graph, whose child
-        /// tables a walk still checks. Nothing a head reaches is read, and
-        /// nothing under a persistent-heap page (envelope kind 1000 to 1999,
-        /// a two-byte varint after the magic): the page is a leaf.
+        /// included, with its encoding and bytes: one read of a whole graph,
+        /// whose child tables a walk still checks. Nothing under a
+        /// persistent-heap page is read (envelope kind 1000 to 1999, a
+        /// two-byte varint after the magic): the page is a leaf.
         walk_reach = "WITH RECURSIVE reach AS (
                  SELECT UNNEST(?1::bytea[]) AS hash
                  UNION
                  SELECT edge.child_hash FROM blob_edges AS edge
                  JOIN reach ON edge.parent_hash = reach.hash
                  JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?2::bytea[]))
-                   AND NOT (edge.child_hash = ANY(?2::bytea[]))
-                   AND CASE
+                 WHERE CASE
                        WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
                        WHEN get_byte(parent.content, 4) < 128
                             OR get_byte(parent.content, 5) >= 128 THEN TRUE
@@ -141,9 +137,7 @@ lash_store_sql::statements! {
                  SELECT edge.child_hash FROM blob_edges AS edge
                  JOIN reach ON edge.parent_hash = reach.hash
                  JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?2::bytea[]))
-                   AND NOT (edge.child_hash = ANY(?2::bytea[]))
-                   AND CASE
+                 WHERE CASE
                        WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
                        WHEN get_byte(parent.content, 4) < 128
                             OR get_byte(parent.content, 5) >= 128 THEN TRUE
@@ -189,19 +183,17 @@ lash_store_sql::statements! {
                  ARRAY(SELECT DISTINCT edge.child_hash
                      FROM dead JOIN blob_edges AS edge ON edge.parent_hash = dead.hash)";
 
-        /// Execution `?2`'s root, with every blob it reaches along stored
+        /// Execution `?1`'s root, with every blob it reaches along stored
         /// edges and their bytes, in one statement: the root column (no row
-        /// when the owner is gone), then each node, short of the build
-        /// catalog's heads `?1` (nothing a head reaches is read) and short
-        /// of what a persistent-heap page reaches (envelope kind 1000 to
-        /// 1999, a two-byte varint after the magic): the page is a leaf.
+        /// when the owner is gone), then each node, short of what a
+        /// persistent-heap page reaches (envelope kind 1000 to 1999, a
+        /// two-byte varint after the magic): the page is a leaf.
         /// Each `hydrate_*` statement is this one over its own root source.
-        hydrate_exec = "WITH RECURSIVE root AS (SELECT root_ref AS hash FROM exec_snapshots WHERE exec_key = ?2),
+        hydrate_exec = "WITH RECURSIVE root AS (SELECT root_ref AS hash FROM exec_snapshots WHERE exec_key = ?1),
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
                  SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
                  JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?1::bytea[])) AND NOT (edge.child_hash = ANY(?1::bytea[]))
-                   AND CASE
+                 WHERE CASE
                        WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
                        WHEN get_byte(parent.content, 4) < 128
                             OR get_byte(parent.content, 5) >= 128 THEN TRUE
@@ -210,13 +202,12 @@ lash_store_sql::statements! {
                    END)
              SELECT root.hash, blob.hash, blob.encoding, blob.content
              FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
-        /// Owner `?2`'s run `?3` fact `?4`'s node, as [`Self::hydrate_exec`] reads an execution's.
-        hydrate_run_fact = "WITH RECURSIVE root AS (SELECT record_ref AS hash FROM run_records WHERE owner_key = ?2 AND run_seq = ?3 AND ordinal = ?4),
+        /// Owner `?1`'s run `?2` fact `?3`'s node, as [`Self::hydrate_exec`] reads an execution's.
+        hydrate_run_fact = "WITH RECURSIVE root AS (SELECT record_ref AS hash FROM run_records WHERE owner_key = ?1 AND run_seq = ?2 AND ordinal = ?3),
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
                  SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
                  JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?1::bytea[])) AND NOT (edge.child_hash = ANY(?1::bytea[]))
-                   AND CASE
+                 WHERE CASE
                        WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
                        WHEN get_byte(parent.content, 4) < 128
                             OR get_byte(parent.content, 5) >= 128 THEN TRUE
@@ -225,12 +216,11 @@ lash_store_sql::statements! {
                    END)
              SELECT root.hash, blob.hash, blob.encoding, blob.content
              FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
-        hydrate_model_call = "WITH RECURSIVE root AS (SELECT record_ref AS hash FROM model_call_records WHERE session_id = ?2 AND run = ?3 AND call = ?4),
+        hydrate_model_call = "WITH RECURSIVE root AS (SELECT record_ref AS hash FROM model_call_records WHERE session_id = ?1 AND run = ?2 AND call = ?3),
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
                  SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
                  JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?1::bytea[])) AND NOT (edge.child_hash = ANY(?1::bytea[]))
-                   AND CASE
+                 WHERE CASE
                        WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
                        WHEN get_byte(parent.content, 4) < 128
                             OR get_byte(parent.content, 5) >= 128 THEN TRUE
@@ -239,13 +229,12 @@ lash_store_sql::statements! {
                    END)
              SELECT root.hash, blob.hash, blob.encoding, blob.content
              FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
-        /// Effect `?3` of execution `?2`'s Admission node, as [`Self::hydrate_exec`] reads an execution's.
-        hydrate_admission = "WITH RECURSIVE root AS (SELECT admission_ref AS hash FROM effect_admissions WHERE exec_key = ?2 AND effect_id = ?3),
+        /// Effect `?2` of execution `?1`'s Admission node, as [`Self::hydrate_exec`] reads an execution's.
+        hydrate_admission = "WITH RECURSIVE root AS (SELECT admission_ref AS hash FROM effect_admissions WHERE exec_key = ?1 AND effect_id = ?2),
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
                  SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
                  JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?1::bytea[])) AND NOT (edge.child_hash = ANY(?1::bytea[]))
-                   AND CASE
+                 WHERE CASE
                        WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
                        WHEN get_byte(parent.content, 4) < 128
                             OR get_byte(parent.content, 5) >= 128 THEN TRUE
@@ -254,13 +243,12 @@ lash_store_sql::statements! {
                    END)
              SELECT root.hash, blob.hash, blob.encoding, blob.content
              FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
-        /// Run `?3` of session `?2`'s PhaseRoot, as [`Self::hydrate_exec`] reads an execution's.
-        hydrate_phase = "WITH RECURSIVE root AS (SELECT checkpoint_ref AS hash FROM turn_phases WHERE session_id = ?2 AND run = ?3),
+        /// Run `?2` of session `?1`'s PhaseRoot, as [`Self::hydrate_exec`] reads an execution's.
+        hydrate_phase = "WITH RECURSIVE root AS (SELECT checkpoint_ref AS hash FROM turn_phases WHERE session_id = ?1 AND run = ?2),
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
                  SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
                  JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?1::bytea[])) AND NOT (edge.child_hash = ANY(?1::bytea[]))
-                   AND CASE
+                 WHERE CASE
                        WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
                        WHEN get_byte(parent.content, 4) < 128
                             OR get_byte(parent.content, 5) >= 128 THEN TRUE
@@ -269,13 +257,12 @@ lash_store_sql::statements! {
                    END)
              SELECT root.hash, blob.hash, blob.encoding, blob.content
              FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
-        /// Run `?3` of session `?2`'s working execution, as [`Self::hydrate_exec`] reads an execution's.
-        hydrate_working = "WITH RECURSIVE root AS (SELECT working_execution_ref AS hash FROM turn_phases WHERE session_id = ?2 AND run = ?3),
+        /// Run `?2` of session `?1`'s working execution, as [`Self::hydrate_exec`] reads an execution's.
+        hydrate_working = "WITH RECURSIVE root AS (SELECT working_execution_ref AS hash FROM turn_phases WHERE session_id = ?1 AND run = ?2),
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
                  SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
                  JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?1::bytea[])) AND NOT (edge.child_hash = ANY(?1::bytea[]))
-                   AND CASE
+                 WHERE CASE
                        WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
                        WHEN get_byte(parent.content, 4) < 128
                             OR get_byte(parent.content, 5) >= 128 THEN TRUE
@@ -284,27 +271,24 @@ lash_store_sql::statements! {
                    END)
              SELECT root.hash, blob.hash, blob.encoding, blob.content
              FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
-        /// Run `?3` of session `?2`'s receipt, as [`Self::hydrate_exec`] reads an execution's.
-        hydrate_answer = "WITH RECURSIVE root AS (SELECT answer_ref AS hash FROM turn_phases WHERE session_id = ?2 AND run = ?3),
+        /// Run `?2` of session `?1`'s receipt, as [`Self::hydrate_exec`] reads an execution's.
+        hydrate_answer = "WITH RECURSIVE root AS (SELECT answer_ref AS hash FROM turn_phases WHERE session_id = ?1 AND run = ?2),
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
-                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?1::bytea[])) AND NOT (edge.child_hash = ANY(?1::bytea[])))
+                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash)
              SELECT root.hash, blob.hash, blob.encoding, blob.content
              FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
-        /// Run `?3` of session `?2`'s transcript, as [`Self::hydrate_exec`] reads an execution's.
-        hydrate_transcript = "WITH RECURSIVE root AS (SELECT terminal_transcript_ref AS hash FROM session_runs WHERE session_id = ?2 AND run = ?3),
+        /// Run `?2` of session `?1`'s transcript, as [`Self::hydrate_exec`] reads an execution's.
+        hydrate_transcript = "WITH RECURSIVE root AS (SELECT terminal_transcript_ref AS hash FROM session_runs WHERE session_id = ?1 AND run = ?2),
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
-                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?1::bytea[])) AND NOT (edge.child_hash = ANY(?1::bytea[])))
+                 SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash)
              SELECT root.hash, blob.hash, blob.encoding, blob.content
              FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
-        /// Plugin `?4`'s namespace values for run `?3` of session `?2`, as [`Self::hydrate_exec`] reads an execution's.
-        hydrate_namespace = "WITH RECURSIVE root AS (SELECT graph_root_ref AS hash FROM turn_namespaces WHERE session_id = ?2 AND run = ?3 AND plugin = ?4),
+        /// Plugin `?3`'s namespace values for run `?2` of session `?1`, as [`Self::hydrate_exec`] reads an execution's.
+        hydrate_namespace = "WITH RECURSIVE root AS (SELECT graph_root_ref AS hash FROM turn_namespaces WHERE session_id = ?1 AND run = ?2 AND plugin = ?3),
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
                  SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
                  JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?1::bytea[])) AND NOT (edge.child_hash = ANY(?1::bytea[]))
-                   AND CASE
+                 WHERE CASE
                        WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
                        WHEN get_byte(parent.content, 4) < 128
                             OR get_byte(parent.content, 5) >= 128 THEN TRUE
@@ -313,13 +297,12 @@ lash_store_sql::statements! {
                    END)
              SELECT root.hash, blob.hash, blob.encoding, blob.content
              FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
-        /// Session `?2`'s revision `?3`'s checkpoint, as [`Self::hydrate_exec`] reads an execution's.
-        hydrate_revision = "WITH RECURSIVE root AS (SELECT checkpoint_ref AS hash FROM session_revisions WHERE session_id = ?2 AND head_revision = ?3),
+        /// Session `?1`'s revision `?2`'s checkpoint, as [`Self::hydrate_exec`] reads an execution's.
+        hydrate_revision = "WITH RECURSIVE root AS (SELECT checkpoint_ref AS hash FROM session_revisions WHERE session_id = ?1 AND head_revision = ?2),
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
                  SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
                  JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?1::bytea[])) AND NOT (edge.child_hash = ANY(?1::bytea[]))
-                   AND CASE
+                 WHERE CASE
                        WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
                        WHEN get_byte(parent.content, 4) < 128
                             OR get_byte(parent.content, 5) >= 128 THEN TRUE
@@ -328,13 +311,12 @@ lash_store_sql::statements! {
                    END)
              SELECT root.hash, blob.hash, blob.encoding, blob.content
              FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
-        /// Session `?2`'s admission base, as [`Self::hydrate_exec`] reads an execution's.
-        hydrate_admission_base = "WITH RECURSIVE root AS (SELECT admission_base_checkpoint_ref AS hash FROM session_meta WHERE session_id = ?2),
+        /// Session `?1`'s admission base, as [`Self::hydrate_exec`] reads an execution's.
+        hydrate_admission_base = "WITH RECURSIVE root AS (SELECT admission_base_checkpoint_ref AS hash FROM session_meta WHERE session_id = ?1),
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
                  SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
                  JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?1::bytea[])) AND NOT (edge.child_hash = ANY(?1::bytea[]))
-                   AND CASE
+                 WHERE CASE
                        WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
                        WHEN get_byte(parent.content, 4) < 128
                             OR get_byte(parent.content, 5) >= 128 THEN TRUE
@@ -343,13 +325,12 @@ lash_store_sql::statements! {
                    END)
              SELECT root.hash, blob.hash, blob.encoding, blob.content
              FROM root LEFT JOIN (reach JOIN blobs AS blob ON blob.hash = reach.hash) ON TRUE";
-        /// Artifact `?3` of namespace `?2`'s graph node, as [`Self::hydrate_exec`] reads an execution's.
-        hydrate_artifact = "WITH RECURSIVE root AS (SELECT graph_ref AS hash FROM lash_vm_artifacts WHERE namespace = ?2 AND artifact_ref = ?3 AND storage_kind = 1),
+        /// Artifact `?2` of namespace `?1`'s graph node, as [`Self::hydrate_exec`] reads an execution's.
+        hydrate_artifact = "WITH RECURSIVE root AS (SELECT graph_ref AS hash FROM lash_vm_artifacts WHERE namespace = ?1 AND artifact_ref = ?2 AND storage_kind = 1),
              reach AS (SELECT root.hash FROM root WHERE root.hash IS NOT NULL UNION
                  SELECT edge.child_hash FROM blob_edges AS edge JOIN reach ON edge.parent_hash = reach.hash
                  JOIN blobs AS parent ON parent.hash = reach.hash
-                 WHERE NOT (reach.hash = ANY(?1::bytea[])) AND NOT (edge.child_hash = ANY(?1::bytea[]))
-                   AND CASE
+                 WHERE CASE
                        WHEN parent.encoding <> 1 OR octet_length(parent.content) < 6 THEN TRUE
                        WHEN get_byte(parent.content, 4) < 128
                             OR get_byte(parent.content, 5) >= 128 THEN TRUE
@@ -512,16 +493,7 @@ pub(super) async fn walk_within(
     }
     // One recursive query seeds every selected fact root. Bound the
     // retained closure as rows arrive, before buffering its material.
-    // A stored node's edges keep every child it names stored, and the
-    // child's own edges keep its children: a member of the build's catalog
-    // a stored node reaches is stored with all it reaches, under the
-    // build's bytes. The query stops at the catalog's heads, and the walk
-    // takes each member it meets, and all it reaches, from the build.
     let roots_hex: Vec<_> = roots.iter().map(NodeId::to_hex).collect();
-    let heads: Vec<_> = immutable_catalog_heads()
-        .iter()
-        .map(NodeId::to_hex)
-        .collect();
     let reach = if skipped.is_some() {
         SQL.postgres.walk_reach_graph.sql()
     } else {
@@ -534,7 +506,6 @@ pub(super) async fn walk_within(
         let mut rows =
             crate::observed_sql::query_as::<_, (crate::keys::Key, i16, Option<Vec<u8>>)>(reach)
                 .bind(crate::keys::keys(&roots_hex))
-                .bind(crate::keys::keys(&heads))
                 .fetch(crate::observed_sql::executor(&mut *tx));
         while let Some((hash, encoding, bytes)) = rows.try_next().await.map_err(db)? {
             let id = node_of(&hash.0)?;
@@ -566,8 +537,7 @@ struct Budget {
 type Found = BTreeMap<NodeId, (BlobEncoding, Option<Vec<u8>>)>;
 
 /// The nodes `roots` reach, checked within `limits`, from the rows `found`
-/// already read and charged to `spent`; a member of the build's catalog,
-/// and all it reaches, is taken from the build. A node they lack is read on
+/// already read and charged to `spent`. A node they lack is read on
 /// `tx`; with none, the rows were the whole read, and a node they lack is
 /// missing.
 async fn walk_found(
@@ -583,13 +553,6 @@ async fn walk_found(
         mut total,
     } = spent;
     let roots_hex: Vec<_> = roots.iter().map(NodeId::to_hex).collect();
-    let member = |id: &NodeId| {
-        if roots.contains(id) {
-            None
-        } else {
-            immutable_closure(*id)
-        }
-    };
     let mut nodes = BTreeMap::new();
     let mut level = BTreeSet::new();
     let mut pending_roots = roots.iter();
@@ -605,7 +568,7 @@ async fn walk_found(
         }
         let unread: Vec<_> = level
             .iter()
-            .filter(|id| !found.contains_key(id) && member(id).is_none())
+            .filter(|id| !found.contains_key(id))
             .map(NodeId::to_hex)
             .collect();
         if !unread.is_empty()
@@ -632,33 +595,6 @@ async fn walk_found(
         }
         let mut next = BTreeSet::new();
         for id in level {
-            if let Some(closure) = member(&id) {
-                for node in closure.nodes() {
-                    if !visited.insert(node.id) {
-                        continue;
-                    }
-                    // A row the query read for it was charged as it arrived.
-                    if !matches!(found.remove(&node.id), Some((_, Some(_)))) {
-                        charge_node(limits, &mut count, &mut total, node.bytes.len())?;
-                    }
-                    let len = node.bytes.len() as u64;
-                    if len > limits.node_bytes {
-                        return Err(GraphRefusal::DecodeLimit {
-                            dimension: DecodeDimension::NodeBytes,
-                            actual: len,
-                            limit: limits.node_bytes,
-                        });
-                    }
-                    nodes.insert(
-                        node.id,
-                        HydratedNode {
-                            encoding: BlobEncoding::Graph,
-                            bytes: std::sync::Arc::clone(&node.bytes),
-                        },
-                    );
-                }
-                continue;
-            }
             if !visited.insert(id) {
                 continue;
             }
@@ -733,14 +669,7 @@ type HydrateRow = (
 /// column and every blob it reaches.
 async fn hydrate_rows(connection: &mut PgConnection, owner: &RootOwner) -> Answer<Vec<HydrateRow>> {
     let sql = &SQL.postgres;
-    let heads: Vec<String> = immutable_catalog_heads()
-        .iter()
-        .map(NodeId::to_hex)
-        .collect();
-    let query = |statement| {
-        crate::observed_sql::query_as::<sqlx::Postgres, HydrateRow>(statement)
-            .bind(crate::keys::keys(&heads))
-    };
+    let query = |statement| crate::observed_sql::query_as::<sqlx::Postgres, HydrateRow>(statement);
     let bound = match owner {
         RootOwner::Exec(exec) => query(sql.hydrate_exec.sql()).bind(exec.stored()),
         RootOwner::RunFact {

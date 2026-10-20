@@ -208,11 +208,17 @@ affected state while investigating the refusal.
 
 ## Roll a build that changes packages
 
-Install the new dependency-closed package set and retain the artifacts
-needed by parked roots, unfinished processes, saved functions and published
-definitions. A node advertises the artifacts it holds. The fleet gate picks
-one complete set every live serving node holds for each new cell; it may
-fall back to an older set when a node rejoins.
+Build the new dependency-closed package set into the new build. Each node
+installs its set when it starts and advertises its capabilities: its
+natives, kernel versions, providers, codec versions and own set. The
+package gate writes each new cell under the newest live surface every live
+serving node can run. A body-only release is written as soon as one node of
+it is live, and the older surface again once its nodes stop. A release that
+adds a native-only function is written only once no live node lacks the
+native. When no live surface runs on every serving node (two releases each
+adding a native the other lacks), new cells fail typed
+`no_compatible_snapshot` until the fleet agrees: finish or roll back the
+deploy.
 
 Parked runs and published workflows keep their exact function identities.
 Resume requires those definitions and any native-only implementations;
@@ -224,15 +230,16 @@ with an incompatible representation raises
 requirement with `operation_contract_changed`; parked adoption refuses
 `state_not_carried`.
 
-Install retained artifacts one deploy before writing with the new set.
-Each node writes its sets into the store when it starts: the surface
+Each node writes its set into the store when it starts: the surface
 snapshot, execution requirements, every definition and the release
-labels. These are never deleted and outlive the installing node. A set
-whose code is all body-backed can therefore be read and lowered by nodes
-of any build. A set that adds a native-only function needs that native on
-every node that runs it. Rolling back to a build that lacks an identity or
-a native can strand its runs. Retire
-an artifact only after surveying all dependents. The
+labels. These are never deleted and outlive the installing node, so no
+build retains another's artifacts. A set whose code is all body-backed can
+be read, lowered and run by nodes of any build. Work is claimed by its
+hard requirements, so a node that lacks a native, kernel, provider or codec
+version a run needs never claims it to run; the work stays parked rather
+than failing. Before retiring a build, run `lashctl stranded list` with the
+next build's nodes live: each actor it names needs what only the retiring
+build offers, and is run again once a node offering it is live. The
 [host-package guide](../host-packages.md) covers identities, runner contracts,
 storage and explicit adoption.
 

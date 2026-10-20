@@ -15,12 +15,7 @@ pub use lash_execution_contracts::{CellPackages, PackageGate};
 /// What a worker lowering under `packages` is sent: the digest of a held
 /// set, or a stored surface whole with the definitions the node lacks.
 pub(crate) fn wire(packages: &CellPackages) -> lash_vm_client::service::SurfaceRef {
-    lash_vm_client::service::SurfaceRef {
-        digest: packages.digest(),
-        stored: packages.stored_wire().map(|(surface, images)| {
-            lash_vm_client::service::StoredSurface::new(surface.to_vec(), images.iter().cloned())
-        }),
-    }
+    lash_vm_client::service::SurfaceRef::of(packages.digest(), packages.stored_wire())
 }
 
 /// A gate that always answers one set: a host whose fleet runs one build,

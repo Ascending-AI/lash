@@ -982,12 +982,10 @@ impl DurableStore for PostgresDurableStore {
                         .execute(crate::observed_sql::executor(&mut **tx))
                         .await
                         .map_err(sqlx_failure)?;
-                    packages::hold(&mut tx, lease_owner.node.as_str(), &spec.held).await?;
                     Ok(NodeLease {
                         owner: lease_owner,
                         decodes: spec.decodes.clone(),
-                        serves: spec.serves.clone(),
-                        held: spec.held.clone(),
+                        serves: spec.served(),
                         capabilities: spec.capabilities.clone(),
                         ttl_millis: spec.ttl_millis,
                         expires_at,
@@ -1132,12 +1130,7 @@ impl DurableStore for PostgresDurableStore {
                                 } else {
                                     ClaimCause::Ready
                                 },
-                                purpose: ClaimPurpose::of(
-                                    node,
-                                    &get::<String>(row, 3)?,
-                                    &requires,
-                                    get::<bool>(row, 5)?,
-                                ),
+                                purpose: ClaimPurpose::of(node, &get::<String>(row, 3)?, &requires),
                                 requires,
                             })
                         })
@@ -1173,7 +1166,7 @@ impl DurableStore for PostgresDurableStore {
 
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {
         self.within(CommitCapacity::Scheduler, async {
-            let rows: Vec<(String, i64, String, Option<String>, bool)> =
+            let rows: Vec<(String, i64, String, Option<String>)> =
                 crate::observed_sql::query_as(SQL.actor.owned_by.sql())
                     .bind(node.owner.node.as_str())
                     .bind(node.owner.boot.as_str())
@@ -1181,13 +1174,13 @@ impl DurableStore for PostgresDurableStore {
                     .await
                     .map_err(sqlx_failure)?;
             rows.into_iter()
-                .map(|(key, epoch, formats, requires, holds)| {
+                .map(|(key, epoch, formats, requires)| {
                     let requires = requires_of(requires)?;
                     Ok(Claimed {
                         actor: actor_key(&key)?,
                         epoch: Epoch(epoch),
                         cause: ClaimCause::Adopted,
-                        purpose: ClaimPurpose::of(node, &formats, &requires, holds),
+                        purpose: ClaimPurpose::of(node, &formats, &requires),
                         requires,
                     })
                 })
@@ -1225,6 +1218,18 @@ impl DurableStore for PostgresDurableStore {
             let mut connection = self.pools.work.acquire().await.map_err(sqlx_failure)?;
             let now = self.instant_on(&mut connection).await?;
             packages::live_nodes(&mut connection, now).await
+        })
+        .await
+    }
+
+    async fn actor_requirements(
+        &self,
+        after: Option<&ActorKey>,
+        limit: usize,
+    ) -> Result<Vec<(ActorKey, Vec<String>)>, DurableError> {
+        self.within(CommitCapacity::Work, async {
+            let mut connection = self.pools.work.acquire().await.map_err(sqlx_failure)?;
+            packages::actor_requirements(&mut connection, after, limit).await
         })
         .await
     }
@@ -1495,34 +1500,8 @@ impl DurableStore for PostgresDurableStore {
     }
 }
 
-impl PostgresDurableStore {
-    /// A pooled connection for one unfenced domain read.
-    async fn reader(&self) -> Result<sqlx::pool::PoolConnection<sqlx::Postgres>, DurableError> {
-        crate::observed_sql::checkout(&self.pools.work)
-            .await
-            .map_err(sqlx_failure)
-    }
-}
-
-/// A `REPEATABLE READ READ ONLY` transaction on `connection`, for an
-/// unfenced read of several statements: one snapshot, so a root a peel
-/// retires during the read is read whole.
-async fn snapshot(
-    connection: &mut PgConnection,
-) -> Result<sqlx::Transaction<'_, sqlx::Postgres>, DurableError> {
-    let mut snapshot = crate::observed_sql::control("BEGIN", sqlx::Connection::begin(connection))
-        .await
-        .map_err(sqlx_failure)?;
-    crate::observed_sql::query(
-        crate::connection_sql::connection_sql()
-            .begin_repeatable_read_read_only
-            .sql(),
-    )
-    .execute(crate::observed_sql::executor(&mut *snapshot))
-    .await
-    .map_err(sqlx_failure)?;
-    Ok(snapshot)
-}
+mod reader;
+use reader::snapshot;
 
 #[cfg(test)]
 #[path = "../durable_tests.rs"]

@@ -704,11 +704,14 @@ impl Activation for SessionActivation {
             }
         }
     }
-    /// The package code the backend's node holds (FIG-6918).
-    async fn hold(&self) -> Result<lash_durable::NodeHolding, lash_durable::DurableError> {
+    /// What the backend's node's package code offers running code
+    /// (FIG-6993), once installed.
+    async fn capabilities(
+        &self,
+    ) -> Result<lash_durable::NodeCapabilities, lash_durable::DurableError> {
         match self.backend.packages() {
-            Some(packages) => packages.hold(&self.backend).await,
-            None => Ok(lash_durable::NodeHolding::default()),
+            Some(packages) => packages.install(&self.backend).await,
+            None => Ok(lash_durable::NodeCapabilities::default()),
         }
     }
 }

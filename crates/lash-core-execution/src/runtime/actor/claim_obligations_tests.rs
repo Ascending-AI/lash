@@ -261,3 +261,111 @@ async fn a_refused_unstarted_turn_on_an_unreadable_head_keeps_the_heads_requirem
         "the head's requirement is not dropped"
     );
 }
+
+/// What `requirements` is as claim tokens, in the order `requires` answers.
+fn hard(requirements: &lash_kernel_doc::ExecutionRequirements) -> Vec<String> {
+    let mut tokens: Vec<String> = crate::ObligationToken::for_requirements(requirements)
+        .map(String::from)
+        .collect();
+    tokens.sort();
+    tokens
+}
+
+/// A record naming one of each hard kind: a native, a kernel version, a
+/// provider and a codec version.
+fn record() -> lash_kernel_doc::ExecutionRequirements {
+    lash_kernel_doc::ExecutionRequirements {
+        natives: [lash_kernel_doc::FunctionId::from_bytes([3; 32])].into(),
+        kernels: [1].into(),
+        providers: ["o/p".to_owned()].into(),
+        codecs: [("o/q".to_owned(), 2)].into(),
+    }
+}
+
+/// D1 (FIG-6993): the commit that puts a cell's execution root states its
+/// hard record, and the record is the session's claim requirement, one
+/// token per requirement, for exactly as long as the root stands: the
+/// commit that clears it requires nothing of it. The tokens read back as
+/// the record they were written from.
+#[test]
+fn an_execution_roots_hard_record_is_required_while_the_root_stands() {
+    use lash_durable::domain::graph::ExecRootWrite;
+    let exec = lash_durable::domain::ExecKey::Cell(
+        session(),
+        TurnId::try_from("t".to_owned()).unwrap(),
+        lash_durable::domain::CellId::new("c".to_owned()),
+    );
+    let mut work = RecordedWork::session();
+    let mut put = opened();
+    put.write(lash_durable::DomainWrite::ExecRoot(ExecRootWrite::Put {
+        exec: exec.clone(),
+        expected: None,
+        expected_root: None,
+        root: lash_core_store::checkpoint_graph::NodeId([1; 32]),
+        commit_id: lash_core_store::checkpoint_graph::CommitId([2; 32]),
+    }));
+    let debts = super::ExecutionDebts {
+        exec: exec.clone(),
+        owed: Vec::new(),
+        requirements: record(),
+    };
+    work.apply(&put, Epoch(1), Some(&debts), limits(), limits())
+        .unwrap();
+    assert_eq!(work.requires(), hard(&record()));
+    assert_eq!(
+        crate::ObligationToken::requirements_of(work.requires().iter().map(String::as_str)),
+        record(),
+        "the tokens read back as the record"
+    );
+    let mut cleared = opened();
+    cleared.write(lash_durable::DomainWrite::ExecRoot(ExecRootWrite::Clear {
+        exec,
+    }));
+    work.apply(&cleared, Epoch(1), None, limits(), limits())
+        .unwrap();
+    assert!(work.requires().is_empty(), "{:?}", work.requires());
+}
+
+/// DYNAMIC-MATCH (FIG-6993): a call admitted through a dynamic match owes
+/// the matched link's provider and the codec version of its payload, with
+/// its binding's callbacks, from the commit that admits it until the call
+/// settles; then nothing of it is required.
+#[test]
+fn a_matched_call_owes_its_provider_and_codec_until_it_settles() {
+    let provider = crate::plugin::ToolProviderHandle::new(
+        crate::RegistryKind::Session,
+        "o",
+        crate::tool_provider_key!("p"),
+    );
+    let codec = crate::plugin::ToolProviderHandle::new(
+        crate::RegistryKind::Session,
+        "o",
+        crate::tool_provider_key!("q"),
+    );
+    let link = lash_core_store::tool_surface::OperationLink {
+        tool: ToolId::new("matched"),
+        provider,
+        policy: ExecutionPolicy::Once,
+        projection: Default::default(),
+        payload: Some(lash_core_store::tool_surface::ExecutionBinding {
+            codec,
+            format: crate::FormatVersion::new(2).unwrap(),
+            payload: serde_json::json!({}),
+        }),
+        source: lash_core_store::tool_surface::LinkSource::Advertised,
+    };
+    let call = ToolCallId::fixture("matched");
+    let binding = bound_to("o");
+    let mut work = RecordedWork::session();
+    work.admit_linked(owner(), call.clone(), Some(&binding), Some(&link));
+    let mut owed = hard(&lash_kernel_doc::ExecutionRequirements {
+        providers: ["o/p".to_owned()].into(),
+        codecs: [("o/q".to_owned(), 2)].into(),
+        ..Default::default()
+    });
+    owed.push(token("o"));
+    owed.sort();
+    assert_eq!(work.requires(), owed);
+    work.settle(&owner(), &call);
+    assert!(work.requires().is_empty(), "{:?}", work.requires());
+}

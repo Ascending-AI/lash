@@ -1036,7 +1036,6 @@ async fn durable_labels_observe_physical_cost_and_group_members() {
             node: NodeId::new("cost-law"),
             decodes: vec![formats.clone()],
             serves: Vec::new(),
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: 15_000,
         })

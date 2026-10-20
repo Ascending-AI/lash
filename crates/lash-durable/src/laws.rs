@@ -65,8 +65,9 @@ pub use model_calls::{
     a_turn_counts_its_tool_admissions_atomically, a_turn_counts_the_model_calls_it_admitted,
 };
 pub use packages::{
-    a_node_claims_only_actors_whose_package_set_it_holds,
-    a_store_keeps_artifacts_and_sets_by_digest_and_derives_what_a_node_holds,
+    a_hard_record_lands_with_its_owner_commit_or_not_at_all,
+    a_node_claims_only_actors_whose_hard_requirements_it_meets,
+    a_store_keeps_artifacts_and_sets_by_digest,
     a_store_keeps_each_sets_first_surface_and_indexes_its_definitions,
 };
 pub use parks::a_boot_redrives_only_the_session_parks_it_names;
@@ -129,7 +130,6 @@ async fn node(store: &dyn DurableStore, name: &str) -> Result<NodeLease, LawBrok
             node: NodeId::new(name),
             decodes: vec![formats()],
             serves: Vec::new(),
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: TTL_MILLIS,
         })

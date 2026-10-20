@@ -9,7 +9,7 @@ use lash_kernel_doc::{
     Handle, Integer, InvalidReason, Literal, Name, Node, NodeMut, Param, Signature, Site, Stmt,
     Timestamp, Type, Unit, parse_document, print_document,
 };
-use lash_kernel_package::{HeldPackages, Package, PackageSet};
+use lash_kernel_package::{HeldPackages, Package};
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, KernelMachine, Machine, Outcome, Program, Request, Step, Target,
@@ -109,17 +109,32 @@ fn package(
     .unwrap()
 }
 
-/// A node holding every one of `releases` as a set of its own, the last
-/// its own set, with each set's digest.
-fn hold(releases: Vec<Vec<Package>>) -> (HeldPackages, Vec<lash_kernel_doc::PackageSetDigest>) {
-    let sets: Vec<PackageSet> = releases
-        .iter()
-        .map(|release| PackageSet::new(release.iter()).unwrap())
+/// Each of `releases` as the node that built it holds it, and one catalog
+/// that reads every release's surface, the last release's registry first:
+/// how a node reads another build's stored set.
+struct Releases {
+    held: Vec<HeldPackages>,
+    catalog: Arc<FunctionRegistry>,
+}
+
+impl Releases {
+    /// The view of release `index`'s set over the shared catalog.
+    fn view(&self, index: usize) -> lash_kernel_package::PackageView<'_> {
+        lash_kernel_package::PackageView::new(self.held[index].surface(), &self.catalog)
+    }
+
+    fn functions(&self) -> &Arc<FunctionRegistry> {
+        &self.catalog
+    }
+}
+
+fn hold(releases: Vec<Vec<Package>>) -> Releases {
+    let held: Vec<HeldPackages> = releases
+        .into_iter()
+        .map(|release| HeldPackages::install(release).unwrap())
         .collect();
-    let digests: Vec<_> = sets.iter().map(PackageSet::digest).collect();
-    let own = *digests.last().unwrap();
-    let held = HeldPackages::new(releases.into_iter().flatten().map(Arc::new), sets, own).unwrap();
-    (held, digests)
+    let catalog = held.last().unwrap().catalog_over(&held).unwrap();
+    Releases { held, catalog }
 }
 
 fn register(registry: &mut FunctionRegistry, text: &str) -> lash_kernel_doc::FunctionId {
@@ -156,7 +171,7 @@ fn relink_package_at(path: &str, release: &str, value: &str) -> Package {
     })
 }
 
-fn relink_document(held: &HeldPackages, f: lash_kernel_doc::FunctionId) -> Document {
+fn relink_document(held: &Releases, f: lash_kernel_doc::FunctionId) -> Document {
     let mut document = parse_document(&format!(
         "kernel 1\nnumbers float\nuse helper.f = @{f}\nentry run() -> Any\nfn run() {{ let y = invoke helper.f() return y }}\nmain {{}}"
     )).unwrap();
@@ -176,7 +191,7 @@ fn relink_transitive_manifest_closure() {
     let current = relink_package("2", "true");
     let old_f = old.function("helper.f").unwrap();
     let current_f = current.function("helper.f").unwrap();
-    let (held, sets) = hold(vec![vec![old], vec![current]]);
+    let held = hold(vec![vec![old], vec![current]]);
     let original = relink_document(&held, old_f);
     let stored = Document::from_json(&original.to_json().unwrap()).unwrap();
     let mut draft = Draft::open(stored).unwrap();
@@ -184,7 +199,7 @@ fn relink_transitive_manifest_closure() {
     assert_ne!(original.manifest.functions, expected.manifest.functions);
     assert_eq!(expected.manifest.functions.len(), 2);
 
-    let correspondence = draft.relink(&held.view(&sets[1]).unwrap()).unwrap();
+    let correspondence = draft.relink(&held.view(1)).unwrap();
     assert_eq!(correspondence.base, original.identity());
     assert_eq!(correspondence.result, expected.identity());
     assert!(correspondence.entries().iter().all(|s| s.from == s.to));
@@ -199,7 +214,7 @@ fn relink_transitive_manifest_closure() {
     );
 
     // Back to the earlier set: its identities alone, again.
-    draft.relink(&held.view(&sets[0]).unwrap()).unwrap();
+    draft.relink(&held.view(0)).unwrap();
     assert_eq!(draft.document(), &original);
 }
 
@@ -232,7 +247,7 @@ fn slot_package(release: &str, value: &str) -> (Package, String) {
     (package, header)
 }
 
-fn slot_document(held: &HeldPackages, header: &str) -> Document {
+fn slot_document(held: &Releases, header: &str) -> Document {
     let mut document = parse_document(&format!(
         "kernel 1\nnumbers float\n{header}\
          entry run(x: Any) -> Any py_direct(helper.cleanup)\n\
@@ -253,11 +268,11 @@ fn slot_document(held: &HeldPackages, header: &str) -> Document {
 fn relink_rebinds_every_library_reference_slot() {
     let (old, old_header) = slot_package("1", "null");
     let (current, current_header) = slot_package("2", "true");
-    let (held, sets) = hold(vec![vec![old], vec![current]]);
+    let held = hold(vec![vec![old], vec![current]]);
     let original = slot_document(&held, &old_header);
     let expected = slot_document(&held, &current_header);
     let mut draft = Draft::open(original.clone()).unwrap();
-    let correspondence = draft.relink(&held.view(&sets[1]).unwrap()).unwrap();
+    let correspondence = draft.relink(&held.view(1)).unwrap();
     assert_eq!(draft.document(), &expected);
     let json = draft.document().to_json().unwrap();
     for function in original.manifest.functions.keys() {
@@ -299,7 +314,7 @@ fn relink_refusals_leave_the_draft_unchanged() {
             .map(|(_, function)| lash_kernel_doc::FunctionDefinition::clone(function.definition()))
             .collect()
     });
-    let (held, sets) = hold(vec![
+    let held = hold(vec![
         vec![],
         vec![relink_package("2", "true"), twin],
         vec![invalid],
@@ -308,12 +323,8 @@ fn relink_refusals_leave_the_draft_unchanged() {
     let original = relink_document(&held, old_f);
     let mut draft = Draft::open(original.clone()).unwrap();
     let correspondence = draft.correspondence_since_open().clone();
-    for (set, expected) in [
-        (sets[0], "missing"),
-        (sets[1], "ambiguous"),
-        (sets[2], "invalid"),
-    ] {
-        let error = draft.relink(&held.view(&set).unwrap()).unwrap_err();
+    for (set, expected) in [(0, "missing"), (1, "ambiguous"), (2, "invalid")] {
+        let error = draft.relink(&held.view(set)).unwrap_err();
         match (expected, error) {
             ("missing", crate::RelinkRefusal::MissingFunction { function, name }) => {
                 assert_eq!(function, old_f);

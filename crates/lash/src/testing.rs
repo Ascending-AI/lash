@@ -141,11 +141,18 @@ pub fn node_activation(
     ))
 }
 
-/// The claim requirements `core`'s process components serve: what a
-/// simulated node of the core serves, so it runs the processes the core's
-/// own node would (FIG-6034 D3).
+/// The claim requirements `core`'s registrations serve: what a simulated
+/// node of the core serves, so it runs the work the core's own node would
+/// (FIG-6034 D3): its callbacks and formats, and the providers and codec
+/// versions its registrations offer running code (FIG-6993).
 pub fn node_serves(core: &crate::LashCore) -> Vec<String> {
-    core.node_serves()
+    let mut serves = core.node_serves();
+    serves.extend(
+        lash_core::ObligationToken::for_capabilities(&core.node_offers()).map(String::from),
+    );
+    serves.sort();
+    serves.dedup();
+    serves
 }
 
 /// Decode a command's recorded outcome while explicitly settling fixture setup.

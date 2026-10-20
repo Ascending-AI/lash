@@ -138,7 +138,9 @@ pub async fn request_process_successor(
         }
     };
     let new_env = load(request.env.clone()).await?;
-    let linked = engines.link_package_namespaces(kind, &request.payload, new_env.clone())?;
+    let linked = engines
+        .link_package_namespaces(kind, &request.payload, new_env.clone())
+        .await?;
     if linked != new_env {
         let claim = ReferrerClaim::unguarded(ArtifactReferrer::ProcessRecord(process.clone()))
             .map_err(|error| PluginError::Session(error.to_string()))?;

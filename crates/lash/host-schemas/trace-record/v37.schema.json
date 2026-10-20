@@ -408,27 +408,6 @@
           "const": "host",
           "description": "Host infrastructure failed while preparing or executing the program.",
           "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "description": "The worker does not hold the package set the cell is written under\n(FIG-6918). The host can serve the work on a node that holds it.",
-          "properties": {
-            "packages_not_held": {
-              "properties": {
-                "packages": {
-                  "$ref": "#/$defs/PackageSetDigest"
-                }
-              },
-              "required": [
-                "packages"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "packages_not_held"
-          ],
-          "type": "object"
         }
       ]
     },
@@ -1431,10 +1410,6 @@
         "class"
       ],
       "type": "object"
-    },
-    "PackageSetDigest": {
-      "pattern": "^[0-9a-f]{64}$",
-      "type": "string"
     },
     "ProcessStartPhase": {
       "description": "A phase of a host process start, in the order a start passes them. Each\nphase a start reached carries its duration on the start's producer.",

@@ -254,11 +254,12 @@ holdings. A standalone process host uses
 Select packages before starting or cloning the worker service.
 `lash::package::lash_packages()` supplies the built-in holdings; its
 `in_order()` iterates dependency-first artifacts for your assembly.
-`HeldPackages::install` assembles an own set in memory and takes no store
-argument. Use `HeldPackages::new` when reconstructing own and retained sets
-from stored rows.
+`HeldPackages::install` assembles a node's one set in memory and takes no
+store argument. `HeldPackages::new` takes the set's artifacts and the set,
+and refuses an artifact the set does not name. A node holds exactly one
+set: its own build's.
 
-A node installs its sets into the store when it starts. For each set, the
+A node installs its set into the store when it starts. For each set, the
 store keeps its surface snapshot under the `PackageSetDigest`: every
 package's exports (errors, types, member conventions and operation
 declarations included), roots, origin, dependency closure and definition
@@ -278,7 +279,32 @@ stopped.
 Each serving node advertises its capabilities for as long as it is live:
 its native implementations, kernel versions, registered provider keys,
 readable codec versions and its own set's digest. It advertises no
-credentials or grants.
+credentials or grants. Providers come from the node's installed
+registrations. A provider declares the binding formats it reads when it is
+registered: a static spec takes them from the provider instance
+(`PluginSpec::with_tool_provider`), and a recipe states them with
+`provider_reading(key, &[formats], binder)`. Binding refuses an instance
+whose `readable_binding_formats` differ from its declaration.
+
+Work is claimed to run by what it requires. Each execution root records its
+hard requirements (natives, kernel versions, providers, codec versions),
+and the record is the work's claim requirement: a node claims the work to
+run only when it offers all of it. A cell's record also names the provider
+and codec of every dynamic match its grants committed; a process call owes
+its matched provider and codec from the match's commit until the call
+settles. A new process start is created with its published code's natives
+and kernels, and with the provider and codec version of every tool its
+environment links. Owned recovery and a claim judge the same predicate, so a node
+that lacks a requirement can cancel or close the work but never runs it.
+
+Work no live node can run stays parked, whatever it lacks. A process whose
+linked provider no live node registers is not claimed to run, and a node
+that holds it anyway parks it at the call; the call does not settle as
+`linked_tool_missing`, which is kept for a provider that is registered and
+no longer serves the tool. `lashctl stranded list` (the
+strand report, `lash::durable::strand_report`) names each unfinished actor
+no live node can run, with what the closest live node lacks. A deploy that
+offers it lets the work run.
 
 Prefer body-backed functions for portable packages: any node can run them
 from the stored definitions. A native-only function runs only on a node
@@ -293,9 +319,12 @@ The language packages have no user surface: dialect lowering calls their
 definitions directly. Hosts still choose which dialects their workers build
 and serve.
 
-`HeldPackages` contains the node's own and retained artifacts. The parent
-builds the declaration registry from them, and every worker receives its
-registry from the parent. A single-binary worker supplies native
+`HeldPackages` contains the node's own set's artifacts. The parent builds
+the declaration registry from them, and every worker receives its registry
+from the parent. Code of another build's set runs from the store: a cell
+written under a stored surface is sent to the worker with the definitions
+it lacks, and a run reaching a definition the frame lacks loads it from the
+store under the run's closure. A single-binary worker supplies native
 implementations by `FunctionId`; it takes no second package list. A shipped
 worker receives the definitions in one release-image frame at pool start.
 Its registry stays fixed for its lifetime. Pool start refuses a native-only
@@ -310,13 +339,21 @@ it even when its source and release label are unchanged. The result is a new
 artifact digest. Selecting a newer dependency independently would let one
 cell execute two artifacts of the same package.
 
-`PackageSetDigest` identifies the complete set. The fleet gate selects a
-set every live serving node holds, considering the node's own set first,
-then retained sets in store install order, newest first. The result is the
-cell's `CellPackages`, passed to lowering, namespace resolution, discovery
-and workflow import. Each reader takes that set's surface snapshot: the
-node's own when it holds the set, else the stored one. A node's own set is only a gate
-candidate. The gate may fall back to an older set during a rollback.
+`PackageSetDigest` identifies the complete set. The package gate promotes
+by capability: of the own sets of live serving nodes, it selects the newest by store install order whose
+requirements the writer and every live serving node meet. A serving node
+is one that decodes this build's session set or one it carries forward. A
+body-only release is selected as soon as one of its nodes is live, and
+selected away again once its nodes stop. A release that adds a native-only
+function waits until no live serving node lacks the native. When no
+candidate is one every serving node can run, as in a mixed fleet of two
+releases that each add a native the other lacks, a new cell fails with the
+typed `no_compatible_snapshot` refusal (`RuntimeErrorCause::NoCompatibleSnapshot`),
+which names each candidate and what it lacks; the gate never answers a
+partial surface. The result is the cell's `CellPackages`, passed to
+lowering, namespace resolution, discovery and workflow import. Each reader
+takes that set's surface snapshot: the node's own registration for its own
+set, else the stored one.
 
 ## Parked runs, publication and adoption
 
@@ -328,10 +365,11 @@ they were admitted against; installing a new package does not relink them.
 
 Resume needs those exact identities and any required natives. The pending
 and future operations of parked code remain bound to its recorded
-requirements. Retain artifacts needed by parked roots, unfinished processes
-including ones not started, saved functions and published definitions.
-Install retained artifacts before a deployment begins writing new work.
-Rolling back to a build that lacks needed identities can strand that work.
+requirements. Every definition is stored at install and never deleted, so
+any node can read parked code; only a node offering its requirements claims
+it to run. A rollback to a build that lacks a needed native or kernel leaves
+that work parked and named by the strand report until a node offering it is
+live.
 
 Adoption relinks a published document or an unparked process to the
 successor's functions of the same names. It refuses a changed operation
@@ -343,15 +381,15 @@ does not adopt an already-running process. The
 
 ## Sessions use the cell's current set
 
-A new cell lowers against the package set selected for its round. The fleet
-gate is asked once per round: the prompt shows that set's packages, and the
-round's cell is written under the same set while the node holds it. A gate
-that cannot answer yet fails the round's prompt with its typed retryable
-refusal, and the turn defers the call. A parked cell keeps its exact
-execution closure until it completes. Its envelope records its set, and its
-first park on each node stamps the session with it, so only a node holding
-that set claims the session while the cell stands parked. The turn's commit
-after the cell clears the stamp.
+A new cell lowers against the package set selected for its round. The
+package gate is asked once per round: the prompt shows that set's packages,
+and the round's cell is written under the same set. A gate whose read is
+unavailable fails the round's prompt with its typed retryable refusal, and
+the turn defers the call. A parked cell keeps its exact execution closure
+until it completes. Its envelope records its set, and its execution root's
+requirements are the session's claim record while it stands parked: only a
+node offering them claims the session to run. Between cells the session
+requires nothing of its packages; each call is judged when it runs.
 
 A top-level function binding is saved as a self-contained document when
 its cell succeeds, with its captures frozen at cell end. So is every
@@ -366,7 +404,7 @@ function or a record still share it in the next cell. At the start of
 each later cell, the session relinks every saved function by name to the
 cell's package set (`relink_saved`). Each package function it calls takes
 the identity that set defines under the same name, even while the node
-still holds an earlier release. Each package operation it performs takes
+holds an earlier release's code. Each package operation it performs takes
 the set's requirement, so a changed contract under an unchanged signature is
 taken. A saved function whose callee the set no longer defines, or defines
 or offers under another signature, is dropped at the cell's start. The
@@ -404,9 +442,10 @@ A different brand raises `type_error`. The same brand with an incompatible
 shape raises `package.stale_value`, naming the type, first mismatched path,
 the constructor that built the value and the check that refused it, with the
 repair to rebuild the value. `StaleValue::of` decodes those facts and
-`StaleValue::message` finds the held artifacts of the type's package whose
+`StaleValue::message` finds the node's artifacts of the type's package whose
 code holds each function and renders their release labels, adding short
-digests when labels are equal or unknown. A constructor that several held
+digests when labels are equal or unknown (`StaleValue::message_among` names
+releases among any artifacts a reader knows). A constructor that several
 releases share unchanged is named by every one of them. The diagnosis
 applies in either upgrade direction.
 
@@ -432,8 +471,8 @@ facts and what model-facing guidance to supply.
 
 | Stored fact | Responsibility |
 | --- | --- |
-| Package artifacts and exact dependency keys | Lash stores artifacts by `(path, digest)`. Each install appends its release labels, and per-line ordinals support listings. Keep artifacts reachable while dependents remain. |
-| Package sets | Lash stores each member map, surface snapshot and execution requirements under the set's computed digest, with every definition, and assigns install order. Snapshots and their definitions are never deleted. Node advertisements list held artifacts and the node's capabilities; holding a set is derived from them. |
+| Package artifacts and exact dependency keys | Lash stores artifacts by `(path, digest)`. Each install appends its release labels, and per-line ordinals support listings. |
+| Package sets | Lash stores each member map, surface snapshot and execution requirements under the set's computed digest, with every definition, and assigns install order. Snapshots and their definitions are never deleted. Node advertisements list the node's capabilities and its own set. |
 | Workflow documents and execution closures | Preserve the document's exact identities and its referrer's retention. Parked state remains opaque to the host. |
 | Operation links and committed outcomes | Lash records the chosen provider, policy and codec payload before a park. Supply a runner that can read its retained payload. |
 | Session bindings and saved functions | Lash retains data and saved function documents with frozen captures, including functions nested in carried data. |

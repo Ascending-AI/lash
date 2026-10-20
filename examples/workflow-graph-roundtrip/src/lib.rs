@@ -160,17 +160,13 @@ impl SavedWorkflow {
         };
         let (view, view_unavailable, printed, source_unavailable) = match &derived {
             Ok(derived) => {
-                let (mut view, view_unavailable) = match self
-                    .packages
-                    .view(&self.packages.own())
-                    .map_err(|error| error.to_string())
-                    .and_then(|packages| {
-                        lash::workflow::view::derive(derived, &packages)
-                            .map_err(|error| error.to_string())
-                    }) {
-                    Ok(view) => (Some(view), None),
-                    Err(error) => (None, Some(error.to_string())),
-                };
+                let (mut view, view_unavailable) =
+                    match lash::workflow::view::derive(derived, &self.packages.view())
+                        .map_err(|error| error.to_string())
+                    {
+                        Ok(view) => (Some(view), None),
+                        Err(error) => (None, Some(error.to_string())),
+                    };
                 let options = lash::dialect::PrintOptions {
                     source_map: true,
                     ..Default::default()
@@ -327,9 +323,7 @@ impl AppState {
             .map_err(|error| StartupError(error.to_string()))?;
         let packages =
             lash::package::lash_packages().map_err(|error| StartupError(error.to_string()))?;
-        let package_view = packages
-            .view(&packages.own())
-            .map_err(|error| StartupError(error.to_string()))?;
+        let package_view = packages.view();
         let state = Self {
             store: Arc::new(Mutex::new(None)),
             publishing: Arc::new(tokio::sync::Mutex::new(())),
@@ -833,5 +827,5 @@ impl IntoResponse for ErrorResponse {
 fn test_packages() -> lash::package::PackageView<'static> {
     static HELD: std::sync::LazyLock<Arc<lash::package::HeldPackages>> =
         std::sync::LazyLock::new(|| lash::package::lash_packages().unwrap());
-    HELD.view(&HELD.own()).unwrap()
+    HELD.view()
 }

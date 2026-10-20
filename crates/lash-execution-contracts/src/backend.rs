@@ -126,50 +126,42 @@ struct BackendInner {
     /// under, when it serves, takes its hints from here, so a mailbox commit
     /// made on this node reaches its actors without waiting for a poll.
     hints: Hints,
-    /// The package code a node of this build holds, which it installs and
-    /// advertises before it starts ([`Backend::hold_packages`]). Like the
-    /// hints, it is the node's: every backend derived from this one shares
-    /// the slot, so an activation built before the registration holds it.
+    /// The package code a node of this build runs, which it installs and
+    /// advertises before it starts ([`Backend::register_packages`]). Like
+    /// the hints, it is the node's: every backend derived from this one
+    /// shares the slot, so an activation built before the registration
+    /// reads it.
     packages: Arc<std::sync::OnceLock<Arc<dyn NodePackages>>>,
 }
 
-/// The package code a node of this build holds (FIG-6918, S1-F2). Before
-/// the node starts it installs its artifacts and sets in the store, keeps
-/// each retained artifact a dependent still lists an identity of
-/// (RETAIN-SURVEY), and advertises what it holds and what it offers
-/// running code: a node claims an actor only when it holds the set the
-/// actor's code was linked under (CLAIM-HOLDS), and a set's surface is
-/// promoted to new cells only once every live serving node meets its
-/// requirements (FIG-6991).
+/// The package code a node of this build runs (FIG-6918, FIG-6991,
+/// FIG-6993). Before the node starts it installs its artifacts and sets in
+/// the store, each set with its surface and every definition, and answers
+/// what the node offers running code: the natives it binds, the kernel
+/// versions it interprets and its own package set, whose stored surface is
+/// the node's candidate for new cells. A node claims an actor to run it
+/// only when its capabilities meet the actor's hard requirements, and a
+/// surface is promoted to new cells only once every live serving node
+/// meets its requirements.
 #[async_trait::async_trait]
 pub trait NodePackages: Send + Sync {
-    /// Candidate surface sets from this node's existing registration.
-    fn candidates(
-        &self,
-        catalog: &lash_durable::PackageCatalog,
-    ) -> Vec<(
-        lash_durable::PackageSetDigest,
-        std::collections::BTreeSet<lash_durable::HeldArtifact>,
-    )>;
     /// The declared surface for a new Standard catalog.
     fn surface_view(&self) -> Arc<dyn lash_kernel_dialect::ExportView + Send + Sync>;
-    /// The package code the node holds: its registration of every
-    /// definition, over which it reads a stored surface it does not hold.
+    /// The package code the node registers: every definition it binds,
+    /// over which it reads a stored surface it was not built with.
     fn packages(&self) -> &Arc<lash_kernel_package::HeldPackages>;
 
-    /// Installs the node's artifacts and sets, each set with its surface,
-    /// in `backend`'s store, surveys what its dependents list, and answers
-    /// the artifacts the node holds and what it offers running code.
+    /// Installs the node's artifacts and sets, each set with its surface
+    /// and definitions, in `backend`'s store, and answers what the node
+    /// offers running code.
     ///
     /// # Errors
     ///
-    /// [`lash_durable::DurableError::RetiredDependents`] when a dependent
-    /// lists an identity no artifact the node holds declares: serving, the
-    /// node would strand it. The store's otherwise.
-    async fn hold(
+    /// The store's refusal of the install.
+    async fn install(
         &self,
         backend: &Backend,
-    ) -> Result<lash_durable::NodeHolding, lash_durable::DurableError>;
+    ) -> Result<lash_durable::NodeCapabilities, lash_durable::DurableError>;
 }
 
 impl Backend {
@@ -403,16 +395,16 @@ impl Backend {
         &self.inner.surfaces
     }
 
-    /// The package code a node of this build holds, when the host
-    /// installed any.
+    /// The package code a node of this build runs, when the host
+    /// registered any.
     pub fn packages(&self) -> Option<&Arc<dyn NodePackages>> {
         self.inner.packages.get()
     }
 
-    /// Register `packages` as the code this backend's node holds, which it
-    /// installs and advertises before it starts. A node holds one
+    /// Register `packages` as the code this backend's node runs, which it
+    /// installs and advertises before it starts. A node has one
     /// registration: a later one is refused, answering `false`.
-    pub fn hold_packages(&self, packages: Arc<dyn NodePackages>) -> bool {
+    pub fn register_packages(&self, packages: Arc<dyn NodePackages>) -> bool {
         self.inner.packages.set(packages).is_ok()
     }
 

@@ -267,7 +267,9 @@ async fn payload(backend: &lash::Backend, text: &str) -> serde_json::Value {
             &document,
             identity,
             lash::workflow::document::Name::new("worker"),
-            None,
+            lash::package::lash_packages()
+                .expect("the shipped library assembles")
+                .digest(),
         )
         .start(serde_json::Map::new()),
     )
@@ -853,9 +855,10 @@ impl lash::tools::StaticToolExecute for HoldBody {
     }
 }
 
-/// The hold component of this build.
+/// The hold component of this build, registering its body under `key`.
 struct HoldComponent {
     body: Arc<dyn lash::tools::ToolProvider>,
+    key: lash::plugins::ToolProviderKey,
 }
 
 impl lash::process::ProcessComponentFactory for HoldComponent {
@@ -890,9 +893,7 @@ impl lash::process::ProcessComponentFactory for HoldComponent {
         >::for_process(HOLD.component());
         registrations
             .tools()
-            .provider(lash::tool_provider_key!("body"), |owner, _| {
-                Ok(Arc::clone(&owner.body))
-            })?;
+            .provider(self.key, |owner, _| Ok(Arc::clone(&owner.body)))?;
         Ok(lash::plugins::ProcessRecipe::new(
             HOLD.component(),
             registrations,
@@ -913,6 +914,16 @@ fn hold_component_of(
     holds: bool,
     seen: &Arc<Holds>,
 ) -> Component {
+    hold_component_keyed(lash::tool_provider_key!("body"), definition, holds, seen)
+}
+
+/// The hold component serving `definition` under the provider key `key`.
+fn hold_component_keyed(
+    key: lash::plugins::ToolProviderKey,
+    definition: lash::tools::ToolDefinition,
+    holds: bool,
+    seen: &Arc<Holds>,
+) -> Component {
     (
         Arc::new(HoldComponent {
             body: Arc::new(lash::tools::StaticToolProvider::new(
@@ -922,6 +933,7 @@ fn hold_component_of(
                     seen: Arc::clone(seen),
                 },
             )),
+            key,
         }),
         HOLD,
     )
@@ -999,8 +1011,14 @@ async fn payload_under(
         )
         .await
         .expect("the document publishes");
+    let packages = core
+        .host_artifacts()
+        .cell_packages()
+        .await
+        .expect("the gate answers the environment's set")
+        .digest();
     serde_json::to_value(lash_vm_runtime::KernelProcessInput {
-        packages: None,
+        packages,
         document: identity,
         functions: document.manifest.functions.keys().copied().collect(),
         entry: lash::workflow::document::Name::new("worker"),
@@ -1273,6 +1291,100 @@ async fn a_changed_tool_answers_a_new_process_call_with_a_typed_catchable_error(
         "no body ran"
     );
     later.shutdown().await.expect("the later build stops");
+}
+
+/// UNREGISTERED-PROVIDER-PARKS (FIG-6993): build N starts a process whose
+/// code calls the hold tool through the component's provider `body`, and
+/// stops while it sleeps. A later build has the component but registers its
+/// body under another key: it never claims the process, so the call is
+/// never failed as a missing linked tool and no body runs, and the strand
+/// report names the provider while that build is the only one live. A
+/// build that registers `body` ends the process with the tool's answer.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_run_whose_provider_no_live_node_registers_stays_parked_and_stranded() {
+    let stores: Arc<dyn StoreSet> = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("an in-memory store set opens"),
+    );
+    let seen = Arc::new(Holds::default());
+    let env = hold_environment();
+    let (backend, first) = with_components(
+        &stores,
+        "provider-before",
+        vec![hold_component(false, &seen)],
+    );
+    let payload = payload_under(&first, &backend, &env, SLEEPING_HOLD_WORKER).await;
+    let process = start_under(&first, &env, payload).await;
+    first.shutdown().await.expect("build N stops");
+    drop(first);
+    let before = unowned(&backend, &process).await;
+
+    let (later_backend, later) = with_components(
+        &stores,
+        "provider-renamed",
+        vec![hold_component_keyed(
+            lash::tool_provider_key!("renamed"),
+            hold_definition(),
+            false,
+            &seen,
+        )],
+    );
+    assert!(
+        tokio::time::timeout(
+            Duration::from_secs(6),
+            later.processes().await_output(&process),
+        )
+        .await
+        .is_err(),
+        "the process does not end on a build without its provider"
+    );
+    let row = unowned(&later_backend, &process).await;
+    assert_eq!(
+        row.epoch, before.epoch,
+        "the build never claimed the process"
+    );
+    let page = lash::durable::strand_report(&later_backend, None, 64)
+        .await
+        .expect("the strand report reads");
+    let actor = ActorKey::process(process.as_str()).expect("a process actor key");
+    let stranded = page
+        .stranded
+        .iter()
+        .find(|work| work.actor == actor.as_str())
+        .unwrap_or_else(|| panic!("the strand report names the process: {page:?}"));
+    assert!(
+        stranded.lacks.natives.is_empty()
+            && stranded.lacks.kernels.is_empty()
+            && stranded.lacks.codecs.is_empty()
+            && stranded.lacks.providers.len() == 1
+            && stranded.lacks.providers.iter().all(|provider| {
+                provider.starts_with("kernel-claim-hold/") && provider.ends_with("body")
+            }),
+        "the run lacks only its provider: {stranded:?}"
+    );
+    assert_eq!(
+        seen.deliveries.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "no body ran"
+    );
+    later.shutdown().await.expect("the later build stops");
+    drop(later);
+
+    let (_, capable) =
+        with_components(&stores, "provider-back", vec![hold_component(false, &seen)]);
+    let output = tokio::time::timeout(
+        Duration::from_secs(60),
+        capable.processes().await_output(&process),
+    )
+    .await
+    .expect("the build registering the provider ends the process within a minute")
+    .expect("its end is read");
+    let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = output else {
+        panic!("the process ended without an answer: {output:?}");
+    };
+    assert_eq!(output.value_for_projection(), serde_json::json!("released"));
+    capable.shutdown().await.expect("the capable build stops");
 }
 
 // --- SUCCESSOR-PAIR-CARRIES-WAITS (FIG-6121 law 17, D2) --------------------

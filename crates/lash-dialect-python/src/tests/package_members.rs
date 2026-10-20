@@ -97,7 +97,7 @@ fn fixture() -> &'static Fixture {
             .expect("the worker binds to the registration");
         let registry: Arc<FunctionRegistry> =
             Arc::clone(embedding.registry().expect("the worker registry"));
-        let view = held.view(&held.own()).expect("the node's own set");
+        let view = held.view();
         let mut effects = super::machine::effects();
         effects.insert(
             EffectName::new("control.finish").expect("an effect name"),

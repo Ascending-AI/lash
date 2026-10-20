@@ -1,12 +1,10 @@
-//! Package artifacts, sets and the artifacts each node holds (FIG-6918):
+//! Package artifacts and sets, and what each live node offers (FIG-6918):
 //! the SQLite side of `lash_store_sql::durable::packages`.
 
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
-use lash_durable::packages::{
-    ArtifactInstall, HeldArtifact, NodeCapability, PackageCatalog, SetInstall,
-};
+use lash_durable::packages::{ArtifactInstall, NodeCapability, PackageCatalog, SetInstall};
 use lash_durable::{DurableError, DurableInstant};
 use lash_store_sql::durable::packages::PackageStatements;
 use rusqlite::{Connection, OptionalExtension};
@@ -15,23 +13,6 @@ use crate::conn::cached_execute;
 
 static SQL: LazyLock<PackageStatements> =
     LazyLock::new(|| PackageStatements::render(crate::schema_layout::MAIN));
-
-/// Records that `node` holds each of `held`, in the registration's
-/// transaction.
-pub(super) fn hold(
-    tx: &Connection,
-    node: &str,
-    held: &BTreeSet<HeldArtifact>,
-) -> rusqlite::Result<()> {
-    for artifact in held {
-        cached_execute(
-            tx,
-            SQL.hold.sql(),
-            rusqlite::params![node, artifact.digest.to_string(), artifact.path],
-        )?;
-    }
-    Ok(())
-}
 
 /// Every node live at `now`, by node id.
 pub(super) fn live_nodes(
@@ -45,12 +26,28 @@ pub(super) fn live_nodes(
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
-                row.get::<_, Option<String>>(3)?,
-                row.get::<_, Option<String>>(4)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(lash_durable::packages::nodes_of(rows))
+}
+
+type RequirementRows = Vec<(lash_durable::ActorKey, Vec<String>)>;
+
+/// Up to `limit` actors that have not ended and carry claim requirements,
+/// by key after `after`.
+pub(super) fn actor_requirements(
+    tx: &Connection,
+    after: Option<&str>,
+    limit: i64,
+) -> rusqlite::Result<Result<RequirementRows, DurableError>> {
+    let rows = tx
+        .prepare_cached(SQL.actor_requirements.sql())?
+        .query_map(rusqlite::params![after.unwrap_or(""), limit], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(lash_durable::packages::requirement_rows(rows))
 }
 
 /// Installs `artifacts`, then `sets`, keeping what is stored. A set naming

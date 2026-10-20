@@ -258,26 +258,23 @@ impl CellDeclarations {
             .packages()
             .expect("the core registered packages")
             .packages();
-        let installed: BTreeSet<Edge> = packages
-            .sets()
-            .iter()
-            .flat_map(|(digest, set)| {
-                let mut bytes = [0_u8; 16];
-                bytes.copy_from_slice(&digest.as_bytes()[..16]);
-                bytes[6] = (bytes[6] & 0x0f) | 0x40;
-                bytes[8] = (bytes[8] & 0x3f) | 0x80;
-                let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
-                let id = format!("host-pin:v1:{hex}");
-                set.keys()
-                    .flat_map(|key| packages.artifacts()[&key].code().ids().iter().copied())
-                    .map(move |function| {
-                        (
-                            format!("function:{function}"),
-                            "host_pin".to_owned(),
-                            id.clone(),
-                        )
-                    })
-                    .collect::<Vec<_>>()
+        let digest = packages.digest();
+        let set = packages.set();
+        let mut bytes = [0_u8; 16];
+        bytes.copy_from_slice(&digest.as_bytes()[..16]);
+        bytes[6] = (bytes[6] & 0x0f) | 0x40;
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+        let id = format!("host-pin:v1:{hex}");
+        let installed: BTreeSet<Edge> = set
+            .keys()
+            .flat_map(|key| packages.artifacts()[&key].code().ids().iter().copied())
+            .map(move |function| {
+                (
+                    format!("function:{function}"),
+                    "host_pin".to_owned(),
+                    id.clone(),
+                )
             })
             .collect();
         let pins: BTreeSet<_> = installed.iter().map(|(_, _, id)| id).collect();

@@ -33,7 +33,6 @@ pub(super) async fn node(store: &dyn DurableStore, name: &str) -> Result<NodeLea
             node: NodeId::new(name),
             decodes: vec![formats()],
             serves: Vec::new(),
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: 15_000,
         })
@@ -434,6 +433,14 @@ impl DurableStore for CountingStore {
 
     async fn live_nodes(&self) -> Result<Vec<crate::NodeCapability>, DurableError> {
         self.inner.live_nodes().await
+    }
+
+    async fn actor_requirements(
+        &self,
+        after: Option<&crate::ActorKey>,
+        limit: usize,
+    ) -> Result<Vec<(crate::ActorKey, Vec<String>)>, DurableError> {
+        self.inner.actor_requirements(after, limit).await
     }
 
     async fn install_packages(

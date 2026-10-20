@@ -1,5 +1,7 @@
-//! What one node holds: every artifact, the sets they make up, its own
-//! set, and the one registry and member index derived from them (V1).
+//! What one node was built with: its package set, every artifact of it,
+//! and the one registry and member index derived from them (V1). A node
+//! holds no other set: work linked under another set runs from that set's
+//! stored definitions (FIG-6985, FIG-6993).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, OnceLock};
@@ -17,15 +19,14 @@ use crate::{
     SurfaceSnapshot,
 };
 
-/// The artifacts a node holds, registered once by its host and read by
-/// the parent's admission and every worker (V1).
+/// The package set a node was built with, registered once by its host and
+/// read by the parent's admission and every worker (V1).
 #[derive(Clone, Debug)]
 pub struct HeldPackages {
     pub(crate) artifacts: BTreeMap<ArtifactKey, Arc<Package>>,
-    pub(crate) sets: BTreeMap<PackageSetDigest, PackageSet>,
-    pub(crate) own: PackageSetDigest,
-    /// Each held set's surface, as the node stores it at install.
-    pub(crate) surfaces: BTreeMap<PackageSetDigest, Arc<SurfaceSnapshot>>,
+    pub(crate) set: PackageSet,
+    /// The set's surface, as the node stores it at install.
+    pub(crate) surface: Arc<SurfaceSnapshot>,
     /// Every artifact's code as declarations, each function once for every
     /// kernel version the build interprets.
     pub(crate) functions: Arc<FunctionRegistry>,
@@ -33,54 +34,44 @@ pub struct HeldPackages {
     pub(crate) live_frame: OnceLock<&'static [u8]>,
 }
 
-/// A view of a set the node does not hold.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("package set {packages} is not held by this node")]
-pub struct SetNotHeld {
-    pub packages: PackageSetDigest,
-}
-
 impl HeldPackages {
-    /// A node holding exactly `packages`, which are its own set.
+    /// A node built with exactly `packages`, as one set.
     ///
     /// # Errors
     ///
     /// [`HeldPackages::new`]'s, and [`PackageSet::new`]'s.
     pub fn install(packages: impl IntoIterator<Item = Package>) -> Result<Self, PackageRefusal> {
         let packages: Vec<Arc<Package>> = packages.into_iter().map(Arc::new).collect();
-        let own = PackageSet::new(packages.iter().map(AsRef::as_ref))?;
-        let digest = own.digest();
-        Self::new(packages, [own], digest)
+        let set = PackageSet::new(packages.iter().map(AsRef::as_ref))?;
+        Self::new(packages, set)
     }
 
-    /// A node holding `artifacts` and the `sets` they make up, `own` among
-    /// them: what a store's rows or a pool frame reconstruct.
+    /// A node built with `set`, whose members are `artifacts`: what a pool
+    /// frame reconstructs.
     ///
     /// # Errors
     ///
-    /// [`PackageRefusal::OwnNotHeld`]; a set naming an artifact the node is
-    /// not given ([`PackageRefusal::ArtifactNotHeld`]) or that is not
-    /// dependency-closed ([`PackageRefusal::NotClosed`]); a host package
-    /// whose path meets a root a lash package lists
-    /// ([`PackageRefusal::ReservedRoot`]); and a definition the registry
-    /// refuses ([`PackageRefusal::Registry`]).
+    /// An artifact `set` does not name ([`PackageRefusal::NotMember`]); a
+    /// member the node is not given ([`PackageRefusal::ArtifactNotHeld`])
+    /// or a set that is not dependency-closed
+    /// ([`PackageRefusal::NotClosed`]); a host package whose path meets a
+    /// root a lash package lists ([`PackageRefusal::ReservedRoot`]); and a
+    /// definition the registry refuses ([`PackageRefusal::Registry`]).
     pub fn new(
         artifacts: impl IntoIterator<Item = Arc<Package>>,
-        sets: impl IntoIterator<Item = PackageSet>,
-        own: PackageSetDigest,
+        set: PackageSet,
     ) -> Result<Self, PackageRefusal> {
         let artifacts: BTreeMap<ArtifactKey, Arc<Package>> = artifacts
             .into_iter()
             .map(|package| (package.key(), package))
             .collect();
-        let sets: BTreeMap<PackageSetDigest, PackageSet> =
-            sets.into_iter().map(|set| (set.digest(), set)).collect();
-        if !sets.contains_key(&own) {
-            return Err(PackageRefusal::OwnNotHeld);
+        if let Some(key) = artifacts
+            .keys()
+            .find(|key| set.members().get(&key.path) != Some(&key.digest))
+        {
+            return Err(PackageRefusal::NotMember { key: key.clone() });
         }
-        for set in sets.values() {
-            set.check_closed(|key| artifacts.get(key).map(AsRef::as_ref))?;
-        }
+        set.check_closed(|key| artifacts.get(key).map(AsRef::as_ref))?;
         check_reserved_roots(artifacts.values().map(AsRef::as_ref))?;
         let mut written = FunctionRegistry::declarations();
         for package in registration_order(&artifacts) {
@@ -95,12 +86,11 @@ impl HeldPackages {
         let (functions, roots) =
             interpreted(written).map_err(|message| PackageRefusal::Interpretation { message })?;
         let functions = Arc::new(functions);
-        let surfaces = surfaces(&artifacts, &sets, &functions);
+        let surface = surface(&artifacts, &set, &functions);
         let mut held = Self {
             artifacts,
-            sets,
-            own,
-            surfaces,
+            set,
+            surface,
             functions,
             frame: Arc::from([]),
             live_frame: OnceLock::new(),
@@ -113,33 +103,25 @@ impl HeldPackages {
         &self.artifacts
     }
 
-    /// The sets the node knows whose members it all holds.
-    pub fn sets(&self) -> &BTreeMap<PackageSetDigest, PackageSet> {
-        &self.sets
+    /// The node's set.
+    pub fn set(&self) -> &PackageSet {
+        &self.set
     }
 
-    /// The set this node built at start: the fleet gate's first candidate,
-    /// and nothing else.
-    pub fn own(&self) -> PackageSetDigest {
-        self.own
+    /// The node's set's digest: the surface it advertises as its candidate
+    /// for new cells.
+    pub fn digest(&self) -> PackageSetDigest {
+        self.set.digest()
     }
 
-    /// One set's names, exports and definitions.
-    ///
-    /// # Errors
-    ///
-    /// [`SetNotHeld`].
-    pub fn view(&self, packages: &PackageSetDigest) -> Result<PackageView<'_>, SetNotHeld> {
-        let surface = self.surface(packages).ok_or(SetNotHeld {
-            packages: *packages,
-        })?;
-        Ok(PackageView::new(surface, &self.functions))
+    /// The node's set's names, exports and definitions.
+    pub fn view(&self) -> PackageView<'_> {
+        PackageView::new(&self.surface, &self.functions)
     }
 
-    /// The surface of the held set `packages`: what the node stores for it
-    /// at install.
-    pub fn surface(&self, packages: &PackageSetDigest) -> Option<&Arc<SurfaceSnapshot>> {
-        self.surfaces.get(packages)
+    /// The node's set's surface: what the node stores for it at install.
+    pub fn surface(&self) -> &Arc<SurfaceSnapshot> {
+        &self.surface
     }
 
     /// Every held artifact's code as declarations: what a parent links,
@@ -171,6 +153,28 @@ impl HeldPackages {
         .register_into(&mut registry, &|_| None)
         .map_err(|message| PackageRefusal::StoredDefinition { message })?;
         Ok(Arc::new(registry))
+    }
+
+    /// The node's registry with every definition of `others` it lacks
+    /// registered over it: one catalog that reads each of their surfaces,
+    /// as a node reads other builds' stored sets over the code the store
+    /// holds for them (FIG-6993).
+    ///
+    /// # Errors
+    ///
+    /// [`PackageRefusal::StoredDefinition`] for a definition the registry
+    /// refuses.
+    pub fn catalog_over<'a>(
+        &self,
+        others: impl IntoIterator<Item = &'a HeldPackages>,
+    ) -> Result<Arc<FunctionRegistry>, PackageRefusal> {
+        let stored = others
+            .into_iter()
+            .flat_map(|other| other.functions().iter())
+            .filter(|(function, _)| self.functions.get(function).is_none())
+            .map(|(function, registered)| (*function, Arc::clone(registered.definition())))
+            .collect();
+        self.catalog_with(&stored)
     }
 
     /// The roots lash's held packages list: no host package path meets one.
@@ -364,19 +368,17 @@ impl ExportView for PackageView<'_> {
     }
 }
 
-/// Each of `sets`' surface, over `registry`, which holds their code.
-pub(crate) fn surfaces(
+/// `set`'s surface, over `registry`, which holds its code.
+pub(crate) fn surface(
     artifacts: &BTreeMap<ArtifactKey, Arc<Package>>,
-    sets: &BTreeMap<PackageSetDigest, PackageSet>,
+    set: &PackageSet,
     registry: &FunctionRegistry,
-) -> BTreeMap<PackageSetDigest, Arc<SurfaceSnapshot>> {
-    sets.iter()
-        .map(|(digest, set)| {
-            let surface =
-                SurfaceSnapshot::of(set, |key| artifacts.get(key).map(AsRef::as_ref), registry);
-            (*digest, Arc::new(surface))
-        })
-        .collect()
+) -> Arc<SurfaceSnapshot> {
+    Arc::new(SurfaceSnapshot::of(
+        set,
+        |key| artifacts.get(key).map(AsRef::as_ref),
+        registry,
+    ))
 }
 
 /// Every root a lash package lists, with that package.
@@ -464,47 +466,49 @@ fn interpreted(
     Ok((registry, roots))
 }
 
-/// An owned handle to one explicit package set, for runtime service boundaries.
+/// An owned handle to a package surface, for runtime service boundaries:
+/// the node's own set, or a stored surface over the node's registry.
 #[derive(Clone, Debug)]
 pub struct SharedPackageView {
-    held: Arc<HeldPackages>,
-    digest: PackageSetDigest,
+    surface: Arc<SurfaceSnapshot>,
+    catalog: Arc<FunctionRegistry>,
 }
 
 impl SharedPackageView {
     /// The set this producer registered at node construction.
     pub fn declared(held: Arc<HeldPackages>) -> Self {
-        let digest = held.own;
-        Self { held, digest }
+        Self {
+            surface: Arc::clone(held.surface()),
+            catalog: Arc::clone(held.functions()),
+        }
     }
 
-    pub fn new(held: Arc<HeldPackages>, digest: PackageSetDigest) -> Result<Self, SetNotHeld> {
-        held.view(&digest)?;
-        Ok(Self { held, digest })
+    /// The stored `surface`, read over `catalog` (FIG-6993): a set that is
+    /// not the node's own, whose names and roots it shows.
+    pub fn stored(surface: Arc<SurfaceSnapshot>, catalog: Arc<FunctionRegistry>) -> Self {
+        Self { surface, catalog }
+    }
+
+    fn view(&self) -> PackageView<'_> {
+        PackageView::new(&self.surface, &self.catalog)
     }
 }
 
 impl ExportView for SharedPackageView {
     fn namespace_roots(&self) -> BTreeSet<String> {
-        self.held
-            .view(&self.digest)
-            .map_or_else(|_| BTreeSet::new(), |view| view.namespace_roots())
+        self.view().namespace_roots()
     }
 
     fn exports(&self, path: &PackagePath) -> Option<&BTreeMap<Segment, Export>> {
-        self.held
-            .view(&self.digest)
-            .ok()?
+        self.surface
             .package(path)
             .filter(|package| package.origin() == Origin::Host)
             .map(crate::SnapshotPackage::exports)
     }
     fn reserves(&self, root: &str) -> Option<String> {
-        self.held.view(&self.digest).ok()?.reserves(root)
+        self.view().reserves(root)
     }
     fn paths(&self) -> Vec<PackagePath> {
-        self.held
-            .view(&self.digest)
-            .map_or_else(|_| Vec::new(), |view| view.paths())
+        self.view().paths()
     }
 }

@@ -81,25 +81,6 @@ pub struct DurableSnapshotStore {
     /// park stages only the others. Emptied when a commit fails.
     pub(crate) stored: Mutex<std::collections::BTreeSet<NodeId>>,
     pub(crate) members: tokio::sync::Mutex<Members>,
-    /// The package set the execution's code was linked under, which a park
-    /// stamps its actor with (CLAIM-HOLDS).
-    pub(crate) stamp: Mutex<ParkStamp>,
-}
-
-/// What a park stamps the execution's actor with, and whether a park of
-/// this activation committed it.
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct ParkStamp {
-    pub(crate) packages: Option<lash_durable::PackageSetDigest>,
-    pub(crate) committed: bool,
-}
-
-impl ParkStamp {
-    /// The stamp the next park writes: once per activation, since a
-    /// stamping commit takes the store's explicit-transaction path.
-    pub(crate) fn owed(&self) -> Option<lash_durable::PackageSetDigest> {
-        self.packages.filter(|_| !self.committed)
-    }
 }
 
 impl std::fmt::Debug for DurableSnapshotStore {
@@ -130,30 +111,7 @@ impl DurableSnapshotStore {
             book: Mutex::new(AdmissionBook::default()),
             latest: Mutex::new(None),
             stored: Mutex::default(),
-            stamp: Mutex::default(),
         }
-    }
-
-    /// Stamps the execution's actor with `packages`, the package set its
-    /// code was linked under, at its first park of this activation: from
-    /// then on only a node holding that whole set claims the actor to run
-    /// it (CLAIM-HOLDS). Set before the execution runs.
-    pub fn stamp_parks_with(&self, packages: lash_durable::PackageSetDigest) {
-        self.stamp
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .packages = Some(packages);
-    }
-
-    /// The package set the execution's parks stamp its actor with, and
-    /// whether a park of this activation committed that stamp.
-    #[must_use]
-    pub fn park_stamp(&self) -> Option<(lash_durable::PackageSetDigest, bool)> {
-        let stamp = *self
-            .stamp
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        stamp.packages.map(|packages| (packages, stamp.committed))
     }
 
     /// Run its members' bodies from `bodies`, vetoing a stored `Repeatable`

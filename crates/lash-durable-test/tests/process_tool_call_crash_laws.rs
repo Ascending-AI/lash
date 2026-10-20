@@ -813,6 +813,8 @@ struct Resolutions {
     entries: Mutex<Vec<(String, lash_core::ToolCallId, serde_json::Value)>>,
     /// How many times the grant's transform ran.
     transforms: std::sync::atomic::AtomicUsize,
+    /// Whether matches carry a codec absent from the static dispatch link.
+    binding: std::sync::atomic::AtomicBool,
     /// The nodes whose trace the resolver reads.
     nodes: Mutex<Option<std::sync::Weak<SimNodes>>>,
 }
@@ -869,6 +871,10 @@ struct Resolver {
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for Resolver {
+    fn readable_binding_formats(&self) -> &'static [lash_core::FormatVersion] {
+        &[lash_core::FormatVersion::ONE]
+    }
+
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
@@ -922,7 +928,15 @@ impl lash_core::DeferredToolProvider for Resolver {
                 RESOLVED_PATH => lash_core::DeferredOutcome::resolved(
                     DYNAMIC_COMPONENT.tool_provider(lash::tool_provider_key!("deferred")),
                     dynamic_target(if earlier { "dyn_second" } else { "dyn_first" }),
-                    None,
+                    self.seen
+                        .binding
+                        .load(std::sync::atomic::Ordering::SeqCst)
+                        .then(|| lash::tools::ExecutionBinding {
+                            codec: DYNAMIC_COMPONENT
+                                .tool_provider(lash::tool_provider_key!("deferred")),
+                            format: lash_core::FormatVersion::ONE,
+                            payload: serde_json::json!({"route": "matched"}),
+                        }),
                 ),
                 REFUSED_PATH => lash_core::DeferredOutcome::Refused {
                     reason: dynamic_host_explanation(),
@@ -1241,7 +1255,9 @@ impl DynamicCalls {
             .await
             .map_err(|error| format!("publish the document: {error}"))?;
         let payload = serde_json::to_value(lash_vm_runtime::KernelProcessInput {
-            packages: None,
+            packages: lash_vm_runtime::lash_packages()
+                .expect("lash's packages")
+                .digest(),
             document: identity,
             functions: document.manifest.functions.keys().copied().collect(),
             entry: lash::workflow::document::Name::new("dynamic"),
@@ -1742,3 +1758,125 @@ tiered_laws!(
     an_ungranted_tool_dispatches_nothing_and_is_caught_typed,
     a_diverging_transform_is_refused_typed_when_the_call_replays_it,
 );
+
+/// DYNAMIC-MATCH-ATOMIC (FIG-6993): the resolution's outcome adds its
+/// codec before the handoff can run, and the target's outcome removes it
+/// before the engine advances. A crash at either outcome preserves those
+/// requirements: an incapable node skips the former and takes the latter,
+/// reusing the committed match and outcome without another body entry.
+#[tokio::test]
+async fn a_dynamic_match_owes_its_codec_from_resolution_commit_through_target_settlement() {
+    let calls = DynamicCalls::new(Dialect::SqliteMemory, None, RESOLVING);
+    calls
+        .seen
+        .binding
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let clock = SimClock::new();
+    let database = calls.database(Arc::clone(&clock)).await;
+    let script = Script::new();
+    script.cut_on("a", CommitLabel::STEP_OUTCOME, 2, Fault::CommitThenAbort);
+    script.cut_on("c", CommitLabel::STEP_OUTCOME, 1, Fault::CommitThenAbort);
+    let config = calls.config();
+    let lacking: Vec<String> = config
+        .serves
+        .iter()
+        .filter(|token| !token.starts_with("codec:"))
+        .cloned()
+        .collect();
+    let nodes = Arc::new(SimNodes::new(
+        database.clone(),
+        clock.clone(),
+        script,
+        config,
+        calls.activation(),
+    ));
+    *calls.seen.nodes.lock_recover() = Some(Arc::downgrade(&nodes));
+    let process = calls.start_process().await.unwrap();
+    *calls.process.lock_recover() = Some(process.clone());
+    let actor = ActorKey::process(process.as_str()).unwrap();
+    nodes.start("a");
+    let horizon = clock.logical_ms() + 120_000;
+    while !nodes.script().trace().iter().any(|write| {
+        write.node.as_ref() == "a" && write.cut == Some(Fault::CommitThenAbort) && write.committed()
+    }) {
+        assert!(
+            !calls.done(&nodes).await
+                && clock.logical_ms() < horizon
+                && nodes.step().await.is_some(),
+            "the resolution never committed"
+        );
+    }
+    nodes.quiesce().await;
+    let requirements = || async {
+        database
+            .actor_requirements(None, 16)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|(key, _)| key == &actor)
+            .map(|(_, requires)| requires)
+            .unwrap_or_default()
+    };
+    assert_eq!(
+        calls.seen.resolved.lock_recover().len(),
+        1,
+        "the cut follows the resolution, not the preceding kernel step"
+    );
+    assert!(
+        calls.seen.entries.lock_recover().is_empty(),
+        "the target did not run before the cut"
+    );
+    let codec = "codec:process-dynamic/deferred@1";
+    assert!(
+        requirements().await.iter().any(|token| token == codec),
+        "the committed resolution did not require its codec"
+    );
+    nodes.serve_on("b", lacking.clone());
+    nodes.start("b");
+    let horizon = clock.logical_ms() + 60_000;
+    while clock.logical_ms() < horizon && nodes.step().await.is_some() {}
+    assert!(
+        calls.seen.entries.lock_recover().is_empty(),
+        "a node without the codec ran the target"
+    );
+    assert!(
+        nodes
+            .script()
+            .trace()
+            .iter()
+            .all(|write| write.node.as_ref() != "b" || write.actor.as_ref() != Some(&actor)),
+        "a node without the codec claimed matched work"
+    );
+    nodes.kill("b");
+    nodes.quiesce().await;
+    nodes.start("c");
+    let horizon = clock.logical_ms() + 120_000;
+    while !nodes.script().trace().iter().any(|write| {
+        write.node.as_ref() == "c" && write.cut == Some(Fault::CommitThenAbort) && write.committed()
+    }) {
+        assert!(
+            !calls.done(&nodes).await
+                && clock.logical_ms() < horizon
+                && nodes.step().await.is_some(),
+            "the target never settled"
+        );
+    }
+    nodes.quiesce().await;
+    assert!(
+        !requirements().await.iter().any(|token| token == codec),
+        "the settled target still required its codec"
+    );
+    nodes.serve_on("d", lacking);
+    nodes.start("d");
+    let horizon = clock.logical_ms() + 120_000;
+    while !calls.done(&nodes).await {
+        assert!(
+            clock.logical_ms() < horizon && nodes.step().await.is_some(),
+            "the node without the codec did not consume the settled outcome"
+        );
+    }
+    nodes.quiesce().await;
+    assert_eq!(calls.seen.resolved.lock_recover().len(), 1);
+    assert_eq!(calls.seen.entries.lock_recover().len(), 1);
+    assert_eq!(calls.laws(&nodes, None).await, Vec::<String>::new());
+}

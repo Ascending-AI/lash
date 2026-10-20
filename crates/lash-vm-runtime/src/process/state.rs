@@ -35,9 +35,9 @@ pub const KERNEL_RUN_STEP: &str = "kernel_run";
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct KernelProcessInput {
-    /// The imported definition's surface snapshot; raw function values name none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub packages: Option<lash_kernel_doc::PackageSetDigest>,
+    /// The package set the definition is linked under: the publishing or
+    /// starting cell's, recorded at creation (FIG-6993).
+    pub packages: lash_kernel_doc::PackageSetDigest,
     pub document: DocumentId,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub functions: BTreeSet<FunctionId>,
@@ -73,9 +73,9 @@ impl KernelProcessInput {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct KernelProcessDefinition {
-    /// The imported definition's surface snapshot; raw function values name none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub packages: Option<lash_kernel_doc::PackageSetDigest>,
+    /// The package set the definition is linked under: the publishing or
+    /// starting cell's, recorded at creation (FIG-6993).
+    pub packages: lash_kernel_doc::PackageSetDigest,
     pub document: DocumentId,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub functions: BTreeSet<FunctionId>,
@@ -84,12 +84,12 @@ pub struct KernelProcessDefinition {
 
 impl KernelProcessDefinition {
     /// The definition of `entry` of `document`, whose identity is
-    /// `identity`: pure, from the document alone.
+    /// `identity`, linked under `packages`: pure, from the document alone.
     pub fn of(
         document: &lash_kernel_doc::Document,
         identity: DocumentId,
         entry: Name,
-        packages: Option<lash_kernel_doc::PackageSetDigest>,
+        packages: lash_kernel_doc::PackageSetDigest,
     ) -> Self {
         Self {
             packages,

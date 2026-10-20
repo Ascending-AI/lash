@@ -13,9 +13,7 @@ use std::process::ExitCode;
 fn main() -> ExitCode {
     let (held, _) = fixtures::installed();
     let selector = std::env::args().nth(1);
-    let view = held
-        .view(&held.own())
-        .unwrap_or_else(|error| panic!("{error}"));
+    let view = held.view();
     if let Some(selector) = &selector {
         let exists = view.packages().any(|package| {
             package

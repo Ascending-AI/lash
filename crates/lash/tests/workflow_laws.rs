@@ -70,25 +70,6 @@ main {
 }
 "#;
 
-/// `echoed(name)`: performs `tools.echo` once, sleeps, and returns what
-/// the echo answered.
-const ECHOED: &str = r#"kernel 1
-numbers float
-effect tools.echo(input: Any) -> Any contract "1"
-entry echoed(name: Text) -> Any
-
-fn echoed(name) {
-  let input = {value: name}
-  let got = perform tools.echo(input) as Any
-  do sleep 5
-  return got
-}
-
-main {
-  finish null
-}
-"#;
-
 /// `supervisor(value)` starts the entry `worker` of its own document by
 /// function reference, awaits it and returns what it ended with.
 const SUPERVISOR: &str = r#"kernel 1
@@ -528,8 +509,7 @@ async fn a_host_captures_exactly_the_published_entrys_environment() {
             lash_kernel_dialect::ExportView::namespace_roots(
                 &lash_vm_runtime::lash_packages()
                     .expect("the fixture's packages")
-                    .view(&lash_vm_runtime::lash_packages().unwrap().own())
-                    .unwrap(),
+                    .view(),
             ),
         )
     );
@@ -1339,9 +1319,18 @@ async fn a_process_starts_another_entry_of_its_document_by_function_reference_an
             .effects
             .insert(name.clone(), checked.checker().effects[&name].clone());
     }
-    let worker =
-        lash_vm_runtime::definition_of_entry(&document, document.identity(), &Name::new("worker"))
-            .expect("pure workflow id");
+    let packages = artifacts
+        .cell_packages()
+        .await
+        .expect("the gate answers")
+        .digest();
+    let worker = lash_vm_runtime::definition_of_entry(
+        &document,
+        document.identity(),
+        &Name::new("worker"),
+        packages,
+    )
+    .expect("pure workflow id");
     let worker_id =
         lash_core::ProcessDefinitionId::from_tagged_json(&worker["id"]).expect("worker id");
     let publication = published(
@@ -1716,95 +1705,6 @@ async fn a_new_env_naming_a_retired_component_is_refused_typed() {
     core.shutdown().await.expect("shutdown");
 }
 
-/// RETIRED-USED (FIG-6296): a process whose sealed env links `tools.echo`
-/// to the echo component performs it and parks. On a node that declares
-/// the component retired, the effect would have no body, so the process
-/// parks with the typed refusal before any step resumes, and nothing
-/// settles.
-#[tokio::test]
-async fn a_sealed_env_linking_a_retired_components_effect_parks_with_the_typed_refusal() {
-    let files = Files::new();
-    let first = core_over(files.open().await, "first").await;
-    let artifacts = first.host_artifacts();
-    let pin = lash::process::HostArtifactPin::mint();
-    let environment = environment(true);
-    let mut document =
-        lash::workflow::document::parse_document(ECHOED).expect("the document parses");
-    let checked = artifacts
-        .workflow_environment(&environment)
-        .await
-        .expect("the environment reads")
-        .expect("the kernel environment");
-    let echo = lash::workflow::document::EffectName::new("tools.echo").expect("effect");
-    document
-        .manifest
-        .effects
-        .insert(echo.clone(), checked.checker().effects[&echo].clone());
-    let publication = published(
-        artifacts
-            .publish_workflow(
-                &pin,
-                &lash::workflow::document::DocumentBytes::from(document.clone()),
-                &Name::new("echoed"),
-                &environment,
-                artifacts
-                    .cell_packages()
-                    .await
-                    .expect("the package gate answers"),
-                None,
-            )
-            .await
-            .expect("the publication answers"),
-    );
-    let env_ref = artifacts
-        .publish_process_env(&pin, &linking(&environment, &["tools.echo"]))
-        .await
-        .expect("publish the process environment");
-    let process = start(&first, &env_ref, &publication.definition, "used", "echoed").await;
-    let due = timer_park_after(&first, &process, 0).await;
-    first.shutdown().await.expect("the first node stops");
-    drop(first);
-
-    files.clock.set(due);
-    let second =
-        core_with_process_tools(files.open().await, "second", true, EchoComponent::Retired).await;
-    let observed = tokio::time::timeout(std::time::Duration::from_secs(120), async {
-        loop {
-            let observed = second
-                .processes()
-                .get(&process)
-                .await
-                .expect("the process reads")
-                .expect("the process is retained");
-            if matches!(
-                observed.park,
-                lash_execution_contracts::process::ProcessParkState::Parked(_)
-            ) {
-                break observed;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .expect("the process parks within two minutes");
-    assert_eq!(
-        observed.park,
-        lash_execution_contracts::process::ProcessParkState::Parked(
-            lash_execution_contracts::park::ProcessParkReason::EnvRefused {
-                refusal: lash::process::ProcessEnvRefusal::RetiredComponentServes {
-                    id: echo_id(),
-                    effect: "tools.echo".to_owned(),
-                },
-            }
-        )
-    );
-    assert!(
-        observed.lifecycle.terminal().is_none(),
-        "nothing settled: {observed:?}"
-    );
-    second.shutdown().await.expect("the second node stops");
-}
-
 /// FIG-6215: a multithreaded host can await workflow import in a Send future.
 #[test]
 fn workflow_import_future_is_send() {
@@ -1818,7 +1718,7 @@ fn workflow_import_future_is_send() {
                 environment,
                 {
                     let held = lash::package::lash_packages().unwrap();
-                    lash::package::CellPackages::held(&held, &held.own()).unwrap()
+                    lash::package::CellPackages::held(&held)
                 },
                 Some(lash::dialect::workflow::WorkflowSourceLimits {
                     max_bytes: 1024,
@@ -2074,5 +1974,5 @@ mod value_names;
 fn test_packages() -> lash::package::PackageView<'static> {
     static HELD: std::sync::LazyLock<Arc<lash::package::HeldPackages>> =
         std::sync::LazyLock::new(|| lash::package::lash_packages().unwrap());
-    HELD.view(&HELD.own()).unwrap()
+    HELD.view()
 }

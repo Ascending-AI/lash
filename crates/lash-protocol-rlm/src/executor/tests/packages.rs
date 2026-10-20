@@ -1,31 +1,32 @@
 //! Sessions on the cell's package set (FIG-6926): each cell runs on the
 //! set the gate answers, its carried saved functions relinked to that set
 //! by name (RELINK-CLOSURE, K-LIB-009), so everything one cell runs comes
-//! from one set (CURRENT-RELEASE), and a package value built by another
+//! from one set, and a package value built by another
 //! release of its package raises `package.stale_value` naming both
-//! (K-SES-002 carries it). The node holds every release, the earlier ones
-//! retained beside its own. A round's prompt and its cell take one gate
-//! answer, and a parked cell's session stays stamped with its set across a
-//! reclaim (FIG-6986).
+//! (K-SES-002 carries it). A node holds its own release; an earlier
+//! one's cells are written under its stored surface, read over the node's
+//! registry with the definitions the earlier build stored (FIG-6993). A
+//! round's prompt and its cell take one gate answer.
 
 use std::collections::BTreeSet;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
 use lash_kernel_doc::{FunctionId, PackageSetDigest};
-use lash_kernel_package::{HeldPackages, Package, PackageSet, PackageSources, testing};
+use lash_kernel_package::{HeldPackages, Package, PackageSources, testing};
 
 use super::{CellTools, SESSION, TURN, finish_of, open_host};
 use crate::CellDialect;
 use crate::plugin::runtime_state::RlmRuntimeState;
 use crate::testing::{DurableHost, cell_context, cell_services, run_cell};
 
-/// A gate a law moves between surfaces, as a fleet's would: `held`'s sets,
-/// or a stored surface it does not hold.
-struct Switch(Arc<HeldPackages>, Mutex<crate::CellPackages>);
+/// A gate a law moves between surfaces, as a fleet's would: the node's
+/// own set, another release's stored one, or a stored surface it does not
+/// hold.
+struct Switch(Arc<Releases>, Mutex<crate::CellPackages>);
 
 impl Switch {
-    fn new(held: &Arc<HeldPackages>, set: PackageSetDigest) -> Self {
+    fn new(held: &Arc<Releases>, set: PackageSetDigest) -> Self {
         Self(Arc::clone(held), Mutex::new(held_cell(held, set)))
     }
 
@@ -39,8 +40,13 @@ impl Switch {
     }
 }
 
-fn held_cell(held: &HeldPackages, set: PackageSetDigest) -> crate::CellPackages {
-    crate::CellPackages::held(held, &set).expect("a held set")
+/// The surface of release `set` as the node of `held` writes a cell under
+/// it: its own registration, or the release's stored surface.
+fn held_cell(held: &Releases, set: PackageSetDigest) -> crate::CellPackages {
+    if set == held.own.digest() {
+        return crate::CellPackages::held(&held.own);
+    }
+    stored_cell(&held.own, &held.sets[&set], set)
 }
 
 #[async_trait::async_trait]
@@ -188,7 +194,8 @@ fn stored_cell(
     installer: &HeldPackages,
     set: PackageSetDigest,
 ) -> crate::CellPackages {
-    let installed = installer.surface(&set).expect("the installer's surface");
+    assert_eq!(installer.digest(), set, "the installer's own set");
+    let installed = installer.surface();
     let surface = lash_kernel_package::SurfaceSnapshot::decode(set, &installed.encode())
         .expect("the stored bytes")
         .with_labels(|artifact| {
@@ -227,42 +234,60 @@ fn q(lash: &[Arc<Package>], value: &str) -> Package {
     .expect("q builds")
 }
 
-/// A node holding lash's packages with each of `releases` as a set of its
-/// own, the last its own set, the others retained; with each set's
-/// digest.
+/// The node of the last of `releases`, each over lash's packages, and
+/// every release as the build that installed it holds it: the stored sets
+/// the node reads the earlier ones from.
+struct Releases {
+    own: Arc<HeldPackages>,
+    sets: std::collections::BTreeMap<PackageSetDigest, Arc<HeldPackages>>,
+}
+
+impl Releases {
+    /// The view of release `set`, as the build that installed it holds it.
+    fn view(&self, set: PackageSetDigest) -> lash_kernel_package::PackageView<'_> {
+        self.sets[&set].view()
+    }
+}
+
+/// [`Releases`] of `releases`, with each set's digest.
 fn hold(
     lash: &[Arc<Package>],
     releases: Vec<Vec<Package>>,
-) -> (Arc<HeldPackages>, Vec<PackageSetDigest>) {
-    let mut artifacts: Vec<Arc<Package>> = lash.to_vec();
-    let mut sets = Vec::new();
-    for release in releases {
-        let members: Vec<Arc<Package>> = lash
-            .iter()
-            .cloned()
-            .chain(release.into_iter().map(Arc::new))
-            .collect();
-        sets.push(PackageSet::new(members.iter().map(AsRef::as_ref)).expect("a closed set"));
-        artifacts.extend(members);
-    }
-    let digests: Vec<PackageSetDigest> = sets.iter().map(PackageSet::digest).collect();
-    let own = *digests.last().expect("a set");
-    let held = HeldPackages::new(artifacts, sets, own).expect("the node's packages");
-    (Arc::new(held), digests)
+) -> (Arc<Releases>, Vec<PackageSetDigest>) {
+    let installed: Vec<Arc<HeldPackages>> = releases
+        .into_iter()
+        .map(|release| {
+            Arc::new(
+                HeldPackages::install(
+                    lash.iter()
+                        .map(|package| (**package).clone())
+                        .chain(release),
+                )
+                .expect("a release's packages"),
+            )
+        })
+        .collect();
+    let digests: Vec<PackageSetDigest> = installed.iter().map(|held| held.digest()).collect();
+    let own = Arc::clone(installed.last().expect("a set"));
+    let sets = installed
+        .into_iter()
+        .map(|held| (held.digest(), held))
+        .collect();
+    (Arc::new(Releases { own, sets }), digests)
 }
 
 /// The services of a node holding `held`, its cells written under the set
 /// `gate` answers.
 fn node(
     dialect: &CellDialect,
-    held: &Arc<HeldPackages>,
+    held: &Arc<Releases>,
     gate: &Arc<Switch>,
 ) -> super::super::CellServices {
     let mut services = cell_services(
         dialect,
-        lash_vm_client::service::Service::default().with_packages(Arc::clone(held)),
+        lash_vm_client::service::Service::default().with_packages(Arc::clone(&held.own)),
     );
-    services.kernel = super::super::KernelCarry::holding(Some(Arc::clone(held)), None);
+    services.kernel = super::super::KernelCarry::holding(Some(Arc::clone(&held.own)), None);
     services.packages = Some(Arc::clone(gate) as Arc<dyn crate::plugin::PackageGate>);
     services
 }
@@ -276,23 +301,51 @@ struct Session {
     services: super::super::CellServices,
     gate: Arc<Switch>,
     tools: Arc<dyn lash_core::ToolProvider>,
-    held: Arc<HeldPackages>,
+    held: Arc<Releases>,
     cells: usize,
 }
 
+/// What each release's install writes (FIG-6991): the code the node of
+/// `held` lacks, under the set's pin.
+async fn store_code(backend: &lash_execution_contracts::backend::Backend, held: &Releases) {
+    for set in held.sets.keys() {
+        let images: Vec<(FunctionId, Arc<[u8]>)> = held_cell(held, *set)
+            .stored_definitions()
+            .iter()
+            .map(|(function, definition)| {
+                (
+                    *function,
+                    Arc::from(lash_kernel_doc::graph_tokens::encode_body(
+                        definition.as_ref(),
+                    )),
+                )
+            })
+            .collect();
+        if images.is_empty() {
+            continue;
+        }
+        lash_vm_runtime::KernelDocuments::new(backend.module_artifacts())
+            .hold_definitions(
+                &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
+                    lash_core::HostArtifactPin::mint(),
+                ))
+                .expect("a host pin is unguarded"),
+                &images,
+            )
+            .await
+            .expect("the release's install stores its code");
+    }
+}
+
 impl Session {
-    async fn open(held: &Arc<HeldPackages>, first: PackageSetDigest) -> Self {
+    async fn open(held: &Arc<Releases>, first: PackageSetDigest) -> Self {
         Self::open_in(CellDialect::typescript(), held, first).await
     }
 
-    async fn open_in(
-        dialect: CellDialect,
-        held: &Arc<HeldPackages>,
-        first: PackageSetDigest,
-    ) -> Self {
+    async fn open_in(dialect: CellDialect, held: &Arc<Releases>, first: PackageSetDigest) -> Self {
         let gate = Arc::new(Switch::new(held, first));
         let services = node(&dialect, held, &gate);
-        Self {
+        let session = Self {
             state: crate::testing::session_state(&dialect),
             dialect,
             host: open_host().await,
@@ -301,14 +354,17 @@ impl Session {
             tools: Arc::new(CellTools::default()),
             held: Arc::clone(held),
             cells: 0,
-        }
+        };
+        store_code(session.host.context().backend(), held).await;
+        session
     }
 
     /// The session's next cells served by a node holding `held`: one that
     /// no longer holds the release earlier cells ran on.
-    fn on(&mut self, held: &Arc<HeldPackages>) {
+    async fn on(&mut self, held: &Arc<Releases>) {
         self.services = node(&self.dialect, held, &self.gate);
         self.held = Arc::clone(held);
+        store_code(self.host.context().backend(), held).await;
     }
 
     /// The session with its cells offered `tools`'s operations.
@@ -354,8 +410,7 @@ impl Session {
     /// Every definition of `set`'s packages.
     fn set(&self, set: PackageSetDigest) -> BTreeSet<FunctionId> {
         self.held
-            .view(&set)
-            .expect("a held set")
+            .view(set)
             .definitions()
             .map(|(_, function)| function)
             .collect()
@@ -363,8 +418,7 @@ impl Session {
 
     fn function(&self, set: PackageSetDigest, name: &str) -> FunctionId {
         self.held
-            .view(&set)
-            .expect("a held set")
+            .view(set)
             .definitions()
             .find(|(defined, _)| *defined == name)
             .map(|(_, function)| function)
@@ -389,7 +443,7 @@ fn failed(response: &lash_core::ExecResponse) -> String {
     response.error().expect("the cell fails").message.clone()
 }
 
-/// RELINK-CLOSURE and CURRENT-RELEASE: a saved function calling
+/// RELINK-CLOSURE: a saved function calling
 /// `dataframe.col`, and a binding of `col` itself (TypeScript's
 /// `const { col } = dataframe`), both saved under R1, run in a cell of R2
 /// against R2's `col`, a new identity, while the node still holds R1 under
@@ -461,7 +515,7 @@ async fn a_saved_function_the_cell_set_does_not_serve_is_dropped_naming_it_and_t
                 "function w(row) { return dataframe.width(row); }\nconst plan = { map: (row) => dataframe.width(row) };",
             )
             .await);
-        session.on(&later);
+        session.on(&later).await;
         ok(&session.cell_under(second[0], "const other = 1;").await);
         let not_carried = session.state.not_carried();
         let why = not_carried[&lash_kernel_doc::Name::new("w")].clone();
@@ -548,7 +602,7 @@ async fn a_package_value_dispatches_while_its_shape_holds_and_is_stale_once_it_c
 async fn a_cell_the_gate_writes_under_an_older_set_reaches_that_set_alone() {
     let lash = lash();
     let (held, sets) = hold(&lash, vec![vec![r1(&lash)], vec![r2_kept(&lash)]]);
-    assert_eq!(held.own(), sets[1]);
+    assert_eq!(held.own.digest(), sets[1]);
     let mut session = Session::open(&held, sets[1]).await;
     ok(&session
         .cell_under(
@@ -573,48 +627,14 @@ async fn a_cell_the_gate_writes_under_an_older_set_reaches_that_set_alone() {
     }
 }
 
-/// CURRENT-RELEASE: with `p@1` built over `q@1`, and `q@2` installed (so
-/// `p` rebuilt over it), a fresh cell and a relinked saved function reach
-/// `q` directly and through `p`, and run `q@2` both ways.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_dependency_closed_set_runs_one_release_of_each_line_directly_and_through_dependents() {
-    let lash = lash();
-    let p = |q: &Package| {
-        Package::build(
-            "p",
-            "1",
-            &PackageSources {
-                kernel: "use q.f\n\nfunction p.g() -> Int\nkernel 1\ncharge 1\nbody {\n  let v = invoke q.f()\n  return v\n}\n",
-                surface: "function g() -> Int = p.g\n",
-                labels: "",
-            },
-            &[kernel(&lash), q],
-        )
-        .expect("p builds")
-    };
-    let (q1, q2) = (q(&lash, "1"), q(&lash, "2"));
-    let (p1, p2) = (p(&q1), p(&q2));
-    let (held, sets) = hold(&lash, vec![vec![q1, p1], vec![q2, p2]]);
-    let mut session = Session::open(&held, sets[0]).await;
-    ok(&session
-        .cell_under(sets[0], "function both() { return [q.f(), p.g()]; }")
-        .await);
-    let ran = session
-        .cell_under(sets[1], "await control.finish([...both(), q.f(), p.g()]);")
-        .await;
-    assert_eq!(finish_of(&ran), serde_json::json!([2, 2, 2, 2]));
-    assert!(session.listed("both").is_subset(&session.set(sets[1])));
-}
-
 /// The prompt lists the code of the packages of the cell's set, in each
 /// dialect's spelling, under that set's releases.
 #[test]
 fn the_prompt_shows_the_cell_set_packages_in_each_dialect_spelling() {
     let lash = lash();
     let (held, sets) = hold(&lash, vec![vec![r1(&lash)], vec![r2_kept(&lash)]]);
-    let surface = |set: PackageSetDigest, spelling| {
-        crate::package_surface::render(&held.view(&set).expect("a held set"), spelling)
-    };
+    let surface =
+        |set: PackageSetDigest, spelling| crate::package_surface::render(&held.view(set), spelling);
     let typescript = surface(sets[0], lash_kernel_dialect::Spelling::TypeScript);
     for shown in [
         "#### `dataframe` (0.3.0)",
@@ -669,8 +689,9 @@ async fn a_round_cell_is_written_under_the_set_its_prompt_showed() {
     let lash = lash();
     let (held, sets) = hold(&lash, vec![vec![q(&lash, "1")], vec![q(&lash, "2")]]);
     let gate = Arc::new(Switch::new(&held, sets[0]));
-    let state = runtime_state(&held, Arc::clone(&gate) as _);
+    let state = runtime_state(&held.own, Arc::clone(&gate) as _);
     let host = open_host().await;
+    store_code(host.context().backend(), &held).await;
     let render = crate::testing::recorded_test_render();
     for (round, (shown, moved_to, value)) in [(sets[0], sets[1], 1), (sets[1], sets[0], 2)]
         .into_iter()
@@ -733,7 +754,7 @@ impl crate::plugin::PackageGate for Unanswered {
 async fn a_round_whose_gate_cannot_answer_has_no_prompt_and_defers_typed() {
     let lash = lash();
     let (held, _) = hold(&lash, vec![vec![r1(&lash)]]);
-    let state = runtime_state(&held, Arc::new(Unanswered));
+    let state = runtime_state(&held.own, Arc::new(Unanswered));
     let render = crate::testing::recorded_test_render();
     let Err(error) = state.prompt_facts(Some(&render), None, true, None).await else {
         panic!("a prompt rendered while the gate had no answer");
@@ -756,111 +777,6 @@ async fn a_round_whose_gate_cannot_answer_has_no_prompt_and_defers_typed() {
             lash_core::ExecutionEnvironmentSyncError::Live(_)
         ),
         "the turn defers the call"
-    );
-}
-
-/// The cell a reclaim law parks: each call it makes is held, and a call a
-/// node died in is caught as interrupted.
-const PARKING_CELL: &str = "let first = \"unset\";\ntry {\n  first = await echo.say({ text: \"held\" });\n} catch (error) {\n  first = \"interrupted\";\n}\nlet second = \"unset\";\ntry {\n  second = await echo.say({ text: \"held\" });\n} catch (error) {\n  second = \"interrupted\";\n}";
-
-/// Runs [`PARKING_CELL`] in `state` on `host`'s node until its next held
-/// call starts, the cell parked on it.
-async fn park_at_the_held_call(
-    state: &mut super::super::CodeModeExecutionState,
-    host: &DurableHost,
-    services: &super::super::CellServices,
-    tools: &Arc<CellTools>,
-) {
-    let cell = run_cell(
-        state,
-        cell_context(host, SESSION, TURN, "exec-code:1", tools.clone()),
-        services,
-        PARKING_CELL,
-    );
-    tokio::select! {
-        response = cell => panic!("the cell ended with its call held: {:?}", response.result),
-        () = tools.held_started.notified() => {}
-    }
-}
-
-/// CLAIM-HOLDS across a reclaim: a cell written under the set the gate
-/// answers stamps its session with that set when it parks, so no node
-/// lacking the set claims the session while the cell stands parked. On
-/// the node that reclaims it, the turn's working state is restored and
-/// committed, which clears a stamp the restored state cannot know; the
-/// resumed cell parks again under the set its envelope records, and the
-/// session is stamped with it again. Once the cell ends, the turn's
-/// capture after it clears the stamp.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_parked_cell_keeps_its_session_stamped_with_its_set_across_a_reclaim() {
-    let held = lash_vm_runtime::lash_packages().expect("lash's packages");
-    let own = held.own();
-    let mut host = DurableHost::open_holding(
-        lash_core::AdmittedScope::turn(
-            lash_core::SessionId::from(SESSION),
-            lash_core::TurnId::from(TURN),
-        ),
-        own,
-    )
-    .await;
-    let mut services = cell_services(
-        &CellDialect::typescript(),
-        lash_vm_client::service::Service::default(),
-    );
-    services.packages = Some(Arc::new(Switch::new(&held, own)) as _);
-    let tools = Arc::new(CellTools::default());
-
-    // A first cell leaves the turn a working state to restore.
-    let mut state = crate::testing::session_state(&CellDialect::typescript());
-    ok(&run_cell(
-        &mut state,
-        cell_context(&host, SESSION, TURN, "exec-code:0", tools.clone()),
-        &services,
-        "const before = 1;",
-    )
-    .await);
-    let (capture, _) = crate::testing::commit_working(&mut state, &host).await;
-    let lash_core_store::execution_state::ExecutionGraphCapture::Replace(working) = capture else {
-        panic!("the first cell leaves a working state");
-    };
-    let restored = || {
-        let mut state = crate::testing::session_state(&CellDialect::typescript());
-        state
-            .restore_execution_graph(
-                &working,
-                lash_core_store::execution_state::ExecutionGraphPurpose::Working,
-            )
-            .expect("the working state restores");
-        state
-    };
-
-    tools.hold.store(true, Ordering::SeqCst);
-    park_at_the_held_call(&mut state, &host, &services, &tools).await;
-    assert!(
-        !host.kill_and_resume_past_a_lacking_node().await,
-        "a node lacking the cell's set claimed its session at the cell's first park"
-    );
-    let mut state = restored();
-    crate::testing::commit_working(&mut state, &host).await;
-    park_at_the_held_call(&mut state, &host, &services, &tools).await;
-    assert!(
-        !host.kill_and_resume_past_a_lacking_node().await,
-        "a node lacking the cell's set claimed its session after the cell parked again"
-    );
-
-    tools.hold.store(false, Ordering::SeqCst);
-    let mut state = restored();
-    ok(&run_cell(
-        &mut state,
-        cell_context(&host, SESSION, TURN, "exec-code:1", tools.clone()),
-        &services,
-        PARKING_CELL,
-    )
-    .await);
-    crate::testing::commit_working(&mut state, &host).await;
-    assert!(
-        host.kill_and_resume_past_a_lacking_node().await,
-        "a session between cells pins no code"
     );
 }
 
@@ -996,7 +912,7 @@ async fn an_unavailable_shown_snapshot_is_refused_without_a_second_gate_answer()
         }
     }
     let held = lash_vm_runtime::lash_packages().unwrap();
-    let own = crate::CellPackages::held(&held, &held.own()).expect("lash's own set");
+    let own = crate::CellPackages::held(&held);
     let lash = lash();
     let (other, sets) = hold(&lash, vec![vec![r1(&lash)]]);
     // The worker holds lash's packages alone.
@@ -1024,8 +940,8 @@ async fn an_unavailable_shown_snapshot_is_refused_without_a_second_gate_answer()
     )
     .await;
     assert!(
-        matches!(response.error().map(|failure| &failure.kind), Some(lash_core::CellFailureKind::PackagesNotHeld { packages }) if *packages == unavailable),
-        "{:?}",
+        response.error().is_some(),
+        "a worker that cannot serve the shown snapshot fails the cell: {:?}",
         response.result
     );
     assert_eq!(
@@ -1051,7 +967,7 @@ async fn a_node_writes_cells_under_a_stored_surface_it_does_not_hold() {
     let (a, a_sets) = hold(&lash, vec![vec![r1(&lash)]]);
     let (b, b_sets) = hold(&lash, vec![vec![r2_grown(&lash)]]);
     let r1 = a_sets[0];
-    let stored = stored_cell(&a, &b, b_sets[0]);
+    let stored = stored_cell(&a.own, &b.own, b_sets[0]);
     assert!(
         !stored.stored_definitions().is_empty(),
         "the node lacks B's code"
@@ -1064,7 +980,7 @@ async fn a_node_writes_cells_under_a_stored_surface_it_does_not_hold() {
     ] {
         assert!(shown.contains(line), "{line} in:\n{shown}");
     }
-    let b_view = b.view(&b_sets[0]).expect("B");
+    let b_view = b.view(b_sets[0]);
     let b_function = |name: &str| {
         b_view
             .definitions()
@@ -1132,7 +1048,7 @@ async fn a_node_runs_a_member_no_document_reached_from_the_code_its_install_stor
     let lash = lash();
     let (a, a_sets) = hold(&lash, vec![vec![r1(&lash)]]);
     let (b, b_sets) = hold(&lash, vec![vec![r2_grown(&lash)]]);
-    let stored = stored_cell(&a, &b, b_sets[0]);
+    let stored = stored_cell(&a.own, &b.own, b_sets[0]);
     let mut session = Session::open(&a, a_sets[0]).await;
     // What B's install writes (FIG-6991): the code the node lacks, under
     // the set's pin.

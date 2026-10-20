@@ -26,7 +26,7 @@ impl Activation for ActorDispatch {
     }
 
     /// The session activation's: both run over one node's backend.
-    async fn hold(&self) -> Result<crate::NodeHolding, crate::DurableError> {
-        self.session.hold().await
+    async fn capabilities(&self) -> Result<crate::NodeCapabilities, crate::DurableError> {
+        self.session.capabilities().await
     }
 }

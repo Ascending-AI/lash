@@ -1,5 +1,5 @@
-//! Package artifacts and sets as the store keeps them, what a node holds,
-//! and what an actor's code was linked under (FIG-6918, S1-F2).
+//! Package artifacts and sets as the store keeps them, and what each live
+//! node offers running code (FIG-6918, S1-F2, FIG-6993).
 //!
 //! An artifact is one build of a package, keyed by its digest, which its
 //! path is among the facts of; the store assigns it an ordinal on its
@@ -8,10 +8,12 @@
 //! members, the store's install sequence (the only key behind "newest
 //! first"), its surface snapshot and the execution requirements its code
 //! derives (FIG-6991). Both are immutable: the install that first writes a
-//! set writes them. A node advertises the artifacts it holds and its
-//! capabilities, for as long as it is live. An actor whose state pins code
-//! records the set it was linked under, and a node claims it to run it
-//! only when it holds that set (CLAIM-HOLDS).
+//! set writes them, and nothing deletes them. A node advertises its
+//! capabilities for as long as it is live; an actor's claim requirements
+//! name the natives, kernels, providers and codecs its outstanding work
+//! needs, and a node claims it to run it only when its capabilities serve
+//! each (FIG-6993). [`strand`] is what the strand report reads: the work
+//! no live node can run.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -23,10 +25,10 @@ pub use lash_kernel_doc::{
 use crate::formats::FormatSet;
 use crate::{DurableError, StoreFailure, StoreFailureKind};
 
-/// One artifact a node holds or a set names: its package path, and its
-/// digest, which alone identifies it.
+/// One artifact a set names or an install writes: its package path, and
+/// its digest, which alone identifies it.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct HeldArtifact {
+pub struct PackageArtifact {
     /// The digest of the artifact's canonical facts, its path among them.
     pub digest: ArtifactDigest,
     /// The artifact's package path, canonically spelled.
@@ -38,25 +40,7 @@ pub struct HeldArtifact {
 pub struct NodeCapability {
     /// The format sets the node decodes.
     pub decodes: Vec<FormatSet>,
-    /// The artifacts the node holds.
-    pub held: BTreeSet<HeldArtifact>,
-    /// What the node offers running code.
-    pub capabilities: NodeCapabilities,
-}
-
-impl NodeCapability {
-    /// Whether the node holds every member of `members`, a set's.
-    #[must_use]
-    pub fn holds(&self, members: &BTreeSet<HeldArtifact>) -> bool {
-        members.is_subset(&self.held)
-    }
-}
-
-/// What a node holds before it registers: the artifacts it advertises
-/// and what it offers running code, its own set among it.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct NodeHolding {
-    pub held: BTreeSet<HeldArtifact>,
+    /// What the node offers running code, its own package set among it.
     pub capabilities: NodeCapabilities,
 }
 
@@ -67,7 +51,7 @@ pub struct NodeHolding {
 /// Ruling 5).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ArtifactInstall {
-    pub artifact: HeldArtifact,
+    pub artifact: PackageArtifact,
     /// The artifact's header, as JSON.
     pub header: String,
     pub definitions: BTreeSet<FunctionId>,
@@ -93,7 +77,7 @@ impl ArtifactInstall {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SetInstall {
     pub digest: PackageSetDigest,
-    pub members: BTreeSet<HeldArtifact>,
+    pub members: BTreeSet<PackageArtifact>,
     pub surface: Vec<u8>,
     pub requirements: ExecutionRequirements,
 }
@@ -101,7 +85,7 @@ pub struct SetInstall {
 /// One stored artifact, without its bytes: what a listing reads.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoredArtifact {
-    pub artifact: HeldArtifact,
+    pub artifact: PackageArtifact,
     /// Its place on its package line, assigned by the store when it was
     /// first installed, the first being 1.
     pub ordinal: u32,
@@ -111,7 +95,7 @@ pub struct StoredArtifact {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoredSet {
     pub digest: PackageSetDigest,
-    pub members: BTreeSet<HeldArtifact>,
+    pub members: BTreeSet<PackageArtifact>,
     /// The store's install sequence: a later install is newer.
     pub sequence: u64,
     /// What running the set's code requires.
@@ -124,34 +108,6 @@ pub struct StoredSet {
 pub struct PackageCatalog {
     pub artifacts: Vec<StoredArtifact>,
     pub sets: Vec<StoredSet>,
-}
-
-/// The canonical stored spelling of a node's held artifacts and a set's
-/// members: a JSON array of `[digest, path]` pairs, sorted by digest.
-#[must_use]
-pub fn encode_artifacts(artifacts: &BTreeSet<HeldArtifact>) -> String {
-    serde_json::Value::from(
-        artifacts
-            .iter()
-            .map(|artifact| {
-                serde_json::Value::from(vec![artifact.digest.to_string(), artifact.path.clone()])
-            })
-            .collect::<Vec<_>>(),
-    )
-    .to_string()
-}
-
-/// The digests of `artifacts`, as the JSON array of hex text a claim
-/// compares a set's members against.
-#[must_use]
-pub fn encode_digests(artifacts: &BTreeSet<HeldArtifact>) -> String {
-    serde_json::Value::from(
-        artifacts
-            .iter()
-            .map(|artifact| artifact.digest.to_string())
-            .collect::<Vec<_>>(),
-    )
-    .to_string()
 }
 
 /// A stored digest's text as the digest.
@@ -169,18 +125,6 @@ fn corrupt(message: String) -> DurableError {
         kind: StoreFailureKind::Corrupt,
         message,
     })
-}
-
-/// The sets `catalog` holds that `node` holds wholly, newest first.
-#[must_use]
-pub fn held_sets<'a>(catalog: &'a PackageCatalog, node: &NodeCapability) -> Vec<&'a StoredSet> {
-    let mut sets: Vec<&StoredSet> = catalog
-        .sets
-        .iter()
-        .filter(|set| node.holds(&set.members))
-        .collect();
-    sets.sort_by_key(|set| std::cmp::Reverse(set.sequence));
-    sets
 }
 
 /// The stored spelling of a set's requirements: canonical JSON, each set
@@ -221,7 +165,7 @@ pub fn catalog_of(
         .into_iter()
         .map(|(digest, path, ordinal)| {
             Ok(StoredArtifact {
-                artifact: HeldArtifact {
+                artifact: PackageArtifact {
                     digest: parse_digest(&digest)?,
                     path,
                 },
@@ -248,7 +192,7 @@ pub fn catalog_of(
                 sets.len() - 1
             }
         };
-        sets[index].members.insert(HeldArtifact {
+        sets[index].members.insert(PackageArtifact {
             digest: parse_digest(&artifact)?,
             path,
         });
@@ -257,45 +201,80 @@ pub fn catalog_of(
 }
 
 /// One row of the live-node listing: `(node, formats_json,
-/// capabilities_json, artifact, path)`.
-pub type NodeRow = (String, String, String, Option<String>, Option<String>);
+/// capabilities_json)`.
+pub type NodeRow = (String, String, String);
 
-/// The live nodes the listing rows spell, each row `(node, formats_json,
-/// capabilities_json, artifact, path)` by node, the artifact columns empty
-/// for a node that holds none. Both backends' reads.
+/// The live nodes the listing rows spell, one row per node. Both backends'
+/// reads.
 ///
 /// # Errors
 ///
 /// A row that does not decode: the store is corrupt.
 pub fn nodes_of(rows: Vec<NodeRow>) -> Result<Vec<NodeCapability>, DurableError> {
-    let mut nodes: Vec<(String, NodeCapability)> = Vec::new();
-    for (node, formats, capabilities, artifact, path) in rows {
-        if nodes.last().is_none_or(|(last, _)| *last != node) {
+    rows.into_iter()
+        .map(|(node, formats, capabilities)| {
             let sets: Vec<String> = serde_json::from_str(&formats)
                 .map_err(|_| corrupt(format!("node {node}'s format sets `{formats}`")))?;
-            let capability = NodeCapability {
+            Ok(NodeCapability {
                 decodes: sets.into_iter().map(FormatSet::new).collect(),
-                held: BTreeSet::new(),
                 capabilities: decode_capabilities(&capabilities, &node)?,
-            };
-            nodes.push((node, capability));
-        }
-        if let (Some(artifact), Some(path)) = (artifact, path)
-            && let Some((_, capability)) = nodes.last_mut()
-        {
-            capability.held.insert(HeldArtifact {
-                digest: parse_digest(&artifact)?,
-                path,
-            });
-        }
+            })
+        })
+        .collect()
+}
+
+/// The actors and stored requirements the strand read's rows spell, each
+/// `(actor_key, requires)`. Both backends' reads.
+///
+/// # Errors
+///
+/// A row that does not decode: the store is corrupt.
+pub fn requirement_rows(
+    rows: Vec<(String, String)>,
+) -> Result<Vec<(crate::ActorKey, Vec<String>)>, DurableError> {
+    rows.into_iter()
+        .map(|(actor, requires)| {
+            let key = crate::ActorKey::parse(&actor)
+                .map_err(|error| corrupt(format!("actor key `{actor}`: {error}")))?;
+            let requires = crate::port::parse_requires(Some(&requires))
+                .map_err(|error| corrupt(format!("actor {actor}'s requirements: {error}")))?;
+            Ok((key, requires))
+        })
+        .collect()
+}
+
+/// What strands work whose claim requirements are `requires` while `live`
+/// are the live nodes (FIG-6993): `None` when some live node offers every
+/// hard requirement it names, else what the live node closest to running
+/// it lacks (fewest unmet), or the whole record when no node is live. Only
+/// the hard families are read: a registration token is a node's, not the
+/// code's.
+#[must_use]
+pub fn strand(requires: &[String], live: &[NodeCapability]) -> Option<ExecutionRequirements> {
+    let record = lash_core_store::obligations::ObligationToken::requirements_of(
+        requires.iter().map(String::as_str),
+    );
+    if record.is_empty() {
+        return None;
     }
-    Ok(nodes.into_iter().map(|(_, node)| node).collect())
+    let size = |unmet: &ExecutionRequirements| {
+        unmet.natives.len() + unmet.kernels.len() + unmet.providers.len() + unmet.codecs.len()
+    };
+    let closest = live
+        .iter()
+        .map(|node| record.unmet_by(&node.capabilities))
+        .min_by_key(size);
+    match closest {
+        Some(unmet) if unmet.is_empty() => None,
+        Some(unmet) => Some(unmet),
+        None => Some(record),
+    }
 }
 
 /// The refusal of a set naming an artifact neither stored nor installed
 /// with it.
 #[must_use]
-pub fn unknown_member(set: &SetInstall, member: &HeldArtifact) -> DurableError {
+pub fn unknown_member(set: &SetInstall, member: &PackageArtifact) -> DurableError {
     DurableError::UnknownArtifact {
         set: set.digest,
         artifact: member.digest,

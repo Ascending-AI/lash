@@ -450,7 +450,6 @@ async fn test_parks_are_typed_fenced_and_redrivable(
             node: NodeId::new("test-park-live-owner"),
             decodes: vec![row.formats],
             serves: lash::testing::node_serves(&client),
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: 60_000,
         })
@@ -503,7 +502,6 @@ async fn test_parks_are_typed_fenced_and_redrivable(
             node: NodeId::new("test-park-live-process-owner"),
             decodes: vec![row.formats],
             serves: lash::testing::node_serves(&client),
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: 60_000,
         })
@@ -654,7 +652,6 @@ async fn test_parks_are_typed_fenced_and_redrivable(
             node: NodeId::new("test-park-terminal"),
             decodes: Vec::new(),
             serves: Vec::new(),
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: 60_000,
         })

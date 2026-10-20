@@ -39,64 +39,6 @@ fn typescript_services() -> super::CellServices {
     )
 }
 
-/// FIG-6124, S1-F1: a worker sent a stored surface without a definition it
-/// names that it does not hold refuses the set, and the refusal reaches the
-/// cell's host result as data naming the set, including after the result
-/// crosses its serialized boundary.
-#[tokio::test]
-async fn a_worker_package_set_refusal_keeps_the_set_typed() {
-    let lash: Vec<_> = lash_vm_runtime::lash_packages()
-        .expect("lash's packages")
-        .artifacts()
-        .values()
-        .map(|package| package.as_ref().clone())
-        .collect();
-    let kernel = lash
-        .iter()
-        .find(|package| package.path().to_string() == "kernel")
-        .expect("the kernel package")
-        .clone();
-    let other =
-        lash_kernel_package::HeldPackages::install(lash.into_iter().chain([
-            lash_kernel_package::testing::dataframe(&kernel).expect("the fixture builds"),
-        ]))
-        .expect("another node's packages");
-    let unheld = other.own();
-    let surface = Arc::clone(other.surface(&unheld).expect("its own surface"));
-    let catalog = Arc::clone(other.functions());
-    let host = open_host().await;
-    let mut state = typescript_state();
-    let mut services = typescript_services();
-    services.packages = Some(Arc::new(crate::plugin::OneSet(
-        crate::CellPackages::stored(surface, catalog, std::collections::BTreeMap::new()),
-    )));
-    let response = run_cell(
-        &mut state,
-        cell_context(
-            &host,
-            SESSION,
-            TURN,
-            "exec-code:0",
-            Arc::new(ControlRaceTools::default()),
-        ),
-        &services,
-        "const value = 1;",
-    )
-    .await;
-    let failure = response.error().expect("the worker refuses the set");
-    let recorded = serde_json::to_value(failure).expect("the failure serializes");
-    assert_eq!(
-        recorded["kind"],
-        serde_json::json!({"packages_not_held": {"packages": unheld.to_string()}})
-    );
-    let restored: lash_core::CellFailure =
-        serde_json::from_value(recorded).expect("the failure restores");
-    assert_eq!(
-        restored.kind,
-        lash_core::CellFailureKind::PackagesNotHeld { packages: unheld }
-    );
-}
-
 /// The cell context `tools` run under, with `deferred` as the run's
 /// deferred provider when there is one.
 fn context_with(
@@ -1457,6 +1399,7 @@ async fn an_unrelated_error_keeps_its_cause_after_a_binding_is_dropped() {
             },
             &dropped,
             None,
+            &[],
         );
         if expected {
             assert_eq!(
@@ -1775,7 +1718,7 @@ async fn package_namespace_candidates_are_decided_without_the_provider() {
         )
         .unwrap(),
     );
-    let view = held.view(&held.own()).unwrap();
+    let view = held.view();
     let host = open_host().await;
     #[derive(Default)]
     struct ClaimsAny {

@@ -293,6 +293,14 @@ impl DurableStore for CutStore {
         self.inner.live_nodes().await
     }
 
+    async fn actor_requirements(
+        &self,
+        after: Option<&lash_durable::ActorKey>,
+        limit: usize,
+    ) -> Result<Vec<(lash_durable::ActorKey, Vec<String>)>, DurableError> {
+        self.inner.actor_requirements(after, limit).await
+    }
+
     async fn install_packages(
         &self,
         artifacts: &[lash_durable::packages::ArtifactInstall],
@@ -521,7 +529,6 @@ impl World {
                 node: NodeId::new(format!("law-node-{boot}")),
                 decodes: vec![FormatSet::new(SESSION_FORMATS)],
                 serves: Vec::new(),
-                held: Default::default(),
                 capabilities: Default::default(),
                 ttl_millis: 600_000,
             })
@@ -1603,7 +1610,6 @@ async fn end_process(backend: &Backend, process: &ProcessId) {
             node: NodeId::new(format!("law-terminal-{process}")),
             decodes: backend.formats().decodes(),
             serves: Vec::new(),
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: 600_000,
         })

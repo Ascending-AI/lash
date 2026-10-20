@@ -10,14 +10,13 @@
 //! migrator this build ships, so the cell is refused, typed, and stays
 //! parked (FIG-6193).
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use lash_core::plugin::StoredCell;
 use lash_core_store::checkpoint_graph::bodies::{ExecRoot, ExecStatus};
 use lash_core_store::checkpoint_graph::{GraphDecoder, NodeKind};
 use lash_kernel_dialect::SavedFunction;
-use lash_kernel_doc::{FunctionId, FunctionRegistry, KERNEL_VERSION, KernelVersion};
+use lash_kernel_doc::{FunctionRegistry, KERNEL_VERSION, KernelVersion};
 use lash_kernel_package::HeldPackages;
 use lash_vm_runtime::{
     KernelMigrationRefusal, ParkedRefusal, migrate_saved_function, plan_migration,
@@ -173,22 +172,4 @@ pub fn cell_migration_refusal(
     }
     .cell_snapshot(cell)
     .err()
-}
-
-/// The library functions the cell `cell`, a cell's stored root, pins:
-/// those its document's manifest lists (FIG-5799). `None` when the root
-/// does not decode. What a build that drops a helper release asks of the
-/// cell a session's open turn stopped in.
-pub fn cell_snapshot_functions(cell: &StoredCell) -> Option<BTreeSet<FunctionId>> {
-    let loaded = super::envelope::load_cell(&cell.graph, cell.row.root, cell.read_limits).ok()?;
-    Some(
-        loaded
-            .cell
-            .document
-            .manifest
-            .functions
-            .keys()
-            .copied()
-            .collect(),
-    )
 }

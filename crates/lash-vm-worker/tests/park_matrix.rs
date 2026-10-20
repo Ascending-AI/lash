@@ -543,6 +543,14 @@ async fn lost(owned: &Owned) -> bool {
 
 #[async_trait::async_trait]
 impl Activation for ParkActivation {
+    /// What the law's nodes run: lash's own packages, whose natives and
+    /// kernel versions a parked run's hard record names (FIG-6993).
+    async fn capabilities(&self) -> Result<lash_durable::NodeCapabilities, DurableError> {
+        Ok(lash_kernel_package::node_capabilities(
+            &lash_vm_releases::lash_packages().expect("lash's packages"),
+        ))
+    }
+
     async fn activate(&self, owned: Owned) -> Exit {
         let cx = ActorContext::claimed(
             self.shared.backend(),

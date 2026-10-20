@@ -126,11 +126,13 @@ impl Activation for Switch {
         }
     }
 
-    async fn hold(&self) -> Result<lash_durable::NodeHolding, lash_durable::DurableError> {
+    async fn capabilities(
+        &self,
+    ) -> Result<lash_durable::NodeCapabilities, lash_durable::DurableError> {
         if self.switched.load(Ordering::SeqCst) {
-            self.later.hold().await
+            self.later.capabilities().await
         } else {
-            self.first.hold().await
+            self.first.capabilities().await
         }
     }
 }

@@ -86,7 +86,9 @@ impl Activation for ObservedActivation {
             .scope((actor, Cell::new(0)), self.inner.activate(owned))
             .await
     }
-    async fn hold(&self) -> Result<lash_durable::NodeHolding, lash_durable::DurableError> {
-        self.inner.hold().await
+    async fn capabilities(
+        &self,
+    ) -> Result<lash_durable::NodeCapabilities, lash_durable::DurableError> {
+        self.inner.capabilities().await
     }
 }

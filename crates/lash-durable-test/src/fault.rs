@@ -744,6 +744,14 @@ impl DurableStore for FaultStore {
         self.read(self.inner.live_nodes()).await
     }
 
+    async fn actor_requirements(
+        &self,
+        after: Option<&lash_durable::ActorKey>,
+        limit: usize,
+    ) -> Result<Vec<(lash_durable::ActorKey, Vec<String>)>, DurableError> {
+        self.read(self.inner.actor_requirements(after, limit)).await
+    }
+
     async fn install_packages(
         &self,
         artifacts: &[lash_durable::packages::ArtifactInstall],
@@ -1101,7 +1109,6 @@ mod tests {
                 node: lash_durable::NodeId::new(name),
                 decodes: vec![lash_durable::FormatSet::new(FORMATS)],
                 serves: Vec::new(),
-                held: Default::default(),
                 capabilities: Default::default(),
                 ttl_millis: 15_000,
             }

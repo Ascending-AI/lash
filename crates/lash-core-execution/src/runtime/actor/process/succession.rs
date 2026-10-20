@@ -57,6 +57,8 @@ pub(super) struct Current<'a> {
     pub(super) record: &'a ProcessRecord,
     pub(super) engine: &'a dyn ProcessEngine,
     pub(super) root: Option<&'a ExecRootRow>,
+    /// The hard requirements record of the engine state `root` holds.
+    pub(super) requirements: &'a lash_kernel_doc::ExecutionRequirements,
 }
 
 fn unavailable(message: impl std::fmt::Display) -> DurableError {
@@ -302,9 +304,20 @@ impl ProcessActivation {
                 .await?
                 .unwrap_or_default(),
         };
+        // The state the successor carries states its record; one not
+        // carried keeps the record of the state it stands on.
+        let record = carried
+            .as_ref()
+            .map_or(current.requirements, |carried| &carried.requirements);
         tx.set_requires(
-            super::step_admission::outstanding_work(current.process, environment, &driver, fold)
-                .requires(),
+            super::step_admission::outstanding_work(
+                current.process,
+                environment,
+                record,
+                &driver,
+                fold,
+            )
+            .requires(),
         );
         // The activation built its tools from the old env: the next claim
         // builds the new one's.

@@ -221,6 +221,17 @@ pub trait MemberBodies: Send + Sync {
         Box::pin(async move { output })
     }
 
+    /// Project an owner's outstanding claim obligations onto a lifecycle
+    /// commit, atomically with the outcomes it records. Session contexts
+    /// already reduce theirs; process bodies supply their driver facts.
+    fn stage_commit(
+        &self,
+        _tx: &mut lash_durable::ActorTx,
+        _epoch: lash_durable::Epoch,
+    ) -> Result<(), DurableError> {
+        Ok(())
+    }
+
     /// Publish `state`, the plugin-state resolutions a member's committed
     /// outcome carries, into the resident namespaces the members' bodies
     /// reduce against. Called once per committed outcome, never before its
@@ -1102,10 +1113,11 @@ impl Lifecycle {
     /// error.
     async fn commit(
         &mut self,
-        tx: lash_durable::ActorTx,
+        mut tx: lash_durable::ActorTx,
         label: CommitLabel,
         staged: Vec<StagedRecord>,
     ) -> Result<Act, RoundError> {
+        self.bodies.stage_commit(&mut tx, self.cx.epoch())?;
         let appended = RunFacts::appended(tx.domain(), tx.graph(), self.cx.epoch());
         match self.cx.commit(tx, label).await {
             Ok(commit) => Ok(Act::Committed(Committed {
@@ -1161,6 +1173,7 @@ impl Lifecycle {
         ),
         staged: Vec<StagedRecord>,
     ) -> Result<Act, RoundError> {
+        self.bodies.stage_commit(&mut tx, self.cx.epoch())?;
         let commit = lash_core_store::checkpoint_graph::CommitId::mint();
         let published = match candidate.0.publication(&mut tx, commit).await {
             Ok(published) => published,

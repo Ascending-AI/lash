@@ -355,7 +355,6 @@ fn failed(host: &ReplayHost, failure: KernelFailure) -> Result<SegmentAnswer, Re
             RunRefusal::Restore {
                 refusal:
                     KernelRestoreRefusal::MissingNative { .. }
-                    | KernelRestoreRefusal::MissingFunction { .. }
                     | KernelRestoreRefusal::DefinitionRefused { .. },
             } => unreplayable(Unreplayable::FunctionMissing),
             RunRefusal::Restore {

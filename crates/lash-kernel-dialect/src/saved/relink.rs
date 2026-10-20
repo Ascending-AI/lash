@@ -4,8 +4,7 @@
 //! A saved function's document names each library function by identity.
 //! At a cell start, each one takes the identity the cell's set defines
 //! under its name, and what the function performs takes what that set
-//! requires, so everything one cell runs comes from that one set
-//! (CURRENT-RELEASE). A name the set does not define, or defines or
+//! requires, so everything one cell runs comes from that one set. A name the set does not define, or defines or
 //! offers under another signature, refuses the function, naming it and the
 //! callee ([`Unusable::Relink`]).
 

@@ -52,7 +52,6 @@ async fn world() -> World {
             node: NodeId::new("owned-call-owner"),
             decodes: vec![formats],
             serves: Vec::new(),
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: 15_000,
         })

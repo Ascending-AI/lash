@@ -206,9 +206,7 @@ pub(crate) async fn observe(
     let document = execution_document(&core, &snapshot.read_view).await?;
     let packages =
         lash::package::lash_packages().map_err(|error| RunError::Invalid(error.to_string()))?;
-    let package_view = packages
-        .view(&packages.own())
-        .map_err(|error| RunError::Invalid(error.to_string()))?;
+    let package_view = packages.view();
     let mut overlay = Overlay::new(&document, process, workflow_version, host, &package_view)?;
     let mut workflow = process_overlay(&snapshot.read_view);
     let (mut events, mut terminal) = overlay.snapshot(snapshot.read_view)?;

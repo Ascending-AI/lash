@@ -299,7 +299,6 @@ impl CodeModeCheckpointPerfPublisher {
                 node: NodeId::new(format!("rlm-checkpoint-perf-{session}")),
                 decodes: vec![FormatSet::new(FORMATS)],
                 serves: Vec::new(),
-                held: Default::default(),
                 capabilities: Default::default(),
                 ttl_millis: 600_000,
             })

@@ -544,6 +544,19 @@ impl ProcessSteps for WorkerSteps {
                     crate::plugin::StepLink::Unreadable { reason, .. } => {
                         Err(StepRefusal::CompositionUnavailable { reason })
                     }
+                    // A link whose provider this node does not register
+                    // parks the process as an unreadable binding does
+                    // (FIG-6993): the call's record names the provider, so
+                    // only a node that registers it claims the process to
+                    // run, and the strand report names it while none is
+                    // live. Nothing settles.
+                    crate::plugin::StepLink::ProviderUnregistered { provider } => {
+                        Err(StepRefusal::CompositionUnavailable {
+                            reason: format!(
+                                "the call's provider `{provider}` is not registered on this node"
+                            ),
+                        })
+                    }
                     // The body's limit and the park's deadline are pinned
                     // separately, as a round member's are.
                     // It is admitted under the policy its link recorded,

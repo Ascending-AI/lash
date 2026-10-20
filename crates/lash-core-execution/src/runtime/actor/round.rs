@@ -899,6 +899,17 @@ pub fn admitted_bindings_of(
     }
 }
 
+/// A final outcome's checked payload, for its owner's claim reducer.
+pub(crate) fn settled_output_of(
+    facts: &lash_durable::domain::RunFacts,
+    row: &lash_durable::domain::RunFactRow,
+) -> Result<SettledOutput, String> {
+    match records::read(facts, row)? {
+        Record::Outcome(body) => Ok(body.output),
+        _ => Err("the row is not a final outcome".to_owned()),
+    }
+}
+
 /// Read only the selected call's retained output, with the fact and material checks
 /// used by execution. This does not fold the run or execute a callback.
 ///

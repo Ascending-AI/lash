@@ -165,8 +165,12 @@ law!(
     |store, _advance| { laws::a_node_claims_only_actors_whose_formats_it_decodes(store) }
 );
 law!(
-    a_node_claims_only_actors_whose_package_set_it_holds,
-    |store, _advance| { laws::a_node_claims_only_actors_whose_package_set_it_holds(store) }
+    a_hard_record_lands_with_its_owner_commit_or_not_at_all,
+    |store, _advance| { laws::a_hard_record_lands_with_its_owner_commit_or_not_at_all(store) }
+);
+law!(
+    a_node_claims_only_actors_whose_hard_requirements_it_meets,
+    |store, _advance| { laws::a_node_claims_only_actors_whose_hard_requirements_it_meets(store) }
 );
 law!(
     a_store_keeps_each_sets_first_surface_and_indexes_its_definitions,
@@ -175,10 +179,8 @@ law!(
     }
 );
 law!(
-    a_store_keeps_artifacts_and_sets_by_digest_and_derives_what_a_node_holds,
-    |store, _advance| {
-        laws::a_store_keeps_artifacts_and_sets_by_digest_and_derives_what_a_node_holds(store)
-    }
+    a_store_keeps_artifacts_and_sets_by_digest,
+    |store, _advance| { laws::a_store_keeps_artifacts_and_sets_by_digest(store) }
 );
 law!(
     a_newer_format_is_not_written_while_an_older_node_is_live,
@@ -253,7 +255,6 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
             node: NodeId::new("fragment-owner"),
             decodes: vec![formats],
             serves: Vec::new(),
-            held: Default::default(),
             capabilities: Default::default(),
             ttl_millis: 15_000,
         })
