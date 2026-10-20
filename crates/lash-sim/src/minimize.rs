@@ -698,6 +698,15 @@ fn apply_fixture_mutation(
 ) -> Result<(), MinimizeError> {
     if let Some(remove_kind) = mutation.remove_kind.as_deref() {
         let kind = fixture_boundary_kind(remove_kind)?;
+        // An observer of a removed completion cannot retain its completed-turn
+        // facts. Remove those dependent observations with their provider family
+        // so the fixture reaches its missing-continuation oracle on replay.
+        let removed_provider_sessions = trace
+            .events
+            .iter()
+            .filter(|event| kind == BoundaryKind::Provider && event.kind == kind)
+            .map(|event| event.actor_alias.clone())
+            .collect::<BTreeSet<_>>();
         let mut removed_queued_inputs = BTreeSet::new();
         if kind == BoundaryKind::QueuedIngress {
             removed_queued_inputs.extend(
@@ -708,7 +717,11 @@ fn apply_fixture_mutation(
                     .map(|event| event.boundary_id.clone()),
             );
         }
-        trace.events.retain(|event| event.kind != kind);
+        trace.events.retain(|event| {
+            event.kind != kind
+                && !(event.kind == BoundaryKind::Observer
+                    && removed_provider_sessions.contains(&event.actor_alias))
+        });
         if !removed_queued_inputs.is_empty() {
             rewrite_cancellations_for_removed_queued_inputs(trace, &removed_queued_inputs)?;
         }

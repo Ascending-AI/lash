@@ -196,7 +196,7 @@ async fn pending_tool_roundtrip_provider_response_shape_mutation_guard() {
         matches!(
             tool_response.parts.as_slice(),
             [LlmOutputPart::ToolCall { call_id, tool_name, input_json, .. }]
-                if call_id == "call-1" && tool_name == "tools.app_lookup" && input_json == "{}"
+                if call_id == "call-1" && tool_name == "tools__app_lookup" && input_json == "{}"
         ),
         "pending tool provider must start with the concrete tool-call part"
     );

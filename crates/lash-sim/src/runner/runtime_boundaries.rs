@@ -293,7 +293,7 @@ impl RuntimeBoundaryHarness {
                 ))
             } else {
                 lash_core::CellOutcome::Controlled {
-                    tool_name: "finish".into(),
+                    tool_name: "control.finish".into(),
                     call_id: lash_core::ToolCallId::fixture(&event.boundary_id),
                     control: lash_core::CellControl::Finish {
                         value: json!({

@@ -16,6 +16,7 @@ pub(super) struct SuspendingTurn {
     suspend_kind: BoundaryKind,
     tool_name: String,
     resolution: Value,
+    tool_result: crate::content_oracle::ToolResultContent,
     /// `true` once the world has observed the turn parked on its await key
     /// (the tool registered its completion key and the turn future is not yet
     /// finished). Recorded before any resolution so the oracle can prove the
@@ -128,11 +129,24 @@ impl GeneratedRuntimeWorld {
 
         let key_slot = Arc::new(tokio::sync::Mutex::new(None));
         let events = Arc::new(RuntimeProofRecordingEvents::default());
+        let provider = Arc::new(SuspendToolProvider::new(
+            tool_name.clone(),
+            Arc::clone(&key_slot),
+            crate::invariants::ToolObserver::new(self.recorder.clone()),
+        ));
+        // The wire script and reopened Standard result use the manifest's
+        // model-facing projection; runtime boundaries keep the operation name.
+        let standard_name = provider.definition().manifest().standard_name();
+        let tool_result = crate::content_oracle::ToolResultContent::from_tool_value(
+            lash_provider_fixtures::runtime_providers::SUSPEND_TOOL_CALL_ID,
+            &standard_name,
+            &resolution,
+        );
         // Route the parked turn through the real openai-compatible provider wire
         // transport (not a TestProvider), so both the tool-call exchange that
         // suspends the turn and the post-resume exchange exercise real provider
         // wire parsing.
-        let suspend_scripts = suspend_roundtrip_scripts(&tool_name.replace('.', "__"))
+        let suspend_scripts = suspend_roundtrip_scripts(&standard_name)
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         let transport = Arc::new(ScriptedLlmHttpTransport::from_scripts(
             suspend_scripts.clone(),
@@ -141,7 +155,6 @@ impl GeneratedRuntimeWorld {
         let (provider_handle, model, _provider_kind) =
             runtime_provider_components(OPENAI_COMPATIBLE, &transport)
                 .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-        let observer = crate::invariants::ToolObserver::new(self.recorder.clone());
         let core = lash::LashCore::standard_builder(backend)
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .data_retention(lash::DataRetention::standard())
@@ -152,11 +165,7 @@ impl GeneratedRuntimeWorld {
             .serve_test_llm_profile(provider_handle, model.clone())
             .tools(
                 lash::tool_provider_key!("tools"),
-                Arc::new(SuspendToolProvider::new(
-                    tool_name.clone(),
-                    Arc::clone(&key_slot),
-                    observer,
-                )) as Arc<dyn lash_core::ToolProvider>,
+                provider as Arc<dyn lash_core::ToolProvider>,
             )
             .build(crate::sim_process_owner())
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
@@ -197,6 +206,7 @@ impl GeneratedRuntimeWorld {
                 suspend_kind,
                 tool_name,
                 resolution,
+                tool_result,
                 suspended_before_completion: None,
                 resolution_scheduled: false,
                 completed_before_resolution: 0,
@@ -307,14 +317,7 @@ impl GeneratedRuntimeWorld {
             .record(crate::invariants::Fact::CompletionResolved {
                 key: crate::invariants::completion_key_label(&key),
                 session: event.actor_alias.clone(),
-                result_digest: crate::invariants::result_digest(
-                    &crate::content_oracle::ToolResultContent::from_tool_value(
-                        lash_provider_fixtures::runtime_providers::SUSPEND_TOOL_CALL_ID,
-                        &turn.tool_name,
-                        &resolution,
-                    )
-                    .content,
-                ),
+                result_digest: crate::invariants::result_digest(&turn.tool_result.content),
             });
         let accepted = turn
             .core
@@ -410,11 +413,7 @@ impl GeneratedRuntimeWorld {
             session: event.actor_alias.clone(),
             transport: Arc::clone(&turn.transport),
             scripts: turn.scripts.clone(),
-            tool_result: crate::content_oracle::ToolResultContent::from_tool_value(
-                lash_provider_fixtures::runtime_providers::SUSPEND_TOOL_CALL_ID,
-                &turn.tool_name,
-                &resolution,
-            ),
+            tool_result: turn.tool_result,
             reopen: turn.reopen,
         });
         Ok(observed)

@@ -14,19 +14,19 @@ const OFF: u64 = Layout(ON).without_regions().0;
 const PROGRAMS: &[(&str, &str)] = &[
     (
         "map reads by constant and variable keys, a list write through py.index, and a held map write",
-        "def body():\n    tree = {\"level\": {\"rows\": [[0], [1], [2]], \"counters\": {\"c\": 0}}}\n    for n in range(5):\n        tree[\"level\"][\"rows\"][n % 3] = [n]\n        key = \"c\"\n        tree[\"level\"][\"counters\"][key] = tree[\"level\"][\"counters\"][key] + 1\n    return tree\nawait observe(body())\n",
+        "def body():\n    tree = {\"level\": {\"rows\": [[0], [1], [2]], \"counters\": {\"c\": 0}}}\n    for n in range(5):\n        tree[\"level\"][\"rows\"][n % 3] = [n]\n        key = \"c\"\n        tree[\"level\"][\"counters\"][key] = tree[\"level\"][\"counters\"][key] + 1\n    return tree\nawait host.observe(body())\n",
     ),
     (
         "native entries' answers, a method's heap paths and a held map write",
-        "def body():\n    counts = {}\n    for n in range(5):\n        key = \"key_\" + str(n % 3)\n        counts[key] = counts.get(key, 0) + n\n    return counts\nawait observe(body())\n",
+        "def body():\n    counts = {}\n    for n in range(5):\n        key = \"key_\" + str(n % 3)\n        counts[key] = counts.get(key, 0) + n\n    return counts\nawait host.observe(body())\n",
     ),
     (
         "a template's immediate paths, an operator's typed path left to its site, a minimum formula and a constant one",
-        "def body():\n    rows = {\"k\": 7, \"b\": None, \"r\": [1]}\n    v = \"\"\n    x = 0.0\n    c = 0\n    for n in range(4):\n        v = str(rows[\"k\"])\n        x = n + 0.5\n        if rows[\"b\"] is None:\n            c = c + 1\n        rows[\"r\"].append(n)\n    return (v, x, c, len(rows[\"r\"]))\nawait observe(body())\n",
+        "def body():\n    rows = {\"k\": 7, \"b\": None, \"r\": [1]}\n    v = \"\"\n    x = 0.0\n    c = 0\n    for n in range(4):\n        v = str(rows[\"k\"])\n        x = n + 0.5\n        if rows[\"b\"] is None:\n            c = c + 1\n        rows[\"r\"].append(n)\n    return (v, x, c, len(rows[\"r\"]))\nawait host.observe(body())\n",
     ),
     (
         "a heap path's decline that the reference raises, caught",
-        "def body():\n    rows = {\"k\": 7, \"r\": [1]}\n    c = 0\n    for n in range(4):\n        c = c + rows[\"k\"]\n        rows[\"r\"].append(n)\n        if n == 3:\n            c = rows[\"missing\"]\n    return c\ntry:\n    await observe(body())\nexcept KeyError as e:\n    await observe(\"raised\")\n",
+        "def body():\n    rows = {\"k\": 7, \"r\": [1]}\n    c = 0\n    for n in range(4):\n        c = c + rows[\"k\"]\n        rows[\"r\"].append(n)\n        if n == 3:\n            c = rows[\"missing\"]\n    return c\ntry:\n    await host.observe(body())\nexcept KeyError as e:\n    await host.observe(\"raised\")\n",
     ),
 ];
 

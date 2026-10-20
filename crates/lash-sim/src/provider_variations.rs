@@ -541,7 +541,7 @@ mod tests {
         assert_eq!(
             turn.outcome,
             lash::TurnOutcome::Finished(TurnFinish::Finished {
-                tool_name: "finish".into(),
+                tool_name: "control.finish".into(),
                 value: json!("settled")
             })
         );

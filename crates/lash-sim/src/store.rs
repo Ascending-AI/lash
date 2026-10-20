@@ -664,7 +664,7 @@ impl ModelStore {
                         ))
                     } else {
                         lash_core::CellOutcome::Controlled {
-                            tool_name: "finish".into(),
+                            tool_name: "control.finish".into(),
                             call_id: lash_core::ToolCallId::fixture(&event.boundary_id),
                             control: lash_core::CellControl::Finish {
                                 value: json!({
@@ -840,7 +840,7 @@ impl ModelStore {
             },
             "runtime_tool_record": {
                 "provider_call_id": effect_id,
-                "tool": "sim_opaque_effect",
+                "tool": "tools.sim_opaque_effect",
                 "args": {
                     "durable_key": durable_key,
                     "session": event.actor_alias,
