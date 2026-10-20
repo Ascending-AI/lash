@@ -30,8 +30,8 @@ pub use binding::{
     required_tool_executable,
 };
 pub use boundary::{
-    BoundaryError, HostBoundary, HostEffect, SchemaConflict, SchemaProjectionRefusal, tool_input,
-    type_of_schema,
+    BoundaryError, HostBoundary, HostEffect, MAX_PROJECTED_TYPE_NODES, MAX_RESOLVED_REFERENCES,
+    SchemaConflict, SchemaProjectionRefusal, tool_input, type_of_schema,
 };
 pub use formats::{
     KERNEL_DOCUMENT_SCHEMA_VERSION, KERNEL_HELPER_RELEASE, KERNEL_PARKED_STATE_VERSION,

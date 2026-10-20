@@ -273,20 +273,61 @@ fn slots() -> lash_core::ToolDefinition {
     )
 }
 
+/// `model.take`: a tool whose input is what pydantic writes for a model
+/// with an `Optional[Callable]` field and a field of a marked `$defs` type:
+/// an open object (no `additionalProperties`), as MCP servers write theirs
+/// too.
+fn open_take() -> lash_core::ToolDefinition {
+    typed_definition(
+        "tool:model_take",
+        "model_take",
+        "model",
+        "take",
+        serde_json::json!({
+            "$defs": {
+                "Handler": { "x-lash": { "kind": "function" }, "title": "Handler" }
+            },
+            "properties": {
+                "callback": {
+                    "anyOf": [{ "x-lash": { "kind": "function" } }, { "type": "null" }],
+                    "default": null,
+                    "title": "Callback"
+                },
+                "handler": { "$ref": "#/$defs/Handler" },
+                "label": { "title": "Label", "type": "string" }
+            },
+            "required": ["label"],
+            "title": "TakeInput",
+            "type": "object"
+        }),
+    )
+}
+
 /// What `slots.take(input)` raised, as text, `input` written in `dialect`
 /// and handed through a helper, so only the perform knows what it holds,
 /// and what the tool received.
 async fn slots_raised(dialect: &CellDialect, input: &str) -> (String, Vec<serde_json::Value>) {
+    take_raised(slots, "slots", dialect, input).await
+}
+
+/// What `<module>.take(input)` raised, as [`slots_raised`] does for
+/// `slots.take`, `tool` being that operation.
+async fn take_raised(
+    tool: fn() -> lash_core::ToolDefinition,
+    module: &str,
+    dialect: &CellDialect,
+    input: &str,
+) -> (String, Vec<serde_json::Value>) {
     let code = if dialect.name() == CellDialect::python().name() {
         format!(
-            "async def f():\n    return 1\n\n\nasync def take(value):\n    return await slots_take(value)\n\n\nraised = 'none'\ntry:\n    await take({input})\nexcept Exception as error:\n    raised = str(error)\nawait control_finish(raised)"
+            "async def f():\n    return 1\n\n\nasync def take(value):\n    return await {module}_take(value)\n\n\nraised = 'none'\ntry:\n    await take({input})\nexcept Exception as error:\n    raised = str(error)\nawait control_finish(raised)"
         )
     } else {
         format!(
-            "const f = async () => 1;\nconst take = async (input) => await slots.take(input);\nlet raised = \"none\";\ntry {{\n  await take({input});\n}} catch (error) {{\n  raised = String(error.message);\n}}\nawait control.finish(raised);"
+            "const f = async () => 1;\nconst take = async (input) => await {module}.take(input);\nlet raised = \"none\";\ntry {{\n  await take({input});\n}} catch (error) {{\n  raised = String(error.message);\n}}\nawait control.finish(raised);"
         )
     };
-    let tools = Arc::new(Keeps::of(slots));
+    let tools = Arc::new(Keeps::of(tool));
     let host = open_host().await;
     let response = run_cell(
         &mut crate::testing::session_state(dialect),
@@ -368,6 +409,63 @@ async fn a_function_crosses_in_a_nullable_slot_the_x_lash_marker_declares_under_
         let (raised, received) = slots_raised(&dialect, null).await;
         assert_eq!(raised, "none", "{}", dialect.name());
         assert_eq!(received[0]["fallback"], serde_json::Value::Null);
+    }
+}
+
+/// X-LASH-ONE on open objects and local references (FIG-6966): a
+/// pydantic-shaped open object's `Optional[Callable]` field and its field
+/// of a marked `$defs` type are presented callable in either dialect and
+/// take a function, which crosses as a function value; its declared text
+/// and its undeclared rest stay data, and a function there raises
+/// `not_data` naming its path. Main typed the whole open object `Json`, so
+/// the function raised `not_data` in every slot.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_function_crosses_in_a_marked_slot_of_an_open_object_and_behind_a_local_reference() {
+    for (dialect, crossing, extra, callable) in [
+        (
+            CellDialect::typescript(),
+            "{ label: 'x', callback: f, handler: f, extra: { n: 1 } }",
+            "{ label: 'x', extra: { g: f } }",
+            "=> Promise<unknown>",
+        ),
+        (
+            CellDialect::python(),
+            "{'label': 'x', 'callback': f, 'handler': f, 'extra': {'n': 1}}",
+            "{'label': 'x', 'extra': {'g': f}}",
+            "Callable[..., Any]",
+        ),
+    ] {
+        let signature =
+            crate::loaded_tool_signature(&dialect, &serde_json::json!({}), &open_take())
+                .expect("an addressable tool");
+        assert!(
+            signature.contains("handler") && signature.matches(callable).count() >= 2,
+            "{}: both marked slots are presented callable: {signature}",
+            dialect.name()
+        );
+        let (raised, received) = take_raised(open_take, "model", &dialect, crossing).await;
+        assert_eq!(raised, "none", "{}", dialect.name());
+        for slot in ["callback", "handler"] {
+            assert_eq!(
+                function_value(&received[0][slot]).entry.as_str(),
+                "run",
+                "{}: {slot}",
+                dialect.name()
+            );
+        }
+        assert_eq!(received[0]["extra"], serde_json::json!({"n": 1}));
+        let (raised, received) = take_raised(open_take, "model", &dialect, extra).await;
+        assert!(
+            raised.contains("a function cannot leave the run")
+                && raised.contains("`input.extra.g`"),
+            "{}: {raised}",
+            dialect.name()
+        );
+        assert!(
+            received.is_empty(),
+            "{}: nothing was requested",
+            dialect.name()
+        );
     }
 }
 

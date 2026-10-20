@@ -3,7 +3,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-pub use lash_kernel_check::{SchemaConflict, SchemaProjectionRefusal, type_of_schema};
+pub use lash_kernel_check::{
+    MAX_PROJECTED_TYPE_NODES, MAX_RESOLVED_REFERENCES, SchemaConflict, SchemaProjectionRefusal,
+    type_of_schema,
+};
 use lash_kernel_doc::{EffectName, Signature, Type};
 use lash_protocol_types::ToolId;
 

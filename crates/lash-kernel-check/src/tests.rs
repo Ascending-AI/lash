@@ -682,11 +682,16 @@ main {{
     );
 }
 
-/// FIG-6340: an open output offered for a closed output names the side
-/// and the differing projected types, rather than just the effect.
+/// FIG-6340, as FIG-6966 states openness: an object schema is a record of
+/// its declared fields whose rest is what `additionalProperties` states, so
+/// an open object schema and its closed twin differ only in that rest. A
+/// tool's result is projected open either way, so an open output serves
+/// where its closed twin's is expected. An input keeps the openness its
+/// schema states: a closed input offered where the open one is expected is
+/// refused, naming the side, the rest and both projected records; so is an
+/// open output offered for a native closed kernel result.
 #[test]
 fn an_effect_signature_refusal_names_the_output_openness_difference() {
-    let input = serde_json::json!({});
     let closed = serde_json::json!({
         "type": "object",
         "properties": {"message": {"type": "string"}},
@@ -694,15 +699,24 @@ fn an_effect_signature_refusal_names_the_output_openness_difference() {
     });
     let mut open = closed.clone();
     open.as_object_mut().unwrap().remove("additionalProperties");
-    let signature = |output: &serde_json::Value| {
+    let signature = |input: &serde_json::Value, output: &serde_json::Value| {
         crate::tool_signature(
-            crate::type_of_schema(&input).unwrap(),
+            crate::type_of_schema(input).unwrap(),
             true,
             crate::result_type_of_schema(output).unwrap(),
         )
     };
-    let expected = signature(&closed);
-    let provided = signature(&open);
+    assert_eq!(
+        crate::result_type_of_schema(&open),
+        crate::result_type_of_schema(&closed),
+        "a result is open whether or not its schema closes it"
+    );
+    assert!(crate::signature_serves(
+        &signature(&open, &open),
+        &signature(&open, &closed)
+    ));
+    let expected = signature(&open, &closed);
+    let provided = signature(&closed, &closed);
     let mut document = document(
         "kernel 1\nnumbers float\neffect chat.message_to_self(input?: Any) -> Any\n\nmain {\n  let sent = perform chat.message_to_self() as Any\n}\n",
     );
@@ -716,17 +730,16 @@ fn an_effect_signature_refusal_names_the_output_openness_difference() {
         .effects
         .insert(effect("chat.message_to_self"), provided);
     let refusal =
-        admit(&document, &environment).expect_err("an open output cannot serve the closed output");
+        admit(&document, &environment).expect_err("a closed input cannot take the open input");
     let reason = refusal
         .errors
         .iter()
         .find(|error| error.reason.code() == "effect_signature")
         .expect("signature refusal");
     let message = reason.to_string();
-    assert!(message.contains("output"), "{message}");
-    assert!(message.contains("/output"), "{message}");
+    assert!(message.contains("input"), "{message}");
     assert!(
-        message.contains("declared fields") && message.contains("JSON data"),
+        message.contains("closed object") && message.contains("open rest"),
         "{message}"
     );
     let RefusalReason::EffectSignature {
@@ -738,23 +751,21 @@ fn an_effect_signature_refusal_names_the_output_openness_difference() {
     else {
         unreachable!()
     };
-    assert_eq!(mismatch.side, crate::SignatureSide::Output);
-    assert_eq!(mismatch.path, "/output");
-    assert_eq!(mismatch.expected, expected.result);
-    assert_eq!(mismatch.provided, provided.result);
-    // A native closed record retains its closedness in the signature.
+    assert_eq!(mismatch.side, crate::SignatureSide::Input);
+    assert_eq!(mismatch.path, "/input/additionalProperties");
+    assert_eq!(mismatch.expected, expected.params[0].ty);
+    assert_eq!(mismatch.provided, provided.params[0].ty);
+    // A native closed record retains its closedness in the signature, and
+    // the open rest is the first part that cannot serve it.
     let closed = Signature {
         result: crate::type_of_schema(&closed).unwrap(),
-        ..expected.clone()
+        ..provided.clone()
     };
-    let mismatch = crate::signature_mismatch(provided, &closed).expect("closed vs unconstrained");
-    assert!(mismatch.to_string().contains("closed object"), "{mismatch}");
-    // When both projections retain record structure, the rest itself is
-    // the first incompatible part.
-    let mismatch = crate::signature_mismatch(expected, &closed).expect("open rest vs closed");
+    let mismatch = crate::signature_mismatch(provided, &closed).expect("open rest vs closed");
+    assert_eq!(mismatch.side, crate::SignatureSide::Output);
     assert_eq!(mismatch.path, "/output/additionalProperties");
     assert_eq!(mismatch.expected, closed.result);
-    assert_eq!(mismatch.provided, expected.result);
+    assert_eq!(mismatch.provided, provided.result);
     let message = mismatch.to_string();
     assert!(
         message.contains("closed object") && message.contains("open rest"),

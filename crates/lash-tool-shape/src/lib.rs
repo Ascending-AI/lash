@@ -115,6 +115,54 @@ pub fn is_named_type_reference(reference: &str) -> bool {
             .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
 }
 
+/// The JSON pointer a local `$ref` names within its schema's root: the
+/// part after `#`, the root itself when empty. `None` for any other
+/// reference, which no reader resolves.
+///
+/// ```
+/// # use lash_tool_shape::local_reference_pointer;
+/// assert_eq!(local_reference_pointer("#/$defs/Node"), Some("/$defs/Node"));
+/// assert_eq!(local_reference_pointer("#"), Some(""));
+/// assert_eq!(local_reference_pointer("other.json#/a"), None);
+/// ```
+#[must_use]
+pub fn local_reference_pointer(reference: &str) -> Option<&str> {
+    reference
+        .strip_prefix('#')
+        .filter(|pointer| pointer.is_empty() || pointer.starts_with('/'))
+}
+
+/// Whether a schema below `root` declares its own `$id`. An embedded
+/// identifier changes the base a `$ref` resolves against; without a URI
+/// resolver, every reader leaves the local references of such a schema to
+/// the tool's validation rather than bind one to the wrong root.
+///
+/// ```
+/// # use lash_tool_shape::has_scoped_references;
+/// assert!(has_scoped_references(&serde_json::json!({"$defs": {"a": {"$id": "a"}}})));
+/// assert!(!has_scoped_references(&serde_json::json!({"$id": "root"})));
+/// ```
+#[must_use]
+pub fn has_scoped_references(root: &Value) -> bool {
+    let mut pending = Vec::new();
+    if let Some(map) = root.as_object() {
+        pending.extend(map.values());
+    }
+    while let Some(value) = pending.pop() {
+        match value {
+            Value::Object(map) => {
+                if map.contains_key("$id") {
+                    return true;
+                }
+                pending.extend(map.values());
+            }
+            Value::Array(items) => pending.extend(items),
+            _ => {}
+        }
+    }
+    false
+}
+
 /// One schema node as a prompt surface shows it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SchemaShape {

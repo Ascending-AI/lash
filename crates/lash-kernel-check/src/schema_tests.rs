@@ -545,3 +545,349 @@ fn a_marker_under_a_composition_types_and_presents_its_slot_as_the_marked_kind()
         ])
     );
 }
+
+/// An open object schema of `properties`, requiring `required`, as pydantic
+/// and MCP servers write one: no `additionalProperties`.
+fn open_object(properties: Value, required: &[&str]) -> Value {
+    json!({"type": "object", "properties": properties, "required": required})
+}
+
+/// SCHEMA-OPEN (FIG-6966): an object schema with `properties` is a record
+/// of its declared fields, typed, whose rest is what
+/// `additionalProperties` states: `Json` when it states nothing or `true`,
+/// the projected schema when it is one, and none when it is `false`
+/// (closed as an input, `Json` as an open result). A key a
+/// `patternProperties` pattern matches may hold anything that pattern
+/// states, so the rest is `Json`. One that states no `type` also admits
+/// every non-object value, so it is the record beside `Json`, which
+/// absorbs it unless it may hold a function.
+#[test]
+fn an_open_object_schema_projects_to_a_record_of_its_typed_fields_and_a_json_rest() {
+    let fields = json!({
+        "label": {"type": "string"},
+        "limit": {"anyOf": [{"type": "integer"}, {"type": "null"}], "default": null}
+    });
+    let typed = vec![
+        field("label", Type::Text, false),
+        field("limit", Type::Union(vec![Type::Int, Type::Null]), true),
+    ];
+    let open = |rest: Type| {
+        Type::Record(RecordType {
+            fields: typed.clone(),
+            rest: Some(Box::new(rest)),
+        })
+    };
+    let pydantic = open_object(fields.clone(), &["label"]);
+    assert_eq!(type_of_schema(&pydantic), open(Type::Json));
+    assert_eq!(result_type_of_schema(&pydantic), open(Type::Json));
+    let mut stated = pydantic.clone();
+    stated["additionalProperties"] = json!(true);
+    assert_eq!(type_of_schema(&stated), open(Type::Json));
+    stated["additionalProperties"] = json!({"type": "string"});
+    assert_eq!(type_of_schema(&stated), open(Type::Text));
+    assert_eq!(result_type_of_schema(&stated), open(Type::Text));
+    stated["patternProperties"] = json!({"^x-": {"type": "integer"}});
+    assert_eq!(type_of_schema(&stated), open(Type::Json));
+    let closed = closed_object(fields, &["label"]);
+    assert_eq!(
+        type_of_schema(&closed),
+        Type::Record(RecordType {
+            fields: typed.clone(),
+            rest: None,
+        })
+    );
+    assert_eq!(result_type_of_schema(&closed), open(Type::Json));
+    // An object schema that states neither fields nor a rest states no
+    // record; one that closes or types its rest does.
+    assert_eq!(type_of_schema(&json!({"type": "object"})), Type::Json);
+    assert_eq!(
+        type_of_schema(&json!({"type": "object", "additionalProperties": {"type": "integer"}})),
+        Type::Record(RecordType {
+            fields: Vec::new(),
+            rest: Some(Box::new(Type::Int)),
+        })
+    );
+    // Without a `type`, the record of data is absorbed by `Json`, and the
+    // record that may hold a function stands beside it.
+    assert_eq!(
+        type_of_schema(&json!({"properties": {"a": {"type": "string"}}})),
+        Type::Json
+    );
+    let marked = json!({"properties": {"run": {"x-lash": {"kind": "function"}}}});
+    assert_eq!(
+        type_of_schema(&marked),
+        Type::Union(vec![
+            Type::Json,
+            Type::Record(RecordType {
+                fields: vec![field("run", Type::Any, true)],
+                rest: Some(Box::new(Type::Json)),
+            }),
+        ])
+    );
+}
+
+/// X-LASH-ONE on open objects and local references (FIG-6966): a marker on
+/// a field of an open object, and one a local `$ref` names (under `$defs`
+/// or `definitions`), types its slot as the marked kind, and the presenter
+/// shows the same slot callable through the same decode. A reference the
+/// projection cannot resolve to its target is `Json`: a non-local one, and
+/// any within a schema that declares a nested `$id`, whose references the
+/// presenter leaves to the tool too.
+#[test]
+fn a_marker_on_an_open_object_field_or_behind_a_local_reference_types_and_presents_its_slot() {
+    let callable =
+        |kind: &ShapeKind| matches!(kind, ShapeKind::Function(_) | ShapeKind::Process(_));
+    let presented_field = |schema: &Value, name: &str| {
+        let document = SchemaDocument::from_json_schema(schema, 8)
+            .unwrap_or_else(|refusal| panic!("{schema}: {refusal:?}"));
+        let ShapeKind::Object(object) = &document.roots[0].kind else {
+            panic!("{schema}: presented as an object");
+        };
+        let shape = object
+            .fields
+            .iter()
+            .find(|field| field.name == name)
+            .map(|field| field.shape.clone())
+            .unwrap_or_else(|| panic!("{schema}: presents `{name}`"));
+        match shape.kind {
+            ShapeKind::Ref(id) => document.definitions[id.0].shape.kind.clone(),
+            kind => kind,
+        }
+    };
+    let slot = |schema: &Value| {
+        let Type::Record(record) = type_of_schema(schema) else {
+            panic!("{schema}: a record");
+        };
+        assert_eq!(record.rest.as_deref(), Some(&Type::Json), "{schema}");
+        record
+            .fields
+            .into_iter()
+            .find(|field| field.name == "slot")
+            .unwrap_or_else(|| panic!("{schema}: types `slot`"))
+            .ty
+    };
+    for (marked, expected) in marked_forms() {
+        let schemas = [
+            open_object(json!({"slot": marked, "label": {"type": "string"}}), &[]),
+            json!({
+                "$defs": {"Marked": marked},
+                "type": "object",
+                "properties": {"slot": {"$ref": "#/$defs/Marked", "description": "A slot."}}
+            }),
+            json!({
+                "definitions": {"Marked": marked},
+                "type": "object",
+                "properties": {"slot": {"$ref": "#/definitions/Marked"}}
+            }),
+        ];
+        for schema in schemas {
+            assert_eq!(slot(&schema), expected, "{schema}");
+            assert!(callable(&presented_field(&schema, "slot")), "{schema}");
+        }
+    }
+    let unresolved = [
+        json!({
+            "type": "object",
+            "properties": {"slot": {"$ref": "https://example.com/marked.json"}}
+        }),
+        json!({
+            "$defs": {"Marked": {"$id": "marked", "x-lash": {"kind": "function"}}},
+            "type": "object",
+            "properties": {"slot": {"$ref": "#/$defs/Marked"}}
+        }),
+    ];
+    for schema in unresolved {
+        assert_eq!(slot(&schema), Type::Json, "{schema}");
+        assert!(!callable(&presented_field(&schema, "slot")), "{schema}");
+    }
+}
+
+/// `$ref` cycles terminate (FIG-6966): the kernel grammar has no recursive
+/// type, so a reference into a target it is already resolving, the root
+/// included, stops there: at `Json` when nothing the cycle reaches carries
+/// an `x-lash` marker, and at `Any` when something does, so a function
+/// still crosses into the recursive slot the presenter shows callable.
+#[test]
+fn a_reference_cycle_terminates_at_json_or_at_any_where_it_reaches_a_marker() {
+    let node = |rest: Type, next: Type| {
+        Type::Record(RecordType {
+            fields: vec![field("next", next, true), field("value", Type::Int, true)],
+            rest: Some(Box::new(rest)),
+        })
+    };
+    let list = json!({
+        "$defs": {"Node": open_object(
+            json!({"next": {"$ref": "#/$defs/Node"}, "value": {"type": "integer"}}),
+            &[],
+        )},
+        "$ref": "#/$defs/Node"
+    });
+    assert_eq!(type_of_schema(&list), node(Type::Json, Type::Json));
+    let rooted = open_object(
+        json!({"next": {"$ref": "#"}, "value": {"type": "integer"}}),
+        &[],
+    );
+    assert_eq!(type_of_schema(&rooted), node(Type::Json, Type::Json));
+    assert_eq!(type_of_schema(&json!({"$ref": "#"})), Type::Json);
+    // Mutually recursive definitions resolve each once along a path.
+    let mutual = json!({
+        "$defs": {
+            "A": open_object(json!({"b": {"$ref": "#/$defs/B"}}), &[]),
+            "B": open_object(json!({"a": {"$ref": "#/$defs/A"}}), &[])
+        },
+        "$ref": "#/$defs/A"
+    });
+    let record = |name: &str, ty: Type| {
+        Type::Record(RecordType {
+            fields: vec![field(name, ty, true)],
+            rest: Some(Box::new(Type::Json)),
+        })
+    };
+    assert_eq!(
+        type_of_schema(&mutual),
+        record("b", record("a", Type::Json))
+    );
+    // A cycle that reaches a marked slot stops at `Any`.
+    let handlers = json!({
+        "$defs": {"Step": open_object(json!({
+            "run": {"x-lash": {"kind": "function"}},
+            "then": {"anyOf": [{"$ref": "#/$defs/Step"}, {"type": "null"}]}
+        }), &[])},
+        "$ref": "#/$defs/Step"
+    });
+    let Type::Record(step) = type_of_schema(&handlers) else {
+        panic!("a record");
+    };
+    assert_eq!(step.fields[0], field("run", Type::Any, true));
+    let then = &step.fields[1];
+    assert_eq!(then.name, "then");
+    assert_eq!(then.ty, Type::Any, "`Any` absorbs the null beside it");
+}
+
+/// SCHEMA-CONST (FIG-6966): a `const` is its literal's type: a text the
+/// enum of that one text, a number spelled as an integer `Int` and any
+/// other `Number`, a boolean `Bool` and null `Null`; a list or object
+/// literal is data.
+#[test]
+fn a_const_projects_to_its_literal_type() {
+    for (literal, expected) in [
+        (json!("read"), Type::Enum(vec!["read".into()])),
+        (json!(3), Type::Int),
+        (json!(-3), Type::Int),
+        (json!(1.5), Type::Number),
+        (json!(true), Type::Bool),
+        (json!(null), Type::Null),
+        (json!([1]), Type::Json),
+        (json!({"a": 1}), Type::Json),
+    ] {
+        let schema = json!({"const": literal});
+        assert_eq!(type_of_schema(&schema), expected, "{schema}");
+        assert_eq!(result_type_of_schema(&schema), expected, "{schema}");
+    }
+    // A pydantic tagged union discriminates its members by a `const`.
+    let tagged = json!({"oneOf": [
+        closed_object(json!({"kind": {"const": "a"}, "a": {"type": "string"}}), &["kind"]),
+        closed_object(json!({"kind": {"const": "b"}}), &["kind"]),
+    ]});
+    assert_eq!(
+        type_of_schema(&tagged),
+        Type::Union(vec![
+            Type::Record(RecordType {
+                fields: vec![
+                    field("a", Type::Text, true),
+                    field("kind", Type::Enum(vec!["a".into()]), false),
+                ],
+                rest: None,
+            }),
+            Type::Record(RecordType {
+                fields: vec![field("kind", Type::Enum(vec!["b".into()]), false)],
+                rest: None,
+            }),
+        ])
+    );
+}
+
+/// SCHEMA-BOUND (FIG-6966): a meet distributes over a union, so two
+/// unions meet as their product, and a meet that would hold more type nodes
+/// than both its sides together and than `MAX_PROJECTED_TYPE_NODES` refuses
+/// the schema, naming the conjunction, before the product is built. A union
+/// is as large as its members, so a large one stands. Local references a
+/// schema shares down many paths are resolved at most
+/// `MAX_RESOLVED_REFERENCES` times; past that a reference is typed as at a
+/// cycle, so such a schema still projects, in bounded work.
+#[test]
+fn a_meet_past_its_size_bound_is_refused_naming_where_and_shared_references_are_bounded() {
+    let members = |prefix: &str| {
+        (0..80)
+            .map(|index| open_object(json!({format!("{prefix}{index}"): {"type": "string"}}), &[]))
+            .collect::<Vec<_>>()
+    };
+    let product = closed_object(
+        json!({"query": {"allOf": [{"anyOf": members("a")}, {"anyOf": members("b")}]}}),
+        &[],
+    );
+    let refused = refusal(&product);
+    assert_eq!(
+        refused,
+        SchemaProjectionRefusal {
+            path: "/properties/query/allOf".into(),
+            conflict: SchemaConflict::TooLarge {
+                limit: crate::MAX_PROJECTED_TYPE_NODES
+            },
+        }
+    );
+    assert_eq!(
+        refused.to_string(),
+        "the schema at `/properties/query/allOf` has no kernel type: the meet of its members would hold more than 4096 type nodes"
+    );
+    // A product within the bound stands.
+    let small = json!({"allOf": [
+        {"anyOf": [{"type": "string"}, {"type": "integer"}, {"type": "null"}]},
+        {"anyOf": [{"enum": ["a"]}, {"type": "number"}]}
+    ]});
+    assert_eq!(
+        type_of_schema(&small),
+        Type::Union(vec![Type::Enum(vec!["a".into()]), Type::Int])
+    );
+    // A union larger than the bound is as large as its members: it stands,
+    // and so does its meet with a type that only narrows it.
+    let modes: Vec<Value> = (0..=crate::MAX_PROJECTED_TYPE_NODES)
+        .map(|index| json!({"const": format!("v{index}")}))
+        .collect();
+    let Type::Union(wide) = type_of_schema(&json!({"type": "string", "anyOf": modes})) else {
+        panic!("a union");
+    };
+    assert_eq!(wide.len(), crate::MAX_PROJECTED_TYPE_NODES + 1);
+    // Sixteen definitions each naming the next twice resolve 2^17 - 1
+    // references in full: the first resolutions are typed, and those past
+    // the budget are typed as at a cycle.
+    let depth = 16;
+    let mut definitions = serde_json::Map::new();
+    for index in 0..depth {
+        let next = json!({"$ref": format!("#/definitions/D{}", index + 1)});
+        definitions.insert(
+            format!("D{index}"),
+            open_object(json!({"left": next, "right": next}), &[]),
+        );
+    }
+    definitions.insert(format!("D{depth}"), json!({"type": "string"}));
+    let shared = json!({"$ref": "#/definitions/D0", "definitions": definitions});
+    let mut ty = type_of_schema(&shared);
+    for _ in 0..depth {
+        let Type::Record(record) = ty else {
+            panic!("the first path is typed in full");
+        };
+        ty = record.fields[0].ty.clone();
+    }
+    assert_eq!(ty, Type::Text);
+    let mut ty = type_of_schema(&shared);
+    let mut cut = false;
+    for _ in 0..depth {
+        let Type::Record(record) = ty else {
+            cut = true;
+            break;
+        };
+        ty = record.fields[1].ty.clone();
+    }
+    assert!(cut && ty == Type::Json, "the last path is cut: {ty:?}");
+}

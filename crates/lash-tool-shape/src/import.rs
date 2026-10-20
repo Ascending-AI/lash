@@ -6,7 +6,7 @@ use serde_json::{Map, Value};
 use crate::{
     DefinitionId, ExtraKeys, ObjectShape, ProcessParamShape, ProcessShape, SchemaDefinition,
     SchemaDocument, SchemaShape, ShapeConstraints, ShapeField, ShapeKind, X_LASH_KEYWORD,
-    XLashType, is_named_type_reference, union_kind,
+    XLashType, has_scoped_references, is_named_type_reference, local_reference_pointer, union_kind,
 };
 
 /// Presentation limits on anonymous nesting and total imported nodes, not repeated
@@ -91,7 +91,7 @@ impl SchemaDocument {
     ) -> std::result::Result<Self, ShapeImportRefusal> {
         let mut importer = Importer {
             root: schema,
-            scoped_references: has_nested_ids(schema),
+            scoped_references: has_scoped_references(schema),
             limits,
             nodes: 0,
             pointers: BTreeMap::new(),
@@ -137,9 +137,7 @@ impl<'a> Importer<'a> {
         if let Some(id) = self.pointers.get(reference) {
             return Some(*id);
         }
-        let pointer = reference
-            .strip_prefix('#')
-            .filter(|pointer| pointer.is_empty() || pointer.starts_with('/'))?;
+        let pointer = local_reference_pointer(reference)?;
         let source = self.root.pointer(pointer)?;
         if self.definitions.len() >= self.limits.max_nodes.max(1) {
             return None;
@@ -524,26 +522,4 @@ fn literal_has_type(value: &Value, name: &str) -> bool {
         "array" => value.is_array(),
         _ => false,
     }
-}
-
-// Embedded identifiers change the resolution base. Without a URI resolver,
-// keep reference validation explicit rather than binding to the wrong root.
-fn has_nested_ids(schema: &Value) -> bool {
-    let mut pending = Vec::new();
-    if let Some(map) = schema.as_object() {
-        pending.extend(map.values());
-    }
-    while let Some(value) = pending.pop() {
-        match value {
-            Value::Object(map) => {
-                if map.contains_key("$id") {
-                    return true;
-                }
-                pending.extend(map.values());
-            }
-            Value::Array(items) => pending.extend(items),
-            _ => {}
-        }
-    }
-    false
 }

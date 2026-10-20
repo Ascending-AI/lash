@@ -98,9 +98,9 @@ pub use lash_vm_worker::{
 /// projection reads with kernel data, and how a tool is named in guest code.
 #[cfg(feature = "codemode")]
 pub use lash_vm_runtime::{
-    BoundaryError, HostBoundary, HostEffect, ProjectionCatalog, ProjectionProvider,
-    ProjectionRefusal, SchemaConflict, SchemaProjectionRefusal, ToolBindingError,
-    required_tool_executable, type_of_schema,
+    BoundaryError, HostBoundary, HostEffect, MAX_PROJECTED_TYPE_NODES, MAX_RESOLVED_REFERENCES,
+    ProjectionCatalog, ProjectionProvider, ProjectionRefusal, SchemaConflict,
+    SchemaProjectionRefusal, ToolBindingError, required_tool_executable, type_of_schema,
 };
 
 // The vocabulary this module's signatures name (the facade-completeness rule).

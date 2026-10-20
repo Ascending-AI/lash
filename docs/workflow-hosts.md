@@ -470,7 +470,16 @@ exclusivity is left to the tool's own validation), and `allOf` as the meet of
 its members; a schema whose `allOf` no kernel type states, such as a string
 that is also an integer or a required field another member's closed object
 leaves out, is refused when it is admitted, with
-`SchemaAdmissionError::Unprojectable` naming the composition's JSON pointer. A function a run handed to a tool
+`SchemaAdmissionError::Unprojectable` naming the composition's JSON pointer.
+So is a meet that grows as the product of two unions past
+`lash::vm::MAX_PROJECTED_TYPE_NODES` (4096) type nodes and past both its sides
+together. An object with `properties` is typed as a record of its fields
+whether or not it closes `additionalProperties`, so the marker holds on a
+field of the open objects pydantic and MCP servers write, and behind a local
+`$ref` (`#/$defs/...`, `#/definitions/...`) too: a reference is typed as its
+target, and at a cycle, or past `lash::vm::MAX_RESOLVED_REFERENCES` (4096)
+resolutions, as `Json`, or as `Any` when its target can reach a marked
+slot. A field an open object does not declare is data. A function a run handed to a tool
 there arrives as a function value, `{"$lash_function": <FunctionValue>}`,
 and needs no publication to start.
 `ProcessStartRequest::inline(LASH_VM_ENGINE_KIND, value, args, launch, ..)`

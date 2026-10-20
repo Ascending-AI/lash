@@ -39,7 +39,9 @@ pub enum SchemaAdmissionError {
         schema_path: String,
         reference: String,
     },
-    /// A composition whose members no kernel type states, at the JSON
+    /// A composition whose members no kernel type states, or whose meet
+    /// grows past the projection's bound
+    /// ([`lash_kernel_check::MAX_PROJECTED_TYPE_NODES`]), at the JSON
     /// pointer `schema_path`: a value of the schema could not be typed.
     #[error("JSON schema at `{schema_path}` has no kernel type: {message}")]
     Unprojectable {
@@ -321,6 +323,39 @@ mod preparation_tests {
                 .unwrap()
                 .validate(&Value::Null)
                 .is_err()
+        );
+    }
+
+    /// SCHEMA-BOUND at registration (FIG-6966): a tool schema whose meet
+    /// grows past the projection's bound is refused where every tool,
+    /// payload and MCP schema is admitted, naming the conjunction.
+    #[test]
+    fn a_schema_past_the_projection_bound_is_refused_at_admission_naming_where() {
+        let members = |prefix: &str| {
+            (0..80)
+                .map(|index| {
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {format!("{prefix}{index}"): {"type": "string"}}
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "query": {"allOf": [{"anyOf": members("a")}, {"anyOf": members("b")}]}
+            }
+        });
+        assert_eq!(
+            JsonSchema::admit(schema).unwrap_err(),
+            SchemaAdmissionError::Unprojectable {
+                schema_path: "/properties/query/allOf".into(),
+                message: format!(
+                    "the meet of its members would hold more than {} type nodes",
+                    lash_kernel_check::MAX_PROJECTED_TYPE_NODES
+                ),
+            }
         );
     }
 }
