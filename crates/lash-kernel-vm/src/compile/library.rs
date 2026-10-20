@@ -40,6 +40,14 @@ impl Lib {
             && self.arity == 2
     }
 
+    /// Whether it is `kind`, whose answer is a function of its operand's
+    /// value kind alone.
+    pub(crate) fn is_kind(&self) -> bool {
+        self.definition.name.as_str() == "kind"
+            && matches!(self.run, LibRun::Native { .. })
+            && self.arity == 1
+    }
+
     /// Whether it is `list.get`, whose answer on a list and a position the
     /// list has is the item there: a plan region reads it from the arena
     /// where the list is resident, as the native's own call reads it.

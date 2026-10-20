@@ -315,6 +315,13 @@ pub(super) fn compile(
             let value = *value;
             Box::new(move |_, _| Some(value))
         }
+        Kind::Operator {
+            lib, args, invoke, ..
+        } if !invoke.is_some_and(|invoke| invoke.call)
+            && let Some(node) = kind_node(libs, *lib, args, &mut node) =>
+        {
+            node
+        }
         Kind::Operator { lib, args, .. } => match fused(libs, *lib, args, &mut node) {
             Some(fused) => fused,
             None => operator(libs, *lib, nodes(args, &mut node)?, fresh(args))?,
@@ -737,6 +744,55 @@ fn fused(
             Some(value)
         }),
     })
+}
+
+/// One kind-pure pair of calls. A region admits a whole statement before
+/// committing any of its charge; its meter still records the two formulas
+/// separately, in the reference's order, for the statement's replay.
+fn kind_node(
+    libs: &Libs<'_>,
+    id: LibId,
+    args: &[Expr],
+    node: &mut impl FnMut(&Expr) -> Option<Node>,
+) -> Option<Node> {
+    if !libs.general {
+        return None;
+    }
+    let (inner, literal) = super::super::kind_test::test(libs.exe, id, args)?;
+    let Kind::Operator {
+        lib: kind, args, ..
+    } = &inner.kind
+    else {
+        return None;
+    };
+    let kind = *kind;
+    let value = Leaf::of(&args[0], node)?;
+    let memo = super::super::kind_test::KindMemo::default();
+    Some(Box::new(move |slots, cx| {
+        let x = value.eval(slots, cx)?;
+        if cx.charging
+            && let Some((answer, first, second)) = memo.get(x.kind())
+        {
+            cx.meter.measured(first);
+            cx.meter.measured(second);
+            return Some(Value::Bool(answer));
+        }
+        let before = cx.meter.units;
+        let named = cx.operate_on(cx.exe.lib(kind), &[x], Fresh::default())?;
+        let between = cx.meter.units;
+        let answer = cx.operate_on(cx.exe.lib(id), &[named, literal], Fresh::default())?;
+        if cx.charging
+            && cx.meter.units != u64::MAX
+            && let Value::Bool(answer) = answer
+            && matches!(named, Value::Text(_))
+        {
+            memo.set(
+                x.kind(),
+                (answer, between - before, cx.meter.units - between),
+            );
+        }
+        Some(answer)
+    }))
 }
 
 /// The compiled operator `id` over `operands`.

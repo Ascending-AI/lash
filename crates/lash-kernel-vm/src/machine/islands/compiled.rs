@@ -267,38 +267,11 @@ fn expr(expr: &Expr, exe: &Executable) -> Option<Operand> {
                 island.unit_test(&site, x)
             })
         }
-        Kind::Operator {
-            lib,
-            invoke,
-            args,
-            closes,
-        } => {
-            let function = exe.lib(*lib);
-            let (entry, fast) = function.prepared.as_ref()?;
-            let extra = entry.depth();
-            let depth = if function.operation() {
-                Depth::Operation(extra)
-            } else if extra > 0 {
-                Depth::Template(extra)
-            } else {
-                Depth::None
-            };
-            let counted = invoke
-                .filter(|invoke| invoke.call)
-                .map(|invoke| invoke.occurrence);
-            let site = OperatorSite {
-                lib: *lib,
-                entry: entry.clone(),
-                table: fast.scalar()?.clone(),
-                close: closes.first().copied(),
-                pc,
-                reg,
-                counted,
-                body_when_observed: counted.is_some()
-                    && matches!(function.run, LibRun::DeferredPlan { .. })
-                    && exe.fallback(*lib).is_none(),
-                depth,
-            };
+        Kind::Operator { lib, args, .. } if let Some(node) = kind_node(expr, exe, *lib, args) => {
+            node
+        }
+        Kind::Operator { args, .. } => {
+            let site = operator_site(expr, exe)?;
             operator(site, operands(args)?)
         }
         Kind::Native { lib, args, closes } => {
@@ -542,6 +515,83 @@ fn typed(pair: &lash_kernel_doc::scalar::Pair, x: Value, y: Value) -> Option<Val
     }
 }
 
+/// Resolves an operator's entry, charge and resume sites.
+fn operator_site(expr: &Expr, exe: &Executable) -> Option<OperatorSite> {
+    let (pc, reg) = (expr.pc, expr.reg);
+    let Kind::Operator {
+        lib,
+        invoke,
+        closes,
+        ..
+    } = &expr.kind
+    else {
+        return None;
+    };
+    let function = exe.lib(*lib);
+    let (entry, fast) = function.prepared.as_ref()?;
+    let extra = entry.depth();
+    let depth = if function.operation() {
+        Depth::Operation(extra)
+    } else if extra > 0 {
+        Depth::Template(extra)
+    } else {
+        Depth::None
+    };
+    let counted = invoke
+        .filter(|invoke| invoke.call)
+        .map(|invoke| invoke.occurrence);
+    let site = OperatorSite {
+        lib: *lib,
+        entry: entry.clone(),
+        table: fast.scalar()?.clone(),
+        close: closes.first().copied(),
+        pc,
+        reg,
+        counted,
+        body_when_observed: counted.is_some()
+            && matches!(function.run, LibRun::DeferredPlan { .. })
+            && exe.fallback(*lib).is_none(),
+        depth,
+    };
+    Some(site)
+}
+
+/// The fused node of `same(kind(x), literal)` `expr`, where its two calls
+/// count no occurrence; each close is replayed at its original call.
+fn kind_node(expr: &Expr, exe: &Executable, lib: LibId, args: &[Expr]) -> Option<Node> {
+    let (inner, literal) = crate::compile::kind_test::test(exe, lib, args)?;
+    let Kind::Operator {
+        args: inner_args, ..
+    } = &inner.kind
+    else {
+        return None;
+    };
+    let kind_site = operator_site(inner, exe)?;
+    let same_site = operator_site(expr, exe)?;
+    if kind_site.counted.is_some() || same_site.counted.is_some() {
+        return None;
+    }
+    let value = self::expr(&inner_args[0], exe)?;
+    let site = KindTest {
+        kind: kind_site,
+        same: same_site,
+        literal,
+        memo: Default::default(),
+    };
+    Some(Box::new(move |island, slots| {
+        let x = value.eval(island, slots)?;
+        island.kind_test(&site, x)
+    }))
+}
+
+/// A kind-pure pair of calls and its first general answer per kind.
+pub(super) struct KindTest {
+    pub(super) kind: OperatorSite,
+    pub(super) same: OperatorSite,
+    pub(super) literal: Value,
+    pub(super) memo: crate::compile::kind_test::KindMemo,
+}
+
 /// The compiled operator `site` over `operands`.
 fn operator(site: OperatorSite, operands: Vec<Operand>) -> Node {
     let mut operands = operands.into_iter();
@@ -593,3 +643,7 @@ fn operator(site: OperatorSite, operands: Vec<Operand>) -> Node {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "kind_laws.rs"]
+mod kind_laws;

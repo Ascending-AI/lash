@@ -639,6 +639,55 @@ impl Island<'_> {
         Ok(answer)
     }
 
+    /// `same(kind(x), literal)` of `x`: by its memo
+    /// where it has answered `x`'s kind, as the two calls answer and
+    /// charge it otherwise.
+    #[inline(always)]
+    fn kind_test(&mut self, site: &compiled::KindTest, x: Value) -> Answer {
+        let memo = &site.memo;
+        let total = |close: Option<Close>| close.map_or(0, |close| u64::from(close.total));
+        let (kind_closed, same_closed) = (total(site.kind.close), total(site.same.close));
+        if self.charging
+            && let Some((answer, kind_units, same_units)) = memo.get(x.kind())
+            && self.depth_fits(site.kind.depth)
+            && self.depth_fits(site.same.depth)
+            && self.fits(
+                kind_closed
+                    .saturating_add(kind_units)
+                    .saturating_add(same_closed)
+                    .saturating_add(same_units),
+            )
+        {
+            if let Some(close) = &site.kind.close {
+                self.close(close);
+            }
+            self.formula(kind_units);
+            if let Some(close) = &site.same.close {
+                self.close(close);
+            }
+            self.formula(same_units);
+            return Ok(Value::Bool(answer));
+        }
+        let before = self.charged;
+        let kind = self.operate(&site.kind, &[x])?;
+        let between = self.charged;
+        let same = self.operate(&site.same, &[kind, site.literal])?;
+        if self.charging
+            && let Value::Bool(answer) = same
+            && matches!(kind, Value::Text(_))
+        {
+            memo.set(
+                x.kind(),
+                (
+                    answer,
+                    between - before - kind_closed,
+                    self.charged - between - same_closed,
+                ),
+            );
+        }
+        Ok(same)
+    }
+
     /// A stop at op `pc`, the frame holding operands `args` from register
     /// `reg`.
     #[cold]
