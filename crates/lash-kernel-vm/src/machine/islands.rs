@@ -368,7 +368,19 @@ impl Island<'_> {
     /// its formula from its scalar table on scalars, measured otherwise, or
     /// a stop at its op.
     #[inline(always)]
-    fn operate(&mut self, site: &OperatorSite, args: &[Value]) -> Answer {
+    pub(super) fn operate(&mut self, site: &OperatorSite, args: &[Value]) -> Answer {
+        self.operate_with(site, args, || site.entry.call(args))
+    }
+
+    /// [`Self::operate`], the entry's answer on `args` given by `call`:
+    /// the entry's own, or its typed path's.
+    #[inline(always)]
+    pub(super) fn operate_with(
+        &mut self,
+        site: &OperatorSite,
+        args: &[Value],
+        call: impl FnOnce() -> Option<Value>,
+    ) -> Answer {
         if let Some(close) = &site.close
             && !self.close(close)
         {
@@ -380,9 +392,9 @@ impl Island<'_> {
             if !(!site.body_when_observed || !self.observed) || !self.depth_fits(site.depth) {
                 None
             } else if !self.charging {
-                site.entry.call(args).filter(held).map(|value| (value, 0))
+                call().filter(held).map(|value| (value, 0))
             } else if args.iter().all(scalar) {
-                match site.entry.call(args) {
+                match call() {
                     Some(result) if scalar(&result) => site
                         .table
                         .units(sizes(args, &result))

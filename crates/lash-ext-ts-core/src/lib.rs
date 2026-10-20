@@ -305,6 +305,7 @@ impl NativeFunction for BuiltinName {
 
     fn prepare(&self) -> Option<PreparedNative> {
         Some(PreparedNative {
+            pair: None,
             entry: builtin_name,
             charged_entry: None,
             operation: "ts.builtin_name(name: Text) -> Bool",

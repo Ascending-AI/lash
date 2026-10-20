@@ -94,6 +94,18 @@ pub struct HelperTemplate {
     pub depth: u32,
     /// The paths that read, build or write arena objects, when any do.
     pub heap: Option<HeapTemplate>,
+    /// The scalar paths that forward two operands of one kind to one of
+    /// [`Self::callees`] unchanged.
+    pub forwards: Forwards,
+}
+
+/// Which resolved native a template's path over two floats, or two word
+/// integers, answers as exactly: the path is that native's call on the
+/// same two arguments, and nothing else.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Forwards {
+    pub floats: Option<u8>,
+    pub ints: Option<u8>,
 }
 
 /// A helper's paths that reach the arena: each reads, builds and writes

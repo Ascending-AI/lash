@@ -1,6 +1,7 @@
 //! Library-owned entries specialized by operation and operand domain.
 
 use lash_kernel_doc::PreparedAnswer;
+use lash_kernel_doc::scalar::ScalarOp;
 
 use super::{Binary, Domain, Math, Operation, PreparedNative, Unary, Value, plain};
 
@@ -17,6 +18,15 @@ fn run<const DOMAIN: u8, const CHARGED: bool, S: Scalar>(args: &[Value]) -> Opti
     if DOMAIN != 2
         && let [Value::Float(a), Value::Float(b)] = args
     {
+        if let Some(op) = const { kernel::<S>() }
+            && let Some(value) = lash_kernel_doc::scalar::floats(op, *a, *b)
+        {
+            return Some(PreparedAnswer {
+                value,
+                scalar_sizes: CHARGED
+                    .then_some(u8::from(matches!(value, Value::Int(n) if n != 0)) << 3),
+            });
+        }
         let value = match S::OPERATION {
             Operation::Binary(op) if !matches!(op, Binary::Min | Binary::Max) => Some(
                 Value::Float(crate::arithmetic::float_binary(op, a.get(), b.get())),
@@ -44,7 +54,10 @@ fn run<const DOMAIN: u8, const CHARGED: bool, S: Scalar>(args: &[Value]) -> Opti
     if DOMAIN != 3
         && let [Value::Int(a), Value::Int(b)] = args
     {
+        let kernel =
+            const { kernel::<S>() }.and_then(|op| lash_kernel_doc::scalar::ints(op, *a, *b));
         let value = match S::OPERATION {
+            _ if kernel.is_some() => kernel,
             Operation::Binary(op) => crate::arithmetic::in_word(op, *a, *b).map(Value::Int),
             Operation::Eq
             | Operation::Lt
@@ -128,6 +141,38 @@ fn run<const DOMAIN: u8, const CHARGED: bool, S: Scalar>(args: &[Value]) -> Opti
     })
 }
 
+/// The shared kernel of `S`'s operation ([`lash_kernel_doc::scalar`]):
+/// `run`'s own first answer on two floats and on two word integers.
+const fn kernel<S: Scalar>() -> Option<ScalarOp> {
+    use lash_kernel_doc::scalar::ScalarOp as K;
+    match S::OPERATION {
+        Operation::Binary(Binary::Add) => Some(K::Add),
+        Operation::Binary(Binary::Sub) => Some(K::Sub),
+        Operation::Binary(Binary::Mul) => Some(K::Mul),
+        Operation::Binary(Binary::Div) => Some(K::Div),
+        Operation::Binary(Binary::RemTrunc) => Some(K::RemTrunc),
+        Operation::Eq => Some(K::Eq),
+        Operation::Lt => Some(K::Lt),
+        Operation::Le => Some(K::Le),
+        Operation::Gt => Some(K::Gt),
+        Operation::Ge => Some(K::Ge),
+        _ => None,
+    }
+}
+
+/// The kernels `run` answers two floats and two word integers by in
+/// `DOMAIN`.
+fn pair<const DOMAIN: u8, S: Scalar>() -> Option<lash_kernel_doc::scalar::Pair> {
+    let op = kernel::<S>()?;
+    if S::ARITY != 2 {
+        return None;
+    }
+    Some(lash_kernel_doc::scalar::Pair {
+        floats: (DOMAIN != 2).then_some(op),
+        ints: (DOMAIN != 3).then_some(op),
+    })
+}
+
 macro_rules! entries {
     ($( $marker:ident, $operation:pat => $expression:expr, $arity:literal; )*) => {
         $(struct $marker;
@@ -144,10 +189,10 @@ macro_rules! entries {
             }
             Some(match operation {
                 $( $operation => match domain {
-                    Domain::Any => PreparedNative { entry: |args| run::<0, false, $marker>(args).map(|answer| answer.value), charged_entry: Some(run::<0, true, $marker>), operation: concat!(stringify!($expression), " / Any") },
-                    Domain::Number => PreparedNative { entry: |args| run::<1, false, $marker>(args).map(|answer| answer.value), charged_entry: Some(run::<1, true, $marker>), operation: concat!(stringify!($expression), " / Number") },
-                    Domain::Int => PreparedNative { entry: |args| run::<2, false, $marker>(args).map(|answer| answer.value), charged_entry: Some(run::<2, true, $marker>), operation: concat!(stringify!($expression), " / Int") },
-                    Domain::Float => PreparedNative { entry: |args| run::<3, false, $marker>(args).map(|answer| answer.value), charged_entry: Some(run::<3, true, $marker>), operation: concat!(stringify!($expression), " / Float") },
+                    Domain::Any => PreparedNative { entry: |args| run::<0, false, $marker>(args).map(|answer| answer.value), charged_entry: Some(run::<0, true, $marker>), operation: concat!(stringify!($expression), " / Any"), pair: pair::<0, $marker>() },
+                    Domain::Number => PreparedNative { entry: |args| run::<1, false, $marker>(args).map(|answer| answer.value), charged_entry: Some(run::<1, true, $marker>), operation: concat!(stringify!($expression), " / Number"), pair: pair::<1, $marker>() },
+                    Domain::Int => PreparedNative { entry: |args| run::<2, false, $marker>(args).map(|answer| answer.value), charged_entry: Some(run::<2, true, $marker>), operation: concat!(stringify!($expression), " / Int"), pair: pair::<2, $marker>() },
+                    Domain::Float => PreparedNative { entry: |args| run::<3, false, $marker>(args).map(|answer| answer.value), charged_entry: Some(run::<3, true, $marker>), operation: concat!(stringify!($expression), " / Float"), pair: pair::<3, $marker>() },
                 }, )*
             })
         }

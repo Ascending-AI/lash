@@ -1150,6 +1150,7 @@ const HEAP: [(&str, ValueKind, bool); 4] = [
 struct Pass {
     arms: BTreeMap<String, Vec<Vec<&'static str>>>,
     depth: u32,
+    forwards: lash_kernel_doc::plan::Forwards,
     /// Whether a path of an arm writes an arena object.
     writes: bool,
 }
@@ -1182,6 +1183,7 @@ impl Evaluator<'_> {
             .try_fold(1usize, |count, choices| count.checked_mul(choices.len()))?;
         let mut pass = Pass {
             arms: BTreeMap::new(),
+            forwards: Default::default(),
             depth: 1,
             writes: false,
         };
@@ -1260,6 +1262,20 @@ impl Evaluator<'_> {
                             .or_else(|| Symbol::constant(Value::Null))?
                             .code,
                     );
+                }
+                // Preserve the single native forwarding fact before rendering
+                // the arm: no guards, wrappers or reordered arguments qualify.
+                if let [(state, Some(value))] = results.as_slice()
+                    && let [Step::Entry { name, native, args }] = state.steps.as_slice()
+                    && value.code == *name
+                    && args == "args[0], args[1]"
+                {
+                    let native = u8::try_from(*native).ok();
+                    match names.as_slice() {
+                        ["Float(_)", "Float(_)"] => pass.forwards.floats = native,
+                        ["Int(_)", "Int(_)"] => pass.forwards.ints = native,
+                        _ => {}
+                    }
                 }
                 let alternatives: Vec<_> = results
                     .iter()
@@ -1396,6 +1412,12 @@ pub(crate) fn emit(
     if scalar.arms.is_empty() && heap.is_none() {
         return None;
     }
+    let forward = |native: Option<u8>| native.map_or("None".to_string(), |k| format!("Some({k})"));
+    let forwards = format!(
+        "p::Forwards {{ floats: {}, ints: {} }}",
+        forward(scalar.forwards.floats),
+        forward(scalar.forwards.ints)
+    );
     let mut descriptor = String::from("Some(p::HelperTemplate { entry: ");
     let mut code = String::new();
     if scalar.arms.is_empty() {
@@ -1432,6 +1454,7 @@ pub(crate) fn emit(
             );
         }
     }
+    let _ = write!(descriptor, ", forwards: {forwards}");
     descriptor.push_str(" })");
     Some((descriptor, code))
 }

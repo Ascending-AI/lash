@@ -863,6 +863,9 @@ pub struct PreparedNative {
     /// is charged. It must answer and decline exactly as `entry` does.
     pub charged_entry: Option<ChargedEntry>,
     pub operation: &'static str,
+    /// The kernels of [`crate::scalar`] that are the entry's own paths on
+    /// two floats and on two word integers.
+    pub pair: Option<crate::scalar::Pair>,
 }
 
 /// A prepared answer and the scalar sizes established by its guard.

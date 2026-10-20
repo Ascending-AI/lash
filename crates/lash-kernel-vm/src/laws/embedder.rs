@@ -52,6 +52,7 @@ macro_rules! prepared {
             }
             fn prepare(&self) -> Option<PreparedNative> {
                 Some(PreparedNative {
+                    pair: None,
                     charged_entry: None,
                     entry: |args| Self::answer(args).ok(),
                     operation: stringify!($native),
@@ -98,6 +99,7 @@ impl NativeFunction for Concat {
     }
     fn prepare(&self) -> Option<PreparedNative> {
         Some(PreparedNative {
+            pair: None,
             charged_entry: None,
             entry: |args| match args {
                 [Value::Text(a), Value::Text(b)] => {

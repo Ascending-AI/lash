@@ -309,6 +309,7 @@ pub(super) fn functions<T>(
             Arc::new(Aux(
                 function,
                 entry.map(|entry| PreparedNative {
+                    pair: None,
                     charged_entry: None,
                     entry,
                     operation: name,
@@ -339,6 +340,7 @@ pub(super) fn functions<T>(
         Arc::new(Aux(
             function,
             Some(PreparedNative {
+                pair: None,
                 charged_entry: None,
                 entry,
                 operation,
@@ -800,6 +802,7 @@ impl NativeFunction for Native {
         macro_rules! check {
             ($kind:ident) => {
                 PreparedNative {
+                    pair: None,
                     charged_entry: None,
                     operation: concat!(stringify!($kind), ".check"),
                     entry: |args| {
@@ -1080,6 +1083,7 @@ impl NativeFunction for IdentityKey {
 
     fn prepare(&self) -> Option<PreparedNative> {
         Some(PreparedNative {
+            pair: None,
             charged_entry: None,
             operation: "collection.identity_key(Any, Any, Text)",
             entry: |args| {

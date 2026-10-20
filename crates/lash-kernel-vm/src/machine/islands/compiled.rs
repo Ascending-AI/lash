@@ -530,10 +530,36 @@ fn native(site: NativeSite, operands: Vec<Operand>) -> Node {
     })
 }
 
+/// The answer of `pair`'s kernel on `x` and `y` when both are floats or
+/// both word integers and it has a kernel for them.
+#[inline(always)]
+fn typed(pair: &lash_kernel_doc::scalar::Pair, x: Value, y: Value) -> Option<Value> {
+    use lash_kernel_doc::scalar;
+    match (x, y) {
+        (Value::Float(p), Value::Float(q)) => scalar::floats(pair.floats?, p, q),
+        (Value::Int(p), Value::Int(q)) => scalar::ints(pair.ints?, p, q),
+        _ => None,
+    }
+}
+
 /// The compiled operator `site` over `operands`.
 fn operator(site: OperatorSite, operands: Vec<Operand>) -> Node {
     let mut operands = operands.into_iter();
+    let pair = site.entry.pair();
     match (operands.next(), operands.next(), operands.next()) {
+        // Two operands whose entry has typed paths:
+        // two floats or two word integers take the path for their kind.
+        (Some(a), Some(b), None) if let Some(pair) = pair => Box::new(move |island, slots| {
+            let x = a.eval(island, slots)?;
+            let y = match b.eval(island, slots) {
+                Ok(y) => y,
+                Err(stop) => return Err(island.held(stop, site.reg, x)),
+            };
+            let args = [x, y];
+            island.operate_with(&site, &args, || {
+                typed(&pair, x, y).or_else(|| site.entry.call(&args))
+            })
+        }),
         (Some(a), Some(b), None) => Box::new(move |island, slots| {
             let x = a.eval(island, slots)?;
             let y = match b.eval(island, slots) {

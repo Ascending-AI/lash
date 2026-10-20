@@ -28,6 +28,7 @@ impl NativeFunction for ToBoolean {
 
     fn prepare(&self) -> Option<PreparedNative> {
         Some(PreparedNative {
+            pair: None,
             entry: to_boolean,
             charged_entry: None,
             operation: "ts.to_boolean(value: Any) -> Bool",
@@ -159,6 +160,7 @@ impl NativeFunction for NumberToString {
 
     fn prepare(&self) -> Option<PreparedNative> {
         Some(PreparedNative {
+            pair: None,
             entry: number_to_string,
             charged_entry: None,
             operation: "ts.number.to_string(value: Number) -> Text",

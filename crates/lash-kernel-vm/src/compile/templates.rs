@@ -89,6 +89,25 @@ impl Entry {
         }
     }
 
+    /// The entry's typed paths over two floats and over two word
+    /// integers: a native's own, or those of the native a template's path
+    /// forwards both arguments to unchanged.
+    #[inline]
+    pub(crate) fn pair(&self) -> Option<lash_kernel_doc::scalar::Pair> {
+        match self {
+            Self::Native(entry) => entry.pair,
+            Self::Template {
+                template, natives, ..
+            } => {
+                let of = |native: Option<u8>| natives.get(usize::from(native?))?.pair;
+                let floats = of(template.forwards.floats).and_then(|pair| pair.floats);
+                let ints = of(template.forwards.ints).and_then(|pair| pair.ints);
+                (floats.is_some() || ints.is_some())
+                    .then_some(lash_kernel_doc::scalar::Pair { floats, ints })
+            }
+        }
+    }
+
     /// Whether the entry answers immediates: a native's, or a template
     /// with scalar paths.
     #[inline]

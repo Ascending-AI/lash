@@ -19,6 +19,7 @@ impl NativeFunction for Scalar {
     }
     fn prepare(&self) -> Option<PreparedNative> {
         Some(PreparedNative {
+            pair: None,
             charged_entry: None,
             entry: Self::answer,
             operation: "law.scalar",
@@ -65,6 +66,7 @@ impl NativeFunction for Truth {
     }
     fn prepare(&self) -> Option<PreparedNative> {
         Some(PreparedNative {
+            pair: None,
             charged_entry: None,
             entry: Self::answer,
             operation: "law.truth",
@@ -87,6 +89,7 @@ impl NativeFunction for ListItem {
     }
     fn prepare(&self) -> Option<PreparedNative> {
         Some(PreparedNative {
+            pair: None,
             charged_entry: None,
             entry: Self::answer,
             operation: "law.list_item",
@@ -111,6 +114,7 @@ impl NativeFunction for ValueOnly {
     }
     fn prepare(&self) -> Option<PreparedNative> {
         Some(PreparedNative {
+            pair: None,
             entry: Scalar::answer,
             charged_entry: Some(|_| panic!("an uncharged helper produced charge metadata")),
             operation: "law.value_only",
@@ -484,6 +488,7 @@ fn template_bearing_invokes_are_prepared_operator_sites() {
                 args.first().copied()
             }),
             heap: None,
+            forwards: Default::default(),
         }),
     }));
     registry.install_plans(&[plan]).unwrap();

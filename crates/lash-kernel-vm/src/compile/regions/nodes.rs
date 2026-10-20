@@ -315,9 +315,10 @@ pub(super) fn compile(
             let value = *value;
             Box::new(move |_, _| Some(value))
         }
-        Kind::Operator { lib, args, .. } => {
-            operator(libs, *lib, nodes(args, &mut node)?, fresh(args))?
-        }
+        Kind::Operator { lib, args, .. } => match fused(libs, *lib, args, &mut node) {
+            Some(fused) => fused,
+            None => operator(libs, *lib, nodes(args, &mut node)?, fresh(args))?,
+        },
         Kind::Native { lib, args, .. } => call(libs, *lib, nodes(args, &mut node)?, fresh(args))?,
         Kind::Call { callee, args, .. } => {
             let read = match callee {
@@ -608,6 +609,134 @@ impl Answer {
         meter.formula(self.table.units(mask)?);
         Some(result)
     }
+}
+
+/// An operand of a fused operator: a frame variable or a constant read in
+/// place, or any other expression's node.
+enum Leaf {
+    Slot(usize),
+    Const(Value),
+    Node(Node),
+}
+
+impl Leaf {
+    fn of(expr: &Expr, node: &mut impl FnMut(&Expr) -> Option<Node>) -> Option<Self> {
+        Some(match &expr.kind {
+            Kind::Local {
+                local,
+                scoped: false,
+                ..
+            } => Self::Slot(local.at as usize),
+            Kind::Const(value) => Self::Const(*value),
+            _ => Self::Node(node(expr)?),
+        })
+    }
+
+    #[inline(always)]
+    fn eval(&self, slots: &[SlotState], cx: &mut Cx<'_>) -> Option<Value> {
+        match self {
+            Self::Slot(at) => match slots.get(*at) {
+                Some(SlotState::Value(value)) => Some(*value),
+                _ => None,
+            },
+            Self::Const(value) => Some(*value),
+            Self::Node(node) => node(slots, cx),
+        }
+    }
+}
+
+/// The scalar size mask of a call on `args` that answered `result`, as
+/// the entries certify it: bit `i` for argument `i` and bit 3 for the
+/// result, set for a nonzero word integer.
+#[inline(always)]
+fn pair_sizes(x: Value, y: Value, result: Value) -> u8 {
+    let bit = |value: Value| u8::from(matches!(value, Value::Int(word) if word != 0));
+    bit(x) | bit(y) << 1 | bit(result) << 3
+}
+
+/// The answer of `pair`'s kernel on `x` and `y` when both are floats or
+/// both word integers and it has a kernel for them: `None` where the
+/// entry's general path answers.
+#[inline(always)]
+fn typed(pair: &lash_kernel_doc::scalar::Pair, x: Value, y: Value) -> Option<Value> {
+    use lash_kernel_doc::scalar;
+    match (x, y) {
+        (Value::Float(p), Value::Float(q)) => scalar::floats(pair.floats?, p, q),
+        (Value::Int(p), Value::Int(q)) => scalar::ints(pair.ints?, p, q),
+        _ => None,
+    }
+}
+
+/// The operator `id` of two operands, fused: its
+/// operands read in place where they are variables or constants, and its
+/// entry's typed path called on two floats or two word integers, its
+/// answer charged by its scalar table as the entry's certified sizes
+/// index it. Every other answer runs as the unfused node does.
+fn fused(
+    libs: &Libs<'_>,
+    id: LibId,
+    args: &[Expr],
+    node: &mut impl FnMut(&Expr) -> Option<Node>,
+) -> Option<Node> {
+    let [a, b] = args else {
+        return None;
+    };
+    let function = libs.exe.lib(id);
+    let pair = function.prepared.as_ref()?.0.pair()?;
+    let answer = Answer::of(function)?;
+    let fresh = fresh(args);
+    let (a, b) = (Leaf::of(a, node)?, Leaf::of(b, node)?);
+    Some(match (libs.general, libs.charging) {
+        (true, _) => Box::new(move |slots, cx| {
+            let x = a.eval(slots, cx)?;
+            let y = b.eval(slots, cx)?;
+            let Some(value) = typed(&pair, x, y) else {
+                return match answer.certified(&[x, y], cx) {
+                    Ok(value) => Some(value),
+                    Err(answered) => cx.operated(cx.exe.lib(id), &[x, y], fresh, answered),
+                };
+            };
+            let answered = Some(lash_kernel_doc::PreparedAnswer {
+                value,
+                scalar_sizes: (cx.charging && scalar(&value)).then(|| pair_sizes(x, y, value)),
+            });
+            match answered {
+                Some(answered) if !cx.charging => Some(answered.value),
+                Some(lash_kernel_doc::PreparedAnswer {
+                    value,
+                    scalar_sizes: Some(mask),
+                }) => {
+                    cx.meter.measured(answer.table.units(mask)?);
+                    Some(value)
+                }
+                answered => cx.operated(cx.exe.lib(id), &[x, y], fresh, answered),
+            }
+        }),
+        (false, true) => Box::new(move |slots, cx| {
+            let x = a.eval(slots, cx)?;
+            let y = b.eval(slots, cx)?;
+            let Some(value) = typed(&pair, x, y) else {
+                if !scalar(&x) || !scalar(&y) {
+                    return None;
+                }
+                return answer.call::<true>(&[x, y], &mut cx.meter);
+            };
+            cx.meter
+                .formula(answer.table.units(pair_sizes(x, y, value))?);
+            Some(value)
+        }),
+        (false, false) => Box::new(move |slots, cx| {
+            let x = a.eval(slots, cx)?;
+            let y = b.eval(slots, cx)?;
+            let Some(value) = typed(&pair, x, y) else {
+                if !scalar(&x) || !scalar(&y) {
+                    return None;
+                }
+                return answer.call::<false>(&[x, y], &mut cx.meter);
+            };
+            Some(value)
+        }),
+    })
 }
 
 /// The compiled operator `id` over `operands`.

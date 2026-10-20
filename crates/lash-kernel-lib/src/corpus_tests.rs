@@ -560,3 +560,137 @@ fn immediate_charges_are_the_declared_formula() {
     }
     assert!(answered > 0);
 }
+
+/// FIG-6941, K-NUM and K-CHG-003: every published typed kernel is the
+/// general native's value and completion charge, including signed zeros,
+/// NaNs, infinities, word overflow and remainder's exceptional divisors.
+#[test]
+fn typed_scalar_kernels_agree_with_general_entries_on_edge_pairs() {
+    use lash_kernel_doc::{Float, scalar};
+    let floats = [
+        f64::NAN,
+        -0.0,
+        0.0,
+        -1.0,
+        1.0,
+        -2.5,
+        2.5,
+        f64::NEG_INFINITY,
+        f64::INFINITY,
+        i64::MIN as f64,
+        i64::MAX as f64,
+        f64::from_bits((i64::MAX as f64).to_bits() - 1),
+        f64::from_bits((i64::MIN as f64).to_bits() + 1),
+    ];
+    let ints = [
+        i64::MIN,
+        i64::MIN + 1,
+        -2,
+        -1,
+        0,
+        1,
+        2,
+        i64::MAX - 1,
+        i64::MAX,
+    ];
+    let mut seen = Vec::new();
+    for (definition, native) in crate::numbers() {
+        let Some(prepared) = native.prepare() else {
+            continue;
+        };
+        let Some(pair) = prepared.pair else { continue };
+        for (op, values) in [
+            (
+                pair.floats,
+                floats
+                    .iter()
+                    .map(|n| Value::Float(Float::new(*n)))
+                    .collect::<Vec<_>>(),
+            ),
+            (
+                pair.ints,
+                ints.iter().copied().map(Value::Int).collect::<Vec<_>>(),
+            ),
+        ] {
+            let Some(op) = op else { continue };
+            if !seen.contains(&op) {
+                seen.push(op);
+            }
+            for a in &values {
+                for b in &values {
+                    let args = [*a, *b];
+                    let typed = match (*a, *b) {
+                        (Value::Float(a), Value::Float(b)) => scalar::floats(op, a, b),
+                        (Value::Int(a), Value::Int(b)) => scalar::ints(op, a, b),
+                        _ => unreachable!(),
+                    };
+                    let mut heap = testsupport::heap();
+                    let general = testsupport::call(
+                        &mut heap,
+                        native.as_ref(),
+                        &args,
+                        64 << 20,
+                        &mut WorkCounter::new(None),
+                    );
+                    let context = format!("{} {args:?}", definition.name);
+                    let prepared = prepared.answer(&args, true);
+                    if let Some(value) = typed {
+                        let general = general
+                            .as_ref()
+                            .unwrap_or_else(|e| panic!("{context}: {e}"));
+                        assert_eq!(
+                            testsupport::datum(&heap, &value),
+                            testsupport::datum(&heap, general),
+                            "{context}"
+                        );
+                        let answer = prepared.as_ref().expect("a typed answer is prepared");
+                        assert_eq!(
+                            testsupport::datum(&heap, &value),
+                            testsupport::datum(&heap, &answer.value),
+                            "{context}"
+                        );
+                        let nonzero = |v| u8::from(matches!(v, Value::Int(n) if n != 0));
+                        let mask = nonzero(*a) | nonzero(*b) << 1 | nonzero(value) << 3;
+                        assert_eq!(answer.scalar_sizes, Some(mask), "{context}");
+                    }
+                    // A kernel decline leaves the prepared/general fallback
+                    // intact (overflow, zero divisors and non-integral rem).
+                    if let Some(answer) = prepared {
+                        let general = general.unwrap_or_else(|e| panic!("{context}: {e}"));
+                        assert_eq!(
+                            testsupport::datum(&heap, &answer.value),
+                            testsupport::datum(&heap, &general),
+                            "{context}"
+                        );
+                        let units = lash_kernel_vm::kernel_internals::prepared_scalar_charge(
+                            &definition,
+                            answer.scalar_sizes.unwrap(),
+                        )
+                        .unwrap();
+                        let generic = definition.charge.evaluate(&mut |operand, measure| {
+                            let value = match operand {
+                                Operand::Result => &general,
+                                Operand::Param(name) => {
+                                    &args[definition
+                                        .signature
+                                        .params
+                                        .iter()
+                                        .position(|p| p.name == *name)
+                                        .unwrap()]
+                                }
+                            };
+                            match measure {
+                                Measure::Size => size(value, &heap),
+                                Measure::DeepSize => deep_size(value, &heap),
+                                Measure::Magnitude => magnitude(value, &heap),
+                                Measure::NestedSize => nested_size(value, &heap),
+                            }
+                        });
+                        assert_eq!(units, generic, "{context}");
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(seen.len(), 10, "every scalar operator has a library entry");
+}

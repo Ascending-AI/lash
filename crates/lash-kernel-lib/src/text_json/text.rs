@@ -96,6 +96,7 @@ pub(super) fn functions() -> Vec<Function> {
             Type::Text,
             concat,
             Some(PreparedNative {
+                pair: None,
                 entry: short_concat,
                 charged_entry: None,
                 operation: "text.concat(text: Text, other: Text) -> Text",

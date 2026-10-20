@@ -232,8 +232,9 @@ pub mod document {
         WaitId, WorkCounter, arena, check_declarations, check_statement, core_support,
         document_work, graph_tokens, heap, parse_definition, parse_definition_with_limits,
         parse_document, parse_document_with_limits, performed_by, performed_through, plan,
-        print_definition, print_document, required_declarations, testkit, validate_definition,
-        validate_definition_with_limits, validate_document, validate_document_with_limits,
+        print_definition, print_document, required_declarations, scalar, testkit,
+        validate_definition, validate_definition_with_limits, validate_document,
+        validate_document_with_limits,
     };
     /// Plain-language captions for a document's steps, its entries'
     /// parameters and the fields of their types, held beside it like its

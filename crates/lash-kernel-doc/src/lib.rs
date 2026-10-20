@@ -70,6 +70,7 @@ mod package_ids;
 pub mod plan;
 mod released;
 mod requirement;
+pub mod scalar;
 mod text;
 mod types;
 mod validate;
