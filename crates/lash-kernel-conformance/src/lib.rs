@@ -10,6 +10,7 @@ mod case;
 mod coverage;
 mod machine;
 mod native;
+pub mod package;
 mod pages;
 mod projection;
 pub mod smith;

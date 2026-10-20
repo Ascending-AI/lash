@@ -36,6 +36,8 @@ pub(crate) struct Text {
     pub(crate) lines: Vec<String>,
     pub(crate) calls: BTreeSet<String>,
     fresh: usize,
+    /// A Both body cannot invoke body-only shape helpers or its digest helper.
+    inline_built: Option<String>,
 }
 
 impl Text {
@@ -162,10 +164,6 @@ impl<'a> Shapes<'a> {
     /// The definition text of `<path>.<ty>.check_shape`, before its `use`
     /// lines.
     pub(crate) fn definition(&self, ty: &str) -> Text {
-        let path = self.path.to_string();
-        let Type::Record(representation) = self.types[ty] else {
-            unreachable!("a value type's representation is a record")
-        };
         let mut text = Text::default();
         text.line(
             0,
@@ -178,30 +176,7 @@ impl<'a> Shapes<'a> {
         text.line(0, format!("errors \"type_error\", \"{STALE_VALUE}\""));
         text.line(0, "charge sum(16, deep(x))");
         text.line(0, "body {");
-        text.calls.insert("brand.of".into());
-        text.line(1, "let brand = invoke brand.of(x)");
-        let not_this = format!(
-            "throw error.new(\"type_error\", text.concat(at, \" is not a {path}.{ty}\"), null)"
-        );
-        text.line(1, "if same(kind(brand), \"absent\") {");
-        text.line(2, &not_this);
-        text.line(1, "}");
-        text.line(1, format!("if bool.not(same(brand[0], \"{path}\")) {{"));
-        text.line(2, &not_this);
-        text.line(1, "}");
-        text.line(1, format!("if bool.not(same(brand[1], \"{ty}\")) {{"));
-        text.line(2, &not_this);
-        text.line(1, "}");
-        text.line(1, "let built = absent");
-        text.line(1, format!("if record.contains(x, \"{BUILT_FIELD}\") {{"));
-        text.line(2, format!("set built = x.{BUILT_FIELD}"));
-        text.line(1, "}");
-        text.calls.insert(built_function(self.path).to_string());
-        let fail = Fail {
-            ty: format!("{path}.{ty}"),
-            built: built_function(self.path).to_string(),
-        };
-        self.record(&mut text, 1, "x", "at", representation, Fails::Stale, &fail);
+        self.check(&mut text, 1, "x", "at", ty, ("brand", "built"));
         text.line(1, "return null");
         text.line(0, "}");
         text
@@ -209,8 +184,23 @@ impl<'a> Shapes<'a> {
 
     /// The checks a member's body begins with: one walk of each slot whose
     /// declared type mentions a package value type.
-    pub(crate) fn slots(&self, signature: &Signature) -> Option<(Text, Vec<String>)> {
-        let mut text = Text::default();
+    pub(crate) fn slots(
+        &self,
+        signature: &Signature,
+        inline_built: Option<&[u8]>,
+    ) -> Option<(Text, Vec<String>)> {
+        let mut text = Text {
+            inline_built: inline_built.map(|bytes| {
+                format!(
+                    "b\"{}\"",
+                    bytes
+                        .iter()
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect::<String>()
+                )
+            }),
+            ..Text::default()
+        };
         let mut checked = Vec::new();
         for param in &signature.params {
             if !self.mentions(&param.ty) {
@@ -221,6 +211,7 @@ impl<'a> Shapes<'a> {
             let fail = Fail {
                 ty: String::new(),
                 built: String::new(),
+                value: String::new(),
             };
             self.value(
                 &mut text,
@@ -234,6 +225,53 @@ impl<'a> Shapes<'a> {
             checked.push(param.name.as_str().to_owned());
         }
         (!checked.is_empty()).then_some((text, checked))
+    }
+
+    /// One check generator, called as its own function or emitted in a Both
+    /// prologue. The latter takes fresh locals at every nested representation.
+    fn check(
+        &self,
+        text: &mut Text,
+        depth: usize,
+        var: &str,
+        at: &str,
+        ty: &str,
+        locals: (&str, &str),
+    ) {
+        let (brand, built) = locals;
+        text.calls.insert("brand.of".into());
+        text.line(depth, format!("let {brand} = invoke brand.of({var})"));
+        let not_this = format!(
+            "throw error.new(\"type_error\", text.concat({at}, \" is not a {}.{ty}\"), null)",
+            self.path
+        );
+        text.line(
+            depth,
+            format!("if same(kind({brand}), \"absent\") {{ {not_this} }}"),
+        );
+        text.line(
+            depth,
+            format!(
+                "if bool.not(same({brand}[0], \"{}\")) {{ {not_this} }}",
+                self.path
+            ),
+        );
+        text.line(
+            depth,
+            format!("if bool.not(same({brand}[1], \"{ty}\")) {{ {not_this} }}"),
+        );
+        text.line(depth, format!("let {built} = absent"));
+        text.line(depth, format!("if record.contains({var}, \"{BUILT_FIELD}\") {{ set {built} = {var}.{BUILT_FIELD} }}"));
+        let Type::Record(record) = self.types[ty] else {
+            unreachable!("a package representation is a record")
+        };
+        text.calls.insert(built_function(self.path).to_string());
+        let fail = Fail {
+            ty: format!("{}.{ty}", self.path),
+            built: built_function(self.path).to_string(),
+            value: built.to_owned(),
+        };
+        self.record(text, depth, var, at, record, Fails::Stale, &fail);
     }
 
     /// Checks the value `var`, read at the path `at`, against `ty`.
@@ -252,6 +290,11 @@ impl<'a> Shapes<'a> {
         fail: &Fail,
     ) {
         if let Some(name) = self.package_type(ty) {
+            if text.inline_built.is_some() {
+                let (brand, built) = (text.fresh(), text.fresh());
+                self.check(text, depth, var, at, name, (&brand, &built));
+                return;
+            }
             text.calls.insert(self.check_shape(name));
             text.line(
                 depth,
@@ -463,6 +506,8 @@ struct Fail {
     ty: String,
     /// The checker's building-artifact function.
     built: String,
+    /// The original value's building artifact, fresh at each nesting level.
+    value: String,
 }
 
 impl Fail {
@@ -475,12 +520,13 @@ impl Fail {
             Fails::Stale => {
                 let package = self.ty.rsplit_once('.').map_or("", |(package, _)| package);
                 let current = text.fresh();
-                text.line(depth, format!("let {current} = invoke {}()", self.built));
+                let expression = text.inline_built.clone().unwrap_or_else(|| format!("invoke {}()", self.built));
+                text.line(depth, format!("let {current} = {expression}"));
                 text.line(
                     depth,
                     format!(
-                        "throw error.new(\"{STALE_VALUE}\", text.concat(\"{} built by another release of {package} differs at \", text.concat({at}, \"; rebuild it\")), {{type: \"{}\", at: {at}, built: built, current: {current}}})",
-                        self.ty, self.ty
+                        "throw error.new(\"{STALE_VALUE}\", text.concat(\"{} built by another release of {package} differs at \", text.concat({at}, \"; rebuild it\")), {{type: \"{}\", at: {at}, built: {}, current: {current}}})",
+                        self.ty, self.ty, self.value
                     ),
                 );
             }

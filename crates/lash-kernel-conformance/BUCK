@@ -59,6 +59,24 @@ lash_rust_unit_test(
 )
 
 lash_rust_binary(
+    name = "package_audit__example",
+    crate_features = [],
+    crate_name = "package_audit",
+    crate_root = "examples/package_audit.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-kernel-conformance", "package_audit"),
+    extra_compile_data = [],
+    include_dev_deps = True,
+    library = ":lash-kernel-conformance",
+    library_crate_name = "lash_kernel_conformance",
+    manifest_dir = "crates/lash-kernel-conformance",
+    package_name = "lash-kernel-conformance",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_binary(
     name = "sort_corpus__example",
     crate_features = [],
     crate_name = "sort_corpus",
@@ -119,7 +137,7 @@ load(
 )
 
 lash_rust_feature_library(
-    name = "lash-kernel-conformance__fv_422cca94",
+    name = "lash-kernel-conformance__fv_a0e48b4d",
     build_script = None,
     crate_features = [],
     crate_name = "lash_kernel_conformance",
@@ -132,6 +150,6 @@ lash_rust_feature_library(
         "feature-lane",
         "manual",
     ],
-    variant_deps = {"//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-kernel-vm:lash-kernel-vm": "//crates/lash-kernel-vm:lash-kernel-vm__fv_81d2cd0a"},
+    variant_deps = {"//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_66d5dd0a", "//crates/lash-kernel-migrate:lash-kernel-migrate": "//crates/lash-kernel-migrate:lash-kernel-migrate__fv_11cdb259", "//crates/lash-kernel-package:lash-kernel-package": "//crates/lash-kernel-package:lash-kernel-package__fv_e912dffd", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_4bd72e2f", "//crates/lash-kernel-vm:lash-kernel-vm": "//crates/lash-kernel-vm:lash-kernel-vm__fv_81d2cd0a"},
     version = "0.0.0-dev",
 )

@@ -23,6 +23,8 @@ lash-kernel-check.workspace = true
 lash-kernel-dialect.workspace = true
 lash-kernel-doc.workspace = true
 lash-kernel-lib.workspace = true
+lash-kernel-package.workspace = true
+lash-kernel-exec.workspace = true
 lash-kernel-state.workspace = true
 lash-kernel-vm.workspace = true
 serde = { workspace = true, features = ["derive"] }
@@ -30,11 +32,10 @@ serde_json.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-lash-kernel-package.workspace = true
+lash-kernel-package = { workspace = true, features = ["testing"] }
 lash-ext-helper-compiler = { workspace = true }
 kernel-embedder = { path = "../../examples/kernel-embedder" }
 lash-kernel-edit.workspace = true
-lash-kernel-exec.workspace = true
 lash-kernel-view.workspace = true
 lash-ext-regex-ecma = { path = "../lash-ext-regex-ecma" }
 

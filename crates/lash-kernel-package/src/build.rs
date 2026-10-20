@@ -110,11 +110,11 @@ impl Package {
                 let mut library = NamedLibrary::from_registry(&registry)
                     .map_err(|error| source(error.to_string()))?;
                 let mut code = Vec::new();
-                let built = built_definition(&path, built);
+                let stamp = built_definition(&path, built);
                 library
-                    .insert(built.clone())
+                    .insert(stamp.clone())
                     .map_err(|error| source(error.to_string()))?;
-                code.push(built);
+                code.push(stamp);
                 let mut checks = uses(CHECK_CALLS.iter().copied().map(str::to_owned));
                 checks.push_str(&format!("use {}\n", crate::built_function(&path)));
                 for ty in &order {
@@ -131,7 +131,7 @@ impl Package {
                 code.extend(
                     define_functions_with(&kernel, &mut library, &mut |definition, library| {
                         if members.contains_key(&definition.name) {
-                            check_slots(&shapes, definition, library)?;
+                            check_slots(&shapes, definition, library, built)?;
                         }
                         Ok(())
                     })
@@ -320,8 +320,10 @@ fn check_slots(
     shapes: &Shapes<'_>,
     definition: &mut FunctionDefinition,
     library: &NamedLibrary,
+    built: &[u8],
 ) -> Result<(), String> {
-    let Some((checks, slots)) = shapes.slots(&definition.signature) else {
+    let inline = matches!(definition.implementation, Implementation::Both(_)).then_some(built);
+    let Some((checks, slots)) = shapes.slots(&definition.signature, inline) else {
         return Ok(());
     };
     let (Implementation::Body(body) | Implementation::Both(body)) = &mut definition.implementation
@@ -346,6 +348,7 @@ fn check_slots(
         .iter()
         .map(|name| (*name).to_owned())
         .chain(checks.calls.iter().cloned())
+        .collect::<BTreeSet<_>>()
     {
         if let Some(function) = lash_kernel_dialect::Library::resolve(library, &name) {
             text.push_str(&format!("use {name} = @{function}\n"));
