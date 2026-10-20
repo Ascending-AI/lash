@@ -132,32 +132,62 @@ pub(super) fn claim_within(
             },
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let mut claimed = Vec::with_capacity(candidates.len());
+    // Validate the selected facts in eligibility order before mutating any
+    // actor. RETURNING has no ordering guarantee, so retain identity with
+    // each cause, purpose and requirement through the batched mutation.
+    let mut selected = Vec::with_capacity(candidates.len());
     for (key, state, stored_formats, requires, holds) in candidates {
         let purpose = ClaimPurpose::of_stored(lease, &stored_formats, requires.as_deref(), holds);
         let purpose = match purpose {
             Ok(purpose) => purpose,
             Err(error) => return Ok(Err(error)),
         };
-        let epoch = tx.prepare_cached(SQL.sqlite.claim.sql())?.query_row(
-            rusqlite::params![key, owner.node.as_str(), owner.boot.as_str()],
-            |row| row.get::<_, i64>(0),
-        )?;
         let actor = match actor_key(&key) {
             Ok(actor) => actor,
             Err(error) => return Ok(Err(error)),
         };
-        claimed.push(Claimed {
+        selected.push((
             actor,
-            epoch: Epoch(epoch),
-            cause: if state == "waiting" {
+            if state == "waiting" {
                 ClaimCause::Due
             } else {
                 ClaimCause::Ready
             },
             purpose,
             // `of_stored` refused a corrupt spelling above.
-            requires: lash_durable::parse_requires(requires.as_deref()).unwrap_or_default(),
+            lash_durable::parse_requires(requires.as_deref()).unwrap_or_default(),
+        ));
+    }
+    let mut epochs = std::collections::BTreeMap::new();
+    // Bound JSON input and RETURNING material independently of the caller's
+    // claim limit; each chunk uses one statement and three bindings.
+    for chunk in selected.chunks(256) {
+        let keys = chunk
+            .iter()
+            .map(|(actor, ..)| actor.as_str())
+            .collect::<Vec<_>>();
+        let keys = serde_json::Value::from(keys).to_string();
+        let mut statement = tx.prepare_cached(SQL.sqlite.claim.sql())?;
+        let rows = statement.query_map(
+            rusqlite::params![keys, owner.node.as_str(), owner.boot.as_str()],
+            |row| Ok((row.get::<_, String>(0)?, Epoch(row.get::<_, i64>(1)?))),
+        )?;
+        for row in rows {
+            let (key, epoch) = row?;
+            epochs.insert(key, epoch);
+        }
+    }
+    let mut claimed = Vec::with_capacity(selected.len());
+    for (actor, cause, purpose, requires) in selected {
+        let epoch = epochs
+            .remove(actor.as_str())
+            .ok_or(rusqlite::Error::QueryReturnedNoRows)?;
+        claimed.push(Claimed {
+            actor,
+            epoch,
+            cause,
+            purpose,
+            requires,
         });
     }
     Ok(Ok(claimed))

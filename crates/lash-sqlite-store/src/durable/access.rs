@@ -176,7 +176,8 @@ lash_store_sql::statements! {
              WHERE actor_key = ?1
              RETURNING state";
 
-        /// Give actor `?1` to boot `?3` of node `?2`, bumping its epoch. A
+        /// Give the bounded JSON array of actor keys `?1` to boot `?3` of
+        /// node `?2`, returning each identity with its bumped epoch. A
         /// claim that finds no commit advanced the actor since the previous
         /// claim counts one more failed activation; any such commit resets
         /// the count.
@@ -186,7 +187,7 @@ lash_store_sql::statements! {
                  failed_activations = CASE WHEN claimed_revision = state_revision
                                            THEN failed_activations + 1 ELSE 0 END,
                  claimed_revision = state_revision
-             WHERE actor_key = ?1
-             RETURNING epoch";
+             WHERE actor_key IN (SELECT value FROM json_each(?1))
+             RETURNING actor_key, epoch";
     }
 }

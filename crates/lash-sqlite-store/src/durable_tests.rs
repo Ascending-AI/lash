@@ -116,6 +116,148 @@ fn advancing(clock: &Arc<TestClock>) -> impl Fn(Duration) + Sync + '_ {
     move |by| clock.advance(u64::try_from(by.as_millis()).expect("a law advances by millis"))
 }
 
+/// CLAIM-BATCH-WORK: a claim mutates bounded identity sets, preserving the
+/// selected age order, Ready/Due causes, purposes, requirements and epochs.
+#[tokio::test]
+async fn a_claim_batches_mutations_without_losing_selected_facts() {
+    use lash_durable::{
+        ActorKey, ClaimCause, ClaimPurpose, CommitLabel, DurableInstant, DurableStore, Epoch,
+        FormatSet, MailKind, MailTx, NodeId, NodeSpec, Release,
+    };
+
+    for count in [16_usize, 257] {
+        let (_root, set, clock) = world(false).await;
+        let store = set.durable_store();
+        let formats = FormatSet::new("claim-batch");
+        let spec = |name: &str, serves| NodeSpec {
+            node: NodeId::new(name),
+            decodes: vec![formats.clone()],
+            serves,
+            held: Default::default(),
+            capabilities: Default::default(),
+            ttl_millis: 15_000,
+        };
+        let setup = store
+            .register_node(&spec("setup", vec!["served".into(), "unserved".into()]))
+            .await
+            .unwrap();
+        // Reverse key order so SQLite's RETURNING order cannot stand in
+        // for the selected eligibility order.
+        let actors = (0..count)
+            .map(|index| ActorKey::process(&format!("batch-{:04}", count - index)).unwrap())
+            .collect::<Vec<_>>();
+        let mut create = MailTx::new();
+        for actor in &actors {
+            create.create_actor(actor.clone(), formats.clone());
+        }
+        store
+            .commit_mail(create, CommitLabel::new("law.create"))
+            .await
+            .unwrap();
+        let initial = store.claim(&setup, count).await.unwrap();
+        assert_eq!(initial.len(), count);
+        for (index, actor) in actors.iter().enumerate() {
+            let grant = initial.iter().find(|claim| &claim.actor == actor).unwrap();
+            let mut tx = store.begin(actor, grant.epoch).await.unwrap();
+            match index % 4 {
+                0 => {
+                    tx.give_up(Release::Waiting {
+                        next_due: Some(DurableInstant(1_000_000 + i64::try_from(index).unwrap())),
+                    });
+                }
+                2 => {
+                    tx.set_requires(vec!["unserved".into()])
+                        .give_up(Release::Ready);
+                }
+                3 => {
+                    tx.set_requires(vec!["served".into()])
+                        .give_up(Release::Ready);
+                }
+                _ => {
+                    tx.give_up(Release::Ready);
+                }
+            }
+            store
+                .commit(tx, CommitLabel::new("law.release"))
+                .await
+                .unwrap();
+            if index % 4 == 2 {
+                let mut cancel = MailTx::new();
+                cancel.append(
+                    actor.clone(),
+                    MailKind::new(lash_durable::domain::CANCEL_MAIL),
+                    "{}",
+                );
+                store
+                    .commit_mail(cancel, CommitLabel::new("law.cancel"))
+                    .await
+                    .unwrap();
+            }
+            clock.advance(1);
+        }
+        let chooser = store
+            .register_node(&spec("chooser", vec!["served".into()]))
+            .await
+            .unwrap();
+        let (answer, receipt) = lash_core_ids::operational_metrics::sql::collect(
+            "claim.batch",
+            "sqlite",
+            store.claim(&chooser, count),
+        )
+        .await;
+        let claimed = answer.unwrap();
+        assert_eq!(claimed.len(), count);
+        for (index, (claim, actor)) in claimed.iter().zip(&actors).enumerate() {
+            assert_eq!(&claim.actor, actor, "selected age order");
+            assert_eq!(claim.epoch, Epoch(3), "one claim increment after release");
+            assert_eq!(
+                claim.cause,
+                if index % 4 == 0 {
+                    ClaimCause::Due
+                } else {
+                    ClaimCause::Ready
+                }
+            );
+            assert_eq!(
+                claim.purpose,
+                if index % 4 == 2 {
+                    ClaimPurpose::CancelOnly
+                } else {
+                    ClaimPurpose::Run
+                }
+            );
+            let requires: Vec<String> = match index % 4 {
+                2 => vec!["unserved".into()],
+                3 => vec!["served".into()],
+                _ => Vec::new(),
+            };
+            assert_eq!(claim.requires, requires);
+            let stored = store.actor(actor).await.unwrap().unwrap();
+            assert_eq!(stored.epoch, claim.epoch);
+            assert_eq!(stored.owner.as_ref(), Some(&chooser.owner));
+        }
+        let updates: u64 = receipt
+            .shapes
+            .iter()
+            .filter(|(shape, _)| shape.starts_with("update main.actors "))
+            .map(|(_, work)| work.statements)
+            .sum();
+        eprintln!(
+            "CLAIM_BATCH count={count} identities={} updates={updates} SQL {}",
+            claimed.len(),
+            serde_json::to_string(&receipt).unwrap()
+        );
+        let chunks = u64::try_from(count.div_ceil(256)).unwrap();
+        assert!(
+            receipt.statements <= 5 + chunks,
+            "{count} actors used {} statements; budget {}",
+            receipt.statements,
+            5 + chunks
+        );
+        assert_eq!(updates, chunks, "one mutation per bounded identity set");
+    }
+}
+
 macro_rules! law {
     ($name:ident, |$store:ident, $advance:ident| $law:expr) => {
         mod $name {
