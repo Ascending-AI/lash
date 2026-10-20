@@ -128,6 +128,11 @@ pub struct RepeatedRead {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Receipt {
     pub epoch: u64,
+    /// Cumulative descriptor construction, including already drained windows.
+    pub worker_label_formats: u64,
+    pub worker_descriptor_bytes: usize,
+    pub relation_analyses: u64,
+    pub statement_descriptor_bytes: usize,
     pub totals: BTreeMap<Backend, Counts>,
     pub rows: Vec<Row>,
     pub active: Vec<Row>,
@@ -193,7 +198,7 @@ struct JoinKey {
     disposition: Option<Disposition>,
     owner: Option<OwnerIdentity>,
     operation: Option<String>,
-    worker: String,
+    worker: std::sync::Arc<str>,
 }
 impl JoinKey {
     fn exported(&self) -> Key {
@@ -208,7 +213,7 @@ impl JoinKey {
             disposition: self.disposition,
             owner: self.owner.clone(),
             operation: self.operation.clone(),
-            worker: self.worker.clone(),
+            worker: self.worker.to_string(),
         }
     }
     fn bytes(&self) -> usize {
@@ -261,6 +266,8 @@ impl ReadIdentity {
     }
 }
 
+type DescriptorSlot = std::sync::Arc<std::sync::OnceLock<Option<std::sync::Arc<Statement>>>>;
+
 pub(super) struct State {
     epoch: u64,
     next: u64,
@@ -268,7 +275,6 @@ pub(super) struct State {
     totals: BTreeMap<Backend, Counts>,
     rows: BTreeMap<JoinKey, Counts>,
     active: BTreeMap<u64, Active>,
-    statements: BTreeMap<String, Vec<std::sync::Arc<Statement>>>,
     sites: std::collections::BTreeSet<std::sync::Arc<str>>,
     next_parameter: usize,
     peak_key_bytes: usize,
@@ -280,6 +286,11 @@ pub(super) struct State {
     key_bytes: usize,
     read_bind_classes: BTreeMap<String, u64>,
     lost: u64,
+    worker_label_formats: u64,
+    worker_descriptor_bytes: usize,
+    relation_analyses: u64,
+    statement_descriptor_bytes: usize,
+    observed_statements: BTreeMap<Backend, BTreeMap<String, DescriptorSlot>>,
 }
 impl Default for State {
     fn default() -> Self {
@@ -293,7 +304,6 @@ impl Default for State {
             totals: BTreeMap::new(),
             rows: BTreeMap::new(),
             active: BTreeMap::new(),
-            statements: BTreeMap::new(),
             sites: std::collections::BTreeSet::new(),
             next_parameter: 0,
             peak_key_bytes: 0,
@@ -303,12 +313,19 @@ impl Default for State {
             key_bytes: 0,
             lost: 0,
             read_bind_classes: BTreeMap::new(),
+            worker_label_formats: 0,
+            worker_descriptor_bytes: 0,
+            relation_analyses: 0,
+            statement_descriptor_bytes: 0,
+            observed_statements: BTreeMap::new(),
         }
     }
 }
 impl State {
     pub(super) fn receipt(&self) -> Receipt {
         Receipt {
+            worker_label_formats: self.worker_label_formats, worker_descriptor_bytes: self.worker_descriptor_bytes,
+            relation_analyses: self.relation_analyses, statement_descriptor_bytes: self.statement_descriptor_bytes,
             epoch: self.epoch, totals: self.totals.clone(),
             rows: self.rows.iter().map(|(key, counts)| Row { key: key.exported(), counts: counts.clone() }).collect(),
             active: self.active.values().map(Active::exported).collect(),
@@ -320,40 +337,42 @@ impl State {
             complete: self.lost == 0 && self.active.is_empty() && self.totals.values().all(|c| c.unknown_bindings == 0),
         }
     }
-    fn statement(
-        &mut self,
-        sql: &str,
-        relations: Option<Vec<String>>,
-    ) -> Option<std::sync::Arc<Statement>> {
+    fn descriptor_slot(&mut self, backend: Backend, sql: &str) -> Option<DescriptorSlot> {
         if let Some(found) = self
-            .statements
-            .get(sql)
-            .and_then(|variants| variants.iter().find(|s| s.relations == relations))
+            .observed_statements
+            .get(&backend)
+            .and_then(|statements| statements.get(sql))
         {
             return Some(std::sync::Arc::clone(found));
         }
-        let statement = Statement {
-            digest: format!("{:x}", Sha256::digest(sql.as_bytes())),
-            shape: crate::operational_metrics::sql::normalized_shape(sql).to_string(),
-            relations,
-        };
-        let bytes = statement.bytes()
-            + if self.statements.contains_key(sql) {
-                0
-            } else {
-                sql.len() + 128
-            };
-        if self.statements.len() >= KEY_LIMIT || !self.retain(bytes) {
+        let bytes = sql.len() + 128 + std::mem::size_of::<DescriptorSlot>();
+        if self
+            .observed_statements
+            .values()
+            .map(BTreeMap::len)
+            .sum::<usize>()
+            == KEY_LIMIT
+            || self
+                .key_bytes
+                .saturating_add(self.statement_descriptor_bytes)
+                .saturating_add(bytes)
+                > KEY_BYTES_LIMIT
+        {
             self.lost += 1;
             return None;
         }
-        let statement = std::sync::Arc::new(statement);
-        self.statements
-            .entry(sql.into())
+        self.statement_descriptor_bytes += bytes;
+        self.peak_key_bytes = self
+            .peak_key_bytes
+            .max(self.key_bytes + self.statement_descriptor_bytes);
+        let slot = std::sync::Arc::new(std::sync::OnceLock::new());
+        self.observed_statements
+            .entry(backend)
             .or_default()
-            .push(std::sync::Arc::clone(&statement));
-        Some(statement)
+            .insert(sql.to_owned(), std::sync::Arc::clone(&slot));
+        Some(slot)
     }
+
     fn site(&mut self, site: &str) -> Option<std::sync::Arc<str>> {
         if let Some(found) = self.sites.get(site) {
             return Some(std::sync::Arc::clone(found));
@@ -367,17 +386,10 @@ impl State {
         Some(site)
     }
     fn resident_bytes(&self) -> usize {
-        self.statements
+        self.sites
             .iter()
-            .map(|(sql, variants)| {
-                sql.len() + 128 + variants.iter().map(|s| s.bytes()).sum::<usize>()
-            })
+            .map(|site| site.len() + 128)
             .sum::<usize>()
-            + self
-                .sites
-                .iter()
-                .map(|site| site.len() + 128)
-                .sum::<usize>()
             + self.rows.keys().map(JoinKey::bytes).sum::<usize>()
             + self
                 .active
@@ -399,6 +411,10 @@ impl State {
     fn drain_completed(&mut self) -> Receipt {
         let mut drained = Receipt {
             epoch: self.epoch,
+            worker_label_formats: self.worker_label_formats,
+            worker_descriptor_bytes: self.worker_descriptor_bytes,
+            relation_analyses: self.relation_analyses,
+            statement_descriptor_bytes: self.statement_descriptor_bytes,
             complete: true,
             repeat_identities_complete: true,
             admitted_key_bytes: self.peak_key_bytes,
@@ -435,10 +451,6 @@ impl State {
         let parameters: std::collections::BTreeSet<_> =
             self.reads.keys().map(|key| key.parameters).collect();
         self.parameters.retain(|_, id| parameters.contains(id));
-        self.statements.retain(|_, variants| {
-            variants.retain(|s| std::sync::Arc::strong_count(s) > 1);
-            !variants.is_empty()
-        });
         self.sites
             .retain(|site| std::sync::Arc::strong_count(site) > 1);
         self.key_bytes = self.resident_bytes();
@@ -450,11 +462,18 @@ impl State {
         drained
     }
     fn retain(&mut self, bytes: usize) -> bool {
-        if self.key_bytes.saturating_add(bytes) > KEY_BYTES_LIMIT {
+        if self
+            .key_bytes
+            .saturating_add(self.statement_descriptor_bytes)
+            .saturating_add(bytes)
+            > KEY_BYTES_LIMIT
+        {
             false
         } else {
             self.key_bytes += bytes;
-            self.peak_key_bytes = self.peak_key_bytes.max(self.key_bytes);
+            self.peak_key_bytes = self
+                .peak_key_bytes
+                .max(self.key_bytes + self.statement_descriptor_bytes);
             true
         }
     }
@@ -485,6 +504,32 @@ pub fn drain_completed() -> Option<Receipt> {
     Some(lock().as_mut()?.work.drain_completed())
 }
 
+// One immutable label per observed thread/epoch. A thread retains one slot,
+// replacing its previous epoch; no mutable execution facts live here.
+thread_local! {
+    static WORKER: std::cell::RefCell<Option<(u64, std::sync::Arc<str>)>> = const { std::cell::RefCell::new(None) };
+}
+fn worker(state: &mut State) -> Option<std::sync::Arc<str>> {
+    WORKER.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if let Some((epoch, label)) = &*slot
+            && *epoch == state.epoch
+        {
+            return Some(std::sync::Arc::clone(label));
+        }
+        if state.worker_label_formats >= KEY_LIMIT as u64 {
+            state.lost += 1;
+            return None;
+        }
+        let label: std::sync::Arc<str> = format!("{:?}", std::thread::current().id()).into();
+        state.worker_label_formats += 1;
+        state.worker_descriptor_bytes +=
+            label.len() + std::mem::size_of::<(u64, std::sync::Arc<str>)>();
+        *slot = Some((state.epoch, std::sync::Arc::clone(&label)));
+        Some(label)
+    })
+}
+
 /// A token cannot attach a late completion to a successor collector.
 #[derive(Clone, Copy, Debug)]
 pub struct Execution {
@@ -493,12 +538,84 @@ pub struct Execution {
     read: bool,
 }
 impl Execution {
+    /// Observed executors supply syntactic relation analysis lazily. Exact SQL
+    /// and backend select immutable metadata within this collector epoch.
     pub fn start(
         backend: Backend,
         sql: &str,
         site: &str,
-        relations: Option<Vec<String>>,
+        relations: impl FnOnce() -> Option<Vec<String>>,
         read: bool,
+    ) -> Option<Self> {
+        if !enabled() {
+            return None;
+        }
+        let (epoch, slot) = {
+            let mut guard = lock();
+            let state = &mut guard.as_mut()?.work;
+            if sql.len() > VALUE_LIMIT || site.len() > 4096 {
+                state.lost += 1;
+                return None;
+            }
+            (state.epoch, state.descriptor_slot(backend, sql)?)
+        };
+        let statement = slot
+            .get_or_init(|| {
+                {
+                    let mut guard = lock();
+                    let state = &mut guard.as_mut()?.work;
+                    if state.epoch != epoch {
+                        return None;
+                    }
+                    state.relation_analyses += 1;
+                }
+                // One initializer per admitted SQL/backend descriptor. Parsing
+                // and hashing run outside the collector lock, including races.
+                let statement = std::sync::Arc::new(Statement {
+                    digest: format!("{:x}", Sha256::digest(sql.as_bytes())),
+                    shape: crate::operational_metrics::sql::normalized_shape(sql).to_string(),
+                    relations: relations(),
+                });
+                let mut guard = lock();
+                let state = &mut guard.as_mut()?.work;
+                if state.epoch != epoch {
+                    return None;
+                }
+                let bytes = statement.bytes();
+                if state
+                    .key_bytes
+                    .saturating_add(state.statement_descriptor_bytes)
+                    .saturating_add(bytes)
+                    > KEY_BYTES_LIMIT
+                {
+                    return None;
+                }
+                state.statement_descriptor_bytes += bytes;
+                state.peak_key_bytes = state
+                    .peak_key_bytes
+                    .max(state.key_bytes + state.statement_descriptor_bytes);
+                Some(statement)
+            })
+            .clone();
+        let Some(statement) = statement else {
+            let mut guard = lock();
+            if let Some(state) = guard.as_mut()
+                && state.work.epoch == epoch
+            {
+                state.work.lost += 1;
+            }
+            return None;
+        };
+        Self::start_inner(backend, sql, site, read, epoch, statement)
+    }
+
+    fn start_inner(
+        backend: Backend,
+        sql: &str,
+        site: &str,
+        read: bool,
+        epoch: u64,
+        statement: std::sync::Arc<Statement>,
     ) -> Option<Self> {
         if !enabled() {
             return None;
@@ -510,7 +627,9 @@ impl Execution {
             state.lost += 1;
             return None;
         }
-        let statement = state.statement(sql, relations)?;
+        if epoch != state.epoch {
+            return None;
+        }
         let site = state.site(site)?;
         let key = JoinKey {
             statement,
@@ -521,7 +640,7 @@ impl Execution {
             disposition: None,
             owner: window.as_ref().and_then(|v| v.0.clone()),
             operation: window.map(|v| v.1),
-            worker: format!("{:?}", std::thread::current().id()),
+            worker: worker(state)?,
         };
         if !state.retain(key.bytes()) {
             state.lost += 1;
@@ -780,11 +899,11 @@ mod tests {
         reason = "isolates the process-global witness"
     )]
     #[test]
-    fn repeated_executions_bound_resident_admissions() {
+    fn closed_windows_release_dynamic_keys_and_retain_epoch_descriptors() {
         const CHILD: &str = "LASH_SQL_RESIDENT_CHILD";
         if std::env::var_os(CHILD).is_none() {
             let output = std::process::Command::new(std::env::current_exe().unwrap())
-                .args(["--exact", "perf_witness::sql_shapes::work::tests::repeated_executions_bound_resident_admissions", "--nocapture"])
+                .args(["--exact", "perf_witness::sql_shapes::work::tests::closed_windows_release_dynamic_keys_and_retain_epoch_descriptors", "--nocapture"])
                 .env(CHILD, "1").output().unwrap();
             let stdout = String::from_utf8_lossy(&output.stdout);
             eprint!("{}", String::from_utf8_lossy(&output.stderr));
@@ -801,7 +920,7 @@ mod tests {
                 Backend::Sqlite,
                 "SELECT 1",
                 "resident-law",
-                Some(vec![]),
+                || Some(vec![]),
                 false,
             ) {
                 execution.finish();
@@ -831,7 +950,7 @@ mod tests {
                         Backend::Sqlite,
                         "SELECT ?",
                         "resident-law",
-                        Some(vec![]),
+                        || Some(vec![]),
                         true,
                     )
                     .unwrap();
@@ -864,13 +983,77 @@ mod tests {
             let guard = lock();
             let state = &guard.as_ref().unwrap().work;
             assert_eq!(state.key_bytes, 0);
-            assert!(
-                state.parameters.is_empty()
-                    && state.statements.is_empty()
-                    && state.sites.is_empty()
-            );
+            assert_eq!(state.relation_analyses, 2);
+            assert!(state.statement_descriptor_bytes > 0);
+            assert!(state.statement_descriptor_bytes < KEY_BYTES_LIMIT);
+            assert!(state.parameters.is_empty() && state.sites.is_empty());
         }
         assert!(collector.snapshot().sql_shapes.unwrap().work.complete);
+    }
+
+    /// Descriptor identity belongs to the collector epoch, including late tokens.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "exclusive global witness needs an isolated process"
+    )]
+    #[test]
+    fn immutable_descriptors_belong_to_one_backend_and_collector_epoch() {
+        const CHILD: &str = "LASH_WORKER_DESCRIPTOR_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "perf_witness::sql_shapes::work::tests::immutable_descriptors_belong_to_one_backend_and_collector_epoch"])
+                .env(CHILD, "1").output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+            return;
+        }
+        let mut previous_epoch = 0;
+        let mut stale = None;
+        for _ in 0..2 {
+            let collector = crate::perf_witness::Collector::install_with_sql_shapes().unwrap();
+            if let Some(stale) = stale {
+                let stale: Execution = stale;
+                stale.finish();
+            }
+            for _ in 0..10 {
+                let e = Execution::start(Backend::Sqlite, "SELECT 1", "law", || Some(vec![]), true)
+                    .unwrap();
+                e.bindings(Some(0), Some(vec![]), "none");
+                e.finish();
+                stale = Some(e);
+            }
+            let barrier = std::sync::Barrier::new(4);
+            std::thread::scope(|scope| {
+                for _ in 0..3 {
+                    let barrier = &barrier;
+                    scope.spawn(move || {
+                        barrier.wait();
+                        let e =
+                            Execution::start(Backend::Postgres, "SELECT 1", "law", || None, true)
+                                .unwrap();
+                        e.bindings(Some(0), Some(vec![]), "none");
+                        e.finish();
+                    });
+                }
+                barrier.wait();
+            });
+            let work = collector.snapshot().sql_shapes.unwrap().work;
+            assert!(work.epoch > previous_epoch);
+            previous_epoch = work.epoch;
+            assert_eq!(work.worker_label_formats, 4);
+            assert_eq!(work.relation_analyses, 2);
+            assert_eq!(work.statements(), 13);
+            assert!(
+                work.rows
+                    .iter()
+                    .filter(|row| row.key.backend == Backend::Postgres)
+                    .all(|row| row.key.relations.is_none())
+            );
+            assert!(work.complete && work.conserves());
+        }
     }
 
     /// SQL-COST-JOIN: a cut cannot hide an active statement or assign its
@@ -899,7 +1082,7 @@ mod tests {
         let collector = crate::perf_witness::Collector::install_with_sql_shapes().unwrap();
         set_window(None, "session_start");
         let execution =
-            Execution::start(Backend::Sqlite, "SELECT 1", "law", Some(vec![]), true).unwrap();
+            Execution::start(Backend::Sqlite, "SELECT 1", "law", || Some(vec![]), true).unwrap();
         execution.bindings(Some(0), Some(b"SELECT 1".to_vec()), "integer_null_or_none");
         execution.row(8);
         let cut = collector.snapshot().sql_shapes.unwrap().work;
@@ -908,7 +1091,7 @@ mod tests {
         assert_eq!(cut.active.len(), 1);
         assert!(cut.active[0].key.owner.is_none());
         let tail =
-            Execution::start(Backend::Sqlite, "SELECT 1", "law", Some(vec![]), true).unwrap();
+            Execution::start(Backend::Sqlite, "SELECT 1", "law", || Some(vec![]), true).unwrap();
         set_window(Some(1), "turn");
         let drained = drain_completed().unwrap();
         assert!(drained.conserves());
@@ -956,7 +1139,9 @@ mod tests {
         {
             lock().as_mut().unwrap().work.key_bytes = KEY_BYTES_LIMIT;
         }
-        assert!(Execution::start(Backend::Sqlite, "SELECT 1", "law", Some(vec![]), true).is_none());
+        assert!(
+            Execution::start(Backend::Sqlite, "SELECT 1", "law", || Some(vec![]), true).is_none()
+        );
         let refused = collector.snapshot().sql_shapes.unwrap().work;
         assert!(!refused.complete && !refused.conserves());
         assert!(refused.lost > 0);

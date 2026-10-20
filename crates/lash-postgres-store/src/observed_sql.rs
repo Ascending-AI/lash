@@ -200,13 +200,12 @@ impl Statement {
                 perf_witness::record_sql_statement(sql);
             }
             if sql_shapes::enabled() {
-                let relations = lash_store_sql::relation_set(sql);
                 let read = perf_witness::SqlVerb::classify(sql) == perf_witness::SqlVerb::Select;
                 sql_shapes::work::Execution::start(
                     sql_shapes::work::Backend::Postgres,
                     sql,
                     &site.to_string(),
-                    relations,
+                    || lash_store_sql::relation_set(sql),
                     read,
                 )
             } else {

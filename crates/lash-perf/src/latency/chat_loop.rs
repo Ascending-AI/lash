@@ -10,7 +10,7 @@ use lash_core_ids::perf_witness::latency::Stamp;
 use super::loop_spans::{LoopClocks, ToolStamp};
 use super::provider::{LaneHold, ProviderTiming, STEERED_TEXT};
 use super::runner::{
-    CaseSpec, CaseTopology, STORE_POLL_TIMEOUT, Sample, SampleCtx, create_lane_session,
+    CaseSpec, CaseTopology, CompletedSample, STORE_POLL_TIMEOUT, SampleCtx, create_lane_session,
     measure_send, observer_poll_store,
 };
 use crate::runtime_perf::providers::BenchmarkEchoTool;
@@ -91,7 +91,7 @@ pub(crate) async fn steer_sample(
     lane: usize,
     index: usize,
     hold: &LaneHold,
-) -> Result<Sample> {
+) -> Result<CompletedSample> {
     let turn = lash::TurnId::parse(format!("latency-{}-{lane}-{index}", ctx.spec.name))
         .map_err(|error| anyhow::anyhow!("steer turn id: {error}"))?;
     hold.arm();
@@ -130,8 +130,8 @@ pub(crate) async fn steer_sample(
     let (steered, steer_request, steer_accepted) = steered?;
     // The steered input settles with the run it joined.
     let _ = steered.outcome().await;
-    sample.loop_clocks.steer_request = Some(steer_request);
-    sample.loop_clocks.steer_accepted = Some(steer_accepted);
+    sample.sample.loop_clocks.steer_request = Some(steer_request);
+    sample.sample.loop_clocks.steer_accepted = Some(steer_accepted);
     Ok(sample)
 }
 
@@ -143,7 +143,7 @@ pub(crate) async fn cold_lane(
     lane: usize,
     count: usize,
     timing: &Arc<ProviderTiming>,
-) -> Result<Vec<Sample>> {
+) -> Result<Vec<CompletedSample>> {
     let mut samples = Vec::with_capacity(count);
     for index in 0..count {
         let session_id = SessionId::fixture(format!("latency-{}-{lane}-{index}", spec.name));
@@ -156,13 +156,14 @@ pub(crate) async fn cold_lane(
             poll_store: &poll_store,
             session_id: &session_id,
             timing,
+            diagnostics: &topology.diagnostics,
         };
         let clocks = LoopClocks {
             session_open_started: Some(open_started),
             ..LoopClocks::default()
         };
         let mut sample = measure_send(&ctx, lane, index, None, clocks, || {}).await?;
-        sample.cold = true;
+        sample.sample.cold = true;
         samples.push(sample);
         let _ = session.close().await;
     }

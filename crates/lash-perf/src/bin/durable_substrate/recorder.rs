@@ -164,6 +164,8 @@ pub struct Recorder {
     model_calls: Mutex<HashMap<String, Vec<Instant>>>,
     waiters: Mutex<Waiters>,
     parks: Mutex<HashMap<String, oneshot::Sender<String>>>,
+    pub process_counters: Arc<crate::process_counters::Counters>,
+    changed: tokio::sync::Notify,
 }
 
 impl Default for Recorder {
@@ -175,13 +177,42 @@ impl Default for Recorder {
             model_calls: Mutex::default(),
             waiters: Mutex::default(),
             parks: Mutex::default(),
+            process_counters: Arc::default(),
+            changed: tokio::sync::Notify::new(),
         }
     }
 }
 
 impl Recorder {
-    fn since(&self, at: Instant) -> u64 {
+    pub fn since(&self, at: Instant) -> u64 {
         u64::try_from(at.saturating_duration_since(self.start).as_micros()).unwrap_or(u64::MAX)
+    }
+
+    pub fn port_calls(&self) -> Vec<crate::process_counters::Call> {
+        self.process_counters.calls()
+    }
+    pub fn discoveries(&self) -> Vec<crate::process_counters::Discovery> {
+        self.process_counters.discoveries()
+    }
+    pub async fn ready(&self, nodes: std::ops::Range<usize>) -> anyhow::Result<()> {
+        tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            loop {
+                let changed = self.changed.notified();
+                tokio::pin!(changed);
+                changed.as_mut().enable();
+                if nodes.clone().all(|n| {
+                    self.transactions
+                        .lock_recover()
+                        .iter()
+                        .any(|t| t.actor == format!("node-{n}") && t.label == "node.claim" && t.ok)
+                }) {
+                    break;
+                }
+                changed.await;
+            }
+        })
+        .await
+        .map_err(|_| anyhow::anyhow!("nodes did not complete initial claim"))
     }
 
     /// Microseconds since the recorder started, now.
@@ -195,6 +226,28 @@ impl Recorder {
         self.waiters
             .lock_recover()
             .insert((actor.to_string(), label.as_str()), send);
+        receive
+    }
+
+    /// A newly minted process may end before registration is acknowledged.
+    /// Hold the transaction lock through waiter admission so that a commit
+    /// either satisfies this read or sees the waiter it must notify.
+    pub fn watch_terminal(&self, actor: &ActorKey) -> oneshot::Receiver<Instant> {
+        let (send, receive) = oneshot::channel();
+        let transactions = self.transactions.lock_recover();
+        if let Some(done) = transactions.iter().find(|tx| {
+            tx.actor == actor.to_string()
+                && tx.label == CommitLabel::PROCESS_TERMINAL.as_str()
+                && tx.ok
+        }) {
+            let _ =
+                send.send(self.start + std::time::Duration::from_micros(done.at_us + done.micros));
+        } else {
+            self.waiters.lock_recover().insert(
+                (actor.to_string(), CommitLabel::PROCESS_TERMINAL.as_str()),
+                send,
+            );
+        }
         receive
     }
 
@@ -286,6 +339,7 @@ impl Recorder {
         let key = (transaction.actor.clone(), label);
         let park_actor = transaction.actor.clone();
         self.transactions.lock_recover().push(transaction);
+        self.changed.notify_waiters();
         // Publishing the completion must make its receipt visible first.
         if ok && let Some(waiter) = self.waiters.lock_recover().remove(&key) {
             let _ = waiter.send(ended);
@@ -313,6 +367,7 @@ pub struct RecordingStore {
 #[async_trait::async_trait]
 impl DurableStore for RecordingStore {
     async fn now(&self) -> Result<DurableInstant, DurableError> {
+        self.recorder.process_counters.record("now");
         self.inner.now().await
     }
 
@@ -449,6 +504,7 @@ impl DurableStore for RecordingStore {
     }
 
     async fn begin(&self, actor: &ActorKey, epoch: Epoch) -> Result<ActorTx, DurableError> {
+        self.recorder.process_counters.record("begin");
         self.inner.begin(actor, epoch).await
     }
 
@@ -565,6 +621,9 @@ impl DurableReads for RecordingStore {
     }
 
     async fn run_facts(&self, owner: &OwnerKey) -> Result<RunFacts, DurableError> {
+        if matches!(owner, OwnerKey::Process(_)) {
+            self.recorder.process_counters.facts();
+        }
         self.inner.run_facts(owner).await
     }
 
@@ -573,6 +632,9 @@ impl DurableReads for RecordingStore {
         owner: &OwnerKey,
         run: lash_durable::domain::RunSeq,
     ) -> Result<RunFacts, DurableError> {
+        if matches!(owner, OwnerKey::Process(_)) {
+            self.recorder.process_counters.facts();
+        }
         self.inner.run_facts_of(owner, run).await
     }
     async fn run_facts_within(
@@ -582,12 +644,18 @@ impl DurableReads for RecordingStore {
         max_rows: usize,
         limits: lash_durable::domain::checkpoint_graph::DecodeLimits,
     ) -> Result<lash_durable::domain::RunFacts, DurableError> {
+        if matches!(owner, OwnerKey::Process(_)) {
+            self.recorder.process_counters.facts();
+        }
         self.inner
             .run_facts_within(owner, run, max_rows, limits)
             .await
     }
 
     async fn exec_root(&self, exec: &ExecKey) -> Result<Option<ExecRootRow>, DurableError> {
+        if matches!(exec, ExecKey::Process(_)) {
+            self.recorder.process_counters.record("exec_root");
+        }
         self.inner.exec_root(exec).await
     }
 
@@ -613,6 +681,9 @@ impl DurableReads for RecordingStore {
         expected: Option<lash_durable::domain::checkpoint_graph::NodeId>,
         limits: lash_durable::domain::checkpoint_graph::DecodeLimits,
     ) -> Result<HydratedGraph, DurableError> {
+        if matches!(&owner, RootOwner::Exec(ExecKey::Process(_))) {
+            self.recorder.process_counters.record("hydrate");
+        }
         self.inner.hydrate(owner, expected, limits).await
     }
 
@@ -625,6 +696,7 @@ impl DurableReads for RecordingStore {
     }
 
     async fn process(&self, process: &ProcessId) -> Result<Option<ProcessActorRow>, DurableError> {
+        self.recorder.process_counters.record("process");
         self.inner.process(process).await
     }
 
@@ -831,7 +903,10 @@ impl StoreSet for RecordingStores {
     }
 
     fn process_registry(&self) -> Arc<dyn ProcessRegistry> {
-        self.inner.process_registry()
+        Arc::new(crate::process_registry::RecordingRegistry {
+            inner: self.inner.process_registry(),
+            counters: Arc::clone(&self.store.recorder.process_counters),
+        })
     }
 
     fn process_authority_reads(

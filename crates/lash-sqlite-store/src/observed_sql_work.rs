@@ -30,7 +30,7 @@ pub(super) unsafe fn start(statement: *mut ffi::sqlite3_stmt, sql: &str) {
             Backend::Sqlite,
             sql,
             sql_shapes::work::origin(),
-            lash_store_sql::relation_set(sql),
+            || lash_store_sql::relation_set(sql),
             ffi::sqlite3_stmt_readonly(statement) != 0,
         ) else {
             return;

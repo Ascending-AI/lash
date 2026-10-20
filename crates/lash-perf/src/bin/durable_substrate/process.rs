@@ -34,6 +34,9 @@ pub const KIND: &str = "durable-substrate-bench";
 /// What the engine saw, by the process's token.
 #[derive(Debug)]
 pub enum Seen {
+    StepStarted(Instant, String),
+    StepSettled(Instant, String),
+    TimerDue(Instant),
     /// A key was pinned; the host may resolve it.
     Pinned(Instant, PinnedKey),
     /// A resolution reached the engine.
@@ -44,6 +47,7 @@ pub enum Seen {
 #[derive(Default)]
 pub struct ProcessBoard {
     feeds: Mutex<HashMap<String, mpsc::UnboundedSender<Seen>>>,
+    barriers: Mutex<HashMap<String, Arc<tokio::sync::Barrier>>>,
 }
 
 impl ProcessBoard {
@@ -54,6 +58,14 @@ impl ProcessBoard {
         receive
     }
 
+    pub fn barrier(&self, token: &str, count: usize) -> Arc<tokio::sync::Barrier> {
+        let barrier = Arc::new(tokio::sync::Barrier::new(count + 1));
+        self.barriers
+            .lock_recover()
+            .insert(token.to_owned(), Arc::clone(&barrier));
+        barrier
+    }
+
     fn report(&self, token: &str, seen: Seen) {
         if let Some(feed) = self.feeds.lock_recover().get(token) {
             let _ = feed.send(seen);
@@ -61,9 +73,21 @@ impl ProcessBoard {
     }
 }
 
+/// Fixed populations: one discriminant drives the fixture and its exporter.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Mode {
+    #[default]
+    Waits,
+    Steps,
+    Timers,
+    Fanout,
+    ReadyFanout,
+}
+
 /// The start payload of a process that awaits `waits` keys.
 pub fn payload(token: &str, waits: usize) -> Value {
-    json!({ "token": token, "waits": waits })
+    json!({ "token": token, "waits": waits, "mode": Mode::Waits })
 }
 
 fn infra(error: impl std::fmt::Display) -> ProcessInfraError {
@@ -193,14 +217,67 @@ impl ProcessEngine for BenchEngine {
     ) -> Result<(EngineState, EngineAction), ProcessInfraError> {
         let mut script: Value = match &event {
             EngineEvent::Started { payload } => {
-                json!({ "token": payload["token"], "waits": payload["waits"], "done": 0 })
+                json!({ "token": payload["token"], "waits": payload["waits"], "mode": payload["mode"], "done": 0 })
             }
             _ => serde_json::from_slice(&state.bytes).map_err(infra)?,
         };
         let token = script["token"].as_str().unwrap_or_default().to_owned();
         let waits = script["waits"].as_u64().unwrap_or(1);
         let done = script["done"].as_u64().unwrap_or(0);
+        let mode: Mode = serde_json::from_value(script["mode"].clone()).map_err(infra)?;
         let action = match event {
+            EngineEvent::Started { .. } if matches!(mode, Mode::Fanout | Mode::ReadyFanout) => {
+                let mut steps = Vec::new();
+                for i in 0..waits {
+                    if let EngineAction::Steps { steps: one, .. } = probe_step(i)? {
+                        steps.extend(one);
+                    }
+                }
+                EngineAction::Steps { steps, wake: None }
+            }
+            EngineEvent::StepSettled { step, .. }
+                if matches!(mode, Mode::Fanout | Mode::ReadyFanout) =>
+            {
+                self.board
+                    .report(&token, Seen::StepSettled(Instant::now(), step.0));
+                script["done"] = json!(done + 1);
+                if done + 1 == waits {
+                    ended("fanout done")
+                } else {
+                    EngineAction::Idle
+                }
+            }
+            EngineEvent::Started { .. } if mode == Mode::Steps => probe_step(0)?,
+            EngineEvent::StepSettled { step, .. } if mode == Mode::Steps => {
+                self.board
+                    .report(&token, Seen::StepSettled(Instant::now(), step.0));
+                script["done"] = json!(done + 1);
+                if done + 1 < waits {
+                    probe_step(done + 1)?
+                } else {
+                    ended("steps done")
+                }
+            }
+            EngineEvent::Started { .. } | EngineEvent::Woke if mode == Mode::Timers => {
+                if done > 0 {
+                    self.board.report(&token, Seen::Resolved(Instant::now()));
+                }
+                script["done"] = json!(done + 1);
+                if done >= waits {
+                    ended("timers done")
+                } else {
+                    let due = Instant::now() + Duration::from_millis(100);
+                    self.board.report(&token, Seen::TimerDue(due));
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_err(infra)?
+                        .as_millis();
+                    EngineAction::Sleep {
+                        until: lash_durable::DurableInstant((now + 100) as i64),
+                        site: None,
+                    }
+                }
+            }
             EngineEvent::Started { .. } => pin(0),
             EngineEvent::KeyPinned { name, key } => {
                 self.board.report(&token, Seen::Pinned(Instant::now(), key));
@@ -281,12 +358,13 @@ impl ProcessEngine for BenchEngine {
     }
 }
 
-/// The engine runs no step.
-#[derive(Debug, Default)]
-pub struct NoSteps;
+/// The benchmark's admitted Once step reports its entry and completes null.
+pub struct BenchSteps {
+    pub board: Arc<ProcessBoard>,
+}
 
 #[async_trait::async_trait]
-impl ProcessSteps for NoSteps {
+impl ProcessSteps for BenchSteps {
     fn stop_grace(&self) -> std::time::Duration {
         std::time::Duration::from_secs(2)
     }
@@ -296,12 +374,19 @@ impl ProcessSteps for NoSteps {
         _runtime: &Arc<lash_core_execution::runtime::process::StepRuntime>,
         _process: &ProcessRecord,
         step: &StepRequest,
-        _now_ms: u64,
+        now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
-        Err(StepRefusal::Refused {
-            step: format!("{step:?}"),
-            reason: "the bench engine runs no step".to_owned(),
-        })
+        let _ = step;
+        Ok(StepAdmission::new(
+            lash_protocol_types::ToolId::new("probe"),
+            lash_protocol_types::ExecutionPolicy::Once,
+            lash_protocol_types::ExecutionLimit::starting_at(
+                now_ms,
+                Duration::from_secs(60),
+                Duration::from_secs(60),
+            ),
+            None,
+        ))
     }
 
     /// Never asked: no step of these parks.
@@ -319,14 +404,53 @@ impl ProcessSteps for NoSteps {
     fn body(
         &self,
         _runtime: &std::sync::Arc<lash_core_execution::runtime::process::StepRuntime>,
-        _process: &ProcessRecord,
-        _step: &StepRequest,
+        process: &ProcessRecord,
+        step: &StepRequest,
         _execution: &lash_core_execution::runtime::actor::round::AdmittedExecution,
     ) -> lash_core_execution::runtime::actor::round::MemberBody {
-        lash_core_execution::runtime::actor::round::member_body({
-            Box::new(|_token| {
+        let board = Arc::clone(&self.board);
+        let owner = process.id.clone();
+        let step = step.step().0.clone();
+        let token = match process.input.as_ref() {
+            lash_execution_contracts::process::ProcessInput::Engine { payload, .. } => {
+                payload["token"].as_str().map(str::to_owned)
+            }
+            _ => None,
+        };
+        let Some(token) = token else {
+            return lash_core_execution::runtime::actor::round::member_body(Box::new(|_| {
                 Box::pin(async { lash_core_store::tool_run::SettledOutput::Interrupted })
+            }));
+        };
+        lash_core_execution::runtime::actor::round::member_body(Box::new(move |_cancel| {
+            Box::pin(async move {
+                board.report(&token, Seen::StepStarted(Instant::now(), step));
+                let barrier = board.barriers.lock_recover().get(&token).cloned();
+                if let Some(barrier) = barrier {
+                    barrier.wait().await;
+                }
+                lash_core_store::tool_run::SettledOutput::Completed(
+                    lash_core_store::tool_run::Material::journal_local(
+                        lash_core_store::tool_run::MaterialOwner::Process { process_id: owner },
+                        lash_core_store::tool_run::MaterialRole::AttemptOutput,
+                        "null".to_owned(),
+                    ),
+                )
             })
-        })
+        }))
     }
+}
+
+fn probe_step(n: u64) -> Result<EngineAction, ProcessInfraError> {
+    Ok(EngineAction::Steps {
+        steps: vec![StepRequest::Tool {
+            step: lash_execution_contracts::process::StepName(format!("probe-{n}")),
+            effect: lash_core_execution::EffectName::new("probe").map_err(infra)?,
+            contract: lash_kernel_doc::ContractId::new("probe"),
+            input: json!({}),
+            site: None,
+            matched: None,
+        }],
+        wake: None,
+    })
 }

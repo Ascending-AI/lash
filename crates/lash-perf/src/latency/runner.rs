@@ -19,6 +19,8 @@ use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt;
 
 use super::FollowerMode;
+#[path = "diagnostics.rs"]
+mod diagnostics;
 use super::loop_spans::{
     HostEvent, LoopClocks, LoopShape, LoopSpans, LoopSummaries, SessionStamps, delta_ordinals,
 };
@@ -31,6 +33,7 @@ use crate::perf_support::scheduler::process_cpu_ms;
 use crate::perf_support::time::round3;
 use crate::runtime_perf::openai_compat::OpenAiCompatBenchServer;
 use crate::runtime_perf::providers::BenchmarkStreamProfile;
+pub(crate) use diagnostics::{CompletedSample, DiagnosticDisposition, Diagnostics};
 
 /// The store poller's interval bounds. A fresh send's admission is imminent, so
 /// the interval starts at the floor and a tick that lands a mark or first
@@ -166,6 +169,7 @@ pub(crate) struct Sample {
     /// settlement — the simulated wake schedule applied to `settled`.
     pub(crate) poll_detect_ms: Option<f64>,
     pub(crate) poller_timed_out: bool,
+    pub(crate) diagnostic: DiagnosticDisposition,
     /// Process-wide CPU (every thread, `utime + stime`) and RSS read as the
     /// sample completes. Both are cumulative: consecutive samples' deltas
     /// give per-turn growth on a 1-lane run, not a turn's own cost.
@@ -205,7 +209,8 @@ pub(crate) struct SampleClocks {
 pub(crate) struct PollMarks {
     pub(crate) admission_observed: Option<Stamp>,
     pub(crate) terminal_observed: Option<Stamp>,
-    timed_out: bool,
+    pub(crate) timed_out: bool,
+    pub(crate) error: Option<String>,
 }
 
 /// The sink `outcome_into` taps: first activity, first visible delta and
@@ -328,6 +333,7 @@ pub(crate) struct CaseTopology {
     pub(crate) core: lash::LashCore,
     pub(crate) observer: lash::LashCore,
     worker: Option<tokio::process::Child>,
+    pub(crate) diagnostics: Diagnostics,
 }
 
 impl CaseTopology {
@@ -347,6 +353,7 @@ impl CaseTopology {
             core,
             observer,
             worker: Some(worker),
+            diagnostics: Diagnostics::default(),
         })
     }
 
@@ -410,6 +417,7 @@ pub(crate) async fn run_case(
                 core,
                 observer,
                 worker: None,
+                diagnostics: Diagnostics::default(),
             }
         }
         Topology::CrossWorker => {
@@ -457,8 +465,9 @@ pub(crate) async fn run_case(
             Err(error) => errors.push(format!("lane failed: {error:#}")),
         }
     }
-    samples.sort_by_key(|sample| (sample.lane, sample.index));
     let wall = started.elapsed();
+    let (mut samples, diagnostics) = topology.diagnostics.finish(samples).await?;
+    samples.sort_by_key(|sample| (sample.lane, sample.index));
     let work_end = collector.snapshot();
     eprintln!("durability-window {} end", spec.name);
     let mut workers = worker_delta(&work_start, &work_end);
@@ -491,6 +500,7 @@ pub(crate) async fn run_case(
     }
     super::loop_spans::fill(spec.loop_shape(), &mut samples, &timing);
     let mut report = CaseReport::assemble(spec, &samples, errors, wall);
+    report.diagnostics = diagnostics;
     report.actual_lanes = lane_count;
     report.sqlite_work = SqliteWork::assemble(workers, samples.len(), spec.busy);
     // A cross-worker case's sessions run in the child: this process saw none.
@@ -683,7 +693,7 @@ async fn run_lane(
     count: usize,
     timing: Arc<ProviderTiming>,
     holds: Option<Arc<HoldRegistry>>,
-) -> Result<Vec<Sample>> {
+) -> Result<Vec<CompletedSample>> {
     if spec.fresh_sessions {
         return super::chat_loop::cold_lane(spec, topology, lane, count, &timing).await;
     }
@@ -697,6 +707,7 @@ async fn run_lane(
         poll_store: &poll_store,
         session_id: &session_id,
         timing: &timing,
+        diagnostics: &topology.diagnostics,
     };
     let mut samples = Vec::with_capacity(count);
     for index in 0..count {
@@ -721,6 +732,7 @@ pub(crate) struct SampleCtx<'a> {
     pub(crate) poll_store: &'a Arc<dyn lash::persistence::RuntimeStore>,
     pub(crate) session_id: &'a SessionId,
     pub(crate) timing: &'a Arc<ProviderTiming>,
+    pub(crate) diagnostics: &'a Diagnostics,
 }
 
 /// One measured send. `busy` lanes first park a sibling input's provider
@@ -731,7 +743,7 @@ async fn run_sample(
     lane: usize,
     index: usize,
     hold: Option<&LaneHold>,
-) -> Result<Sample> {
+) -> Result<CompletedSample> {
     let held = if let Some(hold) = hold {
         hold.arm();
         let held = ctx
@@ -773,7 +785,7 @@ pub(crate) async fn measure_send(
     id: Option<lash::TurnId>,
     mut loop_clocks: LoopClocks,
     after_accept: impl FnOnce(),
-) -> Result<Sample> {
+) -> Result<CompletedSample> {
     let sqlite_workers_at_request = lash_core::perf_witness::latency::workers();
     let text = if ctx.spec.provider == LatencyProviderKind::Cell {
         format!("{} {lane}/{index}", super::provider::CELL_SAMPLE_TEXT)
@@ -792,11 +804,15 @@ pub(crate) async fn measure_send(
     let request_to_accept_ms = acceptance_acknowledged.since(request);
     after_accept();
     let input_id = handle.input_id().clone();
-    let poller = tokio::spawn(poll_marks(
-        Arc::clone(ctx.poll_store),
-        ctx.session_id.clone(),
-        input_id.clone(),
-    ));
+    let pending = ctx.diagnostics.start(
+        ctx.session_id,
+        &input_id,
+        poll_marks(
+            Arc::clone(ctx.poll_store),
+            ctx.session_id.clone(),
+            input_id.clone(),
+        ),
+    );
     let sink = TimingSink::new(t_request);
     let (status, outcome_error) = match handle.outcome_into(&sink).await {
         Ok(outcome) => (status_name(&outcome.status()), None),
@@ -807,7 +823,6 @@ pub(crate) async fn measure_send(
     let send_to_completion_ms = completion.since(request);
     let process_cpu_ms_at_end = process_cpu_ms();
     let process_rss_kb_at_end = process_memory_sample().rss_kb;
-    let marks = poller.await.unwrap_or_default();
     let mut sink_state = sink.state.lock_recover();
     let model_span_ms = (sink_state.model_span_ms > 0.0).then_some(sink_state.model_span_ms);
     let host_first_activity = sink_state.first_activity;
@@ -820,54 +835,58 @@ pub(crate) async fn measure_send(
         .or(model_span_ms)
         .map(|provider| send_to_completion_ms - provider);
 
-    Ok(Sample {
-        case: ctx.spec.name,
-        lane,
-        index,
-        cold: index == 0,
-        status,
-        session_id: ctx.session_id.as_str().to_owned(),
-        input_id: input_id.as_str().to_owned(),
-        clocks: SampleClocks {
-            request,
-            acceptance_acknowledged,
-            completion,
-            accepted: None,
-            admission: None,
-            terminal: None,
-            terminal_commit_returned: None,
-            first_activity: None,
-            first_visible: None,
-            first_delta: None,
-            admission_observed: marks.admission_observed,
-            terminal_observed: marks.terminal_observed,
-            host_first_activity,
-            host_first_visible,
-            host_first_delta,
+    Ok(CompletedSample {
+        pending,
+        sample: Sample {
+            case: ctx.spec.name,
+            lane,
+            index,
+            cold: index == 0,
+            status,
+            session_id: ctx.session_id.as_str().to_owned(),
+            input_id: input_id.as_str().to_owned(),
+            clocks: SampleClocks {
+                request,
+                acceptance_acknowledged,
+                completion,
+                accepted: None,
+                admission: None,
+                terminal: None,
+                terminal_commit_returned: None,
+                first_activity: None,
+                first_visible: None,
+                first_delta: None,
+                admission_observed: None,
+                terminal_observed: None,
+                host_first_activity,
+                host_first_visible,
+                host_first_delta,
+            },
+            request_to_accept_ms,
+            accept_to_admission_ms: None,
+            accept_to_applied_ms: None,
+            admission_to_first_delta_ms: None,
+            admission_to_first_visible_ms: None,
+            admission_to_first_activity_ms: None,
+            admission_to_settled_ms: None,
+            settled_to_complete_ms: None,
+            admission_observation_lag_ms: None,
+            terminal_observation_lag_ms: None,
+            send_to_completion_ms,
+            provider_ms,
+            overhead_ms,
+            model_span_ms,
+            poll_detect_ms: None,
+            poller_timed_out: false,
+            diagnostic: DiagnosticDisposition::Pending,
+            sqlite_workers_at_request,
+            sqlite_workers_at_completion,
+            process_cpu_ms_at_end,
+            process_rss_kb_at_end,
+            error: outcome_error,
+            loop_clocks,
+            loop_spans: LoopSpans::default(),
         },
-        request_to_accept_ms,
-        accept_to_admission_ms: None,
-        accept_to_applied_ms: None,
-        admission_to_first_delta_ms: None,
-        admission_to_first_visible_ms: None,
-        admission_to_first_activity_ms: None,
-        admission_to_settled_ms: None,
-        settled_to_complete_ms: None,
-        admission_observation_lag_ms: None,
-        terminal_observation_lag_ms: None,
-        send_to_completion_ms,
-        provider_ms,
-        overhead_ms,
-        model_span_ms,
-        poll_detect_ms: None,
-        poller_timed_out: marks.timed_out,
-        sqlite_workers_at_request,
-        sqlite_workers_at_completion,
-        process_cpu_ms_at_end,
-        process_rss_kb_at_end,
-        error: outcome_error,
-        loop_clocks,
-        loop_spans: LoopSpans::default(),
     })
 }
 
@@ -892,27 +911,44 @@ pub(crate) async fn poll_marks(
     let mut marks = PollMarks::default();
     let mut run = None;
     let mut interval = STORE_POLL_FLOOR;
-    let deadline = Instant::now() + STORE_POLL_TIMEOUT;
-    loop {
-        if run.is_none()
-            && let Ok(Some(bound)) = store.run_of_input(&session_id, &input_id).await
-        {
-            marks.admission_observed = Some(Stamp::now());
-            run = Some(bound);
-            interval = STORE_POLL_FLOOR;
+    let discovery = async {
+        loop {
+            if run.is_none() {
+                match store.run_of_input(&session_id, &input_id).await {
+                    Ok(Some(bound)) => {
+                        marks.admission_observed = Some(Stamp::now());
+                        run = Some(bound);
+                        interval = STORE_POLL_FLOOR;
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        marks.error = Some(error.to_string());
+                        return;
+                    }
+                }
+            }
+            if let Some(run) = &run {
+                match store.run_terminal(&session_id, run).await {
+                    Ok(Some(_)) => {
+                        marks.terminal_observed = Some(Stamp::now());
+                        return;
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        marks.error = Some(error.to_string());
+                        return;
+                    }
+                }
+            }
+            tokio::time::sleep(interval).await;
+            interval = (interval * 2).min(STORE_POLL_CEILING);
         }
-        if let Some(run) = &run
-            && let Ok(Some(_)) = store.run_terminal(&session_id, run).await
-        {
-            marks.terminal_observed = Some(Stamp::now());
-            break;
-        }
-        if Instant::now() >= deadline {
-            marks.timed_out = true;
-            break;
-        }
-        tokio::time::sleep(interval).await;
-        interval = (interval * 2).min(STORE_POLL_CEILING);
+    };
+    if tokio::time::timeout(STORE_POLL_TIMEOUT, discovery)
+        .await
+        .is_err()
+    {
+        marks.timed_out = true;
     }
     marks
 }
@@ -1134,6 +1170,7 @@ pub(crate) struct CaseReport {
     pub(crate) provider: LatencyProviderKind,
     pub(crate) follower: FollowerMode,
     pub(crate) busy: bool,
+    pub(crate) diagnostics: diagnostics::Receipt,
     pub(crate) samples: usize,
     pub(crate) lanes: usize,
     pub(crate) actual_lanes: usize,
@@ -1177,6 +1214,7 @@ impl CaseReport {
             provider: spec.provider,
             follower: spec.follower,
             busy: spec.busy,
+            diagnostics: diagnostics::Receipt::default(),
             samples: samples.len(),
             lanes: spec.lanes,
             actual_lanes: 0,
@@ -1308,228 +1346,5 @@ pub(super) async fn run_worker(stores_dir: &Path, provider: LatencyProviderKind)
 }
 
 #[cfg(test)]
-mod tests {
-
-    use super::*;
-
-    fn complete_sample(index: usize) -> Sample {
-        let stamp = Stamp {
-            monotonic_ns: 1,
-            unix_ns: 1,
-        };
-        Sample {
-            case: "fast",
-            lane: index % 16,
-            index,
-            cold: false,
-            status: "answered".to_owned(),
-            session_id: String::new(),
-            input_id: String::new(),
-            clocks: SampleClocks {
-                request: stamp,
-                accepted: Some(stamp),
-                acceptance_acknowledged: stamp,
-                admission: Some(stamp),
-                terminal: Some(stamp),
-                terminal_commit_returned: Some(stamp),
-                completion: stamp,
-                first_activity: Some(stamp),
-                first_visible: Some(stamp),
-                first_delta: Some(stamp),
-                admission_observed: Some(stamp),
-                terminal_observed: Some(stamp),
-                host_first_activity: Some(stamp),
-                host_first_visible: Some(stamp),
-                host_first_delta: Some(stamp),
-            },
-            admission_to_first_visible_ms: Some(1.0),
-            admission_to_first_activity_ms: Some(1.0),
-            admission_observation_lag_ms: Some(1.0),
-            terminal_observation_lag_ms: Some(1.0),
-            request_to_accept_ms: 1.0,
-            accept_to_admission_ms: Some(1.0),
-            accept_to_applied_ms: Some(1.0),
-            admission_to_first_delta_ms: Some(1.0),
-            admission_to_settled_ms: Some(1.0),
-            settled_to_complete_ms: Some(1.0),
-            send_to_completion_ms: 6.0,
-            provider_ms: Some(5.0),
-            overhead_ms: Some(1.0),
-            model_span_ms: Some(5.0),
-            poll_detect_ms: Some(1.0),
-            poller_timed_out: false,
-            sqlite_workers_at_request: Vec::new(),
-            sqlite_workers_at_completion: Vec::new(),
-            process_cpu_ms_at_end: None,
-            process_rss_kb_at_end: None,
-            error: None,
-            loop_clocks: LoopClocks::default(),
-            loop_spans: LoopSpans::default(),
-        }
-    }
-
-    /// FAST-POPULATION: a certificate covers every answered row and clock
-    /// in the fixed 16-lane population, never a filtered percentile subset.
-    #[test]
-    fn fast_population_refuses_incomplete_clocks_failures_and_wrong_geometry() {
-        let mut fixtures = Vec::new();
-        for fault in [
-            "complete",
-            "overhead-n-1",
-            "missing-clocks",
-            "failure",
-            "errors",
-            "lanes",
-            "actual-lanes",
-        ] {
-            let mut samples: Vec<_> = (0..10_000).map(complete_sample).collect();
-            let mut errors = Vec::new();
-            let mut spec = super::super::default_cases(10_000, 16).remove(0);
-            match fault {
-                "overhead-n-1" => samples
-                    .iter_mut()
-                    .skip(1)
-                    .for_each(|s| s.overhead_ms = None),
-                "missing-clocks" => samples[9999].clocks.admission = None,
-                "failure" => samples[9999].status = "failed".to_owned(),
-                "errors" => errors.push("lane failed".to_owned()),
-                "lanes" => spec.lanes = 8,
-                _ => {}
-            }
-            let mut case = CaseReport::assemble(&spec, &samples, errors, Duration::ZERO);
-            case.actual_lanes = if fault == "actual-lanes" {
-                8
-            } else {
-                spec.lanes
-            };
-            let report = build_report(serde_json::json!({}), vec![case]);
-            fixtures.push(serde_json::json!({"fixture": fault, "rows": samples.len(), "verdict": report.verdict}));
-        }
-        println!(
-            "fast-population-refusals.json={}",
-            serde_json::to_string(&fixtures).unwrap()
-        );
-        for fixture in fixtures {
-            assert_eq!(
-                fixture["verdict"]["pass"],
-                fixture["fixture"] == "complete",
-                "{fixture}"
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn startup_store_phases_are_complete_and_ordered() {
-        use lash_core_ids::perf_witness::startup::Phase;
-        use lash_core_ids::perf_witness::startup::Recorder;
-        let recorder = Recorder::install().unwrap();
-        let dir = tempfile::tempdir().unwrap();
-        let _stores = lash_sqlite_store::SqliteStoreSet::open(
-            dir.path().join("startup.db"),
-            lash_sqlite_store::SqliteSynchronous::Full,
-        )
-        .await
-        .unwrap();
-        let markers = recorder.snapshot();
-        let positions: Vec<_> = [
-            Phase::StoreOpenStarted,
-            Phase::StoreOpened,
-            Phase::StoreSetupFinished,
-        ]
-        .iter()
-        .map(|phase| {
-            markers
-                .iter()
-                .position(|marker| &marker.phase == phase)
-                .unwrap_or_else(|| panic!("missing startup phase {phase:?}"))
-        })
-        .collect();
-        assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
-        assert!(
-            markers
-                .windows(2)
-                .all(|pair| pair[0].since_entry_ns <= pair[1].since_entry_ns)
-        );
-    }
-
-    /// LATENCY-BINDING: the grace case discovers an unbound input at the
-    /// short floor on successive reads, before it can hold a terminal wait.
-    #[tokio::test(start_paused = true)]
-    async fn grace_binding_discovery_stays_at_floor_after_unbound_reads() {
-        use lash_core::testing::runtime_helpers::LayeredBackend;
-        use lash_core::testing::{Script, StoreOp};
-
-        let reads = Script::new();
-        let first = reads.on(StoreOp::input_status).after().pause();
-        let second = reads.on(StoreOp::input_status).nth(2).after().pause();
-        let third = reads.on(StoreOp::input_status).nth(3).before().pause();
-        let backend =
-            durable_backend(lash::sqlite::SqliteStoreSet::memory().await.unwrap()).unwrap();
-        let backend = LayeredBackend::over(backend)
-            .map_session_store_factory(|inner| reads.wrap("grace-observer", inner))
-            .into_backend();
-        let spec = super::super::default_cases(1, 1)
-            .into_iter()
-            .find(|case| case.name == "grace")
-            .unwrap();
-        let pacing = spec.follower.pacing().unwrap().follow;
-        assert_eq!(
-            pacing.initial(),
-            lash::ObserverPacing::standard().follow.initial()
-        );
-        let core = build_core(
-            backend,
-            &spec,
-            Arc::new(ProviderTiming::default()),
-            None,
-            &None,
-            None,
-        )
-        .unwrap();
-        let session = core
-            .session(SessionId::fixture("grace-binding-floor"))
-            .create(lash::SessionCreation::root(lash::SessionSpec::new(
-                latency_llm_profile_spec().unwrap().wire_model,
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(1),
-                lash_core::NoProgressBudget::bounded(12),
-            )))
-            .await
-            .unwrap();
-        let handle = session
-            .send(lash::TurnInput::text("still unbound"))
-            .await
-            .unwrap();
-        // SQLite runs outside Tokio: prevent automatic time advancement
-        // while a status read is in flight. Gates prove those reads finished.
-        let hold_time = tokio::spawn(async {
-            loop {
-                tokio::task::yield_now().await;
-            }
-        });
-        {
-            let mut following = std::pin::pin!(handle.outcome());
-            first.reached_by(&mut following, 1).await;
-            let started = tokio::time::Instant::now();
-            first.open_one();
-            assert!(futures_util::poll!(&mut following).is_pending());
-            tokio::time::advance(pacing.initial()).await;
-            second.reached_by(&mut following, 1).await;
-            second.open_one();
-            assert!(futures_util::poll!(&mut following).is_pending());
-            // No store work remains until the third gate (before its read).
-            // Tokio can now advance directly to the next probe's timer.
-            hold_time.abort();
-            let _ = hold_time.await;
-            third.reached_by(&mut following, 1).await;
-            assert_eq!(
-                started.elapsed(),
-                pacing.initial() * 2,
-                "unbound reads must not back off toward the 120-second ceiling"
-            );
-            third.open_one();
-        }
-        reads.finish().unwrap();
-        core.shutdown().await.unwrap();
-    }
-}
+#[path = "runner_tests.rs"]
+mod tests;

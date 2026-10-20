@@ -7,7 +7,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anyhow::{Context as _, Result, bail};
 use lash_core::runtime::durable::node::{NodeServe, serve};
@@ -27,7 +27,7 @@ use serde::Serialize;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
-use crate::process::{BenchEngine, NoSteps, ProcessBoard};
+use crate::process::{BenchEngine, BenchSteps, ProcessBoard};
 use crate::recorder::{Recorder, RecordingStores};
 use crate::turn::{BenchServices, Scripts};
 
@@ -216,11 +216,17 @@ impl Deployment {
             )),
             Arc::new(NoProbe),
         );
-        let processes =
-            ProcessActivation::new(backend.clone(), Arc::new(NoSteps), Arc::new(NoProbe));
+        let processes = ProcessActivation::new(
+            backend.clone(),
+            Arc::new(BenchSteps {
+                board: Arc::clone(&self.board),
+            }),
+            Arc::new(NoProbe),
+        );
         let (stop, stopped) = oneshot::channel::<()>();
         let served = backend.clone();
         let node = NodeId::new(name);
+        let process_counters = Arc::clone(&self.recorder.process_counters);
         let task = tokio::spawn(async move {
             serve(
                 &served,
@@ -229,7 +235,10 @@ impl Deployment {
                     node,
                     drain: Drain::default(),
                     sessions: Arc::new(sessions),
-                    processes: Some(Arc::new(processes)),
+                    processes: Some(Arc::new(crate::process_counters::ObservedActivation {
+                        inner: Arc::new(processes),
+                        counters: process_counters,
+                    })),
                     serves,
                 },
                 async move {
@@ -250,11 +259,11 @@ impl Deployment {
 
     /// Boot `count` nodes.
     pub async fn boot_many(&mut self, count: usize) -> Result<()> {
+        let first = self.booted;
         for _ in 0..count {
             self.boot().await?;
         }
-        // Let every node register and take its first claim poll.
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        self.recorder.ready(first..self.booted).await?;
         Ok(())
     }
 

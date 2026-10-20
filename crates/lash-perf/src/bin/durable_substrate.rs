@@ -22,6 +22,10 @@ mod heap;
 mod operations;
 #[path = "durable_substrate/process.rs"]
 mod process;
+#[path = "durable_substrate/process_counters.rs"]
+mod process_counters;
+#[path = "durable_substrate/process_registry.rs"]
+mod process_registry;
 #[path = "durable_substrate/processes.rs"]
 mod processes;
 #[path = "durable_substrate/reads.rs"]
@@ -128,6 +132,7 @@ enum Kind {
     Cell,
     Parked,
     HotWaits { waits: usize },
+    ProcessProbe(process::Mode),
     Idle { actors: usize },
     Store,
     Operations,
@@ -188,6 +193,13 @@ fn case(name: &str) -> Result<Case> {
             )
         }
         "parked-process" => (Kind::Parked, Script::default()),
+        "process-steps-10" => (Kind::ProcessProbe(process::Mode::Steps), Script::default()),
+        "process-timers-10" => (Kind::ProcessProbe(process::Mode::Timers), Script::default()),
+        "process-fanout-10" => (Kind::ProcessProbe(process::Mode::Fanout), Script::default()),
+        "process-ready-fanout-10" => (
+            Kind::ProcessProbe(process::Mode::ReadyFanout),
+            Script::default(),
+        ),
         "process-waits-10" => (Kind::HotWaits { waits: 10 }, Script::default()),
         "idle-0" => (Kind::Idle { actors: 0 }, Script::default()),
         "idle-1000" => (Kind::Idle { actors: 1000 }, Script::default()),
@@ -300,6 +312,7 @@ async fn bench_main() -> Result<()> {
             Kind::Parked => {
                 processes::parked(&run, &case, Duration::from_secs(args.park_seconds)).await?;
             }
+            Kind::ProcessProbe(mode) => processes::probe(&run, &case, mode, 10).await?,
             Kind::HotWaits { waits } => processes::hot_waits(&run, &case, waits).await?,
             Kind::Idle { actors } => {
                 processes::idle(&run, &case, actors, Duration::from_secs(args.idle_seconds))

@@ -26,10 +26,18 @@ const LIMIT: Duration = Duration::from_secs(600);
 
 /// Register a bench process that awaits `waits` keys; returns its actor.
 async fn start(backend: &Backend, token: &str, waits: usize) -> Result<ActorKey> {
+    start_payload(backend, token, payload(token, waits)).await
+}
+
+async fn start_payload(
+    backend: &Backend,
+    token: &str,
+    payload: serde_json::Value,
+) -> Result<ActorKey> {
     let registration = ProcessRegistration::new(
         ProcessInput::Engine {
             kind: KIND.to_owned(),
-            payload: payload(token, waits),
+            payload,
             launch: lash_execution_contracts::process::EngineLaunch::new(
                 lash_execution_contracts::testing::process_execution_env_fixture_ref(),
                 None,
@@ -137,9 +145,7 @@ pub async fn parked(run: &Run<'_>, case: &Case, park: Duration) -> Result<()> {
         let release_after_pin_us = release.map(|_| micros(pinned_at, Instant::now()));
         let parked_from = Instant::now();
         tokio::time::sleep(park).await;
-        let terminal = deployment
-            .recorder
-            .watch(&actor, lash_durable::CommitLabel::PROCESS_TERMINAL);
+        let terminal = deployment.recorder.watch_terminal(&actor);
         let from = deployment.recorder.now_us();
         let started = Instant::now();
         resolve(deployment.producer(sample + 1), &key).await?;
@@ -286,5 +292,129 @@ pub async fn idle(run: &Run<'_>, case: &Case, actors: usize, window: Duration) -
     )?;
     drop(keys);
     counters.close().await;
+    deployment.shutdown().await
+}
+
+/// Maintained serial/timer/fanout populations, with counted attribution.
+pub async fn probe(
+    run: &Run<'_>,
+    case: &Case,
+    mode: crate::process::Mode,
+    count: usize,
+) -> Result<()> {
+    use crate::process::Mode;
+    let mut deployment = run.deployment();
+    deployment.boot_many(run.nodes).await?;
+    let witness = lash_core_ids::perf_witness::Collector::install_with_sql_shapes()?;
+    let capture = lash_perf::perf_support::async_operations::Capture::window(
+        "one process case, after node readiness and before shutdown",
+    )?;
+    let from = deployment.recorder.now_us();
+    for sample in 0..run.samples {
+        let token = format!("{}-{sample}", case.name);
+        let mut feed = deployment.board.follow(&token);
+        let barrier = (mode == Mode::ReadyFanout).then(|| deployment.board.barrier(&token, count));
+        let mut input = payload(&token, count);
+        input["mode"] = serde_json::to_value(mode)?;
+        let ready = Instant::now();
+        let actor = start_payload(deployment.producer(0), &token, input).await?;
+        let registered = Instant::now();
+        let terminal = deployment.recorder.watch_terminal(&actor);
+        let mut starts = Vec::new();
+        let mut body_ids = std::collections::BTreeSet::new();
+        let mut settled_ids = std::collections::BTreeSet::new();
+        let mut settled = Vec::new();
+        let mut previous = None;
+        if matches!(mode, Mode::Fanout | Mode::ReadyFanout) {
+            while starts.len() < count {
+                match next(&mut feed).await? {
+                    Seen::StepStarted(at, id) => {
+                        anyhow::ensure!(body_ids.insert(id), "repeated body");
+                        starts.push(at);
+                    }
+                    Seen::StepSettled(at, id) => {
+                        anyhow::ensure!(settled_ids.insert(id), "repeated settlement");
+                        settled.push(at);
+                    }
+                    other => bail!("unexpected fanout event {other:?}"),
+                }
+            }
+            if let Some(barrier) = barrier {
+                // Every body has entered; one explicit release readies all bodies.
+                tokio::time::timeout(LIMIT, barrier.wait()).await?;
+            }
+            while settled.len() < count {
+                match next(&mut feed).await? {
+                    Seen::StepSettled(at, id) => {
+                        anyhow::ensure!(settled_ids.insert(id), "repeated settlement");
+                        settled.push(at);
+                    }
+                    other => bail!("unexpected fanout settlement {other:?}"),
+                }
+            }
+        } else {
+            for ordinal in 0..count {
+                let started = match next(&mut feed).await? {
+                    Seen::StepStarted(at, id) if mode == Mode::Steps => {
+                        anyhow::ensure!(body_ids.insert(id), "repeated body");
+                        at
+                    }
+                    Seen::TimerDue(at) if mode == Mode::Timers => at,
+                    other => bail!("expected body or due, got {other:?}"),
+                };
+                let done = match next(&mut feed).await? {
+                    Seen::StepSettled(at, id) if mode == Mode::Steps => {
+                        anyhow::ensure!(settled_ids.insert(id), "repeated settlement");
+                        at
+                    }
+                    Seen::Resolved(at) if mode == Mode::Timers => at,
+                    other => bail!("expected settlement, got {other:?}"),
+                };
+                starts.push(started);
+                settled.push(done);
+                run.report.write("process_probe", &serde_json::json!({
+                    "case": case.name, "dialect": run.database.dialect(), "sample": sample, "ordinal": ordinal,
+                    "register_us": micros(ready, registered),
+                    "body_or_due_at_us": deployment.recorder.since(started),
+                    "engine_settled_at_us": deployment.recorder.since(done),
+                    "registered_to_first_body_us": (ordinal == 0 && mode == Mode::Steps).then(|| micros(registered, started)),
+                    "previous_engine_settlement_to_body_us": previous.filter(|_| mode == Mode::Steps).map(|at| micros(at, started)),
+                    "body_to_engine_settlement_us": (mode == Mode::Steps).then(|| micros(started, done)),
+                    "due_to_engine_woke_us": (mode == Mode::Timers).then(|| micros(started, done)),
+                }))?;
+                previous = Some(done);
+            }
+        }
+        tokio::time::timeout(LIMIT, terminal).await??;
+        if mode != Mode::Timers {
+            anyhow::ensure!(
+                body_ids == settled_ids && body_ids.len() == count,
+                "body/settlement identity mismatch"
+            );
+        }
+        let transactions = deployment.recorder.transactions_since(from);
+        run.report.write("process_population", &serde_json::json!({
+            "case": case.name, "sample": sample, "actor": actor.to_string(),
+            "body_entries": if mode == Mode::Timers { 0 } else { starts.len() },
+            "body_identities": body_ids, "settlement_identities": settled_ids,
+            "settlements": settled.len(), "claims": deployment.recorder.claims_of(&actor).len(),
+            "outcome_transactions": transactions.iter().filter(|tx| tx.actor == actor.to_string() && tx.label == lash_durable::CommitLabel::STEP_OUTCOME.as_str() && tx.ok).count(),
+            "transactions": transactions.iter().filter(|tx| tx.actor == actor.to_string()).collect::<Vec<_>>(),
+        }))?;
+    }
+    let snapshot = witness.snapshot();
+    run.report.write(
+        "process_trace",
+        &serde_json::json!({
+            "case": case.name, "dialect": run.database.dialect(),
+            "transactions": deployment.recorder.transactions_since(from),
+            "port_calls": deployment.recorder.port_calls(),
+            "discoveries": deployment.recorder.discoveries(),
+            "sql": snapshot.sql_shapes, "graph_decoded_nodes": snapshot.graph_decoded_nodes,
+            "graph_decoded_bytes": snapshot.graph_decoded_bytes,
+            "async": capture.finish_receipt(),
+        }),
+    )?;
+    drop(witness);
     deployment.shutdown().await
 }

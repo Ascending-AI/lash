@@ -48,3 +48,7 @@ on PostgreSQL and `unknown` in the text table. Their growth exponents stay
 unavailable. Actual zero measurements remain zero, and common page and accepted
 publication statement/returned-row counters remain available on both backends.
 These are backend availability controls, not PostgreSQL service certification.
+
+The serial-step, timer and barrier-controlled fanout populations are maintained
+alongside this wait case. See [runtime instruments](runtime-instruments.md) for
+commands, owner SQL, port-call and discovery-source counter definitions.

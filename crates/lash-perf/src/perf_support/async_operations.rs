@@ -157,8 +157,13 @@ impl Capture {
 
     /// Always enabled: offered-load receipts carry their own evidence.
     pub fn step() -> anyhow::Result<Self> {
+        Self::window("one offered-load step, after population setup and before shutdown")
+    }
+
+    /// An enabled capture with an explicit owner and population window.
+    pub fn window(window: &'static str) -> anyhow::Result<Self> {
         let mut capture = Self::open(PathBuf::new(), true)?;
-        capture.window = "one offered-load step, after population setup and before shutdown";
+        capture.window = window;
         Ok(capture)
     }
 

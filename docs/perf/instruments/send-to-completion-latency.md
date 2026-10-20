@@ -160,3 +160,7 @@ LASH_VM_WORKER="$worker" LASH_LATENCY_ARTIFACT_DIR="$E/chat-loop" \
 
 This exits 2 for the undersized fast population; it is a diagnostic, not a
 gate run.
+
+Marker discovery is owned by the case and never awaited before the next send.
+See [runtime instruments](runtime-instruments.md) for bounded ownership,
+identity joins, explicit diagnostic refusal and the counter definitions.
