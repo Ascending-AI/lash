@@ -84,6 +84,9 @@ pub(super) struct PlanRun<'m, const SHARED: bool> {
     /// The callback the running region's steady site applies, once
     /// resolved.
     pub(super) steady: Option<Steady>,
+    /// The gate its callbacks enter their islands under, decided at its
+    /// first callback (FIG-6945).
+    pub(super) gate: Option<super::islands::Gate>,
 }
 
 impl<const SHARED: bool> PlanRun<'_, SHARED> {
@@ -657,6 +660,7 @@ impl KernelMachine {
             statement: None,
             halt: None,
             steady: None,
+            gate: None,
         };
         let outcome = (plan.plan.run)(&mut run, 0);
         // The statement the body leaves by stays open: the caller's goes on

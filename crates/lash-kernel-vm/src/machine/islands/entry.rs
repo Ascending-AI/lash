@@ -24,7 +24,8 @@ use super::super::stream::Running;
 use super::super::tasks::Occurrences;
 use super::super::{Eval, Halt, KernelMachine, SlotState, fault};
 use super::{
-    Exit, ISLAND_ADMITTED, Island, Level, MAX_ARGS, RunsOn, Scratch, Stands, Stop, found_code, held,
+    Exit, ISLAND_ADMITTED, ISLAND_DEPTH, Island, Level, MAX_ARGS, RunsOn, Scratch, Stands, Stop,
+    found_code, held,
 };
 use crate::compile::{
     BindingName, CodeId, Cx, Executable, GuestCall, Guests, NestedCallee, NestedKind,
@@ -47,8 +48,28 @@ enum Caller {
 enum Target<'c> {
     Declared(CodeId),
     Closure(ArenaHandle),
-    /// A closure's code, with its cells as the call read them.
-    Code(CodeId, &'c [ArenaHandle]),
+    /// The island plan of a closure's code, with its cells as the call
+    /// read them.
+    Code(u32, &'c [ArenaHandle]),
+}
+
+/// The gate island entries pass from where it was decided: whether they
+/// may enter at all, by the guards on what none of them changes, and what
+/// each runs under ([`KernelMachine::gate`]). A plan's walk keeps the one
+/// its first callback decided, with its last callback's code resolved.
+#[derive(Clone, Copy)]
+pub(in crate::machine) struct Gate {
+    open: bool,
+    charging: bool,
+    slice_end: u64,
+    observed: bool,
+    limits: KernelDataLimits,
+    memory: bool,
+    base: u64,
+    call_depth: u64,
+    /// The code of the walk's last callback, and its island plan where it
+    /// has one and runs charged or paced.
+    callee: Option<(CodeId, Option<u32>)>,
 }
 
 /// What an island call came to.
@@ -109,9 +130,9 @@ impl KernelMachine {
         out: usize,
         count: usize,
     ) -> Eval<Option<Flow>> {
-        if running.exe.island_of(code).is_none() {
+        let Some(plan) = running.exe.island_of(code) else {
             return Ok(None);
-        }
+        };
         // The callee runs charged or paced as its code is, not as the
         // caller's: a helper's body is uncharged, its callbacks are not.
         let callee = running.exe.code(code);
@@ -120,7 +141,7 @@ impl KernelMachine {
             running.task,
             running.exe,
             callee.charging || callee.paced,
-            Target::Code(code, cells),
+            Target::Code(plan, cells),
             (out, count),
             None,
         )?;
@@ -130,28 +151,49 @@ impl KernelMachine {
     /// Runs the callback of code `code`, closed over the cells `cells`,
     /// that a helper's plan of `task` applies at a callback site to the
     /// `count` arguments from `args`, as an island when the code's body is
-    /// one. `None`: nothing changed, and the plan stands at its site while
-    /// the reference runs the callback. The site is the helper's, and
-    /// counts no occurrence.
+    /// one, under the gate `gate` of the plan's walk, decided at its first
+    /// callback. `None`: nothing changed, and the plan stands at its site
+    /// while the reference runs the callback. The site is the helper's,
+    /// and counts no occurrence.
     #[inline]
     pub(in crate::machine) fn callback_island(
         &mut self,
+        gate: &mut Option<Gate>,
         task: TaskId,
         exe: &Executable,
         (code, cells): (CodeId, &[ArenaHandle]),
         args: usize,
         count: usize,
     ) -> Eval<Option<Ran>> {
-        if exe.island_of(code).is_none() {
+        let gate = match gate {
+            Some(gate) => gate,
+            None => gate.insert(self.gate(task, !self.islands.quiet)?),
+        };
+        if !gate.open {
             return Ok(None);
         }
-        let callee = exe.code(code);
-        self.island(
-            !self.islands.quiet,
+        // The callee's island, resolved once for each code the walk
+        // applies: a code that runs neither charged nor paced has none.
+        let plan = match gate.callee {
+            Some((resolved, plan)) if resolved == code => plan,
+            _ => {
+                let callee = exe.code(code);
+                let plan = exe
+                    .island_of(code)
+                    .filter(|_| callee.charging || callee.paced);
+                gate.callee = Some((code, plan));
+                plan
+            }
+        };
+        let Some(plan) = plan else {
+            return Ok(None);
+        };
+        let gate = *gate;
+        self.enter_under(
+            &gate,
             task,
             exe,
-            callee.charging || callee.paced,
-            Target::Code(code, cells),
+            Target::Code(plan, cells),
             (args, count),
             None,
         )
@@ -201,60 +243,107 @@ impl KernelMachine {
         (first, given): (usize, usize),
         occurrence: Option<usize>,
     ) -> Eval<Option<Ran>> {
-        // The callee's code has an island that takes these arguments,
-        // before any guard is paid for.
+        // The callee's code has an island, before any guard is paid for.
         let plan = match target {
-            Target::Declared(code) | Target::Code(code, _) => exe.island_of(code),
+            Target::Declared(code) => exe.island_of(code),
+            Target::Code(plan, _) => Some(plan),
             // A closure's first call enters its island too: it finds its
             // code as the reference's call does, and keeps it.
             Target::Closure(handle) => found_code(&mut self.arena.borrow_mut(), exe, handle)
                 .and_then(|code| exe.island_of(code)),
         };
-        if plan.is_none_or(|plan| {
-            given > exe.islands.plans[plan as usize].params.len()
-                || (first..first + given).any(|at| !held(&self.regs[at]))
-        }) {
+        if plan.is_none() || !counted {
             return Ok(None);
         }
+        let gate = self.gate(task, sites)?;
+        if !gate.open {
+            return Ok(None);
+        }
+        self.enter_under(&gate, task, exe, target, (first, given), occurrence)
+    }
+
+    /// The gate of island entries in `task` from here, `sites` whether
+    /// the host observes sites: the guards on what no entry changes, and
+    /// what every entry runs under. A plan's walk decides it at its first
+    /// callback and keeps it for the rest of the walk, as nothing it
+    /// reads changes while a plan walks: what observes the run, its
+    /// charge policy, data limits and memory meter are the run's, and the
+    /// step's verification and slice end the slice's; islands are held off
+    /// only while a statement an island exited in runs on, so a walk that
+    /// statement makes begins held off, and a walk whose callback's island
+    /// exits stands at that callback, ending before islands are held off;
+    /// and the frames below the walk's callbacks are the walk's own, as a
+    /// callee that would push one runs only once the walk has stood. The
+    /// charge bound is not among them: a limiter grows it where a charge
+    /// crosses it, so each entry reads it.
+    fn gate(&mut self, task: TaskId, sites: bool) -> Eval<Gate> {
         // The environment guard: nothing observes the run but a charge
         // tape, which the island records, and no host observes sites.
-        if self.islands.held
-            || !counted
+        let open = !(self.islands.held
             || !self.ran.is_empty()
             || self.steps.verify
             || sites
             || self
                 .observer
                 .as_deref()
-                .is_some_and(|observer| !observer.only_charges())
-        {
-            return Ok(None);
-        }
+                .is_some_and(|observer| !observer.only_charges()));
         #[cfg(test)]
-        if self.boundary.is_some() {
-            return Ok(None);
-        }
-        // The call's push would end the step at the slice threshold.
-        if self.charged >= self.slice_end {
-            return Ok(None);
-        }
-        // The capacity headroom guard: the island's transient holdings and
-        // its virtual frames with their variables fit, and nothing inside
-        // it is counted (FIG-6791).
-        if self.capacity_headroom() < ISLAND_ADMITTED {
-            return Ok(None);
-        }
-        if given > MAX_ARGS {
-            return Ok(None);
-        }
+        let open = open && self.boundary.is_none();
         // A paced run has no charge to record and no bound: its pace only
         // meets the slice's end.
         let charging = self.bounds.charge == crate::Charge::Exact;
+        let below = self.plans as usize + usize::from(task != TaskId::MAIN || !self.session_cell);
+        let frames = self
+            .tasks
+            .get_mut(task.0 as usize)?
+            .ok_or_else(|| fault("no task"))?
+            .frames
+            .len();
+        Ok(Gate {
+            open,
+            charging,
+            slice_end: self.slice_end,
+            observed: self.observer.is_some(),
+            limits: self.limits,
+            memory: self.bounds.memory_meter != crate::MemoryMeter::Off,
+            base: (frames + below) as u64,
+            call_depth: u64::from(self.bounds.call_depth),
+            callee: None,
+        })
+    }
+
+    /// Runs the call of `target` in `task` on the `given` arguments in the
+    /// registers from `first` as an island under the open gate `gate`,
+    /// counting `occurrence` as the call's when given, once the guards on
+    /// what changes between entries hold. `None`: the island does not run,
+    /// and nothing changed.
+    #[inline]
+    fn enter_under(
+        &mut self,
+        gate: &Gate,
+        task: TaskId,
+        exe: &Executable,
+        target: Target<'_>,
+        (first, given): (usize, usize),
+        occurrence: Option<usize>,
+    ) -> Eval<Option<Ran>> {
+        // What changes from one entry to the next: the arguments, the
+        // charge, which the call's push would end the step at once it
+        // reaches the slice threshold, the charge bound, which a limiter
+        // grows, and the capacity headroom, which must fit the island's
+        // transient holdings and its virtual frames with their variables,
+        // as nothing inside it is counted (FIG-6791).
+        if given > MAX_ARGS
+            || (first..first + given).any(|at| !held(&self.regs[at]))
+            || self.charged >= gate.slice_end
+            || self.capacity_headroom() < ISLAND_ADMITTED
+        {
+            return Ok(None);
+        }
         let recorder = self
             .observer
             .as_deref()
             .and_then(|observer| observer.charges.as_ref());
-        let below = self.plans as usize + usize::from(task != TaskId::MAIN || !self.session_cell);
         let mut arena = self.arena.borrow_mut();
         let running = self
             .tasks
@@ -265,20 +354,22 @@ impl KernelMachine {
             arena: &mut arena,
             sites: &mut self.sites,
             session: &self.session,
-            tape: recorder.filter(|_| charging),
+            tape: recorder.filter(|_| gate.charging),
             recorder,
-            charging,
-            bound: if charging {
+            charging: gate.charging,
+            // Read at each entry: a limiter grows it where a charge
+            // crosses it.
+            bound: if gate.charging {
                 self.bounds.charge_limit
             } else {
                 u64::MAX
             },
-            slice_end: self.slice_end,
-            observed: self.observer.is_some(),
-            limits: self.limits,
-            memory: self.bounds.memory_meter != crate::MemoryMeter::Off,
-            base: (running.frames.len() + below) as u64,
-            call_depth: u64::from(self.bounds.call_depth),
+            slice_end: gate.slice_end,
+            observed: gate.observed,
+            limits: gate.limits,
+            memory: gate.memory,
+            base: gate.base,
+            call_depth: gate.call_depth,
         };
         let ran = enter(
             ground,
@@ -525,18 +616,20 @@ fn enter(
         base: ground.base,
         call_depth: ground.call_depth,
         depth: 0,
+        frames: ground
+            .call_depth
+            .saturating_add(1)
+            .saturating_sub(ground.base)
+            .min(u64::from(ISLAND_DEPTH)) as u32,
         scratch,
     };
     let target = match target {
         Target::Declared(code) => island.declared(code),
         Target::Closure(handle) => island.resolve_cold(None, handle),
-        Target::Code(code, cells) => island.with_cells(code, cells),
+        Target::Code(plan, cells) => island.with_cells(plan, cells),
     };
-    let Some((plan, captured)) = target.filter(|(plan, _)| {
-        let plan = &exe.islands.plans[*plan as usize];
-        values.len() <= plan.params.len()
-            && values.iter().all(held)
-            && ground.base <= ground.call_depth
+    let Some(target) = target.filter(|target| {
+        values.len() <= target.compiled.layout.arity && ground.base <= ground.call_depth
     }) else {
         return Ok(None);
     };
@@ -548,7 +641,7 @@ fn enter(
     }
     let ran = occurrence
         .map_or(Ok(()), |occurrence| island.count(occurrence))
-        .and_then(|()| island.enter(plan, captured, values));
+        .and_then(|()| island.enter(target, values));
     *charged = island.charged;
     match ran {
         Ok(value) => Ok(Some(Ran::Returned(value))),

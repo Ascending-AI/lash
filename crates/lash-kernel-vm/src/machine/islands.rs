@@ -144,6 +144,15 @@ pub(super) struct Exit {
     levels: Vec<Level>,
 }
 
+/// A callee's island, resolved: its plan, its compiled form, and where
+/// its captured values start.
+#[derive(Clone, Copy)]
+struct Callee<'e> {
+    plan: &'e IslandPlan,
+    compiled: &'e Compiled,
+    captured: u32,
+}
+
 /// A closure call site's cached callee, for one island entry.
 #[derive(Clone, Copy)]
 struct Cached {
@@ -157,7 +166,7 @@ struct Cached {
 /// the registers it holds there.
 type RunsOn = (StmtId, u32, Vec<(u32, Value)>);
 
-pub(super) use entry::{Ran, RegionGuests};
+pub(super) use entry::{Gate, Ran, RegionGuests};
 
 /// The machine's island state: buffers reused across entries, never saved.
 #[derive(Default)]
@@ -223,10 +232,14 @@ struct Island<'a> {
     call_depth: u64,
     /// The virtual frames running.
     depth: u32,
+    /// The most virtual frames it runs: [`ISLAND_DEPTH`], or fewer where
+    /// the call depth leaves fewer above the frames below it, hoisted from
+    /// each call to the entry, as neither changes while it runs.
+    frames: u32,
     scratch: &'a mut Scratch,
 }
 
-impl Island<'_> {
+impl<'a> Island<'a> {
     /// A stop at op `pc`, which the reference runs.
     #[cold]
     fn at(&mut self, pc: u32) -> Stop {
@@ -343,6 +356,7 @@ impl Island<'_> {
         true
     }
 
+    #[inline(always)]
     fn count(&mut self, occurrence: usize) -> Result<(), Stop> {
         if let Err(halt) = self.counters.advance(occurrence) {
             return Err(self.halt(halt));
@@ -369,18 +383,6 @@ impl Island<'_> {
     /// a stop at its op.
     #[inline(always)]
     pub(super) fn operate(&mut self, site: &OperatorSite, args: &[Value]) -> Answer {
-        self.operate_with(site, args, || site.entry.call(args))
-    }
-
-    /// [`Self::operate`], the entry's answer on `args` given by `call`:
-    /// the entry's own, or its typed path's.
-    #[inline(always)]
-    pub(super) fn operate_with(
-        &mut self,
-        site: &OperatorSite,
-        args: &[Value],
-        call: impl FnOnce() -> Option<Value>,
-    ) -> Answer {
         if let Some(close) = &site.close
             && !self.close(close)
         {
@@ -392,9 +394,9 @@ impl Island<'_> {
             if !(!site.body_when_observed || !self.observed) || !self.depth_fits(site.depth) {
                 None
             } else if !self.charging {
-                call().filter(held).map(|value| (value, 0))
+                site.entry.call(args).filter(held).map(|value| (value, 0))
             } else if args.iter().all(scalar) {
-                match call() {
+                match site.entry.call(args) {
                     Some(result) if scalar(&result) => site
                         .table
                         .units(sizes(args, &result))
@@ -416,6 +418,54 @@ impl Island<'_> {
         }
         self.formula(units);
         Ok(result)
+    }
+
+    /// The scalar answer `value` of the typed path of operator `site` on
+    /// two floats or two word integers, committed as [`Self::operate`]
+    /// commits the same answer: its region closed, its occurrence counted
+    /// and its formula charged the `units` its scalar table gives for the
+    /// call's sizes, in that order. `None`, with nothing committed, where
+    /// [`Self::operate`] decides otherwise: an observed helper's body, a
+    /// depth that does not fit, sizes its table does not certify, a charge
+    /// past the bound, or a counter at its end.
+    #[inline(always)]
+    pub(super) fn typed(
+        &mut self,
+        site: &OperatorSite,
+        value: Value,
+        units: Option<u64>,
+    ) -> Option<Answer> {
+        if (site.body_when_observed && self.observed) || !self.depth_fits(site.depth) {
+            return None;
+        }
+        let units = if self.charging { units? } else { 0 };
+        let fixed = site.close.map_or(0, |close| u64::from(close.total));
+        if !self.fits(fixed.checked_add(units)?)
+            || site
+                .counted
+                .is_some_and(|occurrence| !self.counters.can_advance(&[occurrence]))
+        {
+            return None;
+        }
+        // Both fit together, so each is charged without a second check.
+        if let Some(close) = &site.close {
+            self.charged += u64::from(close.total);
+            if let Some(tape) = self.tape {
+                record(tape, self.stream, close.region);
+            }
+        }
+        if let Some(occurrence) = site.counted
+            && let Err(stop) = self.count(occurrence)
+        {
+            return Some(Err(stop));
+        }
+        self.charged += units;
+        if units != 0
+            && let Some(tape) = self.tape
+        {
+            tape.push(Weight::Atomic(units));
+        }
+        Some(Ok(value))
     }
 
     /// The operator `site` on `args`, not all scalars, or answering no
@@ -699,8 +749,12 @@ impl Island<'_> {
         stop
     }
 
-    /// The call `site` of `callee`, or of its declared code, on `args`: the
-    /// callee's island run as a virtual frame.
+    /// The call `site` of `callee`, or of its declared code, on `args`,
+    /// entered in one step: the site's region closed, the callee resolved
+    /// through the site's cache, its frame admitted against the bounds
+    /// this entry hoisted, the call's occurrence counted, and the callee's
+    /// frame laid out and its body run in place.
+    #[inline(always)]
     fn call(&mut self, site: &CallSite, callee: Option<Value>, args: &[Value]) -> Answer {
         if let Some(close) = &site.close
             && !self.close(close)
@@ -713,19 +767,16 @@ impl Island<'_> {
             (None, Some(callee)) => self.resolve(site.site, callee),
             (None, None) => None,
         };
-        let fits = |island: &Self, plan: u32| {
-            let plan = &island.exe.islands.plans[plan as usize];
-            args.len() <= plan.params.len()
+        let Some(target) = target.filter(|target| {
+            args.len() <= target.compiled.layout.arity
                 && args.iter().all(held)
-                && island.base + u64::from(island.depth) <= island.call_depth
-                && island.depth < ISLAND_DEPTH
-        };
-        let Some((plan, captured)) = target.filter(|(plan, _)| fits(self, *plan)) else {
+                && self.depth < self.frames
+        }) else {
             let stop = self.at(site.pc);
             return Err(self.call_held(stop, site, callee, args));
         };
         self.count(site.occurrence)?;
-        match self.enter(plan, captured, args) {
+        match self.enter(target, args) {
             Ok(value) => Ok(value),
             Err(stop) => {
                 if self.scratch.exit.halt.is_none() {
@@ -736,17 +787,28 @@ impl Island<'_> {
         }
     }
 
+    /// The callee of plan `plan`, its captured values from `captured`.
+    #[inline(always)]
+    fn callee(&self, plan: u32, captured: u32) -> Option<Callee<'a>> {
+        let exe = self.exe;
+        let island = exe.islands.plans.get(plan as usize)?;
+        Some(Callee {
+            plan: island,
+            compiled: island.compiled(exe)?,
+            captured,
+        })
+    }
+
     /// The island of declared code `code`.
-    fn declared(&mut self, code: CodeId) -> Option<(u32, u32)> {
+    fn declared(&mut self, code: CodeId) -> Option<Callee<'a>> {
         let plan = self.exe.island_of(code)?;
-        self.exe.islands.plans[plan as usize].compiled(self.exe)?;
-        Some((plan, self.scratch.captured.len() as u32))
+        self.callee(plan, self.scratch.captured.len() as u32)
     }
 
     /// The island of the closure `callee`, through call site `site`'s
-    /// cache: its plan and where its captured values start.
+    /// cache.
     #[inline(always)]
-    fn resolve(&mut self, site: u32, callee: Value) -> Option<(u32, u32)> {
+    fn resolve(&mut self, site: u32, callee: Value) -> Option<Callee<'a>> {
         let Value::Closure(handle) = callee else {
             return None;
         };
@@ -754,7 +816,7 @@ impl Island<'_> {
             && cached.epoch == self.scratch.epoch
             && cached.handle == handle
         {
-            return Some((cached.plan, cached.captured));
+            return self.callee(cached.plan, cached.captured);
         }
         self.resolve_cold(Some(site), handle)
     }
@@ -762,7 +824,7 @@ impl Island<'_> {
     /// The island of the closure `handle`, cached for call site `site`
     /// when one is given.
     #[inline(never)]
-    fn resolve_cold(&mut self, site: Option<u32>, handle: ArenaHandle) -> Option<(u32, u32)> {
+    fn resolve_cold(&mut self, site: Option<u32>, handle: ArenaHandle) -> Option<Callee<'a>> {
         let plan = self
             .exe
             .island_of(found_code(self.arena, self.exe, handle)?)?;
@@ -774,26 +836,23 @@ impl Island<'_> {
             plan,
             cells,
         )?;
-        let Some(site) = site else {
-            return Some((plan, captured));
-        };
-        let at = site as usize;
-        if self.scratch.cached.len() <= at {
-            self.scratch.cached.resize(at + 1, None);
+        if let Some(site) = site {
+            let at = site as usize;
+            if self.scratch.cached.len() <= at {
+                self.scratch.cached.resize(at + 1, None);
+            }
+            self.scratch.cached[at] = Some(Cached {
+                epoch: self.scratch.epoch,
+                handle,
+                plan,
+                captured,
+            });
         }
-        self.scratch.cached[at] = Some(Cached {
-            epoch: self.scratch.epoch,
-            handle,
-            plan,
-            captured,
-        });
-        Some((plan, captured))
+        self.callee(plan, captured)
     }
 
-    /// The island of code `code`, closed over the cells `cells`: its plan
-    /// and where its captured values start.
-    fn with_cells(&mut self, code: CodeId, cells: &[ArenaHandle]) -> Option<(u32, u32)> {
-        let plan = self.exe.island_of(code)?;
+    /// The island plan `plan`, closed over the cells `cells`.
+    fn with_cells(&mut self, plan: u32, cells: &[ArenaHandle]) -> Option<Callee<'a>> {
         let captured = captured(
             self.exe,
             self.arena,
@@ -801,36 +860,36 @@ impl Island<'_> {
             plan,
             cells,
         )?;
-        Some((plan, captured))
+        self.callee(plan, captured)
     }
 
-    /// Runs plan `plan` on `args` as a new virtual frame, its captured
-    /// values from `captured`: its value, or a stop with the frame left.
-    fn enter(&mut self, plan: u32, captured: u32, args: &[Value]) -> Answer {
-        let exe = self.exe;
-        let island = &exe.islands.plans[plan as usize];
-        let Some(compiled) = island.compiled(exe) else {
-            return Err(self.halt(fault("an island entered uncompiled")));
-        };
+    /// Runs `callee` on `args` as a new virtual frame, laid out as its
+    /// compiled form's layout says: its value, or a stop with the frame
+    /// left.
+    #[inline(always)]
+    fn enter(&mut self, callee: Callee<'a>, args: &[Value]) -> Answer {
+        let Callee {
+            plan,
+            compiled,
+            captured,
+        } = callee;
         let mut slots: Slots = [None; MAX_SLOTS];
-        for (index, at) in island.params.iter().enumerate() {
-            slots[*at as usize] = Some(args.get(index).copied().unwrap_or(Value::Absent));
-        }
-        for (index, at) in island.captures.iter().enumerate() {
-            let (value, _) = self.scratch.captured[captured as usize + index];
-            slots[*at as usize] = Some(value);
-        }
+        compiled.layout.fill(
+            &mut slots,
+            args,
+            &self.scratch.captured[captured as usize..],
+        );
         // The call's frame is pushed: its step ends.
         if self.spent() {
             let stop = self.boundary(compiled.body.id, 0);
-            self.left(island, captured, &slots);
+            self.left(plan, captured, &slots);
             return Err(stop);
         }
         if let Some(recorder) = self.recorder {
             recorder.entered();
         }
         self.depth += 1;
-        let ran = run_block(self, &compiled.body, &mut slots);
+        let ran = run_body(self, &compiled.body, &mut slots);
         self.depth -= 1;
         match ran {
             Ok(Flow2::Returned(value)) => Ok(value),
@@ -838,7 +897,7 @@ impl Island<'_> {
             Ok(Flow2::Fell(_)) => Ok(Value::Null),
             Err(stop) => {
                 if self.scratch.exit.halt.is_none() {
-                    self.left(island, captured, &slots);
+                    self.left(plan, captured, &slots);
                 }
                 Err(stop)
             }
@@ -904,7 +963,7 @@ impl Island<'_> {
 /// scalar table indexes them: bit `i` for argument `i` and bit 3 for the
 /// result, set for a nonzero word integer, whose size is 2.
 #[inline(always)]
-fn sizes(args: &[Value], result: &Value) -> u8 {
+pub(super) fn sizes(args: &[Value], result: &Value) -> u8 {
     let bit = |value: &Value| u8::from(matches!(value, Value::Int(word) if *word != 0));
     args.iter()
         .enumerate()
@@ -965,8 +1024,17 @@ fn record(tape: &ChargeTape, stream: &Stream, region: u32) {
     }
 }
 
-/// Runs block `block` of the virtual frame holding `slots`.
+/// Runs block `block` of the virtual frame holding `slots`: a block
+/// nested in a body.
+#[inline(never)]
 fn run_block(island: &mut Island<'_>, block: &CBlock, slots: &mut Slots) -> Result<Flow2, Stop> {
+    run_body(island, block, slots)
+}
+
+/// Runs block `block` of the virtual frame holding `slots` in place: a
+/// body, run where its call enters it.
+#[inline(always)]
+fn run_body(island: &mut Island<'_>, block: &CBlock, slots: &mut Slots) -> Result<Flow2, Stop> {
     for (index, statement) in block.statements.iter().enumerate() {
         // A step: the statement's unit first, as `advance` charges it.
         if !island.unit() {
@@ -997,6 +1065,7 @@ fn run_block(island: &mut Island<'_>, block: &CBlock, slots: &mut Slots) -> Resu
     Ok(Flow2::Fell(0))
 }
 
+#[inline(always)]
 fn run_statement(
     island: &mut Island<'_>,
     statement: &CStatement,

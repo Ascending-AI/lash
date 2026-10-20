@@ -1838,6 +1838,210 @@ fn record_field_callbacks_run_as_islands_as_the_reference_runs_them() {
     );
 }
 
+/// `program`, lowered as `id`, as a case and its program under both
+/// plans: regions on, then off.
+fn lowered_case(id: &str, program: &Program) -> (Case, Program, Program) {
+    let registry = program.library.registry();
+    let mut case = program_case(id, "main { return null }", 16);
+    case.document = print_document(&program.document);
+    let on = case_program(
+        &prepare_with_layout(Arc::clone(registry), Layout(ON)),
+        &case,
+    )
+    .unwrap_or_else(|| panic!("{id} is admitted"));
+    let off = Program {
+        library: prepare_with_layout(Arc::clone(registry), Layout(OFF)),
+        ..on.clone()
+    };
+    (case, on, off)
+}
+
+/// The unbounded run of `case` under both plans, compared as `what`: the
+/// island calls the run with regions on entered, none where it failed.
+fn calls_agreeing(
+    (case, on, off): (&Case, &Program, &Program),
+    what: &str,
+    counts: &mut Counts,
+    failures: &mut Vec<String>,
+) -> u64 {
+    let a = probe::<ON>(on, case, Charge::Exact, None, None);
+    let b = probe::<OFF>(off, case, Charge::Exact, None, None);
+    let mut held_at = |regions: bool, charge: u64| {
+        let probe = if regions {
+            probe::<ON>(on, case, Charge::Exact, Some(charge), None)
+        } else {
+            probe::<OFF>(off, case, Charge::Exact, Some(charge), None)
+        };
+        probe.ok()?.projector.held
+    };
+    compare(
+        case,
+        what,
+        a.as_ref(),
+        b.as_ref(),
+        &mut held_at,
+        counts,
+        failures,
+    );
+    a.map_or(0, |a| a.work.calls)
+}
+
+/// FIG-6945: a helper's walk decides once, at its first callback, whether
+/// its callbacks may enter their islands at all and what they run under,
+/// on the facts no entry of the walk changes; each entry checks what does
+/// change between them. An argument no island frame holds, given after
+/// the walk's callbacks entered their islands, leaves that callback to the
+/// reference. The run runs as the reference runs it under PLAN-INDEP's
+/// sweep, and enters exactly the islands the gate admits.
+#[test]
+fn a_walk_leaves_to_the_reference_the_callbacks_its_gate_does_not_admit() {
+    let mut counts = Counts::default();
+    let mut failures = Vec::new();
+    for (lowered, program, admitted) in crate::helper_plans::callback_walk_programs() {
+        let registry = program.library.registry();
+        let on = prepare_with_layout(Arc::clone(registry), Layout(ON));
+        let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
+        let mut case = program_case(&lowered.id, "main { return null }", 16);
+        case.document = print_document(&program.document);
+        assert!(
+            formed_alike(&on, &off, &case).1 > 0,
+            "{}: no call island forms",
+            case.name
+        );
+        let calls = check(&on, &off, &case, &mut counts, &mut failures).calls;
+        if calls != admitted {
+            failures.push(format!(
+                "{}: entered {calls} islands, and its gates admit {admitted}",
+                case.name
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} of {} paired runs disagree:\n{}",
+        failures.len(),
+        counts.runs,
+        failures.join("\n")
+    );
+}
+
+/// FIG-6945: a walk's gate keeps the slice's end, and each callback's
+/// entry checks the charge against it, as the charge grows between
+/// entries: an island may return at or past the threshold, which only a
+/// step end inside it stops at. The callback whose entry finds the
+/// threshold reached is left to the reference, whose push ends the step
+/// there, and the walk stands. Under slices that end the run in from two to
+/// forty places, a sort's comparator walk runs as the reference runs it,
+/// and some slice ends at an entry, between callbacks that entered their
+/// islands.
+#[test]
+fn a_walk_leaves_to_the_reference_the_callback_its_slice_ends_at() {
+    let (mut counts, mut failures) = (Counts::default(), Vec::new());
+    let programs = crate::helper_plans::long_walk_programs();
+    let (lowered, program) = &programs[0];
+    let (mut case, on, off) = lowered_case(&lowered.id, program);
+    let whole = calls_agreeing((&case, &on, &off), "unsliced", &mut counts, &mut failures);
+    let charged = probe::<ON>(&on, &case, Charge::Exact, None, None)
+        .ok()
+        .and_then(|natural| natural.observations.charged)
+        .expect("the run is charged");
+    case.environment.max_steps = case.environment.max_steps.max(1_000_000);
+    // Slices that end the run's charge in from two to forty places,
+    // spread across its walk.
+    let mut slices: Vec<u64> = (2..=40).map(|parts| charged.div_ceil(parts)).collect();
+    slices.dedup();
+    let mut between = 0;
+    for slice in slices {
+        case.environment.slice = slice;
+        let calls = calls_agreeing(
+            (&case, &on, &off),
+            &format!("slice {slice}"),
+            &mut counts,
+            &mut failures,
+        );
+        between += usize::from(calls > 0 && calls < whole);
+    }
+    assert!(
+        failures.is_empty(),
+        "{} of {} paired runs disagree:\n{}",
+        failures.len(),
+        counts.runs,
+        failures.join("\n")
+    );
+    assert!(
+        whole > 0 && between > 0,
+        "no slice ends at a callback's entry: {whole} islands unsliced"
+    );
+}
+
+/// FIG-6945: each callback's entry checks the capacity headroom, which the
+/// walk's own allocation shrinks between entries (FIG-6791): under the
+/// memory bounds where it runs out in the middle of a long filter's walk,
+/// as its kept items grow its output, the
+/// callbacks before that point enter their islands and those after it are
+/// left to the reference, and the run runs as the reference runs it.
+#[test]
+fn a_walk_leaves_to_the_reference_the_callbacks_past_its_headroom() {
+    let (mut counts, mut failures) = (Counts::default(), Vec::new());
+    let programs = crate::helper_plans::long_walk_programs();
+    let (lowered, program) = &programs[1];
+    let (mut case, on, off) = lowered_case(&lowered.id, program);
+    let whole = calls_agreeing((&case, &on, &off), "roomy", &mut counts, &mut failures);
+    // The islands a run bounded at `memory` enters, where it finishes:
+    // a refused run's are cut short by its refusal, not its headroom.
+    let calls_under = |memory: u64, case: &mut Case| {
+        case.environment.bounds.memory = memory;
+        probe::<ON>(&on, case, Charge::Exact, None, None)
+            .ok()
+            .filter(|run| matches!(run.observations.end, ExpectedEnd::Finished(_)))
+            .map(|run| run.work.calls)
+    };
+    // The bounds a run finishes under, from the least: halve the span
+    // between one it is refused under and one it finishes under.
+    let roomy = case.environment.bounds.memory;
+    let (mut refused, mut finishes) = (0, roomy);
+    while finishes - refused > 1 {
+        let middle = refused + (finishes - refused) / 2;
+        match calls_under(middle, &mut case) {
+            None => refused = middle,
+            Some(_) => finishes = middle,
+        }
+    }
+    // The calls a finishing run's bound admits grow with it: halve the
+    // span between one that admits none, or the least it finishes under,
+    // and one that admits every callback until one admits some.
+    let (mut none, mut every) = (finishes, roomy);
+    let mut memory = None;
+    while every - none > 1 {
+        let middle = none + (every - none) / 2;
+        match calls_under(middle, &mut case) {
+            Some(0) | None => none = middle,
+            Some(calls) if calls >= whole => every = middle,
+            Some(_) => {
+                memory = Some(middle);
+                break;
+            }
+        }
+    }
+    let memory = memory.expect("some memory bound runs out of headroom mid-walk");
+    for bound in [memory, memory + 4096, memory.saturating_sub(4096)] {
+        case.environment.bounds.memory = bound;
+        calls_agreeing(
+            (&case, &on, &off),
+            &format!("memory {bound}"),
+            &mut counts,
+            &mut failures,
+        );
+    }
+    assert!(
+        failures.is_empty(),
+        "{} of {} paired runs disagree:\n{}",
+        failures.len(),
+        counts.runs,
+        failures.join("\n")
+    );
+}
+
 macro_rules! program_shards {
     (@parts $shard:literal, $parts:expr, $part:expr;) => {};
     (@parts $shard:literal, $parts:expr, $part:expr; $name:ident $(, $rest:ident)*) => {

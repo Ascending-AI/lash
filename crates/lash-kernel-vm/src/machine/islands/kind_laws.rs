@@ -8,7 +8,7 @@ use lash_kernel_doc::arena::{ArenaHandle, ShortText};
 use lash_kernel_doc::{Float, FunctionId, FunctionRegistry, TaskId, ValueKind};
 use lash_kernel_exec::Weight;
 
-use super::super::{Island, Scratch};
+use super::super::{ISLAND_DEPTH, Island, Scratch};
 use super::*;
 use crate::compile::{CompiledStep, Cx, Meter, Taken};
 use crate::laws::embedder::{Embedder, Setup};
@@ -115,6 +115,7 @@ fn island_run(
         base: 0,
         call_depth: 200,
         depth: 1,
+        frames: ISLAND_DEPTH,
         scratch: &mut scratch,
     };
     let mut slots = [Some(x); MAX_SLOTS];

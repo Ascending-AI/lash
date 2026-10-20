@@ -1437,6 +1437,48 @@ pub(crate) fn record_field_island_programs() -> Vec<(runner::Case, Program, usiz
         .collect()
 }
 
+/// FIG-6945: TypeScript programs whose helpers' walks apply callbacks
+/// that run as islands, where a fact an entry's gate reads changes
+/// between entries, each with how many islands its natural run enters.
+pub(crate) fn callback_walk_programs() -> Vec<(runner::Case, Program, u64)> {
+    let sources = [
+        // An argument no island frame holds, after four the walk's
+        // callbacks entered their islands with: that callback is left to
+        // the reference.
+        (
+            "an argument no island holds in a walk",
+            "function run() {\n  return [3, 4, 5, 6, \"a text longer than fourteen bytes\"].map((x) => x === 4);\n}\nconst result = run();\n",
+            4,
+        ),
+    ];
+    let (programs, calls): (Vec<_>, Vec<_>) = sources
+        .into_iter()
+        .map(|(name, source, calls)| (("typescript", name, source), calls))
+        .unzip();
+    lowered_islands(&programs)
+        .into_iter()
+        .zip(calls)
+        .map(|((case, program), calls)| (case, program, calls))
+        .collect()
+}
+
+/// TypeScript programs whose walks apply a callback many times, for the
+/// FIG-6945 laws that move a walk's slice end and memory bound.
+pub(crate) fn long_walk_programs() -> Vec<(runner::Case, Program)> {
+    lowered_islands(&[
+        (
+            "typescript",
+            "a comparator a sort applies",
+            "function run() {\n  const xs = [];\n  for (let i = 0; i < 12; i++) { xs.push({ id: i, key: (i * 7) % 5 }); }\n  xs.sort((p, q) => p.key - q.key);\n  return xs.map((r) => r.id);\n}\nconst result = run();\n",
+        ),
+        (
+            "typescript",
+            "a callback a long filter applies",
+            "function run() {\n  const xs = [];\n  for (let i = 0; i < 3000; i++) { xs.push(i); }\n  return xs.filter((x) => x % 3 !== 1).length;\n}\nconst result = run();\n",
+        ),
+    ])
+}
+
 /// Each `(dialect, name, source)` of `sources`, lowered as an island
 /// program.
 fn lowered_islands(sources: &[(&str, &str, &str)]) -> Vec<(runner::Case, Program)> {

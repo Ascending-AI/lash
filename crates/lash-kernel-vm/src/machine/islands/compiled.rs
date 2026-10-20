@@ -4,6 +4,7 @@
 //! registers the frame holds and the op the reference resumes at.
 
 use lash_kernel_doc::Value;
+use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_exec::ActIx;
 
 use super::{Answer, Island, MAX_ARGS, Slots};
@@ -46,7 +47,80 @@ impl Operand {
 
 /// An island plan's compiled form.
 pub(crate) struct Compiled {
+    pub(super) layout: Layout,
     pub(super) body: CBlock,
+}
+
+/// A plan's frame layout, precomputed from its plan: how many arguments
+/// its call takes, and the variable each argument and each captured value
+/// is copied to as its frame is entered.
+pub(super) struct Layout {
+    pub(super) arity: usize,
+    /// Its parameters are its first variables, in order: the arguments
+    /// are copied as one run.
+    leading: bool,
+    params: [u8; MAX_SLOTS],
+    captures: [u8; MAX_SLOTS],
+    captured: usize,
+}
+
+impl Layout {
+    fn of(plan: &IslandPlan) -> Option<Self> {
+        let mut layout = Self {
+            arity: plan.params.len(),
+            leading: plan
+                .params
+                .iter()
+                .enumerate()
+                .all(|(index, at)| *at as usize == index),
+            params: [0; MAX_SLOTS],
+            captures: [0; MAX_SLOTS],
+            captured: plan.captures.len(),
+        };
+        for (to, from) in [
+            (&mut layout.params, &plan.params),
+            (&mut layout.captures, &plan.captures),
+        ] {
+            for (to, at) in to.iter_mut().zip(from.iter()) {
+                *to = u8::try_from(*at)
+                    .ok()
+                    .filter(|at| usize::from(*at) < MAX_SLOTS)?;
+            }
+            if from.len() > MAX_SLOTS {
+                return None;
+            }
+        }
+        Some(layout)
+    }
+
+    /// Lays out the fresh frame `slots`, every variable empty: `args`
+    /// in its parameters, those past them absent, and the captured values
+    /// from `captured` in its captured variables. `args` are at most its
+    /// arity.
+    #[inline(always)]
+    pub(super) fn fill(
+        &self,
+        slots: &mut Slots,
+        args: &[Value],
+        captured: &[(Value, ArenaHandle)],
+    ) {
+        let given = args.len().min(self.arity);
+        if self.leading {
+            for (slot, value) in slots[..given].iter_mut().zip(args) {
+                *slot = Some(*value);
+            }
+            for slot in &mut slots[given..self.arity] {
+                *slot = Some(Value::Absent);
+            }
+        } else {
+            for (index, at) in self.params[..self.arity].iter().enumerate() {
+                slots[usize::from(*at)] = Some(args.get(index).copied().unwrap_or(Value::Absent));
+            }
+        }
+        for (at, (value, _)) in self.captures[..self.captured].iter().zip(captured) {
+            slots[usize::from(*at)] = Some(*value);
+        }
+    }
 }
 
 pub(super) struct CBlock {
@@ -107,6 +181,10 @@ pub(super) struct OperatorSite {
     pub(super) lib: LibId,
     pub(super) entry: Entry,
     pub(super) table: ScalarTable,
+    /// What its typed path's answer on two floats charges: its table's
+    /// units for sizes of 1, as a float kernel answers a float or a
+    /// boolean.
+    pub(super) floats: Option<u64>,
     pub(super) close: Option<Close>,
     pub(super) pc: u32,
     pub(super) reg: u32,
@@ -155,6 +233,7 @@ pub(super) struct CallSite {
 impl Compiled {
     pub(crate) fn of(plan: &IslandPlan, exe: &Executable) -> Option<Self> {
         Some(Self {
+            layout: Layout::of(plan)?,
             body: block(&plan.body, exe)?,
         })
     }
@@ -504,13 +583,24 @@ fn native(site: NativeSite, operands: Vec<Operand>) -> Node {
 }
 
 /// The answer of `pair`'s kernel on `x` and `y` when both are floats or
-/// both word integers and it has a kernel for them.
+/// both word integers and it has a kernel for them, with the units operator
+/// `site`'s table charges it where it certifies its sizes.
 #[inline(always)]
-fn typed(pair: &lash_kernel_doc::scalar::Pair, x: Value, y: Value) -> Option<Value> {
+fn typed(
+    site: &OperatorSite,
+    pair: &lash_kernel_doc::scalar::Pair,
+    x: Value,
+    y: Value,
+) -> Option<(Value, Option<u64>)> {
     use lash_kernel_doc::scalar;
     match (x, y) {
-        (Value::Float(p), Value::Float(q)) => scalar::floats(pair.floats?, p, q),
-        (Value::Int(p), Value::Int(q)) => scalar::ints(pair.ints?, p, q),
+        (Value::Float(p), Value::Float(q)) => {
+            Some((scalar::floats(pair.floats?, p, q)?, site.floats))
+        }
+        (Value::Int(p), Value::Int(q)) => {
+            let value = scalar::ints(pair.ints?, p, q)?;
+            Some((value, site.table.units(super::sizes(&[x, y], &value))))
+        }
         _ => None,
     }
 }
@@ -540,10 +630,12 @@ fn operator_site(expr: &Expr, exe: &Executable) -> Option<OperatorSite> {
     let counted = invoke
         .filter(|invoke| invoke.call)
         .map(|invoke| invoke.occurrence);
+    let table = fast.scalar()?.clone();
     let site = OperatorSite {
         lib: *lib,
         entry: entry.clone(),
-        table: fast.scalar()?.clone(),
+        floats: table.units(0),
+        table,
         close: closes.first().copied(),
         pc,
         reg,
@@ -597,18 +689,21 @@ fn operator(site: OperatorSite, operands: Vec<Operand>) -> Node {
     let mut operands = operands.into_iter();
     let pair = site.entry.pair();
     match (operands.next(), operands.next(), operands.next()) {
-        // Two operands whose entry has typed paths:
-        // two floats or two word integers take the path for their kind.
+        // Two operands whose entry has typed paths: two floats or two
+        // word integers take the path for their kind, committed in place
+        // where it commits what the general path would.
         (Some(a), Some(b), None) if let Some(pair) = pair => Box::new(move |island, slots| {
             let x = a.eval(island, slots)?;
             let y = match b.eval(island, slots) {
                 Ok(y) => y,
                 Err(stop) => return Err(island.held(stop, site.reg, x)),
             };
-            let args = [x, y];
-            island.operate_with(&site, &args, || {
-                typed(&pair, x, y).or_else(|| site.entry.call(&args))
-            })
+            if let Some((value, units)) = typed(&site, &pair, x, y)
+                && let Some(answer) = island.typed(&site, value, units)
+            {
+                return answer;
+            }
+            island.operate(&site, &[x, y])
         }),
         (Some(a), Some(b), None) => Box::new(move |island, slots| {
             let x = a.eval(island, slots)?;

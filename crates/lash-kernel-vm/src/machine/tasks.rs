@@ -147,7 +147,20 @@ impl Occurrences {
         problem.map_or(Ok(counters), Err)
     }
 
+    #[inline]
     pub(crate) fn advance(&mut self, index: usize) -> Result<u64, super::Halt> {
+        // A site counted since the step's last projection, short of the
+        // counter's end: its count steps in place.
+        let count = self.counts[index];
+        if count < u64::MAX && self.marked[index] {
+            self.counts[index] = count + 1;
+            return Ok(count);
+        }
+        self.advance_marking(index)
+    }
+
+    #[inline(never)]
+    fn advance_marking(&mut self, index: usize) -> Result<u64, super::Halt> {
         let count = self.counts[index];
         self.counts[index] = count
             .checked_add(1)

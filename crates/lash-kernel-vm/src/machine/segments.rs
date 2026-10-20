@@ -202,6 +202,7 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
             }
             Target::Code(code, captures) => {
                 let ran = self.machine.callback_island(
+                    &mut self.gate,
                     self.task,
                     self.exe,
                     (code, &captures),
@@ -300,6 +301,7 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
             }
         };
         let ran = self.machine.callback_island(
+            &mut self.gate,
             self.task,
             self.exe,
             (steady.code, &steady.cells),
@@ -816,6 +818,7 @@ impl KernelMachine {
             statement: None,
             halt: None,
             steady: None,
+            gate: None,
         };
         let opened = run.open_statement();
         let outcome = match opened {
