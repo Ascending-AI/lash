@@ -142,28 +142,6 @@ lash_rust_feature_library(
 )
 
 lash_rust_feature_library(
-    name = "lash-plugin-process-controls__fv_228391d0",
-    build_script = None,
-    crate_features = [
-        "default",
-    ],
-    crate_name = "lash_plugin_process_controls",
-    declared_features = [
-        "default",
-    ],
-    exec_properties = sized_exec_properties("lash-internal-plugin-process-controls", "lash_plugin_process_controls"),
-    extra_compile_data = [],
-    manifest_dir = "crates/lash-plugin-process-controls",
-    package_name = "lash-internal-plugin-process-controls",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_a49e99c0", "//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_f56d36b4", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_84748144", "//crates/lash-llm-tools:lash-llm-tools": "//crates/lash-llm-tools:lash-llm-tools__fv_4b5e48a1", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_abf03f77", "//crates/lash-perf:lash-perf": "//crates/lash-perf:lash-perf__fv_8551f98e", "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_2bd831ba", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_fc467a00", "//crates/lash-protocol-standard:lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_3fd00b8e", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_0cd2a6c4", "//crates/lash-rlm-types:lash-rlm-types": "//crates/lash-rlm-types:lash-rlm-types__fv_db079728", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_5ccd6624", "//crates/lash-tool-support:lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_b9bcb4d3", "//crates/lash-vm-broker:lash-vm-broker": "//crates/lash-vm-broker:lash-vm-broker__fv_42d26c53", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_dbc0f65a", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_11c00844", "//crates/lash-vm-worker:lash-vm-worker": "//crates/lash-vm-worker:lash-vm-worker__fv_62d7d131", "//crates/lash:lash": "//crates/lash:lash__fv_60920cdd", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_23fda301"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_library(
     name = "lash-plugin-process-controls__fv_42fcb3e1",
     build_script = None,
     crate_features = [

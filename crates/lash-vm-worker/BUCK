@@ -947,6 +947,36 @@ lash_rust_feature_library(
 )
 
 lash_rust_feature_library(
+    name = "lash-vm-worker__fv_45db6029",
+    build_script = ":build_script",
+    crate_features = [
+        "dialect-python",
+        "dialect-typescript",
+        "testing",
+    ],
+    crate_name = "lash_vm_worker",
+    declared_features = [
+        "dhat-heap",
+        "dialect-python",
+        "dialect-typescript",
+        "synthetic-next",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-vm-worker", "lash_vm_worker"),
+    extra_compile_data = [
+        "//crates/lash-vm-releases:rust_sources",
+    ],
+    manifest_dir = "crates/lash-vm-worker",
+    package_name = "lash-internal-vm-worker",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_90d14cca", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_7e3d347a", "//crates/lash-perf:lash-perf": "//crates/lash-perf:lash-perf__fv_6c0cc09a", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_7860b643", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_7ad17217", "//crates/lash-vm-broker:lash-vm-broker": "//crates/lash-vm-broker:lash-vm-broker__fv_04aafbda", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_0252cb2e", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_3f9ba12b", "//crates/lash:lash": "//crates/lash:lash__fv_66cf83f0", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_ddda9416"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
     name = "lash-vm-worker__fv_55f1fe7f",
     build_script = ":build_script",
     crate_features = [
@@ -1003,68 +1033,6 @@ lash_rust_feature_library(
         "manual",
     ],
     variant_deps = {"//crates/lash-conformance:lash-conformance": "//crates/lash-conformance:lash-conformance__fv_0f68f013", "//crates/lash-core-effect:lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_b42df3ae", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_43842b35", "//crates/lash-core-ids:lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_ad25808d", "//crates/lash-core-llm:lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_51a9962e", "//crates/lash-core-store:lash-core-store": "//crates/lash-core-store:lash-core-store__fv_af80fd4a", "//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_2092bf93", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_725dc870", "//crates/lash-durable:lash-durable": "//crates/lash-durable:lash-durable__fv_d8f30fa2", "//crates/lash-execution-contracts:lash-execution-contracts": "//crates/lash-execution-contracts:lash-execution-contracts__fv_867f2d7f", "//crates/lash-llm-tools:lash-llm-tools": "//crates/lash-llm-tools:lash-llm-tools__fv_f5e8cc61", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_4f2653b1", "//crates/lash-plugin-process-controls:lash-plugin-process-controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_42fcb3e1", "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_23e1f256", "//crates/lash-postgres-store:lash-postgres-store": "//crates/lash-postgres-store:lash-postgres-store__fv_22f34e72", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_47c2806c", "//crates/lash-protocol-standard:lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_060155fc", "//crates/lash-provider-anthropic:lash-provider-anthropic": "//crates/lash-provider-anthropic:lash-provider-anthropic__fv_72f5a8e4", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_99c923ef", "//crates/lash-rlm-types:lash-rlm-types": "//crates/lash-rlm-types:lash-rlm-types__fv_db079728", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_5ccd6624", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_081d6075", "//crates/lash-tool-support:lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_00ac31d1", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_ae8b3881", "//crates/lash-vm-broker:lash-vm-broker": "//crates/lash-vm-broker:lash-vm-broker__fv_d164f3fc", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_e23fdffb", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_800af59d", "//crates/lash:lash": "//crates/lash:lash__fv_41b88884"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_library(
-    name = "lash-vm-worker__fv_62d7d131",
-    build_script = ":build_script",
-    crate_features = [
-        "dialect-python",
-        "dialect-typescript",
-        "testing",
-    ],
-    crate_name = "lash_vm_worker",
-    declared_features = [
-        "dhat-heap",
-        "dialect-python",
-        "dialect-typescript",
-        "synthetic-next",
-        "testing",
-    ],
-    exec_properties = sized_exec_properties("lash-internal-vm-worker", "lash_vm_worker"),
-    extra_compile_data = [
-        "//crates/lash-vm-releases:rust_sources",
-    ],
-    manifest_dir = "crates/lash-vm-worker",
-    package_name = "lash-internal-vm-worker",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    variant_deps = {"//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_a49e99c0", "//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_f56d36b4", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_84748144", "//crates/lash-llm-tools:lash-llm-tools": "//crates/lash-llm-tools:lash-llm-tools__fv_4b5e48a1", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_abf03f77", "//crates/lash-perf:lash-perf": "//crates/lash-perf:lash-perf__fv_8551f98e", "//crates/lash-plugin-process-controls:lash-plugin-process-controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_228391d0", "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_2bd831ba", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_fc467a00", "//crates/lash-protocol-standard:lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_3fd00b8e", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_0cd2a6c4", "//crates/lash-rlm-types:lash-rlm-types": "//crates/lash-rlm-types:lash-rlm-types__fv_db079728", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_5ccd6624", "//crates/lash-tool-support:lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_b9bcb4d3", "//crates/lash-vm-broker:lash-vm-broker": "//crates/lash-vm-broker:lash-vm-broker__fv_42d26c53", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_dbc0f65a", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_11c00844", "//crates/lash:lash": "//crates/lash:lash__fv_60920cdd", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_23fda301"},
-    version = "0.0.0-dev",
-)
-
-lash_rust_feature_library(
-    name = "lash-vm-worker__fv_68049199",
-    build_script = ":build_script",
-    crate_features = [
-        "dhat-heap",
-        "dialect-python",
-        "dialect-typescript",
-        "testing",
-    ],
-    crate_name = "lash_vm_worker",
-    declared_features = [
-        "dhat-heap",
-        "dialect-python",
-        "dialect-typescript",
-        "synthetic-next",
-        "testing",
-    ],
-    exec_properties = sized_exec_properties("lash-internal-vm-worker", "lash_vm_worker"),
-    extra_compile_data = [
-        "//crates/lash-vm-releases:rust_sources",
-    ],
-    manifest_dir = "crates/lash-vm-worker",
-    package_name = "lash-internal-vm-worker",
-    tags = [
-        "feature-lane",
-        "manual",
-    ],
-    extra_deps = {"//third-party/rust:extra_dhat": "dhat"},
-    variant_deps = {"//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_a49e99c0", "//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_f56d36b4", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_84748144", "//crates/lash-llm-tools:lash-llm-tools": "//crates/lash-llm-tools:lash-llm-tools__fv_4b5e48a1", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_abf03f77", "//crates/lash-perf:lash-perf": "//crates/lash-perf:lash-perf__fv_59a65ae0", "//crates/lash-plugin-process-controls:lash-plugin-process-controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_228391d0", "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_2bd831ba", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_288239a5", "//crates/lash-protocol-standard:lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_3fd00b8e", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_0cd2a6c4", "//crates/lash-rlm-types:lash-rlm-types": "//crates/lash-rlm-types:lash-rlm-types__fv_db079728", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_5ccd6624", "//crates/lash-tool-support:lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_b9bcb4d3", "//crates/lash-vm-broker:lash-vm-broker": "//crates/lash-vm-broker:lash-vm-broker__fv_42d26c53", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_997c1a7c", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_ea106297", "//crates/lash:lash": "//crates/lash:lash__fv_996d3cdc", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_92482083"},
     version = "0.0.0-dev",
 )
 
@@ -1336,6 +1304,38 @@ lash_rust_feature_library(
         "manual",
     ],
     variant_deps = {"//crates/lash-conformance:lash-conformance": "//crates/lash-conformance:lash-conformance__fv_a3bef3ff", "//crates/lash-core-execution:lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_a49e99c0", "//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_26041639", "//crates/lash-core:lash-core": "//crates/lash-core:lash-core__fv_efed6dd8", "//crates/lash-llm-tools:lash-llm-tools": "//crates/lash-llm-tools:lash-llm-tools__fv_d33fdf1a", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_56cfa340", "//crates/lash-plugin-process-controls:lash-plugin-process-controls": "//crates/lash-plugin-process-controls:lash-plugin-process-controls__fv_6117a32c", "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_e5a407ba", "//crates/lash-postgres-store:lash-postgres-store": "//crates/lash-postgres-store:lash-postgres-store__fv_2854b180", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_5c143e22", "//crates/lash-protocol-standard:lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_62303516", "//crates/lash-provider-anthropic:lash-provider-anthropic": "//crates/lash-provider-anthropic:lash-provider-anthropic__fv_628a97a3", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_95924d0b", "//crates/lash-rlm-types:lash-rlm-types": "//crates/lash-rlm-types:lash-rlm-types__fv_db079728", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_5ccd6624", "//crates/lash-sqlite-store:lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_23162748", "//crates/lash-tool-support:lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_bd09448d", "//crates/lash-vm-broker:lash-vm-broker": "//crates/lash-vm-broker:lash-vm-broker__fv_54e273a4", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_8d883c1d", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_65dbec85", "//crates/lash:lash": "//crates/lash:lash__fv_742c96b5"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-vm-worker__fv_e61b5c52",
+    build_script = ":build_script",
+    crate_features = [
+        "dhat-heap",
+        "dialect-python",
+        "dialect-typescript",
+        "testing",
+    ],
+    crate_name = "lash_vm_worker",
+    declared_features = [
+        "dhat-heap",
+        "dialect-python",
+        "dialect-typescript",
+        "synthetic-next",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-vm-worker", "lash_vm_worker"),
+    extra_compile_data = [
+        "//crates/lash-vm-releases:rust_sources",
+    ],
+    manifest_dir = "crates/lash-vm-worker",
+    package_name = "lash-internal-vm-worker",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    extra_deps = {"//third-party/rust:extra_dhat": "dhat"},
+    variant_deps = {"//crates/lash-core-worker:lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_90d14cca", "//crates/lash-llm-transport:lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_7e3d347a", "//crates/lash-perf:lash-perf": "//crates/lash-perf:lash-perf__fv_92f8f4c8", "//crates/lash-protocol-rlm:lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_fbd51ca8", "//crates/lash-provider-openai:lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_7ad17217", "//crates/lash-vm-broker:lash-vm-broker": "//crates/lash-vm-broker:lash-vm-broker__fv_04aafbda", "//crates/lash-vm-client:lash-vm-client": "//crates/lash-vm-client:lash-vm-client__fv_022ffa61", "//crates/lash-vm-runtime:lash-vm-runtime": "//crates/lash-vm-runtime:lash-vm-runtime__fv_25e11ed3", "//crates/lash:lash": "//crates/lash:lash__fv_82299543", "//examples/delegation:delegation": "//examples/delegation:delegation__fv_cb2c6b51"},
     version = "0.0.0-dev",
 )
 
