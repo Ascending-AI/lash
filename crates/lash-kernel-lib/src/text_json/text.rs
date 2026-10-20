@@ -1,5 +1,4 @@
 use super::Selection;
-use lash_kernel_doc::arena::ShortText;
 use lash_kernel_doc::{
     Formula, Integer, Name, NativeCall, NativeError, NewObject, Nursery, Operand, PreparedNative,
     TextView, Type, Value,
@@ -690,13 +689,7 @@ fn short_concat(args: &[Value]) -> Option<Value> {
     let [Value::Text(text), Value::Text(other)] = args else {
         return None;
     };
-    let (text, other) = (text.as_bytes(), other.as_bytes());
-    let mut bytes = [0; ShortText::MAX];
-    let out = bytes.get_mut(..text.len() + other.len())?;
-    let (head, tail) = out.split_at_mut(text.len());
-    head.copy_from_slice(text);
-    tail.copy_from_slice(other);
-    ShortText::new(std::str::from_utf8(out).ok()?).map(Value::Text)
+    text.concat(other).map(Value::Text)
 }
 
 fn starts_with(call: NativeCall<'_, '_>) -> Result<Value, NativeError> {

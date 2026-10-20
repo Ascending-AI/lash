@@ -58,7 +58,7 @@ impl std::fmt::Write for Text {
 
 impl Text {
     fn value(&self) -> Option<Value> {
-        ShortText::new(std::str::from_utf8(&self.bytes[..self.len]).ok()?).map(Value::Text)
+        ShortText::ascii(&self.bytes[..self.len]).map(Value::Text)
     }
 }
 
@@ -82,7 +82,7 @@ fn integer_text(word: i64) -> Option<Value> {
         at = at.checked_sub(1)?;
         bytes[at] = b'-';
     }
-    ShortText::new(std::str::from_utf8(&bytes[at..]).ok()?).map(Value::Text)
+    ShortText::ascii(&bytes[at..]).map(Value::Text)
 }
 
 fn number_to_string(args: &[Value]) -> Option<Value> {

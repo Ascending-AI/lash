@@ -852,7 +852,7 @@ fn short_digits(word: i64, radix: u32) -> Option<ShortText> {
         at = at.checked_sub(1)?;
         *bytes.get_mut(at)? = b'-';
     }
-    ShortText::new(std::str::from_utf8(bytes.get(at..)?).ok()?)
+    ShortText::ascii(bytes.get(at..)?)
 }
 
 /// An integer's digits in `radix`, a text that can be eight times the

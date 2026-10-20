@@ -82,6 +82,37 @@ impl ShortText {
         })
     }
 
+    /// `self` followed by `other`, when the combined text fits inline.
+    #[inline]
+    pub fn concat(&self, other: &Self) -> Option<Self> {
+        let head = usize::from(self.len);
+        let len = head + usize::from(other.len);
+        if len > Self::MAX {
+            return None;
+        }
+        // The untouched tail stays zero-padded, as in `new`.
+        let mut bytes = self.bytes;
+        bytes[head..len].copy_from_slice(other.as_bytes());
+        Some(Self {
+            len: len as u8,
+            bytes,
+        })
+    }
+
+    /// ASCII bytes inline, when they are ASCII and short enough.
+    #[inline]
+    pub fn ascii(text: &[u8]) -> Option<Self> {
+        if text.len() > Self::MAX || !text.is_ascii() {
+            return None;
+        }
+        let mut bytes = [0; Self::MAX];
+        bytes[..text.len()].copy_from_slice(text);
+        Some(Self {
+            len: text.len() as u8,
+            bytes,
+        })
+    }
+
     #[inline]
     pub fn as_bytes(&self) -> &[u8] {
         &self.bytes[..usize::from(self.len)]
@@ -97,12 +128,15 @@ impl ShortText {
         u128::from_le_bytes(word)
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "ShortText::new admits only the bytes of a str"
-    )]
+    #[allow(unsafe_code)]
     pub fn as_str(&self) -> &str {
-        std::str::from_utf8(self.as_bytes()).expect("a short text is UTF-8")
+        let bytes = self.as_bytes();
+        debug_assert!(std::str::from_utf8(bytes).is_ok());
+        // SAFETY: The fields are private and every constructor preserves UTF-8:
+        // `new` copies a str, `ascii` checks ASCII bytes, and `concat` joins
+        // two valid UTF-8 texts at their boundaries. Copy/Clone preserve those
+        // bytes, and no method exposes mutable access to them.
+        unsafe { std::str::from_utf8_unchecked(bytes) }
     }
 }
 

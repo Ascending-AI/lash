@@ -3,6 +3,8 @@
 
 use std::collections::BTreeMap;
 
+use crate::arena::ShortText;
+
 use crate::{
     Action, AssignOrder, Atom, Callee, Document, Expr, Float, Formula, FunctionDefinition,
     FunctionId, FunctionRegistry, Implementation, InvalidReason, Literal, MAX_NESTING_DEPTH, Name,
@@ -10,6 +12,71 @@ use crate::{
     StatementForm, Stmt, parse_definition, parse_document, print_definition, print_document,
     validate_document,
 };
+
+/// FIG-6977: all short-text constructors produce the same zero-padded word,
+/// and refuse bytes outside their length or ASCII contract.
+#[test]
+fn short_text_concat_and_ascii_match_new() {
+    for len in 0..=ShortText::MAX + 1 {
+        for byte in 0..=127 {
+            let bytes = vec![byte; len];
+            let text = std::str::from_utf8(&bytes).unwrap();
+            let expected = ShortText::new(text);
+            let actual = ShortText::ascii(&bytes);
+            assert_eq!(actual, expected);
+            assert_eq!(actual.map(|s| s.word()), expected.map(|s| s.word()));
+        }
+    }
+    for byte in 128..=255 {
+        assert!(ShortText::ascii(&[byte]).is_none());
+    }
+    let texts = [
+        "",
+        "\0",
+        "abc",
+        "é",
+        "界",
+        "🦀",
+        "0123456789🦀",
+        "\0é界🦀abcd",
+    ];
+    for head in texts {
+        for tail in texts {
+            let expected = ShortText::new(&format!("{head}{tail}"));
+            let actual = ShortText::new(head)
+                .unwrap()
+                .concat(&ShortText::new(tail).unwrap());
+            assert_eq!(actual, expected);
+            assert_eq!(actual.map(|s| s.word()), expected.map(|s| s.word()));
+        }
+    }
+}
+
+/// FIG-6977: the unchecked read round-trips every constructor's UTF-8,
+/// including four-byte code points ending exactly at the inline boundary.
+#[test]
+fn short_text_as_str_round_trips_every_constructor() {
+    for text in [
+        "",
+        "\0abc\0",
+        "01234567890123",
+        "é界",
+        "0123456789🦀",
+        "🦀abcdef🦀",
+    ] {
+        assert_eq!(ShortText::new(text).unwrap().as_str(), text);
+        if text.is_ascii() {
+            assert_eq!(ShortText::ascii(text.as_bytes()).unwrap().as_str(), text);
+        }
+        for split in 0..=text.len() {
+            if text.is_char_boundary(split) {
+                let head = ShortText::new(&text[..split]).unwrap();
+                let tail = ShortText::new(&text[split..]).unwrap();
+                assert_eq!(head.concat(&tail).unwrap().as_str(), text);
+            }
+        }
+    }
+}
 
 /// A definition named `name` taking one `Any`: native when `native`, with a
 /// one-statement kernel body otherwise.
