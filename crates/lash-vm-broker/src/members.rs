@@ -186,10 +186,11 @@ impl Members {
         &mut self,
         folded: &RunFold,
     ) -> Result<Option<lash_core_execution::runtime::actor::round::lifecycle::Idle>, Undriven> {
-        match self.lifecycle()?.act(folded).await? {
-            Act::Committed(appended) => {
+        let now = self.cx.durable_now().await?;
+        match self.lifecycle()?.act(folded, now).await? {
+            Act::Committed(committed) => {
                 if let Some(rows) = self.rows.as_mut() {
-                    rows.extend(appended);
+                    rows.extend(committed.appended);
                 }
                 Ok(None)
             }

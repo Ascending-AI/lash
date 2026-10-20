@@ -602,6 +602,14 @@ impl DurableStore for LedgerStore {
         self.inner.begin(actor, epoch).await
     }
 
+    async fn open_process(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+    ) -> Result<(ActorTx, ProcessView), DurableError> {
+        self.inner.open_process(actor, epoch).await
+    }
+
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {
         let actor = tx.actor().clone();
         let epoch = tx.epoch();

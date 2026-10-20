@@ -48,7 +48,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use lash_core_store::tool_run::{AvailableEvidence, CompletionSource};
 use lash_durable::domain::{
-    CANCEL_MAIL, ExecRootRow, ProcessActorRow, ProcessWrite, RunSeq, ScopeKey, WaitState, WaitWrite,
+    CANCEL_MAIL, ExecRootRow, ProcessActorRow, ProcessWrite, RunFacts, RunSeq, ScopeKey, WaitState,
+    WaitWrite,
 };
 use lash_durable::runner::{Activation, Exit, Owned, Wake};
 use lash_durable::{
@@ -216,6 +217,8 @@ pub(super) struct Live {
     published: Option<u64>,
     /// The `requires` the actor's row holds: claimed, then as written.
     pub(super) requires: Vec<String>,
+    /// What this activation keeps of its own acknowledged commits.
+    continuation: super::continuation::Continuation,
 }
 
 impl Live {
@@ -301,6 +304,7 @@ impl ProcessActivation {
             ended_refused: false,
             published: None,
             requires: owned.requires().to_vec(),
+            continuation: super::continuation::Continuation::default(),
         };
         loop {
             let passed = Box::pin(self.pass(owned, process, &mut live)).await;
@@ -486,8 +490,15 @@ impl ProcessActivation {
         live: &mut Live,
     ) -> Result<Pass, DurableError> {
         let reads: &dyn DurableReads = owned.store().as_ref();
-        let mut tx = owned.begin().await?;
-        let Some(row) = reads.process(process).await? else {
+        // One read opens the pass: the fenced open with its mail and the
+        // store's clock, the process row, its registry record and its
+        // engine state's root. Each is decoded where it decides, in the
+        // order the pass meets them.
+        let (mut tx, view) = owned
+            .store()
+            .open_process(owned.actor(), owned.epoch())
+            .await?;
+        let Some(row) = view.row else {
             // The row is gone: nothing is left to run or to end.
             tx.ack_seen().give_up(Release::Terminal);
             owned.commit(tx, CommitLabel::PROCESS_TERMINAL).await?;
@@ -501,15 +512,11 @@ impl ProcessActivation {
             return self.cascade(owned, reads, tx, process, &row).await;
         }
         if owned.purpose() == lash_durable::ClaimPurpose::CancelOnly {
-            return self.end_undecodable(owned, tx, process, live).await;
+            return self
+                .end_undecodable(owned, tx, process, live, &view.registry)
+                .await;
         }
-        let record = self
-            .backend
-            .process_registry()
-            .get_process(process)
-            .await
-            .map_err(|error| registry_failure(&error))?
-            .ok_or_else(|| corrupt("a live process actor", "its registry row is gone"))?;
+        let record = live.continuation.record(process, &view.registry)?;
         let cancel = record
             .cancel_request
             .as_deref()
@@ -550,15 +557,22 @@ impl ProcessActivation {
         let engine = self.backend.process_engine(kind).cloned();
         let loaded = match &engine {
             Some(engine) => {
-                self.load_state(reads, process, &row, engine.as_ref())
-                    .await?
+                self.load_state(
+                    reads,
+                    process,
+                    &row,
+                    view.root.as_ref(),
+                    engine.as_ref(),
+                    &mut live.continuation,
+                )
+                .await?
             }
             None => Err(ProcessParkReason::UnknownEngine { kind: kind.clone() }),
         };
         // The driver row is decoded with the engine state, before anything
         // of the process runs: one this node does not decode parks the
         // process with its typed reason, and a cancel ends it unread.
-        let driver = Driver::decode(row.driver_json.as_deref());
+        let driver = live.continuation.driver(row.driver_json.as_deref());
         if let Some(origin) = cancel
             && (loaded.is_err() || driver.is_err())
         {
@@ -642,7 +656,8 @@ impl ProcessActivation {
             Succession::Ended(pass) => return Ok(pass),
             Succession::AsWritten(tx) => *tx,
         };
-        let now = owned.store().now().await?;
+        // The store's clock as the open read it: what this pass decides at.
+        let now = tx.opened_at();
         if let (Some(origin), Some(until)) = (cancel, driver.grace_until)
             && now.0 >= until
         {
@@ -658,8 +673,15 @@ impl ProcessActivation {
                 .await?;
             return Ok(Pass::Again);
         }
-        let rows = driver
-            .step_facts(reads, process, !live.history_restored)
+        let (rows, waits) = live
+            .continuation
+            .facts(
+                reads,
+                process,
+                &driver,
+                tx.revision(),
+                !live.history_restored,
+            )
             .await?;
         let mut policies = Vec::with_capacity(driver.steps.len());
         let mut link_failures = BTreeMap::new();
@@ -676,7 +698,6 @@ impl ProcessActivation {
             }
         }
         let policies = PolicyView::new(policies);
-        let waits = round::PinnedWaits::read(reads, &rows).await?;
         let fold = round::fold(&rows, &policies, &waits)
             .map_err(|error| corrupt("a process's run records", error))?;
         live.lifecycle
@@ -710,7 +731,11 @@ impl ProcessActivation {
             }
         }
         if settled_links {
-            owned.commit(tx, CommitLabel::STEP_OUTCOME).await?;
+            let appended = RunFacts::appended(tx.domain(), tx.graph(), owned.epoch());
+            let committed = owned.commit(tx, CommitLabel::STEP_OUTCOME).await?;
+            live.continuation
+                .committed(reads, committed.revision, appended, &driver)
+                .await?;
             return Ok(Pass::Again);
         }
         live.lifecycle.declare(policies);
@@ -720,8 +745,19 @@ impl ProcessActivation {
         // that run to commit their outcomes, then hands the process to the
         // next build at this committed phase.
         if owned.draining() {
-            match live.lifecycle.drain(&fold).await.map_err(steps_failure)? {
-                Act::Committed(_) | Act::Refused => return Ok(Pass::Again),
+            match live
+                .lifecycle
+                .drain(&fold, now)
+                .await
+                .map_err(steps_failure)?
+            {
+                Act::Committed(committed) => {
+                    live.continuation
+                        .committed(reads, committed.revision, committed.appended, &driver)
+                        .await?;
+                    return Ok(Pass::Again);
+                }
+                Act::Refused => return Ok(Pass::Again),
                 Act::Idle(idle) if !idle.suspendable() => return Ok(Pass::Wait(idle, None)),
                 Act::Idle(_) => {}
             }
@@ -779,8 +815,19 @@ impl ProcessActivation {
             // its own leaves this transaction unwritten; the next pass reads
             // what it committed.
             Next::Nothing { due } => {
-                let idle = match live.lifecycle.act(&fold).await.map_err(steps_failure)? {
-                    Act::Committed(_) | Act::Refused => return Ok(Pass::Again),
+                let idle = match live
+                    .lifecycle
+                    .act(&fold, now)
+                    .await
+                    .map_err(steps_failure)?
+                {
+                    Act::Committed(committed) => {
+                        live.continuation
+                            .committed(reads, committed.revision, committed.appended, &driver)
+                            .await?;
+                        return Ok(Pass::Again);
+                    }
+                    Act::Refused => return Ok(Pass::Again),
                     Act::Idle(idle) => idle,
                 };
                 if !idle.suspendable() {
@@ -837,7 +884,7 @@ impl ProcessActivation {
             return Ok(Pass::Again);
         }
         let ending = Ending::of(&event);
-        let (next, action) = match engine.advance(state, event) {
+        let (next, action) = match engine.advance(Arc::unwrap_or_clone(state), event) {
             Ok(transition) => transition,
             Err(error) => {
                 let reason = ProcessParkReason::AdvanceRefused {
@@ -892,10 +939,11 @@ impl ProcessActivation {
             self.commit_terminal(owned, tx, process, nodes).await?;
             return Ok(Pass::Again);
         }
+        let driver_json = driver.encode();
         tx.write(DomainWrite::Process(ProcessWrite::Advance {
             process: process.clone(),
             expected_rev: row.state_rev,
-            driver_json: driver.encode(),
+            driver_json: driver_json.clone(),
         }));
         self.record_published(&mut tx, process, &row);
         let requires = self
@@ -909,42 +957,49 @@ impl ProcessActivation {
             // that leaves the state in another format says so too.
             tx.stamp_formats(formats.clone());
         }
-        super::state_graph::write_engine_state(&mut tx, process, kind, &next, root.as_ref())?;
-        owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
+        // The facts this transition appends, before its engine state is
+        // staged beside them: the next pass folds them without a read.
+        let appended = RunFacts::appended(tx.domain(), tx.graph(), owned.epoch());
+        let written =
+            super::state_graph::write_engine_state(&mut tx, process, kind, &next, root.as_ref())?;
+        let committed = owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
         nodes.publish(self.tracing.as_ref(), &record, millis(now));
         if let Some(requires) = requires {
             live.requires = requires;
         }
+        live.continuation
+            .committed(reads, committed.revision, appended, &driver)
+            .await?;
+        live.continuation
+            .wrote(written, kind, next, driver_json, driver);
         // The steps this transition admitted run once the next pass folds
         // their rows.
         live.lifecycle.admitted(&fresh);
         Ok(Pass::Again)
     }
 
-    /// The engine state committed with `row`'s revision, and the root row
-    /// it replaces, or why this node cannot decode it.
+    /// The engine state committed with `row`'s revision under `root`, the
+    /// root row the pass's view read, which the state's next write
+    /// replaces, or why this node cannot decode it.
     async fn load_state(
         &self,
         reads: &dyn DurableReads,
         process: &ProcessId,
         row: &ProcessActorRow,
+        root: Option<&ExecRootRow>,
         engine: &dyn ProcessEngine,
-    ) -> Result<Result<(EngineState, Option<ExecRootRow>), ProcessParkReason>, DurableError> {
+        continuation: &mut super::continuation::Continuation,
+    ) -> Result<Result<(Arc<EngineState>, Option<ExecRootRow>), ProcessParkReason>, DurableError>
+    {
         let format = engine.state_format();
         let carried = self
             .backend
             .state_migration(&format.kind)
             .map(|migration| migration.carries())
             .unwrap_or_default();
-        let Some((root, written_by, state)) = super::state_graph::read_engine_state(
-            reads,
-            process,
-            self.backend.config().settings().graph_reads.engine(),
-        )
-        .await?
-        else {
+        let Some(root) = root else {
             return Ok(if row.state_rev == 0 {
-                Ok((EngineState::empty(format), None))
+                Ok((Arc::new(EngineState::empty(format)), None))
             } else {
                 Err(ProcessParkReason::UndecodableState {
                     kind: format.kind,
@@ -952,6 +1007,14 @@ impl ProcessActivation {
                 })
             });
         };
+        let (written_by, state) = continuation
+            .engine(
+                reads,
+                process,
+                root,
+                self.backend.config().settings().graph_reads.engine(),
+            )
+            .await?;
         if written_by != engine.kind() {
             return Err(corrupt(
                 "a process's engine state",
@@ -960,11 +1023,11 @@ impl ProcessActivation {
         }
         if state.format != format && !carried.contains(&state.format) {
             return Ok(Err(ProcessParkReason::UndecodableState {
-                kind: state.format.kind,
+                kind: state.format.kind.clone(),
                 version: state.format.version,
             }));
         }
-        Ok(Ok((state, Some(root))))
+        Ok(Ok((state, Some(root.clone()))))
     }
 
     pub(super) async fn park(
@@ -1038,20 +1101,19 @@ impl ProcessActivation {
         mut tx: ActorTx,
         process: &ProcessId,
         live: &mut Live,
+        registry: &lash_durable::domain::ProcessRegistryRow,
     ) -> Result<Pass, DurableError> {
         let first_pass = std::mem::replace(&mut live.first_pass, false);
-        let cancel = self
-            .backend
-            .process_registry()
-            .get_process(process)
-            .await
-            .map_err(|error| registry_failure(&error))?
-            .and_then(|record| {
-                record
-                    .cancel_request
-                    .as_deref()
-                    .map(|request| request.origin)
-            });
+        let cancel = lash_execution_contracts::process::registry_transitions::stored_record(
+            process, registry,
+        )
+        .map_err(|error| registry_failure(&error))?
+        .and_then(|record| {
+            record
+                .cancel_request
+                .as_deref()
+                .map(|request| request.origin)
+        });
         match cancel {
             Some(_)
                 if first_pass
@@ -1445,9 +1507,9 @@ struct SeenSteps {
 
 impl StepBodies {
     /// Note `record` and `driver`'s in-flight steps, as this pass read them.
-    fn saw(&self, record: &ProcessRecord, driver: &Driver) {
+    fn saw(&self, record: &Arc<ProcessRecord>, driver: &Driver) {
         let mut seen = self.seen.lock().unwrap_or_else(PoisonError::into_inner);
-        seen.record = Some(Arc::new(record.clone()));
+        seen.record = Some(Arc::clone(record));
         seen.requests = driver
             .steps
             .values()

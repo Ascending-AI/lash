@@ -56,8 +56,8 @@ pub use keys::{CellId, ExecKey, Ordinal, OwnerKey, RunSeq, ScopeKey, StoredKeyEr
 /// The checkpoint graph format the domain's graph rows name.
 pub use lash_core_store::checkpoint_graph;
 pub use processes::{
-    CancelAnswer, CancelRequest, ProcessActorRow, ProcessStartRows, ProcessWrite, RedriveAnswer,
-    RedriveRequest, SessionParksRedrive,
+    CancelAnswer, CancelRequest, ProcessActorRow, ProcessRegistryRow, ProcessStartRows,
+    ProcessView, ProcessWrite, RedriveAnswer, RedriveRequest, SessionParksRedrive,
 };
 pub use prompts::{
     ModelCallId, PromptCallKey, PromptSnapshotRow, PromptText, PromptWrite, RequestTexts,

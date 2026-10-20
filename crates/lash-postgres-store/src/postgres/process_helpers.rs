@@ -5,10 +5,7 @@ use lash_protocol_types::ProcessId;
 use crate::process_sql::process_sql;
 
 fn decode_process_record(json: &str) -> Result<ProcessRecord, PluginError> {
-    serde_json::from_str(json).map_err(|error| PluginError::StoredDataCorrupt {
-        record_kind: "process_registry".to_string(),
-        message: error.to_string(),
-    })
+    lash_execution_contracts::process::registry_transitions::decode_record(json)
 }
 
 pub(crate) async fn process_change_horizon_tx(

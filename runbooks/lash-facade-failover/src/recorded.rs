@@ -277,6 +277,30 @@ impl DurableStore for RecordedStore {
         opened
     }
 
+    async fn open_process(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+    ) -> Result<(ActorTx, lash::durable::domain::ProcessView), DurableError> {
+        let opened = self.inner.open_process(actor, epoch).await;
+        if let Err(error) = &opened {
+            let outcome = match error {
+                DurableError::OwnershipLost(_) => "ownership_lost",
+                _ => "failed",
+            };
+            report(
+                &self.node,
+                Event::BeginRefused {
+                    actor: actor.to_string(),
+                    epoch: epoch.0,
+                    outcome: outcome.to_owned(),
+                    error: error.to_string(),
+                },
+            );
+        }
+        opened
+    }
+
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {
         let actor = tx.actor().to_string();
         let epoch = tx.epoch().0;

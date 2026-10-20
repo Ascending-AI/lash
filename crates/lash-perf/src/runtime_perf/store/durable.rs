@@ -121,6 +121,14 @@ impl DurableStore for RuntimePerfDurableStore {
         self.inner.begin(actor, epoch).await
     }
 
+    async fn open_process(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+    ) -> Result<(ActorTx, lash_durable::domain::ProcessView), DurableError> {
+        self.inner.open_process(actor, epoch).await
+    }
+
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {
         // Retain the logical head-commit metric name across the substrate change.
         let mut head_commit = false;

@@ -350,6 +350,15 @@ impl DurableStore for HoldingDurableStore {
         self.inner.begin(actor, epoch).await
     }
 
+    async fn open_process(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+    ) -> Result<(ActorTx, lash_durable::domain::ProcessView), DurableError> {
+        self.holds.pass(actor).await;
+        self.inner.open_process(actor, epoch).await
+    }
+
     /// Observed once it commits: each session commit the transaction
     /// carried is recorded into every installed collector. A commit that
     /// cannot be observed fails loudly as a corrupt store, so a run never

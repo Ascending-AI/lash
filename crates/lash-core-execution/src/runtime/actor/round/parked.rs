@@ -134,6 +134,11 @@ impl PinnedWaits {
         self
     }
 
+    /// Hold `other`'s waits beside these.
+    pub fn extend(&mut self, other: Self) {
+        self.rows.extend(other.rows);
+    }
+
     /// What `owner`'s admission of `call` of `tool` pinned for its park:
     /// the deadline of `pinned`'s row, or none for a ledger fold, which
     /// reads no wait.

@@ -282,14 +282,23 @@ pub type Discharge<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 /// What one [`Lifecycle::act`] did.
 #[derive(Debug)]
 pub enum Act {
-    /// It committed one transaction, which appended these facts as the
-    /// store holds them: fold again.
-    Committed(RunFacts),
+    /// It committed one transaction: fold again.
+    Committed(Committed),
     /// Its commit was refused, or its acknowledgement lost: read the rows
     /// again and fold them.
     Refused,
     /// It has nothing to commit: what it waits on.
     Idle(Idle),
+}
+
+/// One acknowledged lifecycle commit: what its owner's fold gains, and the
+/// actor revision it left.
+#[derive(Debug)]
+pub struct Committed {
+    /// The facts it appended, as the store holds them.
+    pub appended: RunFacts,
+    /// The actor's state revision after it.
+    pub revision: lash_durable::StateRevision,
 }
 
 /// A parked member: the wait it races, its execution, and what it parked on
@@ -518,17 +527,18 @@ impl Lifecycle {
             .clone()
     }
 
-    /// Decide from `folded`, the owner's committed records, and commit at
-    /// most one transaction: a batch of finished outcomes, the settlement of
-    /// members that need no body, or the starts of retries now due. Starts
-    /// the bodies the fold says to run.
+    /// Decide from `folded`, the owner's committed records, as of `now`,
+    /// the store's clock as the owner last read it, and commit at most one
+    /// transaction: a batch of finished outcomes, the settlement of members
+    /// that need no body, or the starts of retries now due. Starts the
+    /// bodies the fold says to run.
     ///
     /// # Errors
     ///
     /// [`RoundError`]: ownership lost, another store failure on a read, or a
     /// record that cannot be written as it is.
-    pub async fn act(&mut self, folded: &RunFold) -> Result<Act, RoundError> {
-        self.act_with(folded, true).await
+    pub async fn act(&mut self, folded: &RunFold, now: DurableInstant) -> Result<Act, RoundError> {
+        self.act_with(folded, true, now).await
     }
 
     /// [`act`](Self::act) for an owner that is draining: start nothing,
@@ -539,8 +549,12 @@ impl Lifecycle {
     /// # Errors
     ///
     /// As [`act`](Self::act).
-    pub async fn drain(&mut self, folded: &RunFold) -> Result<Act, RoundError> {
-        self.act_with(folded, false).await
+    pub async fn drain(
+        &mut self,
+        folded: &RunFold,
+        now: DurableInstant,
+    ) -> Result<Act, RoundError> {
+        self.act_with(folded, false, now).await
     }
 
     /// Restore committed namespaces before the process drops consumed runs
@@ -569,7 +583,12 @@ impl Lifecycle {
         self.settled.clear();
     }
 
-    async fn act_with(&mut self, folded: &RunFold, starting: bool) -> Result<Act, RoundError> {
+    async fn act_with(
+        &mut self,
+        folded: &RunFold,
+        starting: bool,
+        now: DurableInstant,
+    ) -> Result<Act, RoundError> {
         // What the rows committed publishes before anything reads it: an
         // earlier activation's outcomes on a resume, and outcomes whose
         // acknowledgement was lost.
@@ -588,7 +607,6 @@ impl Lifecycle {
         if self.finished.is_empty() {
             self.batch_opened = None;
         }
-        let now = self.cx.durable_now().await?;
         let mut settlements = Vec::new();
         let mut due_starts = Vec::new();
         let mut parked: Vec<Parked> = Vec::new();
@@ -873,7 +891,9 @@ impl Lifecycle {
 
     /// Wait for what `idle` waits on: a body to finish, a parked wait to
     /// end, the batch window to close or a retry to come due. Answers once
-    /// one did; the owner acts again. Races none of the owner's own events.
+    /// one did; the owner acts again. A finished body brings every other one
+    /// already finished with it, up to the batch's member bound, without
+    /// waiting for any still running. Races none of the owner's own events.
     ///
     /// # Errors
     ///
@@ -885,46 +905,85 @@ impl Lifecycle {
         let window = self
             .batch_opened
             .map(|opened| (opened + group.window).saturating_duration_since(clock.now()));
-        let now = self.cx.durable_now().await?;
-        let until_due = idle.retry_due.map(|at| {
-            Duration::from_millis(u64::try_from(at.0.saturating_sub(now.0)).unwrap_or(0))
-        });
+        // The store's clock times a retry's due, and nothing else here.
+        let until_due = match idle.retry_due {
+            Some(at) => {
+                let now = self.cx.durable_now().await?;
+                Some(Duration::from_millis(
+                    u64::try_from(at.0.saturating_sub(now.0)).unwrap_or(0),
+                ))
+            }
+            None => None,
+        };
         let racing: Vec<WaitRef> = idle.parked.iter().map(|(wait, ..)| *wait).collect();
         tokio::select! {
             won = waits::race(&self.cx, &racing), if !racing.is_empty() => {
                 self.parked_ended(won?, &idle.parked).await;
             }
             Some(joined) = self.running.join_next(), if !self.running.is_empty() => {
-                let done = match joined {
-                    Ok(done) => done,
-                    Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
-                    // Only the runtime shutting down cancels an attempt the
-                    // lifecycle still holds.
-                    Err(_) => return Err(RoundError::Stopped),
-                };
-                self.in_flight.remove(&done.id);
-                if matches!(done.result, Err(Stop::Activation | Stop::Lapsed)) {
-                    return Err(RoundError::Stopped);
-                }
-                // The durable clock could not be read: no outcome, and the
-                // owner retries from its rows.
-                if let Err(Stop::Durable(error)) = &done.result {
-                    return Err(error.clone().into());
-                }
-                // An honoured capacity verdict: no outcome is held or
-                // recorded, and the member waits for a later claim.
-                if let Err(Stop::Capacity(verdict)) = done.result {
-                    self.capacity.insert(done.id, verdict);
-                    return Ok(());
-                }
-                self.finished.insert(done.id, done.result);
-                self.batch_opened.get_or_insert_with(|| clock.now());
+                self.collect(joined, group.max_members)?;
             }
             () = sleep_for(&clock, window), if window.is_some() => {}
             () = sleep_for(&clock, until_due), if until_due.is_some() => {}
             () = self.cx.cancel().cancelled() => return Err(RoundError::Stopped),
         }
         Ok(())
+    }
+
+    /// Hold `joined`, the attempt that finished first, and every attempt
+    /// already finished beside it, without waiting for one still running:
+    /// at most `bound` attempts, and no more outcomes than one batch holds.
+    /// The first that stops the owner ends the collection with its error;
+    /// those held before it stay held.
+    fn collect(
+        &mut self,
+        joined: Result<Finished, tokio::task::JoinError>,
+        bound: usize,
+    ) -> Result<(), RoundError> {
+        self.ingest(joined)?;
+        let mut collected = 1;
+        while collected < bound && self.finished.len() < bound {
+            let Some(joined) = self.running.try_join_next() else {
+                break;
+            };
+            self.ingest(joined)?;
+            collected += 1;
+        }
+        Ok(())
+    }
+
+    /// Hold one finished attempt: its outcome until its batch commits, or
+    /// an honoured capacity verdict, which records nothing.
+    fn ingest(
+        &mut self,
+        joined: Result<Finished, tokio::task::JoinError>,
+    ) -> Result<(), RoundError> {
+        let done = match joined {
+            Ok(done) => done,
+            Err(error) if error.is_panic() => std::panic::resume_unwind(error.into_panic()),
+            // Only the runtime shutting down cancels an attempt the
+            // lifecycle still holds.
+            Err(_) => return Err(RoundError::Stopped),
+        };
+        self.in_flight.remove(&done.id);
+        match done.result {
+            Err(Stop::Activation | Stop::Lapsed) => Err(RoundError::Stopped),
+            // The durable clock could not be read: no outcome, and the
+            // owner retries from its rows.
+            Err(Stop::Durable(error)) => Err(error.into()),
+            // An honoured capacity verdict: no outcome is held or
+            // recorded, and the member waits for a later claim.
+            Err(Stop::Capacity(verdict)) => {
+                self.capacity.insert(done.id, verdict);
+                Ok(())
+            }
+            result => {
+                self.finished.insert(done.id, result);
+                let clock = self.cx.clock();
+                self.batch_opened.get_or_insert_with(|| clock.now());
+                Ok(())
+            }
+        }
     }
 
     /// The earliest durable instant `idle` waits for: a retry's due time
@@ -1024,7 +1083,10 @@ impl Lifecycle {
     ) -> Result<Act, RoundError> {
         let appended = RunFacts::appended(tx.domain(), tx.graph(), self.cx.epoch());
         match self.cx.commit(tx, label).await {
-            Ok(_) => Ok(Act::Committed(appended)),
+            Ok(commit) => Ok(Act::Committed(Committed {
+                appended,
+                revision: commit.revision,
+            })),
             Err(error @ DurableError::OwnershipLost(_)) => Err(error.into()),
             // A start its registrar refused after it was staged refuses
             // every repeat of the commit: the activation ends, and the next
@@ -1094,9 +1156,12 @@ impl Lifecycle {
             .commit_candidate_owing(tx, publication, label, None)
             .await
         {
-            Ok(_) => {
+            Ok(receipt) => {
                 candidate.0.settled(commit).await;
-                Ok(Act::Committed(appended))
+                Ok(Act::Committed(Committed {
+                    appended,
+                    revision: receipt.revision,
+                }))
             }
             Err(
                 error @ (DurableError::OwnershipLost(_)

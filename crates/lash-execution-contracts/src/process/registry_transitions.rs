@@ -68,6 +68,51 @@ pub fn process_no_longer_retained(stamp: ProcessTombstoneStamp) -> PluginError {
     }
 }
 
+/// A process record as its registry stored it.
+///
+/// # Errors
+///
+/// [`PluginError::StoredDataCorrupt`] for a record that does not decode.
+pub fn decode_record(json: &str) -> Result<crate::process::ProcessRecord, PluginError> {
+    serde_json::from_str(json).map_err(|error| PluginError::StoredDataCorrupt {
+        record_kind: "process_registry".to_string(),
+        message: error.to_string(),
+    })
+}
+
+/// What a registry's point read of `process_id` answers from its stored
+/// row: the retained record, `None` for a process no registry knew.
+///
+/// # Errors
+///
+/// [`PluginError::ProcessNoLongerRetained`] for a pruned process, and
+/// [`PluginError::StoredDataCorrupt`] for a row that does not decode.
+pub fn stored_record(
+    process_id: &ProcessId,
+    stored: &lash_durable::domain::ProcessRegistryRow,
+) -> Result<Option<crate::process::ProcessRecord>, PluginError> {
+    use lash_durable::domain::ProcessRegistryRow;
+    match stored {
+        ProcessRegistryRow::Retained(json) => decode_record(json).map(Some),
+        ProcessRegistryRow::Pruned {
+            terminal_label,
+            pruned_at_ms,
+        } => {
+            let pruned_at_ms =
+                u64::try_from(*pruned_at_ms).map_err(|_| PluginError::StoredDataCorrupt {
+                    record_kind: "ProcessTombstone".to_string(),
+                    message: format!("pruned_at_ms must be non-negative, got {pruned_at_ms}"),
+                })?;
+            Err(process_no_longer_retained(ProcessTombstoneStamp::from_row(
+                process_id,
+                terminal_label,
+                pruned_at_ms,
+            )?))
+        }
+        ProcessRegistryRow::Absent => Ok(None),
+    }
+}
+
 /// Refusal for a process id no registry ever knew.
 pub fn unknown_process(process_id: &ProcessId) -> PluginError {
     PluginError::ProcessUnknown {

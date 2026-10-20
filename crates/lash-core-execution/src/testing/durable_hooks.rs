@@ -6,7 +6,9 @@
 //! the store's place (the commit then applies nothing), hold the commit
 //! while the test commits something else, or panic, as an activation that
 //! crashes at that commit would. Every other call passes through, so a
-//! test that runs over it runs over the real store.
+//! test that runs over it runs over the real store; the owner's opens and
+//! the reads that rebuild an owner's state are counted on the way
+//! ([`DurableCommitHook::calls`]).
 
 use std::future::Future;
 use std::pin::Pin;
@@ -44,6 +46,7 @@ type CommitHook = Arc<
 pub struct DurableCommitHook {
     inner: Arc<dyn DurableStore>,
     hook: Arc<Mutex<Option<CommitHook>>>,
+    calls: Arc<Mutex<std::collections::BTreeMap<&'static str, u64>>>,
 }
 
 impl DurableCommitHook {
@@ -53,7 +56,20 @@ impl DurableCommitHook {
         Self {
             inner,
             hook: Arc::new(Mutex::new(None)),
+            calls: Arc::default(),
         }
+    }
+
+    /// How many times `method` was called through this store: one of
+    /// `begin`, `open_process`, `now`, `process`, `exec_root`, `hydrate`
+    /// (of an execution root), `run_facts` and `run_facts_of`.
+    #[must_use]
+    pub fn calls(&self, method: &str) -> u64 {
+        self.calls.lock_recover().get(method).copied().unwrap_or(0)
+    }
+
+    fn count(&self, method: &'static str) {
+        *self.calls.lock_recover().entry(method).or_default() += 1;
     }
 
     /// Run `hook` before every owner commit from now on. The future it
@@ -190,10 +206,12 @@ impl DurableReads for DurableCommitHook {
     }
 
     async fn run_facts(&self, owner: &OwnerKey) -> Result<RunFacts, DurableError> {
+        self.count("run_facts");
         self.inner.run_facts(owner).await
     }
 
     async fn run_facts_of(&self, owner: &OwnerKey, run: RunSeq) -> Result<RunFacts, DurableError> {
+        self.count("run_facts_of");
         self.inner.run_facts_of(owner, run).await
     }
     async fn run_facts_within(
@@ -209,6 +227,7 @@ impl DurableReads for DurableCommitHook {
     }
 
     async fn exec_root(&self, exec: &ExecKey) -> Result<Option<ExecRootRow>, DurableError> {
+        self.count("exec_root");
         self.inner.exec_root(exec).await
     }
 
@@ -234,6 +253,9 @@ impl DurableReads for DurableCommitHook {
         expected: Option<NodeId>,
         limits: DecodeLimits,
     ) -> Result<HydratedGraph, DurableError> {
+        if matches!(owner, RootOwner::Exec(_)) {
+            self.count("hydrate");
+        }
         self.inner.hydrate(owner, expected, limits).await
     }
 
@@ -246,6 +268,7 @@ impl DurableReads for DurableCommitHook {
     }
 
     async fn process(&self, process: &ProcessId) -> Result<Option<ProcessActorRow>, DurableError> {
+        self.count("process");
         self.inner.process(process).await
     }
 
@@ -296,6 +319,7 @@ impl DurableReads for DurableCommitHook {
 #[async_trait::async_trait]
 impl DurableStore for DurableCommitHook {
     async fn now(&self) -> Result<DurableInstant, DurableError> {
+        self.count("now");
         self.inner.now().await
     }
 
@@ -403,7 +427,17 @@ impl DurableStore for DurableCommitHook {
     }
 
     async fn begin(&self, actor: &ActorKey, epoch: Epoch) -> Result<ActorTx, DurableError> {
+        self.count("begin");
         self.inner.begin(actor, epoch).await
+    }
+
+    async fn open_process(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+    ) -> Result<(ActorTx, lash_durable::domain::ProcessView), DurableError> {
+        self.count("open_process");
+        self.inner.open_process(actor, epoch).await
     }
 
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {

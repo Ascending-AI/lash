@@ -77,6 +77,7 @@ mod pages;
 pub(crate) use pages::cut_retirement_holds;
 pub(crate) use pages::retire_roots;
 mod park;
+mod process_view;
 pub(crate) mod processes;
 mod prompts;
 pub(crate) mod retention;
@@ -1390,6 +1391,14 @@ impl DurableStore for PostgresDurableStore {
             }
         }
         Ok(ActorTx::opened(opened))
+    }
+
+    async fn open_process(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+    ) -> Result<(ActorTx, lash_durable::domain::ProcessView), DurableError> {
+        self.open_process_view(actor, epoch).await
     }
 
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {

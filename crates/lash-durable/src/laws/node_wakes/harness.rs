@@ -437,6 +437,14 @@ impl DurableStore for CountingStore {
         self.inner.begin(actor, epoch).await
     }
 
+    async fn open_process(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+    ) -> Result<(ActorTx, crate::domain::ProcessView), DurableError> {
+        self.inner.open_process(actor, epoch).await
+    }
+
     async fn commit(
         &self,
         tx: ActorTx,

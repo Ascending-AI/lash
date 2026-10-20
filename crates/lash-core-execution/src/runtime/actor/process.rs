@@ -8,6 +8,7 @@ mod activation;
 mod carry;
 #[doc(hidden)]
 pub mod component_formats;
+mod continuation;
 mod driver;
 mod effects;
 mod node_trace;

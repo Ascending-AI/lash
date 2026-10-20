@@ -58,4 +58,15 @@ law!(
     a_panicking_activation_parks_at_its_budget_and_progress_resets_the_count,
     a_panicking_session_turn_process_parks_at_its_budget_and_resumes_or_cancels,
     a_cancel_that_fails_every_claim_parks_cancel_loop_and_a_redrive_runs_it,
+    a_step_chain_restores_its_state_once_and_reloads_after_a_lost_acknowledgement,
 );
+
+/// The ready-collection law runs its process on the test's one thread: the
+/// step bodies a gate releases together finish before the owner they wake
+/// is polled, so every completion is ready when the owner collects.
+#[tokio::test]
+async fn ready_step_completions_commit_together_up_to_the_member_bound() {
+    process_laws::ready_step_completions_commit_together_up_to_the_member_bound(&backend().await)
+        .await
+        .unwrap_or_else(|broken| panic!("{broken}"));
+}

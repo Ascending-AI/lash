@@ -455,6 +455,14 @@ mod tool_call_reads {
             self.inner.begin(actor, epoch).await
         }
 
+        async fn open_process(
+            &self,
+            actor: &ActorKey,
+            epoch: Epoch,
+        ) -> Result<(ActorTx, lash_durable::domain::ProcessView), DurableError> {
+            self.inner.open_process(actor, epoch).await
+        }
+
         async fn commit(
             &self,
             tx: ActorTx,

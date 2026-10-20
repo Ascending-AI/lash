@@ -508,6 +508,15 @@ impl DurableStore for RecordingStore {
         self.inner.begin(actor, epoch).await
     }
 
+    async fn open_process(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+    ) -> Result<(ActorTx, lash_durable::domain::ProcessView), DurableError> {
+        self.recorder.process_counters.record("open_process");
+        self.inner.open_process(actor, epoch).await
+    }
+
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {
         let actor = tx.actor().to_string();
         let mut encoded = Encoded::of(&tx);

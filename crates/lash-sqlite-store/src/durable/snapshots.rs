@@ -136,7 +136,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ExecRootWr
     }
 }
 
-fn row_of(
+pub(super) fn row_of(
     exec: ExecKey,
     rev: i64,
     root: &str,

@@ -91,7 +91,8 @@ pub fn stage_engine_state(
 
 /// Writes `state`, the state `engine` holds for `process`, into `tx` as the
 /// process's execution root in place of `expected`, the root row it read:
-/// its nodes staged, its row written, all in one owner commit.
+/// its nodes staged, its row written, all in one owner commit. Answers the
+/// root it writes.
 ///
 /// # Errors
 ///
@@ -102,9 +103,9 @@ pub fn write_engine_state(
     engine: &str,
     state: &EngineState,
     expected: Option<&ExecRootRow>,
-) -> Result<(), DurableError> {
+) -> Result<NodeId, DurableError> {
     let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
-    let (_, write) = stage_engine_state(
+    let (root, write) = stage_engine_state(
         &mut staging,
         process,
         engine,
@@ -114,7 +115,7 @@ pub fn write_engine_state(
     )?;
     tx.stage_all(staging);
     tx.write(write);
-    Ok(())
+    Ok(root)
 }
 
 /// `process`'s execution root row and the engine state it holds, with the
@@ -133,12 +134,29 @@ pub async fn read_engine_state(
     let Some(row) = reads.exec_root(&exec).await? else {
         return Ok(None);
     };
+    let (engine, state) = hydrate_engine_state(reads, process, &row, limits).await?;
+    Ok(Some((row, engine, state)))
+}
+
+/// The engine state `process`'s execution root row `root` publishes, with
+/// the engine that wrote it: its graph hydrated in one read refused unless
+/// the row still names that root, and checked as this process's state.
+///
+/// # Errors
+///
+/// A store failure, or [`DurableError::Graph`] for a root that moved or
+/// does not load as this process's state.
+pub async fn hydrate_engine_state(
+    reads: &dyn DurableReads,
+    process: &ProcessId,
+    root: &ExecRootRow,
+    limits: DecodeLimits,
+) -> Result<(String, EngineState), DurableError> {
     let graph = reads
-        .hydrate(RootOwner::Exec(exec), Some(row.root), limits)
+        .hydrate(RootOwner::Exec(root.exec.clone()), Some(root.root), limits)
         .await?;
     let mut decoder = GraphDecoder::new(&graph, limits);
-    let (engine, state) = load_engine_state(&mut decoder, row.root, process)?;
-    Ok(Some((row, engine, state)))
+    Ok(load_engine_state(&mut decoder, root.root, process)?)
 }
 
 /// The engine state `process`'s execution root `root` holds, with the

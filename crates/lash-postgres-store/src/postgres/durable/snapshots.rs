@@ -153,7 +153,7 @@ pub(super) async fn apply(
     }
 }
 
-fn row_of(
+pub(super) fn row_of(
     exec: ExecKey,
     rev: i64,
     root: &str,

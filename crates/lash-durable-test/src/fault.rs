@@ -812,6 +812,14 @@ impl DurableStore for FaultStore {
         self.read(self.inner.begin(actor, epoch)).await
     }
 
+    async fn open_process(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+    ) -> Result<(ActorTx, lash_durable::domain::ProcessView), DurableError> {
+        self.read(self.inner.open_process(actor, epoch)).await
+    }
+
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {
         self.owner_commit(
             tx,

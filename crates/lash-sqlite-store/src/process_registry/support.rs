@@ -289,12 +289,7 @@ impl SqliteProcessRegistry {
     fn decode_process_record(
         json: &str,
     ) -> Result<ProcessRecord, lash_execution_contracts::plugin_error::PluginError> {
-        serde_json::from_str(json).map_err(|error| {
-            lash_execution_contracts::plugin_error::PluginError::StoredDataCorrupt {
-                record_kind: "process_registry".to_string(),
-                message: error.to_string(),
-            }
-        })
+        lash_execution_contracts::process::registry_transitions::decode_record(json)
     }
 
     /// The retained process registered under `start_key`, if any.

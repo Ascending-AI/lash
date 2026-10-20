@@ -18,7 +18,10 @@ use crate::testing::IsolatedDatabase;
 
 macro_rules! law {
     ($($name:ident),* $(,)?) => {$(
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        law!(@one #[tokio::test(flavor = "multi_thread", worker_threads = 4)] $name);
+    )*};
+    (@one #[$test:meta] $name:ident) => {
+        #[$test]
         async fn $name() {
             let Some(database_url) = crate::postgres_test_support::database_url() else {
                 eprintln!("skipping {}: database URL is not set", stringify!($name));
@@ -43,7 +46,7 @@ macro_rules! law {
                 .await
                 .unwrap_or_else(|broken| panic!("{broken}"));
         }
-    )*};
+    };
 }
 
 law!(
@@ -60,7 +63,13 @@ law!(
     a_process_parked_on_an_unknown_engine_shows_its_park_reason_beside_its_lifecycle,
     a_panicking_activation_parks_at_its_budget_and_progress_resets_the_count,
     a_cancel_that_fails_every_claim_parks_cancel_loop_and_a_redrive_runs_it,
+    a_step_chain_restores_its_state_once_and_reloads_after_a_lost_acknowledgement,
 );
+
+// The ready-collection law runs its process on the test's one thread: the
+// step bodies a gate releases together finish before the owner they wake
+// is polled, so every completion is ready when the owner collects.
+law!(@one #[tokio::test] ready_step_completions_commit_together_up_to_the_member_bound);
 
 /// FIG-5235: a deterministic 40P01 inside the terminal is retried, not refused.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

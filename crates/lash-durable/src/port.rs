@@ -1,6 +1,6 @@
 //! The [`DurableStore`] port and the records it answers with.
 
-use crate::domain::{DurableReads, MailAnswer};
+use crate::domain::{DurableReads, MailAnswer, ProcessView};
 use crate::error::DurableError;
 use crate::formats::FormatSet;
 use crate::ids::{
@@ -483,6 +483,18 @@ pub trait DurableStore: DurableReads {
     /// Refused with [`DurableError::OwnershipLost`] when `epoch` is not
     /// current.
     async fn begin(&self, actor: &ActorKey, epoch: Epoch) -> Result<ActorTx, DurableError>;
+
+    /// [`begin`](Self::begin) over process actor `actor`, with the
+    /// [`ProcessView`] its owner decides a pass from, read in the same
+    /// snapshot as the fenced open: one read for the mail, the store's
+    /// clock, the process row, its registry record and its execution root.
+    /// Refused as `begin` is; an actor that is not a process's is refused as
+    /// corrupt.
+    async fn open_process(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+    ) -> Result<(ActorTx, ProcessView), DurableError>;
 
     /// Apply `tx` atomically. The transaction's first statement re-checks
     /// the epoch; a stale one is [`DurableError::OwnershipLost`] and nothing

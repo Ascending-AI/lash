@@ -130,6 +130,22 @@ impl DurableStore for ObservedStore {
         answer
     }
 
+    async fn open_process(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+    ) -> Result<(ActorTx, crate::domain::ProcessView), DurableError> {
+        let answer = self.inner.open_process(actor, epoch).await;
+        let lost = match &answer {
+            Err(DurableError::OwnershipLost(fenced)) => Some((fenced.held, fenced.current)),
+            _ => None,
+        };
+        if lost.is_some() {
+            let _ = self.begins.send((epoch, lost));
+        }
+        answer
+    }
+
     async fn commit(
         &self,
         tx: ActorTx,

@@ -554,36 +554,36 @@ pub(super) async fn process(
 }
 
 fn process_row(tx: &Connection, process: &ProcessId) -> Answer<Option<ProcessActorRow>> {
-    let row = tx
+    Ok(Ok(tx
         .prepare_cached(SQL.process.row.sql())?
-        .query_row([process.as_str()], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, Option<i64>>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, Option<String>>(4)?,
-                row.get::<_, Option<i64>>(5)?,
-                row.get::<_, i64>(6)?,
-            ))
-        })
-        .optional()?;
-    Ok(Ok(row
-        .map(
-            |(state_rev, driver_json, cancel, status, cascade_cursor, written_epoch, published)| {
-                Ok::<_, rusqlite::Error>(ProcessActorRow {
-                    process: process.clone(),
-                    state_rev: integer::<u64>(state_rev)?,
-                    driver_json,
-                    cancel_requested_at: cancel.map(DurableInstant),
-                    terminal: !matches!(status.as_str(), "running" | "waiting"),
-                    cascade_cursor,
-                    written_epoch: written_epoch.map(Epoch),
-                    published_event_sequence: integer::<u64>(published)?,
-                })
-            },
-        )
-        .transpose()?))
+        .query_row([process.as_str()], |row| actor_row(row, 0, process))
+        .optional()?
+        .flatten()))
+}
+
+/// The actor row of `process` in `row`'s columns from `at`, as
+/// `SQL.process.row` selects them: state revision, driver, cancel, status,
+/// cascade cursor, writer epoch and publication mark. `None` when they are
+/// absent: an outer join that found no row.
+pub(super) fn actor_row(
+    row: &rusqlite::Row<'_>,
+    at: usize,
+    process: &ProcessId,
+) -> rusqlite::Result<Option<ProcessActorRow>> {
+    let Some(state_rev) = row.get::<_, Option<i64>>(at)? else {
+        return Ok(None);
+    };
+    let status: String = row.get(at + 3)?;
+    Ok(Some(ProcessActorRow {
+        process: process.clone(),
+        state_rev: integer::<u64>(state_rev)?,
+        driver_json: row.get(at + 1)?,
+        cancel_requested_at: row.get::<_, Option<i64>>(at + 2)?.map(DurableInstant),
+        terminal: !matches!(status.as_str(), "running" | "waiting"),
+        cascade_cursor: row.get(at + 4)?,
+        written_epoch: row.get::<_, Option<i64>>(at + 5)?.map(Epoch),
+        published_event_sequence: integer::<u64>(row.get::<_, i64>(at + 6)?)?,
+    }))
 }
 
 pub(super) fn until_children(

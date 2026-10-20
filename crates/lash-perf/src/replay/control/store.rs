@@ -135,6 +135,15 @@ impl DurableStore for ObservedStore {
         self.observe("begin", self.inner.begin(actor, epoch)).await
     }
 
+    async fn open_process(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+    ) -> Result<(ActorTx, lash_durable::domain::ProcessView), DurableError> {
+        self.observe("open_process", self.inner.open_process(actor, epoch))
+            .await
+    }
+
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {
         let mut by_kind = std::collections::BTreeMap::new();
         for node in tx.graph().values() {

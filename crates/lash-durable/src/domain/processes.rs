@@ -38,6 +38,39 @@ pub struct ProcessActorRow {
     pub published_event_sequence: u64,
 }
 
+/// What a process owner decides one pass from, read with its fenced open
+/// in one snapshot ([`DurableStore::open_process`](crate::DurableStore::open_process)):
+/// the process's actor row, its registry record as stored, and the
+/// execution root its engine state is published under. Nothing is decoded
+/// past the store's own columns, so the owner meets each refusal where it
+/// decides.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProcessView {
+    /// The process's actor row; `None` once it is gone.
+    pub row: Option<ProcessActorRow>,
+    /// Its registry record.
+    pub registry: ProcessRegistryRow,
+    /// Its engine state's execution root row; `None` before its first
+    /// transition.
+    pub root: Option<super::ExecRootRow>,
+}
+
+/// A process's registry record as a [`ProcessView`] reads it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProcessRegistryRow {
+    /// The retained record, as its registry encoded it.
+    Retained(String),
+    /// The record was pruned: its tombstone's terminal label and when.
+    Pruned {
+        /// The terminal it ended with.
+        terminal_label: String,
+        /// When it was pruned, in store milliseconds.
+        pruned_at_ms: i64,
+    },
+    /// No record and no tombstone.
+    Absent,
+}
+
 /// The rows a process start writes: its registry row, its observers and
 /// its actor, ready, in the transaction that records the outcome of the
 /// call that started it (ADR 0132 §5). A start whose key a process already

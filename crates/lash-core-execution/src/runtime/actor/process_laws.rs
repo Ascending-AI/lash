@@ -61,6 +61,7 @@ mod contended_cancel;
 mod engine_keys;
 mod panicking;
 mod parked_calls;
+mod passes;
 
 pub use blockers::{
     a_process_awaiting_a_child_reads_waiting_on_that_process,
@@ -81,6 +82,10 @@ pub use panicking::{
     a_panicking_session_turn_process_parks_at_its_budget_and_resumes_or_cancels,
 };
 pub use parked_calls::a_parked_call_is_reopened_from_its_completion_wait_after_a_restart_and_a_handover;
+pub use passes::{
+    a_step_chain_restores_its_state_once_and_reloads_after_a_lost_acknowledgement,
+    ready_step_completions_commit_together_up_to_the_member_bound,
+};
 
 /// The kind every law process runs.
 pub const LAW_ENGINE_KIND: &str = "law-process";
@@ -251,7 +256,11 @@ fn origin_name(origin: CancelOrigin) -> String {
 /// - `panic`: panics on every advance, before any of it commits;
 /// - `flap`: panics on its first `LOOP_BUDGET - 1` advances with each
 ///   event, then sleeps until the instant its payload names once started,
-///   and ends once woken.
+///   and ends once woken;
+/// - `fan`: runs `steps` `law_ready` steps at once, and ends once every one
+///   settled;
+/// - `chain`: runs `steps` `law_ready` steps one after another, and ends
+///   once the last settled.
 pub struct LawEngine {
     version: u32,
 }
@@ -315,6 +324,27 @@ fn law_step(step: &str, tool: &str) -> EngineAction {
         wake: None,
     }
 }
+
+/// The tool of [`LawEngine`]'s `fan` and `chain` steps: `Once`, completing
+/// once its process's gate in [`READY_GATES`] opens, at once without one.
+const LAW_READY: &str = "law_ready";
+
+/// A `law_ready` step named `step`.
+fn ready_step(step: &str) -> StepRequest {
+    StepRequest::Tool {
+        step: StepName(step.to_owned()),
+        effect: law_effect(LAW_READY),
+        contract: lash_kernel_doc::ContractId::new("law"),
+        input: json!({}),
+        site: None,
+        matched: None,
+    }
+}
+
+/// The gate each `law_ready` body of a process waits on before it
+/// completes, by its process's tag.
+static READY_GATES: Mutex<BTreeMap<String, Arc<tokio::sync::Barrier>>> =
+    Mutex::new(BTreeMap::new());
 
 /// The steps of [`LawEngine`]'s `park_two` act, each named after its node.
 const PARK_TWO: [&str; 2] = ["park-a", "park-b"];
@@ -474,6 +504,16 @@ impl ProcessEngine for LawEngine {
                         .collect(),
                     wake: None,
                 },
+                "fan" => EngineAction::Steps {
+                    steps: (0..script["steps"].as_u64().unwrap_or(0))
+                        .map(|step| ready_step(&format!("ready-{step}")))
+                        .collect(),
+                    wake: None,
+                },
+                "chain" => EngineAction::Steps {
+                    steps: vec![ready_step("link-0")],
+                    wake: None,
+                },
                 "sleep" | "flap" => EngineAction::Sleep {
                     until: lash_durable::DurableInstant(
                         script["until_ms"]
@@ -489,6 +529,21 @@ impl ProcessEngine for LawEngine {
                     "settled": settled_name(&outcome),
                     "payload": outcome.payload(),
                 }))
+            }
+            EngineEvent::StepSettled { .. } if act == "fan" || act == "chain" => {
+                let settled = script["settled"].as_u64().unwrap_or(0) + 1;
+                script["settled"] = json!(settled);
+                match (
+                    act.as_str(),
+                    settled < script["steps"].as_u64().unwrap_or(0),
+                ) {
+                    (_, false) => ended(json!({ "settled": settled })),
+                    ("chain", true) => EngineAction::Steps {
+                        steps: vec![ready_step(&format!("link-{settled}"))],
+                        wake: None,
+                    },
+                    _ => EngineAction::Idle,
+                }
             }
             EngineEvent::KeyPinned { name, .. } if act == "await_key" || act == "key" => {
                 EngineAction::AwaitExternal { name, site: None }
@@ -713,6 +768,17 @@ impl ProcessSteps for LawSteps {
                             &owner,
                             &format!("succeeded on attempt {attempt}"),
                         )),
+                        LAW_READY => {
+                            let gate = READY_GATES
+                                .lock()
+                                .unwrap_or_else(PoisonError::into_inner)
+                                .get(&tag)
+                                .cloned();
+                            if let Some(gate) = gate {
+                                gate.wait().await;
+                            }
+                            SettledOutput::Completed(step_output(&owner, "ready"))
+                        }
                         LAW_PARK => {
                             let Some((wait, key)) = key else {
                                 return SettledOutput::Interrupted;

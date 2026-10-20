@@ -530,16 +530,31 @@ pub(super) async fn process(
     else {
         return Ok(None);
     };
-    let status: String = get(&row, 3)?;
+    actor_row(&row, 0, process)
+}
+
+/// The actor row of `process` in `row`'s columns from `at`, as
+/// `SQL.process.row` selects them: state revision, driver, cancel, status,
+/// cascade cursor, writer epoch and publication mark. `None` when they are
+/// absent: an outer join that found no row.
+pub(super) fn actor_row(
+    row: &sqlx::postgres::PgRow,
+    at: usize,
+    process: &ProcessId,
+) -> Result<Option<ProcessActorRow>, DurableError> {
+    let Some(state_rev) = get::<Option<i64>>(row, at)? else {
+        return Ok(None);
+    };
+    let status: String = get(row, at + 3)?;
     Ok(Some(ProcessActorRow {
         process: process.clone(),
-        state_rev: integer::<u64>(get::<i64>(&row, 0)?)?,
-        driver_json: get(&row, 1)?,
-        cancel_requested_at: get::<Option<i64>>(&row, 2)?.map(DurableInstant),
+        state_rev: integer::<u64>(state_rev)?,
+        driver_json: get(row, at + 1)?,
+        cancel_requested_at: get::<Option<i64>>(row, at + 2)?.map(DurableInstant),
         terminal: !matches!(status.as_str(), "running" | "waiting"),
-        cascade_cursor: get(&row, 4)?,
-        written_epoch: get::<Option<i64>>(&row, 5)?.map(Epoch),
-        published_event_sequence: integer::<u64>(get::<i64>(&row, 6)?)?,
+        cascade_cursor: get(row, at + 4)?,
+        written_epoch: get::<Option<i64>>(row, at + 5)?.map(Epoch),
+        published_event_sequence: integer::<u64>(get::<i64>(row, at + 6)?)?,
     }))
 }
 

@@ -56,6 +56,7 @@ mod model_calls;
 mod packages;
 mod pages;
 mod park;
+mod process_view;
 pub(crate) mod processes;
 mod prompts;
 
@@ -1540,6 +1541,14 @@ impl DurableStore for SqliteDurableStore {
             })
             .await
             .map_err(store_failure)?
+    }
+
+    async fn open_process(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+    ) -> Result<(ActorTx, lash_durable::domain::ProcessView), DurableError> {
+        self.open_process_view(actor, epoch).await
     }
 
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {
