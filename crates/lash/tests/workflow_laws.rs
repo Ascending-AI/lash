@@ -983,10 +983,21 @@ async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
         snapshot_overlay.current_sites.is_empty(),
         "terminal clears current sites"
     );
-    for row in overlay.sites {
-        assert!(
-            snapshot_overlay.sites.contains(&row),
-            "snapshot uses the stored-event fold"
+    for mut row in overlay.sites {
+        // A snapshot also folds retained live origin metadata (FIG-6925).
+        // Only the perform emits an origin; its durable identity, state,
+        // occurrence count and entry/settlement sequences stay unchanged.
+        if row.at.position() == tool.site {
+            row.origin = Some(tool.statement.clone());
+        }
+        let snapshot_row = snapshot_overlay
+            .sites
+            .iter()
+            .find(|snapshot_row| snapshot_row.at == row.at)
+            .expect("the snapshot retains the committed occurrence");
+        assert_eq!(
+            snapshot_row, &row,
+            "snapshot retains the stored-event fold and the perform's authored origin"
         );
     }
 }
@@ -1678,7 +1689,20 @@ async fn a_sealed_env_linking_a_retired_components_effect_parks_with_the_typed_r
     let artifacts = first.host_artifacts();
     let pin = lash::process::HostArtifactPin::mint();
     let environment = environment(true);
-    let document = lash::workflow::document::parse_document(ECHOED).expect("the document parses");
+    let mut document =
+        lash::workflow::document::parse_document(ECHOED).expect("the document parses");
+    let checked = artifacts
+        .workflow_environment(&environment)
+        .await
+        .expect("the environment reads")
+        .expect("the kernel environment");
+    let echo = lash::workflow::document::EffectName::new("tools.echo").expect("effect");
+    document.manifest.effects.insert(
+        echo.clone(),
+        lash::workflow::document::OperationRequirement::of_signature(
+            checked.checker().effects[&echo].clone(),
+        ),
+    );
     let publication = published(
         artifacts
             .publish_workflow(

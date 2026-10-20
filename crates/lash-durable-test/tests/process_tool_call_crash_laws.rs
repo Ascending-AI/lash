@@ -900,7 +900,7 @@ impl lash_core::DeferredToolProvider for Resolver {
 /// `call_dynamic`, and answers what it answered.
 const RESOLVING: &str = r#"kernel 1
 numbers float
-effect lash.call_dynamic(input: Record{args?: Any, path: Text}) -> Any
+effect lash.call_dynamic(input: Record{args?: Json, path: Text}) -> Json
 entry dynamic() -> Any
 
 fn dynamic() {
@@ -918,7 +918,7 @@ main {
 /// each failure, and answers both.
 const DECIDING: &str = r#"kernel 1
 numbers float
-effect lash.call_dynamic(input: Record{args?: Any, path: Text}) -> Any
+effect lash.call_dynamic(input: Record{args?: Json, path: Text}) -> Json
 entry dynamic() -> Any
 
 fn dynamic() {

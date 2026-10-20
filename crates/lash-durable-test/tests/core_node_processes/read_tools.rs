@@ -19,7 +19,7 @@ const LOOKUP_TOOL: &str = "core-node-knowledge-lookup";
 /// `lookup()`: one `perform` of the knowledge component's `Read` tool.
 const LOOKUP: &str = r#"kernel 1
 numbers float
-effect tools.lookup(input: Any) -> Any
+effect tools.lookup(input: Json) -> Json
 entry lookup() -> Any
 
 fn lookup() {

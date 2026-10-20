@@ -5,8 +5,51 @@
 use super::*;
 use lash::workflow::document::{FunctionValue, FunctionValueLimits};
 
-/// A node whose worker pool crosses functions, as C1c's tool contract will
-/// select for every pool.
+/// This tool's one callable slot is nested.fact; every other slot is data.
+const CAPTURE_TOOLS: lash::process::ProcessConfigKey<()> =
+    lash::process::ProcessConfigKey::new("workflow-capture", lash::plugins::FormatVersion::ONE);
+
+fn capture_definition() -> lash::tools::ToolDefinition {
+    lash::tools::ToolDefinition::raw(
+        "tool:capture",
+        "tools.capture",
+        "Captures a nested function and answers its value.",
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "value": {},
+                "nested": {
+                    "type": "object",
+                    "properties": {"fact": {"x-lash": {"kind": "function"}}},
+                    "required": ["fact"],
+                    "additionalProperties": false
+                }
+            },
+            "required": ["value", "nested"],
+            "additionalProperties": false
+        }),
+        serde_json::json!({}),
+    )
+    .expect("the function-taking contract")
+    .with_execution(std::time::Duration::from_secs(120))
+}
+
+fn capture_component() -> lash::process::StaticProcessComponent {
+    lash::plugins::StaticPluginFactory::new(
+        lash::plugins::PluginDeclaration::initial(CAPTURE_TOOLS.component()),
+        lash::plugins::PluginSpec::new().with_tool_provider(
+            lash::tool_provider_key!("capture"),
+            Arc::new(lash::tools::StaticToolProvider::new(
+                vec![capture_definition()],
+                Echo,
+            )),
+        ),
+    )
+    .as_component(CAPTURE_TOOLS.format())
+    .expect("the capture component")
+}
+
+/// A node whose capture tool explicitly admits a nested function.
 async fn crossing_core() -> lash::LashCore {
     let stores = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
@@ -22,13 +65,14 @@ async fn crossing_core() -> lash::LashCore {
         lash::vm::WorkerService::new(config),
     )
     .await
+    .process_component(Arc::new(capture_component()), CAPTURE_TOOLS)
     .build(node_identity("crossing"))
     .expect("the core builds")
 }
 
-/// A TypeScript workflow's entry hands `tools.echo` a recursive function
+/// A TypeScript workflow's entry hands `tools.capture` a recursive function
 /// that reads a list it shares, then changes the list.
-const SHIPS: &str = "export async function ships(marker: string) {\n  const shared = [1];\n  const fact = async (n: number): Promise<number> => n <= 1 ? shared[0] : n * (await fact(n - 1));\n  await tools.echo({ value: marker, nested: { fact } });\n  shared[0] = 2;\n  return marker;\n}\n";
+const SHIPS: &str = "export async function ships(marker: string) {\n  const shared = [1];\n  const fact = async (n: number): Promise<number> => n <= 1 ? shared[0] : n * (await fact(n - 1));\n  await tools.capture({ value: marker, nested: { fact } });\n  shared[0] = 2;\n  return marker;\n}\n";
 
 /// FN-CROSS in a process, and FN-FREEZE: the process's tool reads the
 /// function as a function value. Its captures were frozen when it crossed,
@@ -40,7 +84,14 @@ async fn a_function_a_process_ships_runs_from_its_own_document_as_it_was() {
     let core = crossing_core().await;
     let artifacts = core.host_artifacts();
     let pin = lash::process::HostArtifactPin::mint();
-    let environment = environment(false);
+    let environment = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(1024))
+        .component(CAPTURE_TOOLS, &())
+        .link_tool(
+            CAPTURE_TOOLS.tool_provider(lash::tool_provider_key!("capture")),
+            &capture_definition(),
+        )
+        .build()
+        .expect("the capture environment");
     let lash::workflow::WorkflowImport::Imported { document, .. } = artifacts
         .import_workflow(
             lash::workflow::document::SourceLanguage::TypeScript,
@@ -60,7 +111,7 @@ async fn a_function_a_process_ships_runs_from_its_own_document_as_it_was() {
             .expect("publish"),
     );
     let env_ref = artifacts
-        .publish_process_env(&pin, &linking(&environment, &["tools.echo"]))
+        .publish_process_env(&pin, &linking(&environment, &["tools.capture"]))
         .await
         .expect("publish the process environment");
     let marker = "fn-cross-process";

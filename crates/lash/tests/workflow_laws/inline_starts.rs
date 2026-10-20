@@ -397,7 +397,12 @@ fn launch_definitions() -> Vec<lash::tools::ToolDefinition> {
             format!("tool:{name}"),
             format!("tools.{name}"),
             "Starts the function it is handed.",
-            serde_json::json!({"type": "object"}),
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "function": {"x-lash": {"kind": "function"}}
+                }
+            }),
             serde_json::json!({"x-lash": {"kind": "process_unknown"}}),
         )
         .expect("tool schema")
@@ -791,9 +796,8 @@ async fn an_inline_start_retry_is_exact_and_a_conflicting_or_refused_one_starts_
 /// `spawner(base, marker, cut)`: hands `tools.<launch>` a closure over
 /// `base`, which the tool starts inline; answers the tool's handle.
 fn spawner(launch: &str) -> lash::workflow::document::DocumentBytes {
-    lash::workflow::document::DocumentBytes::from(
-        parse_document(&format!(
-            r#"kernel 1
+    let mut document = parse_document(&format!(
+        r#"kernel 1
 numbers float
 effect tools.{launch}(input: Any) -> Any
 entry spawner(base: Any, marker: Any, cut: Any) -> Any
@@ -811,9 +815,30 @@ main {{
   finish null
 }}
 "#
-        ))
-        .expect("the spawner parses"),
-    )
+    ))
+    .expect("the spawner parses");
+    let mut boundary = lash::vm::HostBoundary::new();
+    for tool in launch_definitions() {
+        boundary
+            .offer_tool(
+                &tool.manifest,
+                &tool.contract.input_schema.canonical,
+                &tool.contract.output_schema.canonical,
+            )
+            .expect("the launch contract");
+    }
+    let effect = lash::workflow::document::EffectName::new(format!("tools.{launch}"))
+        .expect("the launch effect");
+    document.manifest.effects.insert(
+        effect.clone(),
+        boundary
+            .effect(&effect)
+            .expect("the offered launch")
+            .1
+            .requirement
+            .clone(),
+    );
+    lash::workflow::document::DocumentBytes::from(document)
 }
 
 /// The environment a spawner of `tools.<launch>` runs under: that tool
