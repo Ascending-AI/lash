@@ -700,11 +700,12 @@ impl Evaluator<'_> {
     }
 
     /// The kind a call of `definition` answers, from its signature.
-    fn result_kind(definition: &FunctionDefinition) -> Option<ValueKind> {
+    fn result_kind(&self, definition: &FunctionDefinition) -> Option<ValueKind> {
         match definition.signature.result {
             lash_kernel_doc::Type::Bool => Some(ValueKind::Bool),
             lash_kernel_doc::Type::Float => Some(ValueKind::Float),
             lash_kernel_doc::Type::Int => Some(ValueKind::Int),
+            lash_kernel_doc::Type::Text if !self.heap => Some(ValueKind::Text),
             lash_kernel_doc::Type::Null => Some(ValueKind::Null),
             _ => None,
         }
@@ -722,7 +723,7 @@ impl Evaluator<'_> {
         args: &[Symbol],
         state: &mut State,
     ) -> Symbol {
-        let kind = Self::result_kind(definition);
+        let kind = self.result_kind(definition);
         let counts = kind == Some(ValueKind::Int) && args.iter().all(|arg| !immediate(arg.kind));
         let number = matches!(
             definition.signature.result,
@@ -803,7 +804,7 @@ impl Evaluator<'_> {
             && registered.native().is_some()
             && let Some(form) = read(definition.name.as_str(), &args)
         {
-            let kind = Self::result_kind(definition);
+            let kind = self.result_kind(definition);
             let calls = args.iter().map(|arg| arg.calls).sum();
             return Some(self.heap_step(state, form, (kind, calls)));
         }
@@ -832,7 +833,9 @@ impl Evaluator<'_> {
                 self.callees.len() - 1
             }
         };
-        let kind = Self::result_kind(definition).filter(|kind| *kind != ValueKind::Null);
+        let kind = self
+            .result_kind(definition)
+            .filter(|kind| *kind != ValueKind::Null);
         // Boolean negation is a result wrapper; the underlying comparison
         // or truth test remains the one value-producing native.
         let calls = usize::from(definition.name.as_str() != "bool.not")
@@ -1267,16 +1270,25 @@ impl Evaluator<'_> {
                 );
             }
             self.used = 0;
-            let most = if self.heap || definition.signature.result == lash_kernel_doc::Type::Text {
-                PATH_CALLS
-            } else {
-                SCALAR_CALLS
-            };
             let paths = self.block(&body.block, &mut state, 1);
             let reduced = paths.len();
             let mut results: Vec<_> = paths
                 .into_iter()
-                .filter(|(_, value)| value.as_ref().is_none_or(|value| value.calls <= most))
+                .filter(|(_, value)| {
+                    value.as_ref().is_none_or(|value| {
+                        // The path's answer owns its budget: an Any-returning
+                        // operator may have both numeric and textual arms.
+                        let most = if self.heap
+                            || definition.signature.result == lash_kernel_doc::Type::Text
+                            || value.kind == Some(ValueKind::Text)
+                        {
+                            PATH_CALLS
+                        } else {
+                            SCALAR_CALLS
+                        };
+                        value.calls <= most
+                    })
+                })
                 .collect();
             // A scalar arm that lost a path to the call budget declines
             // wherever that path answers, after re-testing what the general

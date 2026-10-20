@@ -7383,6 +7383,398 @@ let _ = v0;
             })() { return Some(value); }
             None
         },
+        [Value::Float(_), Value::Text(_)] => {
+            if let Some(value) = (|| {
+                let v12 = (|| {
+if let Some(value) = (|| {
+    let v0 = (natives[3].entry)(&[args[0]])?; let _ = v0;
+    if let Some(value) = (|| {
+        let v1 = (natives[4].entry)(&[v0, args[0]])?; let _ = v1;
+        if let Some(value) = (|| {
+            if !matches!(v1, Value::Bool(true)) { return None; }
+            if let Some(value) = (|| {
+                let v2 = (natives[5].entry)(&[args[0]])?; let _ = v2;
+                if let Some(value) = (|| {
+                    let v3 = (natives[6].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+                    if let Some(value) = (|| {
+                        if !matches!(v3, Value::Bool(true)) { return None; }
+                        let v4 = (natives[7].entry)(&[args[0]])?; let _ = v4;
+                        let v5 = (natives[8].entry)(&[v4, Value::Int(10)])?; let _ = v5;
+                        Some(v5)
+                    })() { return Some(value); }
+                    if let Some(value) = (|| {
+                        if !matches!(v3, Value::Bool(false)) { return None; }
+                        if let Some(value) = (|| {
+                            let v6 = (natives[9].entry)(&[args[0]])?; let _ = v6;
+                            if let Some(value) = (|| {
+                                if !matches!(v6, Value::Bool(true)) { return None; }
+                                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
+                            })() { return Some(value); }
+                            if let Some(value) = (|| {
+                                if !matches!(v6, Value::Bool(false)) { return None; }
+                                if let Some(value) = (|| {
+                                    let v7 = (natives[4].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
+                                    if let Some(value) = (|| {
+                                        if !matches!(v7, Value::Bool(true)) { return None; }
+                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
+                                    })() { return Some(value); }
+                                    if let Some(value) = (|| {
+                                        if !matches!(v7, Value::Bool(false)) { return None; }
+                                        let v8 = (natives[4].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v8;
+                                        if !matches!(v8, Value::Bool(true)) { return None; }
+                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
+                                    })() { return Some(value); }
+                                    None
+                                })() { return Some(value); }
+                                None
+                            })() { return Some(value); }
+                            None
+                        })() { return Some(value); }
+                        None
+                    })() { return Some(value); }
+                    None
+                })() { return Some(value); }
+                None
+            })() { return Some(value); }
+            None
+        })() { return Some(value); }
+        if let Some(value) = (|| {
+            if !matches!(v1, Value::Bool(false)) { return None; }
+            if let Some(value) = (|| {
+                let v9 = (natives[9].entry)(&[args[0]])?; let _ = v9;
+                if let Some(value) = (|| {
+                    if !matches!(v9, Value::Bool(true)) { return None; }
+                    Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
+                })() { return Some(value); }
+                if let Some(value) = (|| {
+                    if !matches!(v9, Value::Bool(false)) { return None; }
+                    if let Some(value) = (|| {
+                        let v10 = (natives[4].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v10;
+                        if let Some(value) = (|| {
+                            if !matches!(v10, Value::Bool(true)) { return None; }
+                            Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
+                        })() { return Some(value); }
+                        if let Some(value) = (|| {
+                            if !matches!(v10, Value::Bool(false)) { return None; }
+                            let v11 = (natives[4].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v11;
+                            if !matches!(v11, Value::Bool(true)) { return None; }
+                            Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
+                        })() { return Some(value); }
+                        None
+                    })() { return Some(value); }
+                    None
+                })() { return Some(value); }
+                None
+            })() { return Some(value); }
+            None
+        })() { return Some(value); }
+        None
+    })() { return Some(value); }
+    None
+})() { return Some(value); }
+None
+})()?;
+let _ = v12;
+
+                let v13 = (natives[2].entry)(&[v12, args[1]])?; let _ = v13;
+                Some(v13)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Text(_), Value::Float(_)] => {
+            if let Some(value) = (|| {
+                let v12 = (|| {
+if let Some(value) = (|| {
+    let v0 = (natives[3].entry)(&[args[1]])?; let _ = v0;
+    if let Some(value) = (|| {
+        let v1 = (natives[4].entry)(&[v0, args[1]])?; let _ = v1;
+        if let Some(value) = (|| {
+            if !matches!(v1, Value::Bool(true)) { return None; }
+            if let Some(value) = (|| {
+                let v2 = (natives[5].entry)(&[args[1]])?; let _ = v2;
+                if let Some(value) = (|| {
+                    let v3 = (natives[6].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+                    if let Some(value) = (|| {
+                        if !matches!(v3, Value::Bool(true)) { return None; }
+                        let v4 = (natives[7].entry)(&[args[1]])?; let _ = v4;
+                        let v5 = (natives[8].entry)(&[v4, Value::Int(10)])?; let _ = v5;
+                        Some(v5)
+                    })() { return Some(value); }
+                    if let Some(value) = (|| {
+                        if !matches!(v3, Value::Bool(false)) { return None; }
+                        if let Some(value) = (|| {
+                            let v6 = (natives[9].entry)(&[args[1]])?; let _ = v6;
+                            if let Some(value) = (|| {
+                                if !matches!(v6, Value::Bool(true)) { return None; }
+                                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
+                            })() { return Some(value); }
+                            if let Some(value) = (|| {
+                                if !matches!(v6, Value::Bool(false)) { return None; }
+                                if let Some(value) = (|| {
+                                    let v7 = (natives[4].entry)(&[args[1], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
+                                    if let Some(value) = (|| {
+                                        if !matches!(v7, Value::Bool(true)) { return None; }
+                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
+                                    })() { return Some(value); }
+                                    if let Some(value) = (|| {
+                                        if !matches!(v7, Value::Bool(false)) { return None; }
+                                        let v8 = (natives[4].entry)(&[args[1], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v8;
+                                        if !matches!(v8, Value::Bool(true)) { return None; }
+                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
+                                    })() { return Some(value); }
+                                    None
+                                })() { return Some(value); }
+                                None
+                            })() { return Some(value); }
+                            None
+                        })() { return Some(value); }
+                        None
+                    })() { return Some(value); }
+                    None
+                })() { return Some(value); }
+                None
+            })() { return Some(value); }
+            None
+        })() { return Some(value); }
+        if let Some(value) = (|| {
+            if !matches!(v1, Value::Bool(false)) { return None; }
+            if let Some(value) = (|| {
+                let v9 = (natives[9].entry)(&[args[1]])?; let _ = v9;
+                if let Some(value) = (|| {
+                    if !matches!(v9, Value::Bool(true)) { return None; }
+                    Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
+                })() { return Some(value); }
+                if let Some(value) = (|| {
+                    if !matches!(v9, Value::Bool(false)) { return None; }
+                    if let Some(value) = (|| {
+                        let v10 = (natives[4].entry)(&[args[1], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v10;
+                        if let Some(value) = (|| {
+                            if !matches!(v10, Value::Bool(true)) { return None; }
+                            Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
+                        })() { return Some(value); }
+                        if let Some(value) = (|| {
+                            if !matches!(v10, Value::Bool(false)) { return None; }
+                            let v11 = (natives[4].entry)(&[args[1], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v11;
+                            if !matches!(v11, Value::Bool(true)) { return None; }
+                            Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
+                        })() { return Some(value); }
+                        None
+                    })() { return Some(value); }
+                    None
+                })() { return Some(value); }
+                None
+            })() { return Some(value); }
+            None
+        })() { return Some(value); }
+        None
+    })() { return Some(value); }
+    None
+})() { return Some(value); }
+None
+})()?;
+let _ = v12;
+
+                let v13 = (natives[2].entry)(&[args[0], v12])?; let _ = v13;
+                Some(v13)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Int(_), Value::Text(_)] => {
+            if let Some(value) = (|| {
+                let v16 = (|| {
+if let Some(value) = (|| {
+    let v0 = (natives[3].entry)(&[args[0]])?; let _ = v0;
+    if let Some(value) = (|| {
+        let v1 = (natives[4].entry)(&[v0, args[0]])?; let _ = v1;
+        if let Some(value) = (|| {
+            if !matches!(v1, Value::Bool(true)) { return None; }
+            if let Some(value) = (|| {
+                let v2 = (natives[5].entry)(&[args[0]])?; let _ = v2;
+                if let Some(value) = (|| {
+                    let v3 = (natives[6].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+                    if let Some(value) = (|| {
+                        if !matches!(v3, Value::Bool(true)) { return None; }
+                        let v4 = (natives[7].entry)(&[args[0]])?; let _ = v4;
+                        let v5 = (natives[8].entry)(&[v4, Value::Int(10)])?; let _ = v5;
+                        Some(v5)
+                    })() { return Some(value); }
+                    if let Some(value) = (|| {
+                        if !matches!(v3, Value::Bool(false)) { return None; }
+                        if let Some(value) = (|| {
+                            let v6 = (natives[9].entry)(&[args[0]])?; let _ = v6;
+                            if let Some(value) = (|| {
+                                if !matches!(v6, Value::Bool(true)) { return None; }
+                                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
+                            })() { return Some(value); }
+                            if let Some(value) = (|| {
+                                if !matches!(v6, Value::Bool(false)) { return None; }
+                                if let Some(value) = (|| {
+                                    let v7 = (natives[4].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
+                                    if let Some(value) = (|| {
+                                        if !matches!(v7, Value::Bool(true)) { return None; }
+                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
+                                    })() { return Some(value); }
+                                    if let Some(value) = (|| {
+                                        if !matches!(v7, Value::Bool(false)) { return None; }
+                                        let v8 = (natives[4].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v8;
+                                        if !matches!(v8, Value::Bool(true)) { return None; }
+                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
+                                    })() { return Some(value); }
+                                    None
+                                })() { return Some(value); }
+                                None
+                            })() { return Some(value); }
+                            None
+                        })() { return Some(value); }
+                        None
+                    })() { return Some(value); }
+                    None
+                })() { return Some(value); }
+                None
+            })() { return Some(value); }
+            None
+        })() { return Some(value); }
+        if let Some(value) = (|| {
+            if !matches!(v1, Value::Bool(false)) { return None; }
+            if let Some(value) = (|| {
+                let v11 = (natives[9].entry)(&[args[0]])?; let _ = v11;
+                if let Some(value) = (|| {
+                    if !matches!(v11, Value::Bool(true)) { return None; }
+                    Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
+                })() { return Some(value); }
+                if let Some(value) = (|| {
+                    if !matches!(v11, Value::Bool(false)) { return None; }
+                    if let Some(value) = (|| {
+                        let v12 = (natives[4].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v12;
+                        if let Some(value) = (|| {
+                            if !matches!(v12, Value::Bool(true)) { return None; }
+                            Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
+                        })() { return Some(value); }
+                        if let Some(value) = (|| {
+                            if !matches!(v12, Value::Bool(false)) { return None; }
+                            let v13 = (natives[4].entry)(&[args[0], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v13;
+                            if !matches!(v13, Value::Bool(true)) { return None; }
+                            Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
+                        })() { return Some(value); }
+                        None
+                    })() { return Some(value); }
+                    None
+                })() { return Some(value); }
+                None
+            })() { return Some(value); }
+            None
+        })() { return Some(value); }
+        None
+    })() { return Some(value); }
+    None
+})() { return Some(value); }
+None
+})()?;
+let _ = v16;
+
+                let v17 = (natives[2].entry)(&[v16, args[1]])?; let _ = v17;
+                Some(v17)
+            })() { return Some(value); }
+            None
+        },
+        [Value::Text(_), Value::Int(_)] => {
+            if let Some(value) = (|| {
+                let v16 = (|| {
+if let Some(value) = (|| {
+    let v0 = (natives[3].entry)(&[args[1]])?; let _ = v0;
+    if let Some(value) = (|| {
+        let v1 = (natives[4].entry)(&[v0, args[1]])?; let _ = v1;
+        if let Some(value) = (|| {
+            if !matches!(v1, Value::Bool(true)) { return None; }
+            if let Some(value) = (|| {
+                let v2 = (natives[5].entry)(&[args[1]])?; let _ = v2;
+                if let Some(value) = (|| {
+                    let v3 = (natives[6].entry)(&[v2, Value::Float(lash_kernel_doc::Float::new(f64::from_bits(4845873199050653696)))])?; let _ = v3;
+                    if let Some(value) = (|| {
+                        if !matches!(v3, Value::Bool(true)) { return None; }
+                        let v4 = (natives[7].entry)(&[args[1]])?; let _ = v4;
+                        let v5 = (natives[8].entry)(&[v4, Value::Int(10)])?; let _ = v5;
+                        Some(v5)
+                    })() { return Some(value); }
+                    if let Some(value) = (|| {
+                        if !matches!(v3, Value::Bool(false)) { return None; }
+                        if let Some(value) = (|| {
+                            let v6 = (natives[9].entry)(&[args[1]])?; let _ = v6;
+                            if let Some(value) = (|| {
+                                if !matches!(v6, Value::Bool(true)) { return None; }
+                                Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
+                            })() { return Some(value); }
+                            if let Some(value) = (|| {
+                                if !matches!(v6, Value::Bool(false)) { return None; }
+                                if let Some(value) = (|| {
+                                    let v7 = (natives[4].entry)(&[args[1], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v7;
+                                    if let Some(value) = (|| {
+                                        if !matches!(v7, Value::Bool(true)) { return None; }
+                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
+                                    })() { return Some(value); }
+                                    if let Some(value) = (|| {
+                                        if !matches!(v7, Value::Bool(false)) { return None; }
+                                        let v8 = (natives[4].entry)(&[args[1], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v8;
+                                        if !matches!(v8, Value::Bool(true)) { return None; }
+                                        Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
+                                    })() { return Some(value); }
+                                    None
+                                })() { return Some(value); }
+                                None
+                            })() { return Some(value); }
+                            None
+                        })() { return Some(value); }
+                        None
+                    })() { return Some(value); }
+                    None
+                })() { return Some(value); }
+                None
+            })() { return Some(value); }
+            None
+        })() { return Some(value); }
+        if let Some(value) = (|| {
+            if !matches!(v1, Value::Bool(false)) { return None; }
+            if let Some(value) = (|| {
+                let v11 = (natives[9].entry)(&[args[1]])?; let _ = v11;
+                if let Some(value) = (|| {
+                    if !matches!(v11, Value::Bool(true)) { return None; }
+                    Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("NaN") }?))
+                })() { return Some(value); }
+                if let Some(value) = (|| {
+                    if !matches!(v11, Value::Bool(false)) { return None; }
+                    if let Some(value) = (|| {
+                        let v12 = (natives[4].entry)(&[args[1], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(9218868437227405312)))])?; let _ = v12;
+                        if let Some(value) = (|| {
+                            if !matches!(v12, Value::Bool(true)) { return None; }
+                            Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("Infinity") }?))
+                        })() { return Some(value); }
+                        if let Some(value) = (|| {
+                            if !matches!(v12, Value::Bool(false)) { return None; }
+                            let v13 = (natives[4].entry)(&[args[1], Value::Float(lash_kernel_doc::Float::new(f64::from_bits(18442240474082181120)))])?; let _ = v13;
+                            if !matches!(v13, Value::Bool(true)) { return None; }
+                            Some(Value::Text(const { lash_kernel_doc::arena::ShortText::new("-Infinity") }?))
+                        })() { return Some(value); }
+                        None
+                    })() { return Some(value); }
+                    None
+                })() { return Some(value); }
+                None
+            })() { return Some(value); }
+            None
+        })() { return Some(value); }
+        None
+    })() { return Some(value); }
+    None
+})() { return Some(value); }
+None
+})()?;
+let _ = v16;
+
+                let v17 = (natives[2].entry)(&[args[0], v16])?; let _ = v17;
+                Some(v17)
+            })() { return Some(value); }
+            None
+        },
         _ => None,
     }
 }

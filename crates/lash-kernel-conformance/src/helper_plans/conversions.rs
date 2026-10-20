@@ -242,3 +242,162 @@ main {{ return null }}
         }
     }
 }
+
+/// PLAN-INDEP / FIG-7000: an Any-returning helper's text path may
+/// compose the same prepared calls as a Text-returning helper. Its
+/// completion formula still belongs to the outer helper.
+#[test]
+fn composed_text_addition_agrees_with_its_body_and_charge() {
+    let runner = runner::Runner::new("typescript").unwrap();
+    let case = runner::Case {
+        id: "prefix-number".into(),
+        dialect: "typescript".into(),
+        source: "null;".into(),
+        bits: 0,
+        stride: 0,
+        nanoseconds: 0,
+    };
+    let runner::Lowered::Program(base) = runner.lower(&case).unwrap() else {
+        panic!("fixture lowers")
+    };
+    let registry = base.library.registry();
+    let (add, registered) = registry
+        .iter()
+        .find(|(_, registered)| registered.name() == "ts.add")
+        .unwrap();
+    let template = registered.plan().unwrap().template.as_ref().unwrap();
+    let natives: Vec<_> = template
+        .callees
+        .iter()
+        .map(|id| {
+            registry
+                .get(id)
+                .unwrap()
+                .native()
+                .unwrap()
+                .prepare()
+                .unwrap()
+        })
+        .collect();
+    let prefix = lash_kernel_doc::arena::ShortText::new("key_").unwrap();
+    for number in [-0.0, 0.0, -17.0, 42.0] {
+        let args = [Value::Text(prefix), Value::Float(Float::new(number))];
+        let actual = template.entry.and_then(|entry| entry(&args, &natives));
+        let expected = lash_kernel_doc::arena::ShortText::new(&format!("key_{}", number as i64))
+            .map(Value::Text);
+        assert!(
+            actual
+                .zip(expected)
+                .is_some_and(|(actual, expected)| actual.same(&expected)),
+            "composed path for {number}: {actual:?}"
+        );
+    }
+    let source = format!(
+        r#"kernel 1
+numbers by_spelling
+use add = @{add}
+entry probe(handle: Any) -> Any
+fn probe(handle) {{
+  for number in [-0.0, 0.0, -17.0, 42.0, 9007199254740991.0, 9999999999999.0, 1.5, nan, inf, -inf] {{
+    let answer = invoke add("key_", number)
+    print answer
+  }}
+  return null
+}}
+main {{ return null }}
+"#
+    );
+    let program = Program {
+        closure: base.closure,
+        document: Arc::new(parse_document(&source).unwrap()),
+        library: base.library.clone(),
+    };
+    let reference = Program {
+        library: prepare_with_layout(Arc::clone(registry), Layout(3)),
+        ..program.clone()
+    };
+    let expected = observe::<3>(&reference, 50_000_000);
+    assert!(
+        matches!(expected.end, crate::ExpectedEnd::Finished(_)),
+        "{expected:?}"
+    );
+    assert_eq!(observe::<0>(&program, 50_000_000), expected);
+    let mut charged = 0;
+    for event in &expected.tape {
+        let units = match event {
+            lash_kernel_exec::Weight::Units(units) | lash_kernel_exec::Weight::Atomic(units) => {
+                *units
+            }
+        };
+        for bound in [charged, charged + units / 2] {
+            assert_eq!(
+                observe::<0>(&program, bound),
+                observe::<3>(&reference, bound),
+                "bound {bound}"
+            );
+        }
+        charged += units;
+    }
+    // Explicit conversions and interpolation keep two completion formulas
+    // in their original order, including long answers and fractional inputs.
+    for (dialect, source) in [
+        (
+            "typescript",
+            r#"
+const labels = [];
+for (const number of [-0.0, 0.0, -17.0, 42.0, 9007199254740991.0, 9999999999999.0, 1.5]) {
+  labels.push("é_" + String(number));
+  labels.push(`key_${number}`);
+}
+const result = labels;
+"#,
+        ),
+        (
+            "python",
+            r#"
+labels = []
+for number in [0, -17, 42, 9007199254740991, 9999999999999, 1.5]:
+    labels.append("é_" + str(number))
+    labels.append(f"key_{number}")
+result = labels
+"#,
+        ),
+    ] {
+        let runner = runner::Runner::new(dialect).unwrap();
+        let case = runner::Case {
+            id: "prefix-number-forms".into(),
+            dialect: dialect.into(),
+            source: source.into(),
+            bits: 0,
+            stride: 0,
+            nanoseconds: 0,
+        };
+        let runner::Lowered::Program(program) = runner.lower(&case).unwrap() else {
+            panic!("text construction lowers")
+        };
+        let registry = program.library.registry();
+        let reference = Program {
+            library: prepare_with_layout(Arc::clone(registry), Layout(3)),
+            ..program.clone()
+        };
+        let expected = run::<3>(&case, &reference, &mut Projector::default());
+        assert!(
+            matches!(expected.end, crate::ExpectedEnd::Finished(_)),
+            "{expected:?}"
+        );
+        assert_eq!(
+            run::<0>(&case, &program, &mut Projector::default()),
+            expected,
+            "{dialect}"
+        );
+        let without_regions = Program {
+            library: prepare_with_layout(Arc::clone(registry), Layout(0).without_regions()),
+            ..program.clone()
+        };
+        assert_eq!(
+            run::<0>(&case, &without_regions, &mut Projector::default()),
+            expected,
+            "{dialect} regions off"
+        );
+    }
+}

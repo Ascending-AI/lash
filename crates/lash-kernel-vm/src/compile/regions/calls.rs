@@ -49,6 +49,7 @@ pub(super) struct Site {
     /// The scalar charge table, where the entry answers immediates.
     table: Option<ScalarTable>,
     formula: Option<SiteFormula>,
+    text_charge: Option<super::super::formula::TextCharge>,
 }
 
 impl Site {
@@ -87,13 +88,16 @@ impl Site {
                 (Answers::Template(template.entry), natives.clone(), declined)
             }
         };
+        let formula = fast.at_site(known, fresh);
+        let text_charge = formula.as_ref().and_then(SiteFormula::text_charge);
         Some(Self {
             id,
             answers,
             natives,
             declined,
             table: fast.scalar().cloned(),
-            formula: fast.at_site(known, fresh),
+            formula,
+            text_charge,
         })
     }
 
@@ -131,6 +135,15 @@ impl Site {
         cx: &mut Cx<'_>,
     ) -> Option<Value> {
         if cx.charging {
+            if matches!(answer.value, Value::Text(_))
+                && let Some(units) = self
+                    .text_charge
+                    .as_ref()
+                    .and_then(|charge| charge.units(values, &answer.value))
+            {
+                cx.meter.measured(units);
+                return Some(answer.value);
+            }
             let certified = answer
                 .scalar_sizes
                 .zip(self.table.as_ref())

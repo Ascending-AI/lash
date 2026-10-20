@@ -5,7 +5,7 @@ use lash_kernel_doc as doc;
 use lash_kernel_doc::Value;
 
 use super::regions::Fresh;
-use crate::data::{empty_measure, holds_nothing, immediate_measure, size_one};
+use crate::data::{empty_measure, holds_nothing, immediate_measure, immediate_size, size_one};
 
 /// What a formula's operand measures: an argument by its position, the
 /// result, or a parameter the function does not have, which measures 0.
@@ -453,6 +453,37 @@ pub(crate) struct SiteFormula {
     least: Option<[Term; 2]>,
 }
 
+/// A text answer's linear size formula, with its operand positions
+/// resolved once. Inline text sizes need the byte count, rather than the
+/// binary scalar mask. The coefficients come from the same site formula;
+/// no helper has a separately authored charge (K-CHG-003).
+pub(crate) struct TextCharge {
+    constant: u64,
+    args: [u64; 3],
+    result: u64,
+}
+
+impl TextCharge {
+    #[inline(always)]
+    pub(crate) fn units(&self, args: &[Value], result: &Value) -> Option<u64> {
+        #[inline(always)]
+        fn term(coefficient: u64, value: Option<&Value>) -> Option<u64> {
+            if coefficient == 0 {
+                Some(0)
+            } else {
+                Some(coefficient.saturating_mul(immediate_size(value?)?))
+            }
+        }
+        Some(
+            self.constant
+                .saturating_add(term(self.args[0], args.first())?)
+                .saturating_add(term(self.args[1], args.get(1))?)
+                .saturating_add(term(self.args[2], args.get(2))?)
+                .saturating_add(term(self.result, Some(result))?),
+        )
+    }
+}
+
 /// A measurement of a site's formula.
 #[derive(Clone, Copy)]
 enum Term {
@@ -501,6 +532,32 @@ fn site_measure(value: &Value, measure: doc::Measure) -> Option<u64> {
 }
 
 impl SiteFormula {
+    /// A sum of immediate sizes, with no minimum or fresh collection
+    /// operand. Every other formula keeps its general evaluator.
+    pub(crate) fn text_charge(&self) -> Option<TextCharge> {
+        if self.least.is_some() {
+            return None;
+        }
+        let mut charge = TextCharge {
+            constant: self.constant,
+            args: [0; 3],
+            result: 0,
+        };
+        for term in &self.terms {
+            let coefficient = match term {
+                Term::Arg {
+                    at,
+                    measure: doc::Measure::Size | doc::Measure::DeepSize,
+                    fresh: None,
+                } => charge.args.get_mut(*at)?,
+                Term::Result(doc::Measure::Size | doc::Measure::DeepSize) => &mut charge.result,
+                _ => return None,
+            };
+            *coefficient += 1;
+        }
+        Some(charge)
+    }
+
     /// What [`Fast::immediate`] charges a call of `args` that gave
     /// `result`, the site's fresh operands measured as their values where
     /// a write is `held`; `None` where a value it measures is one the
@@ -699,6 +756,75 @@ impl Fast {
         {
             Some(units) => Charge::Units(units),
             None => Charge::Plan(&self.shallow),
+        }
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    reason = "a refused formula fixture fails the law"
+)]
+mod text_laws {
+    use super::*;
+    use doc::arena::{ArenaHandle, ShortText};
+
+    /// K-CHG-003: specializing a text formula retains byte sizes,
+    /// constant folding, saturation and arena declines.
+    #[test]
+    fn prepared_text_charge_is_the_original_formula() {
+        let params = ["a", "b", "c"].map(|name| doc::Param {
+            name: doc::Name::new(name),
+            ty: doc::Type::Any,
+            optional: false,
+        });
+        let a = doc::Operand::Param(doc::Name::new("a"));
+        let b = doc::Operand::Param(doc::Name::new("b"));
+        let c = doc::Operand::Param(doc::Name::new("c"));
+        let values = [
+            Value::Int(0),
+            Value::Int(-1),
+            Value::Float(doc::Float::new(-0.0)),
+            Value::Text(ShortText::new("").unwrap()),
+            Value::Text(ShortText::new("é_123").unwrap()),
+            Value::Text(ShortText::new("12345678901234").unwrap()),
+            Value::List(ArenaHandle::new(0, 0)),
+            Value::LongText(ArenaHandle::new(1, 0)),
+        ];
+        for constant in [0, 8, u64::MAX - 1] {
+            let formula = doc::Formula::Sum(vec![
+                doc::Formula::Constant(constant),
+                doc::Formula::Size(a.clone()),
+                doc::Formula::Size(b.clone()),
+                doc::Formula::DeepSize(c.clone()),
+                doc::Formula::Size(doc::Operand::Result),
+            ]);
+            let plan = Plan::new(&formula, &params);
+            let fast = Fast::new(&formula, &params, &plan, true);
+            for known in [[None; 3], [Some(values[4]), None, None]] {
+                let site = fast.at_site(&known, Fresh::of(0)).unwrap();
+                let text_charge = site.text_charge().unwrap();
+                for a in &values {
+                    if known[0].is_some_and(|known| !known.same(a)) {
+                        continue;
+                    }
+                    for b in &values {
+                        for c in &values {
+                            for result in &values[3..6] {
+                                let args = [*a, *b, *c];
+                                assert_eq!(
+                                    text_charge.units(&args, result),
+                                    site.units(&args, result, false)
+                                );
+                                assert_eq!(
+                                    text_charge.units(&args, result),
+                                    site.units(&args, result, true)
+                                );
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
