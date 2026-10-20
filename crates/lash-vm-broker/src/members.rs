@@ -190,7 +190,7 @@ impl Members {
         match self.lifecycle()?.act(folded, now).await? {
             Act::Committed(committed) => {
                 if let Some(rows) = self.rows.as_mut() {
-                    rows.extend(committed.appended);
+                    rows.extend(committed.appended, committed.staged);
                 }
                 Ok(None)
             }

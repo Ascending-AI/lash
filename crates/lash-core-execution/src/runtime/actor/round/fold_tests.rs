@@ -12,11 +12,13 @@ use lash_durable::domain::{Ordinal, OwnerKey, RunFacts, RunSeq};
 use lash_durable::{ActorKey, ActorTx, DurableInstant, Epoch, MailSeq, OpenedActor, StateRevision};
 use lash_protocol_types::{ExecutionLimit, ExecutionPolicy, SessionId, TurnId};
 
+use super::records::{Record, StagedRecord};
 use super::{
-    AdmittedExecution, ExecutionDraft, FoldRefusal, PinnedWaits, PolicyView, Recovery, RunFold,
-    admit, fold, settle, settle_retry, start_retry,
+    AdmittedExecution, CompletedCall, ExecutionDraft, FoldRefusal, PinnedWaits, PolicyView,
+    Recovery, RunFold, RunRecords, admit, completed_material, fold, settle, settle_retry,
+    settle_staged, start_retry,
 };
-use crate::{ToolCallId, ToolId};
+use crate::{ModelToolReturn, ToolCallId, ToolCallOutput, ToolId};
 use lash_core_store::tool_run::Material;
 use lash_core_store::tool_run::SettledOutput;
 
@@ -312,4 +314,128 @@ fn a_call_whose_retry_is_due_ends_at_its_failed_attempt() {
         recoveries(&fold(&rows(&tx), &PolicyView::default(), &PinnedWaits::default()).unwrap()),
         vec![Recovery::Settled(failed())]
     );
+}
+
+/// ACKNOWLEDGED-DELTA (FIG-7056): each record an owner stages for its fold
+/// is the record a read of its committed row gives. A typed completion, a
+/// payload kept as text, a park and a retry are each held; the record read
+/// from the row stages as the same node, and its material is held as the
+/// staged one is: the typed answer as its value, its JSON text byte for
+/// byte, the text payload as its text. A fold over the staged records
+/// agrees with a fold that reads every row.
+#[test]
+fn an_acknowledged_commits_staged_records_are_the_records_its_rows_read_as() {
+    let mut tx = opened();
+    let members = admitted(
+        &mut tx,
+        vec![
+            draft("a", "once", ExecutionPolicy::Once),
+            draft("b", "once", ExecutionPolicy::Once),
+            draft("c", "once", ExecutionPolicy::Once),
+            draft("d", "repeats", repeatable()),
+        ],
+    );
+    let mut records = RunRecords::new(rows(&tx));
+    let output = ToolCallOutput::success(serde_json::json!({"answer": "\u{1}\"\\".repeat(500)}));
+    let answer = CompletedCall {
+        call_id: ToolCallId::fixture("a"),
+        provider_call_id: Some("provider-a".to_owned()),
+        tool_name: "once".to_owned(),
+        args: serde_json::json!({"q": "rows", "n": -0.0}),
+        model_return: ModelToolReturn::from_output("once".to_owned(), &output),
+        output,
+        intent_outcomes: Vec::new(),
+        replay: None,
+    };
+    let text = serde_json::to_string(&answer).unwrap();
+    let typed = completed_material(
+        &EffectOpener::turn(
+            SessionId::try_from("s".to_owned()).unwrap(),
+            TurnId::try_from("t".to_owned()).unwrap(),
+        ),
+        answer,
+    )
+    .unwrap();
+
+    let mut tx = opened();
+    let outputs = [
+        SettledOutput::Completed(typed),
+        SettledOutput::Completed(journal("text")),
+        SettledOutput::Waiting(journal("parked").parked("wait".to_owned())),
+    ];
+    let mut staged: Vec<StagedRecord> = members
+        .iter()
+        .zip(outputs)
+        .map(|(member, output)| settle_staged(&mut tx, member, output, Vec::new(), None).unwrap())
+        .collect();
+    staged.push(settle_retry(&mut tx, &members[3], failed(), DurableInstant(50)).unwrap());
+    let appended = rows(&tx);
+
+    for (index, staged) in staged.iter().enumerate() {
+        let held = staged.record.as_deref().expect("the staged record is held");
+        let row = appended
+            .rows
+            .iter()
+            .find(|row| row.record == staged.node)
+            .expect("the staged node is a row's");
+        let read = super::records::read(&appended, row).unwrap();
+        let mut scratch = opened();
+        let again = super::records::append_staged(
+            &mut scratch,
+            &owner(),
+            RUN,
+            row.ordinal,
+            row.call.as_ref(),
+            read,
+        );
+        assert_eq!(again.node, staged.node, "record {index} reads as staged");
+        let read = again.record.expect("the read record is held");
+        let (
+            Record::Outcome(held) | Record::Wait(held),
+            Record::Outcome(read) | Record::Wait(read),
+        ) = (held, &*read)
+        else {
+            let (Record::Retry(held), Record::Retry(read)) = (held, &*read) else {
+                panic!("record {index} changed its kind");
+            };
+            assert_eq!(held.output.payload(), read.output.payload());
+            continue;
+        };
+        assert_eq!(held.output.payload(), read.output.payload());
+        assert_eq!(held.ended_at_ms, read.ended_at_ms);
+        match super::completed_call(&held.output) {
+            Some(held) => {
+                let read = super::completed_call(&read.output).expect("the answer reads typed");
+                assert_eq!(serde_json::to_string(read).unwrap(), text);
+                assert_eq!(serde_json::to_string(held).unwrap(), text);
+            }
+            None => assert!(super::completed_call(&read.output).is_none()),
+        }
+    }
+
+    let mut read = RunRecords::new(records.facts().clone());
+    read.extend(appended.clone(), Vec::new());
+    records.extend(appended, staged);
+    let policies = PolicyView::new([
+        (ToolId::new("once"), ExecutionPolicy::Once),
+        (ToolId::new("repeats"), repeatable()),
+    ]);
+    let (staged, read) = (
+        records.fold(&policies, &PinnedWaits::default()).unwrap(),
+        read.fold(&policies, &PinnedWaits::default()).unwrap(),
+    );
+    assert_eq!(recoveries(&staged), recoveries(&read));
+    let outcomes = |fold: &RunFold| -> Vec<Option<String>> {
+        fold.round(RUN)
+            .unwrap()
+            .members()
+            .iter()
+            .map(|member| {
+                member
+                    .outcome()
+                    .and_then(|output| output.payload().map(str::to_owned))
+            })
+            .collect()
+    };
+    assert_eq!(outcomes(&staged), outcomes(&read));
 }

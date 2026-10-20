@@ -53,9 +53,11 @@ fn resolved_finish(
     else {
         panic!("a resolved park completes the call");
     };
-    decode_completed(material.payload())
-        .expect("the completed call decodes")
+    material
+        .typed::<CompletedCall>()
+        .expect("the completed call is held typed")
         .output
+        .clone()
 }
 
 /// FIG-5823 law 1, deferred route: a Finish that arrives through a park's

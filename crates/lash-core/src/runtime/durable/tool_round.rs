@@ -251,7 +251,8 @@ pub(super) async fn run(
             .map_err(exec)?;
             if let Some(refused) = &refused {
                 for (member, answer) in admitted.members().iter().zip(refused) {
-                    let output = round::completed_material(&opener, answer).map_err(exec)?;
+                    let output =
+                        round::completed_material(&opener, answer.clone()).map_err(exec)?;
                     round::settle(
                         &mut tx,
                         member,
@@ -400,7 +401,7 @@ pub(super) fn record_refused(
     )
     .map_err(exec)?;
     for (member, answer) in admitted.members().iter().zip(completed) {
-        let output = round::completed_material(&opener, answer).map_err(exec)?;
+        let output = round::completed_material(&opener, answer.clone()).map_err(exec)?;
         round::settle(
             tx,
             member,

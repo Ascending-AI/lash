@@ -172,6 +172,35 @@ fn output(payload: String) -> Material {
     )
 }
 
+/// What attempt `attempt` of the write `call` answers.
+fn written(call: &ToolCallId, attempt: u32) -> round::CompletedCall {
+    let answer = lash_core_execution::ToolCallOutput::success(
+        serde_json::json!({ "wrote": format!("{call}#{attempt}") }),
+    );
+    round::CompletedCall {
+        call_id: call.clone(),
+        provider_call_id: None,
+        tool_name: "write".to_owned(),
+        args: serde_json::json!({}),
+        model_return: lash_protocol_types::ModelToolReturn::from_output(
+            "write".to_owned(),
+            &answer,
+        ),
+        output: answer,
+        intent_outcomes: Vec::new(),
+        replay: None,
+    }
+}
+
+/// [`written`] as a member's journal-local output, held typed.
+fn completion(call: &ToolCallId, attempt: u32) -> Material {
+    round::completed_material(
+        &EffectOpener::turn(session(), turn()),
+        written(call, attempt),
+    )
+    .unwrap()
+}
+
 /// What a member's tool does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Tool {
@@ -280,16 +309,18 @@ impl MemberBodies for Catalog {
                         .await;
                 }
                 world.write(&call, attempt);
-                let output = output(format!("{call}#{attempt}"));
                 let fails = match tool {
                     Tool::Write { .. } | Tool::Quick | Tool::Defer { .. } => false,
                     Tool::Flaky => attempt == 1,
                     Tool::Failing => true,
                 };
                 MemberOutcome::from(if fails {
-                    SettledOutput::Failed(output.failure(KnownFailureReason::Reported, None))
+                    SettledOutput::Failed(
+                        output(format!("{call}#{attempt}"))
+                            .failure(KnownFailureReason::Reported, None),
+                    )
                 } else {
-                    SettledOutput::Completed(output)
+                    SettledOutput::Completed(completion(&call, attempt))
                 })
             })
         })
@@ -790,8 +821,14 @@ fn round_laws(
                         "F2: Once {call} was entered {entries} times, wrote {writes:?}"
                     ));
                 }
+                // A completion recovers typed, exactly as its one write
+                // answered it.
+                let answered = |attempt: u32| {
+                    round::completed_call(outcome).map(|answer| serde_json::to_value(answer).ok())
+                        == Some(serde_json::to_value(written(call, attempt)).ok())
+                };
                 match outcome {
-                    SettledOutput::Completed(_) if writes.len() == 1 => {}
+                    SettledOutput::Completed(_) if writes.len() == 1 && answered(writes[0]) => {}
                     SettledOutput::Interrupted => {}
                     SettledOutput::Cancelled { .. } if cancelled => {}
                     other => violations.push(format!(
@@ -1237,8 +1274,9 @@ async fn a_cancel_during_a_retry_backoff_starts_no_next_attempt() {
     );
 }
 
-/// SETTLED-PAYLOAD-REUSE: settled native members reuse their verified
-/// payload image across folds, attempt histories and recovery views.
+/// SETTLED-PAYLOAD-REUSE: settled native members, their completions held
+/// typed, reuse their verified payload image across folds, attempt
+/// histories and recovery views; each projects its completion's exact JSON.
 #[tokio::test]
 async fn settled_payload_reuse() {
     use lash_durable::DurableReads as _;
@@ -1300,11 +1338,14 @@ async fn settled_payload_reuse() {
             replay: None,
         };
         let payload = serde_json::to_string(&completed).unwrap();
-        expected.push(payload.clone());
+        expected.push(payload);
         round::settle(
             &mut tx,
             member,
-            SettledOutput::Completed(output(payload)),
+            SettledOutput::Completed(
+                round::completed_material(&EffectOpener::turn(session(), turn()), completed)
+                    .unwrap(),
+            ),
             Vec::new(),
             None,
         )
@@ -1399,7 +1440,7 @@ async fn settled_payload_reuse() {
         .commit(tx, CommitLabel::ROUND_OUTCOME)
         .await
         .unwrap();
-    records.extend(appended);
+    records.extend(appended, Vec::new());
     let extended = records.fold(&policies, &waits).unwrap();
     assert_eq!(
         extended.round(next).unwrap().members()[0].outcome(),
@@ -1432,7 +1473,7 @@ async fn settled_payload_reuse() {
     bad.bytes = bytes.into();
     let mut corrupted = lash_durable::domain::RunFacts::default();
     corrupted.nodes.insert(id, bad);
-    records.extend(corrupted);
+    records.extend(corrupted, Vec::new());
     assert!(
         records.fold(&policies, &waits).is_err(),
         "a conflicting node must be checked again"

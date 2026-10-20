@@ -49,6 +49,7 @@ use super::tools::CompletedCall;
 use crate::{ToolCallId, ToolCallOutput, ToolValue};
 use lash_core_store::tool_run::Material;
 use lash_core_store::tool_run::NamesMaterial;
+use lash_core_store::tool_run::SettledOutput;
 
 #[path = "call_body.rs"]
 mod call_body;
@@ -429,8 +430,9 @@ pub struct SettledFact {
 impl SettledFact {
     /// Checks the material is present exactly when the outcome names one,
     /// and that it is the node the outcome's reference names: minted over
-    /// the node's identity, or, for a value holding a settled output's
-    /// payload text, over that text, read through `decoder`.
+    /// the node's identity, or, for a node holding a settled output's
+    /// payload, over that payload, read through `decoder`
+    /// ([`load_material`]).
     ///
     /// # Errors
     ///
@@ -450,15 +452,40 @@ impl SettledFact {
                 Some(named),
                 Some(material @ (MaterialNode::Value(_) | MaterialNode::CallPayload(_))),
             ) => material.check(&named).or_else(|_| {
-                let payload = load_payload(decoder, *material)
-                    .map_err(|_| GraphRefusal::PublicationMismatch)?;
-                Material::new(named, payload)
+                load_material(decoder, named, *material)
                     .map(|_| ())
                     .map_err(|_| GraphRefusal::PublicationMismatch)
             }),
             (None, None) => Ok(()),
             _ => Err(GraphRefusal::PublicationMismatch),
         }
+    }
+
+    /// The settled output this fact holds, its material read back through
+    /// `decoder` and checked against the digest its outcome names, once: a
+    /// call's answer typed, any other payload as its text.
+    ///
+    /// # Errors
+    ///
+    /// [`GraphRefusal::PublicationMismatch`] when the material is missing,
+    /// stray, or not the payload its outcome names; any refusal of the node
+    /// read, or [`GraphRefusal::InvalidBody`] for a material that is no
+    /// settled output's payload ([`load_material`]).
+    pub fn output(&self, decoder: &mut GraphDecoder<'_>) -> Result<SettledOutput, GraphRefusal> {
+        let mismatch = |_| GraphRefusal::PublicationMismatch;
+        Ok(match (&self.outcome, self.material) {
+            (AttemptOutcome::Completed(reference), Some(material)) => {
+                SettledOutput::Completed(load_material(decoder, reference.clone(), material)?)
+            }
+            (AttemptOutcome::Failed(failure), Some(material)) => {
+                SettledOutput::Failed(load_material(decoder, failure.clone(), material)?)
+            }
+            (AttemptOutcome::Waiting(source), Some(material)) => {
+                SettledOutput::Waiting(load_material(decoder, source.clone(), material)?)
+            }
+            (outcome, None) => SettledOutput::new(outcome.clone(), None).map_err(mismatch)?,
+            (_, Some(_)) => return Err(GraphRefusal::PublicationMismatch),
+        })
     }
 }
 
@@ -714,58 +741,73 @@ pub fn stage_value(
         .map_err(GraphRefusal::from)
 }
 
-/// Stages a material's payload as one FrozenValue holding its exact text,
-/// placed in shared leaves when large: what a fact's settled output names.
+/// Stages `material`'s payload as the node a fact's settled output names: a
+/// call's answer, held typed, as its outcome ([`CallOutcome::stage`]), when
+/// that outcome reads back as exactly the answer; any other payload as one
+/// FrozenValue holding its exact text, placed in shared leaves when large.
+/// Checks the node reads back as exactly that payload, so the material's
+/// digest names it.
 ///
 /// # Errors
 ///
-/// Any refusal of the staging area.
-pub fn stage_payload(
+/// [`GraphRefusal::PublicationMismatch`] when the node does not read back as
+/// the payload, or any refusal of the staging area or of the read.
+pub fn stage_material<T: NamesMaterial>(
     staging: &mut GraphStaging,
-    payload: &str,
+    material: &Material<T>,
 ) -> Result<MaterialNode, GraphRefusal> {
-    if let Some(completed) = super::decode_completed(payload) {
-        // Admit this encoding only when decoding and re-serializing preserves
-        // every byte the material digest names; other payloads remain values.
-        if serde_json::to_string(&completed).ok().as_deref() == Some(payload) {
-            return CallOutcome::of(&completed, None, 0)
-                .stage(staging)
-                .map(MaterialNode::CallPayload);
+    if let Some(completed) = material.typed::<CompletedCall>() {
+        let outcome = CallOutcome::of(completed, None, 0);
+        let node = outcome.stage(staging)?;
+        // The completion's digest was minted over its value: the outcome
+        // stands for it only when it gives back that value, field for field
+        // ([`CallOutcome::completed`]). One that does not keeps its text.
+        let mut decoder = GraphDecoder::new(&*staging, DecodeLimits::within_total(1 << 32));
+        let staged = CallOutcome::load(&mut decoder, node)?;
+        if staged == outcome && staged.presented().ok().as_ref() == Some(&completed.model_return) {
+            return Ok(MaterialNode::CallPayload(node));
         }
     }
-    stage_value(staging, &serde_json::Value::String(payload.to_owned()))
+    let text = material.payload();
+    let node = stage_value(staging, &serde_json::Value::String(text.to_owned()))?;
+    let mut decoder = GraphDecoder::new(&*staging, DecodeLimits::within_total(1 << 32));
+    match load_value(&mut decoder, node.node())? {
+        serde_json::Value::String(staged) if staged == text => Ok(node),
+        _ => Err(GraphRefusal::PublicationMismatch),
+    }
 }
 
-/// Reads back the payload [`stage_payload`] staged.
+/// Reads back the payload [`stage_material`] staged as the material `named`
+/// names, checking it hashes to `named`'s digest: a call's outcome as its
+/// answer typed, its digest streamed from that value; a value as its text.
 ///
 /// # Errors
 ///
-/// Any refusal of the node read, or [`GraphRefusal::InvalidBody`] for a
-/// value that is not a payload's text.
-pub fn load_payload(
+/// Any refusal of the node read; [`GraphRefusal::PublicationMismatch`] for a
+/// payload that does not hash to `named`'s digest; or
+/// [`GraphRefusal::InvalidBody`] for a node that is no settled output's
+/// payload.
+pub fn load_material<T: NamesMaterial>(
     decoder: &mut GraphDecoder<'_>,
+    named: T,
     material: MaterialNode,
-) -> Result<String, GraphRefusal> {
-    if let MaterialNode::CallPayload(node) = material {
-        let call = CallOutcome::load(decoder, node)?;
-        return serde_json::to_string(&call.completed(call.args.clone())?).map_err(|error| {
-            GraphRefusal::InvalidBody {
-                kind: NodeKind::CALL_OUTCOME.0,
-                reason: error.to_string(),
-            }
-        });
-    }
-    let MaterialNode::Value(node) = material else {
-        return Err(GraphRefusal::InvalidBody {
+) -> Result<Material<T>, GraphRefusal> {
+    let mismatch = |_| GraphRefusal::PublicationMismatch;
+    match material {
+        MaterialNode::CallPayload(node) => {
+            let call = CallOutcome::load(decoder, node)?;
+            Material::verified(named, call.completed(call.args.clone())?).map_err(mismatch)
+        }
+        MaterialNode::Value(node) => match load_value(decoder, node)? {
+            serde_json::Value::String(payload) => Material::new(named, payload).map_err(mismatch),
+            _ => Err(GraphRefusal::InvalidBody {
+                kind: NodeKind::FROZEN_VALUE.0,
+                reason: "a settled output's payload is text".to_owned(),
+            }),
+        },
+        MaterialNode::Outcome(_) => Err(GraphRefusal::InvalidBody {
             kind: NodeKind::ROUND_FACT.0,
             reason: "a settled output's payload is a frozen value".to_owned(),
-        });
-    };
-    match load_value(decoder, node)? {
-        serde_json::Value::String(payload) => Ok(payload),
-        _ => Err(GraphRefusal::InvalidBody {
-            kind: NodeKind::FROZEN_VALUE.0,
-            reason: "a settled output's payload is text".to_owned(),
         }),
     }
 }
@@ -1074,6 +1116,18 @@ impl RoundFact {
             &*staging,
             DecodeLimits::within_total(1 << 32),
         ))?;
+        self.stage_settled(staging)
+    }
+
+    /// Stages this fact, every settled output of which names the node
+    /// [`stage_material`] staged for its material in `staging`: that staging
+    /// already checked the node reads back as the payload the output's
+    /// digest names.
+    ///
+    /// # Errors
+    ///
+    /// Any refusal of the staging area.
+    pub(super) fn stage_settled(&self, staging: &mut GraphStaging) -> Result<NodeId, GraphRefusal> {
         Ok(staging.encode_value(NodeKind::ROUND_FACT, self)?)
     }
 
@@ -1087,7 +1141,37 @@ impl RoundFact {
     pub fn load(decoder: &mut GraphDecoder<'_>, id: NodeId) -> Result<Self, GraphRefusal> {
         let fact: Self = decoder.decode(id, NodeKind::ROUND_FACT)?;
         fact.check(decoder)?;
-        match &fact {
+        fact.children(decoder, id)?;
+        Ok(fact)
+    }
+
+    /// Reads fact `id` as [`load`](Self::load) does, with the settled
+    /// output it holds read back typed and checked once
+    /// ([`SettledFact::output`]) rather than checked and read again.
+    ///
+    /// # Errors
+    ///
+    /// As [`load`](Self::load), and [`SettledFact::output`]'s refusals.
+    pub fn load_settled(
+        decoder: &mut GraphDecoder<'_>,
+        id: NodeId,
+    ) -> Result<(Self, Option<SettledOutput>), GraphRefusal> {
+        let fact: Self = decoder.decode(id, NodeKind::ROUND_FACT)?;
+        let output = match &fact {
+            Self::Wait { output, .. }
+            | Self::Retry { output, .. }
+            | Self::Outcome { output, .. } => Some(output.output(decoder)?),
+            _ => None,
+        };
+        fact.children(decoder, id)?;
+        Ok((fact, output))
+    }
+
+    /// Checks every reference fact `id` holds names a node of its stated
+    /// kind.
+    fn children(&self, decoder: &mut GraphDecoder<'_>, id: NodeId) -> Result<(), GraphRefusal> {
+        let fact = self;
+        match fact {
             Self::Admit { members } => {
                 for member in members {
                     if let AdmitMember::Admission(node) = member {
@@ -1113,7 +1197,7 @@ impl RoundFact {
             }
             Self::Start { .. } | Self::Present => {}
         }
-        Ok(fact)
+        Ok(())
     }
 
     fn check(&self, decoder: &mut GraphDecoder<'_>) -> Result<(), GraphRefusal> {

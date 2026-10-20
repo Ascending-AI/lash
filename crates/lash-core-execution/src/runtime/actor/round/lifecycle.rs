@@ -95,8 +95,8 @@ use super::super::waits;
 use super::super::waits::Resolution;
 use super::super::waits::WaitId;
 use super::{
-    AdmittedExecution, PolicyView, Recovery, RoundError, RoundView, RunFold, Stop,
-    StoreLocalEffect, ToolBody, run_bounded, settle, settle_retry, start_retry,
+    AdmittedExecution, PolicyView, Recovery, RoundError, RoundView, RunFold, StagedRecord, Stop,
+    StoreLocalEffect, ToolBody, run_bounded, settle_retry, settle_staged, start_retry,
 };
 use lash_core_store::tool_run::Material;
 use lash_core_store::tool_run::SettledOutput;
@@ -299,6 +299,9 @@ pub struct Committed {
     pub appended: RunFacts,
     /// The actor's state revision after it.
     pub revision: lash_durable::StateRevision,
+    /// The records it staged, as their owner's fold takes them
+    /// ([`RunRecords::extend`](super::RunRecords::extend)).
+    pub staged: Vec<StagedRecord>,
 }
 
 /// A parked member: the wait it races, its execution, and what it parked on
@@ -383,9 +386,17 @@ pub struct Lifecycle {
     settled: BTreeSet<AdmittedId>,
     prepare_final: bool,
     /// A final batch held for the owner's next output, with the members
-    /// whose outcomes it writes.
-    prepared: Option<(lash_durable::ActorTx, BTreeSet<AdmittedId>)>,
+    /// whose outcomes it writes and the records it staged.
+    prepared: Option<Prepared>,
 }
+
+/// A final batch held for the owner's next output: its transaction, the
+/// members whose outcomes it writes, and the records it staged.
+pub(super) type Prepared = (
+    lash_durable::ActorTx,
+    BTreeSet<AdmittedId>,
+    Vec<StagedRecord>,
+);
 
 impl Lifecycle {
     /// The lifecycle of the members `cx`'s actor owns, whose bodies come
@@ -434,9 +445,7 @@ impl Lifecycle {
         self.prepare_final = enabled;
     }
 
-    pub(super) fn take_prepared(
-        &mut self,
-    ) -> Option<(lash_durable::ActorTx, BTreeSet<AdmittedId>)> {
+    pub(super) fn take_prepared(&mut self) -> Option<Prepared> {
         self.prepared.take()
     }
 
@@ -749,6 +758,7 @@ impl Lifecycle {
             let mut unanswered = Vec::new();
             let mut publication = None;
             let mut unused = Vec::new();
+            let mut staged = Vec::new();
             for (id, result) in &self.finished {
                 let Some(execution) = folded.admitted(id) else {
                     continue;
@@ -760,8 +770,9 @@ impl Lifecycle {
                     execution.id().run,
                     execution.cursor().peek(),
                 );
-                let (recorded, candidate) =
+                let (recorded, candidate, record) =
                     self.record_finished(&mut tx, &execution, result.clone(), now)?;
+                staged.push(record);
                 match recorded {
                     Recorded::Retry => retried = true,
                     Recorded::Outcome { output, paged } => {
@@ -804,7 +815,7 @@ impl Lifecycle {
                     })
                 });
             if final_plain {
-                self.prepared = Some((tx, outcomes));
+                self.prepared = Some((tx, outcomes, staged));
                 self.finished.clear();
                 self.batch_opened = None;
                 return Ok(Some(Act::Idle(Idle {
@@ -815,8 +826,11 @@ impl Lifecycle {
                 })));
             }
             let act = match publication {
-                Some((candidate, place)) => self.commit_paged(tx, label, candidate, place).await?,
-                None => self.commit(tx, label).await?,
+                Some((candidate, place)) => {
+                    self.commit_paged(tx, label, candidate, place, staged)
+                        .await?
+                }
+                None => self.commit(tx, label, staged).await?,
             };
             if matches!(act, Act::Committed(_)) {
                 self.settled.extend(outcomes.iter().cloned());
@@ -841,10 +855,17 @@ impl Lifecycle {
         }
         if !settlements.is_empty() {
             let mut tx = self.cx.begin().await?;
+            let mut staged = Vec::with_capacity(settlements.len());
             for (execution, outcome) in &settlements {
-                settle(&mut tx, execution, outcome.clone(), Vec::new(), None)?;
+                staged.push(settle_staged(
+                    &mut tx,
+                    execution,
+                    outcome.clone(),
+                    Vec::new(),
+                    None,
+                )?);
             }
-            let act = self.commit(tx, self.settlement_label).await?;
+            let act = self.commit(tx, self.settlement_label, staged).await?;
             if matches!(act, Act::Committed(_)) {
                 self.settled.extend(
                     settlements
@@ -863,7 +884,9 @@ impl Lifecycle {
                 .iter()
                 .map(|failed| start_retry(&mut tx, failed))
                 .collect();
-            let act = self.commit(tx, CommitLabel::ROUND_START).await?;
+            let act = self
+                .commit(tx, CommitLabel::ROUND_START, Vec::new())
+                .await?;
             if matches!(act, Act::Committed(_)) {
                 self.admitted(&started);
             }
@@ -1073,19 +1096,22 @@ impl Lifecycle {
         }
     }
 
-    /// Commit `tx` under `label`: the rows it appended, or [`Act::Refused`]
-    /// when the store refused it or its acknowledgement was lost. Ownership
-    /// lost is an error.
+    /// Commit `tx`, which staged `staged`, under `label`: the rows it
+    /// appended with those records, or [`Act::Refused`] when the store
+    /// refused it or its acknowledgement was lost. Ownership lost is an
+    /// error.
     async fn commit(
         &mut self,
         tx: lash_durable::ActorTx,
         label: CommitLabel,
+        staged: Vec<StagedRecord>,
     ) -> Result<Act, RoundError> {
         let appended = RunFacts::appended(tx.domain(), tx.graph(), self.cx.epoch());
         match self.cx.commit(tx, label).await {
             Ok(commit) => Ok(Act::Committed(Committed {
                 appended,
                 revision: commit.revision,
+                staged,
             })),
             Err(error @ DurableError::OwnershipLost(_)) => Err(error.into()),
             // A start its registrar refused after it was staged refuses
@@ -1133,6 +1159,7 @@ impl Lifecycle {
             RunSeq,
             lash_durable::domain::Ordinal,
         ),
+        staged: Vec<StagedRecord>,
     ) -> Result<Act, RoundError> {
         let appended = RunFacts::appended(tx.domain(), tx.graph(), self.cx.epoch());
         let commit = lash_core_store::checkpoint_graph::CommitId::mint();
@@ -1161,6 +1188,7 @@ impl Lifecycle {
                 Ok(Act::Committed(Committed {
                     appended,
                     revision: receipt.revision,
+                    staged,
                 }))
             }
             Err(
@@ -1256,14 +1284,14 @@ impl Lifecycle {
     /// store-local effect, or a retry when its pinned contract repeats it.
     /// A completion's heap pages are recorded with its outcome, which owns
     /// them once `tx` commits with their publication; the candidate is
-    /// handed back with whether its root was recorded.
+    /// handed back with whether its root was recorded, and the record staged.
     fn record_finished(
         &self,
         tx: &mut lash_durable::ActorTx,
         execution: &AdmittedExecution,
         result: Result<MemberOutcome, Stop>,
         now: DurableInstant,
-    ) -> Result<(Recorded, Option<StepCandidate>), RoundError> {
+    ) -> Result<(Recorded, Option<StepCandidate>, StagedRecord), RoundError> {
         let (mut output, store_local, terminal, candidate) = match result {
             Ok(result) => (
                 result.output,
@@ -1308,20 +1336,21 @@ impl Lifecycle {
             source.await_terminal(wait.id().to_hex());
         }
         if let Some(due) = self.retry_due(execution, &output, now) {
-            settle_retry(tx, execution, output, due)?;
-            return Ok((Recorded::Retry, candidate));
+            let record = settle_retry(tx, execution, output, due)?;
+            return Ok((Recorded::Retry, candidate, record));
         }
         let pages = candidate
             .as_ref()
             .filter(|_| matches!(output, SettledOutput::Completed(_)))
             .map(StepCandidate::root);
-        settle(tx, execution, output.clone(), store_local, pages)?;
+        let record = settle_staged(tx, execution, output.clone(), store_local, pages)?;
         Ok((
             Recorded::Outcome {
                 output: Box::new(output),
                 paged: pages.is_some(),
             },
             candidate,
+            record,
         ))
     }
 

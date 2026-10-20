@@ -8,7 +8,7 @@ use lash_core_store::checkpoint_graph::{
     GraphStaging, NodeId, parse_envelope,
 };
 use lash_core_store::effect_opener::EffectOpener;
-use lash_core_store::tool_run::{AttemptOutcome, MaterialOwner, MaterialRole};
+use lash_core_store::tool_run::{AttemptOutcome, MaterialOwner, MaterialRole, SettledOutput};
 
 use super::*;
 use crate::{ModelToolReturn, ModelToolReturnPart, ToolCallId, ToolCallOutput};
@@ -261,14 +261,19 @@ fn every_round_fact_round_trips_through_its_node() {
 }
 
 /// FIG-6171: the turn and live outcome share one exact archival body, while
-/// pins/presentation can be reclaimed. Typed payloads retain their original
-/// material digest and reject a body that would change its request bytes.
+/// pins/presentation can be reclaimed.
+///
+/// COMPLETION-MATERIAL-IDENTITY (FIG-7056): a completion stays typed from its
+/// producer into the graph. Its material is named by the digest of its JSON
+/// text, byte for byte the text material's; it stages as the outcome node
+/// its value stages to, and reads back as that value, checked against the
+/// digest; a node whose request arguments differ is refused.
 #[test]
 fn the_archival_call_body_is_shared_and_its_payload_digest_binds_the_request() {
     let output = ToolCallOutput::success(serde_json::json!({"answer": "a".repeat(70_000)}));
     let presented = ModelToolReturn::from_output("query".to_owned(), &output);
     let mut call = completed(output, presented);
-    call.args = serde_json::json!({"query": "q".repeat(70_000)});
+    call.args = serde_json::json!({"query": "q\"\\\n\u{1}".repeat(17_500)});
     let mut staged = staging();
     let admission = staged
         .encode_value(
@@ -294,26 +299,50 @@ fn the_archival_call_body_is_shared_and_its_payload_digest_binds_the_request() {
     assert_eq!(archive.args, call.args);
     assert_eq!(archive.output, call.output);
     assert_eq!(archive.call_id, call.call_id);
-    let payload = serde_json::to_string(&call).unwrap();
-    let material = stage_payload(&mut staged, &payload).unwrap();
-    assert!(matches!(material, MaterialNode::CallPayload(_)));
-    let named = Material::journal_local(owner(), MaterialRole::AttemptOutput, payload.clone());
+
+    let text = serde_json::to_string(&call).unwrap();
+    let typed =
+        super::super::completed_material(&EffectOpener::turn("session", "turn"), call.clone())
+            .unwrap();
+    assert_eq!(
+        typed.reference(),
+        Material::journal_local(owner(), MaterialRole::AttemptOutput, text.clone()).reference(),
+        "the typed digest is the text digest"
+    );
+    let material = stage_material(&mut staged, &typed).unwrap();
+    assert_eq!(
+        material,
+        MaterialNode::CallPayload(CallOutcome::of(&call, None, 0).stage(&mut staged).unwrap()),
+        "a typed completion stages as its value's outcome node"
+    );
     let fact = SettledFact {
-        outcome: AttemptOutcome::Completed(named.reference().clone()),
+        outcome: AttemptOutcome::Completed(typed.reference().clone()),
         material: Some(material),
     };
     let mut decoder = GraphDecoder::new(&staged, DecodeLimits::within_total(1 << 22));
     fact.check(&mut decoder).unwrap();
-    assert_eq!(load_payload(&mut decoder, material).unwrap(), payload);
+    let SettledOutput::Completed(read) = fact.output(&mut decoder).unwrap() else {
+        panic!("a completed output");
+    };
+    assert_eq!(read, typed);
+    let answer = read.typed::<CompletedCall>().expect("read back typed");
+    assert_eq!(serde_json::to_string(answer).unwrap(), text);
+    assert_eq!(read.payload(), text, "its text projects byte for byte");
+
     call.args = serde_json::json!({"query": "changed"});
-    let forged = stage_payload(&mut staged, &serde_json::to_string(&call).unwrap()).unwrap();
-    let fact = SettledFact {
-        material: Some(forged),
+    let forged = SettledFact {
+        material: Some(MaterialNode::CallPayload(
+            CallOutcome::of(&call, None, 0).stage(&mut staged).unwrap(),
+        )),
         ..fact
     };
     let mut decoder = GraphDecoder::new(&staged, DecodeLimits::within_total(1 << 22));
     assert_eq!(
-        fact.check(&mut decoder),
+        forged.check(&mut decoder),
+        Err(GraphRefusal::PublicationMismatch)
+    );
+    assert_eq!(
+        forged.output(&mut decoder),
         Err(GraphRefusal::PublicationMismatch)
     );
 }

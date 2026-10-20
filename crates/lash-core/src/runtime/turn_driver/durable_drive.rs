@@ -540,8 +540,8 @@ async fn cell_calls(
                     SettledOutput::Completed(_) | SettledOutput::Failed(_)
                 )
             })
-            .and_then(SettledOutput::payload)
-            .and_then(round::decode_completed)
+            .and_then(round::completed_call)
+            .cloned()
         else {
             continue;
         };

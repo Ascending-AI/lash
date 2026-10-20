@@ -10,7 +10,7 @@ use lash_durable::domain::{
     AdmittedId, Ordinal, OwnerKey, RunFactKind, RunFactRow, RunFacts, RunSeq,
 };
 
-use super::records::{self, ADMIT_ORDINAL, Record, first_start};
+use super::records::{self, ADMIT_ORDINAL, Record, StagedRecord, first_start};
 use super::{
     AdmittedExecution, ExecutionDraft, FoldRefusal, PinnedWaits, PolicyView, Recovery, RunCursor,
     RunFold,
@@ -312,8 +312,11 @@ impl RunRecords {
         &self.facts
     }
 
-    /// Include appended facts and their immutable nodes.
-    pub fn extend(&mut self, appended: RunFacts) {
+    /// Include appended facts and their immutable nodes, each row whose
+    /// node `staged` names as the record staged there: an acknowledged
+    /// commit's own records ([`Committed::staged`](super::lifecycle::Committed::staged))
+    /// are not read and checked again.
+    pub fn extend(&mut self, appended: RunFacts, staged: Vec<StagedRecord>) {
         // Normally appended nodes are new or byte-identical. A conflicting
         // image invalidates every checked record, including its descendants:
         // the next fold must encounter the decoder's integrity refusal.
@@ -324,6 +327,18 @@ impl RunRecords {
                 .is_some_and(|previous| previous != node)
         }) {
             self.decoded.clear();
+        } else {
+            let mut held: BTreeMap<_, _> = staged
+                .into_iter()
+                .filter_map(|staged| staged.record.map(|record| (staged.node, record)))
+                .collect();
+            for row in &appended.rows {
+                if let Some(record) = held.remove(&row.record)
+                    && record.kind() == row.kind
+                {
+                    self.decoded.entry((row.run, row.ordinal)).or_insert(record);
+                }
+            }
         }
         self.facts.extend(appended);
     }

@@ -275,7 +275,7 @@ impl RoundRunner {
             let now = self.cx.durable_now().await?;
             let idle = match self.lifecycle.act(&folded, now).await? {
                 Act::Committed(committed) => {
-                    rows.extend(committed.appended.of_run(self.run));
+                    rows.extend(committed.appended.of_run(self.run), committed.staged);
                     quiet_since = None;
                     continue;
                 }
@@ -285,9 +285,10 @@ impl RoundRunner {
                 }
                 Act::Idle(idle) => idle,
             };
-            if let Some((tx, settled)) = self.lifecycle.take_prepared() {
+            if let Some((tx, settled, staged)) = self.lifecycle.take_prepared() {
                 rows.extend(
                     RunFacts::appended(tx.domain(), tx.graph(), self.cx.epoch()).of_run(self.run),
+                    staged,
                 );
                 let folded = rows.fold(&self.policies, &waits)?;
                 self.cx.clear_due(DueSource::RetryDue);

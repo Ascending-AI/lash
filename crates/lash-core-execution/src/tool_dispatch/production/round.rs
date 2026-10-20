@@ -6,8 +6,8 @@
 use super::*;
 use crate::runtime::actor::round::{
     AcceptedStop, AdmittedExecution, CompletedCall, Discharge, MemberBody, MemberOutcome,
-    MemberPin, PolicyView, Presented, RoundTools, StoreLocalEffect, completed_material,
-    decode_completed,
+    MemberPin, PolicyView, Presented, RoundTools, StoreLocalEffect, completed_call,
+    completed_material,
 };
 use crate::runtime::actor::waits::{self, Resolution};
 use crate::session::tool_execution::ToolInvocation;
@@ -172,7 +172,7 @@ pub(super) fn member_output(owner: &crate::EffectOpener, end: MemberEnd) -> Sett
     };
     // An answer that does not encode reached no durable form: the call may
     // or may not have taken effect.
-    let Ok(output) = completed_material(owner, &completed) else {
+    let Ok(output) = completed_material(owner, completed) else {
         return SettledOutput::Interrupted;
     };
     match failure {
@@ -598,10 +598,10 @@ pub(super) async fn present_resolved(
     binding: Option<&crate::tool_run::AdmittedBinding>,
     output: SettledOutput,
 ) -> SettledOutput {
-    let SettledOutput::Completed(material) = &output else {
-        return output;
-    };
-    let Some(mut completed) = decode_completed(material.payload()) else {
+    let Some(mut completed) = matches!(output, SettledOutput::Completed(_))
+        .then(|| completed_call(&output).cloned())
+        .flatten()
+    else {
         return output;
     };
     let dispatch = context.dispatch();
@@ -726,19 +726,16 @@ pub(super) fn completed_answer(
     if let Some(answer) = output.stopped_answer() {
         return answered(call, answer);
     }
-    output
-        .payload()
-        .and_then(decode_completed)
-        .unwrap_or_else(|| {
-            answered(
-                call,
-                ToolCallOutput::failure(crate::ToolFailure::runtime(
-                    crate::ToolFailureClass::Internal,
-                    "tool_outcome_unreadable",
-                    "the call's committed output is not a tool answer",
-                )),
-            )
-        })
+    completed_call(output).cloned().unwrap_or_else(|| {
+        answered(
+            call,
+            ToolCallOutput::failure(crate::ToolFailure::runtime(
+                crate::ToolFailureClass::Internal,
+                "tool_outcome_unreadable",
+                "the call's committed output is not a tool answer",
+            )),
+        )
+    })
 }
 
 /// The catalog's pin of the tool `manifest` declares (or none), read at

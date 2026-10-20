@@ -6,7 +6,7 @@ use std::sync::Arc;
 use lash_durable::domain::AdmittedId;
 use lash_durable::{ActorTx, DurableInstant};
 
-use super::records::{Record, RetryBody, append, start_record};
+use super::records::{Record, RetryBody, StagedRecord, append, append_staged, start_record};
 use super::{
     AdmissionRefusal, AdmittedExecution, AdmittedRound, PinnedWait, Presentation, RoundDraft,
     RunFold, SettleRefusal, check_drafts,
@@ -210,7 +210,7 @@ pub fn settle_retry(
     failed: &AdmittedExecution,
     output: SettledOutput,
     due: DurableInstant,
-) -> Result<(), SettleRefusal> {
+) -> Result<StagedRecord, SettleRefusal> {
     if !failed
         .policy()
         .permits_repeat(failed.policy(), failed.attempt())
@@ -219,19 +219,18 @@ pub fn settle_retry(
         return Err(SettleRefusal::NotRetryable(failed.call().clone()));
     }
     let id = failed.id();
-    append(
+    Ok(append_staged(
         tx,
         &id.owner,
         id.run,
         failed.cursor().take(),
         Some(failed.call()),
-        &Record::Retry(RetryBody {
+        Record::Retry(RetryBody {
             start: id.ordinal.0,
             output,
             due_at_ms: due.0,
         }),
-    );
-    Ok(())
+    ))
 }
 
 /// Record the `x_start` of the attempt after `failed`, whose retry is due,

@@ -534,7 +534,9 @@ impl KernelEffects for CellHost<'_> {
         output: &lash_core_store::tool_run::SettledOutput,
     ) -> Option<Outcome> {
         // `None` while the record is not final.
-        outcome_of(output)?;
+        if matches!(output, lash_core_store::tool_run::SettledOutput::Waiting(_)) {
+            return None;
+        }
         let Some(reply) = self.members.reply_to(&effect.call, output) else {
             return outcome_of(output);
         };

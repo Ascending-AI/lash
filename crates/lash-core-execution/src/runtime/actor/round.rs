@@ -109,6 +109,7 @@ pub use fold::{MemberState, RoundMember, RoundView, fold};
 pub use lifecycle::{
     Discharge, Fence, MemberBodies, MemberBody, MemberOutcome, Presented, member_body,
 };
+pub use records::StagedRecord;
 
 pub use parked::{CallOwner, ParkedCall, PinnedWaits, parked};
 
@@ -121,12 +122,12 @@ pub use runner::{
 };
 pub use tools::{
     AcceptedStop, CompletedCall, MemberPin, RoundCalls, RoundCallsRefusal, RoundTools, call_draft,
-    completed_material, decode_completed, request_material, require_admitted, settle_cancelled,
+    completed_call, completed_material, request_material, require_admitted, settle_cancelled,
     unsettled,
 };
 pub use transcript::{TranscriptEntry, TurnTranscript};
 
-use records::{OutcomeBody, Record, append, first_start};
+use records::{OutcomeBody, Record, append_staged, first_start};
 
 /// The tool completion wait a round pinned for a member that may defer,
 /// with its admission: its id is also its completion key.
@@ -1048,6 +1049,17 @@ pub fn settle(
     store_local: Vec<StoreLocalEffect>,
     pages: Option<lash_core_store::checkpoint_graph::NodeId>,
 ) -> Result<(), SettleRefusal> {
+    settle_staged(tx, admitted, output, store_local, pages).map(drop)
+}
+
+/// [`settle`], handing back the record it staged for its owner's fold.
+fn settle_staged(
+    tx: &mut ActorTx,
+    admitted: &AdmittedExecution,
+    output: SettledOutput,
+    store_local: Vec<StoreLocalEffect>,
+    pages: Option<lash_core_store::checkpoint_graph::NodeId>,
+) -> Result<StagedRecord, SettleRefusal> {
     if pages.is_some() && !matches!(output, SettledOutput::Completed(_)) {
         return Err(SettleRefusal::ForeignEffect(admitted.call().clone()));
     }
@@ -1073,8 +1085,7 @@ pub fn settle(
             }
         }
     }
-    record_outcome(tx, admitted, output, state, pages);
-    Ok(())
+    Ok(record_outcome(tx, admitted, output, state, pages))
 }
 
 /// Record `Interrupted` for `id`, a started `Once` the fold found without
@@ -1104,7 +1115,7 @@ fn record_outcome(
     output: SettledOutput,
     state: Vec<crate::plugin::StateResolution>,
     pages: Option<lash_core_store::checkpoint_graph::NodeId>,
-) {
+) -> StagedRecord {
     let id = admitted.id();
     let body = OutcomeBody {
         start: id.ordinal.0,
@@ -1119,12 +1130,12 @@ fn record_outcome(
     } else {
         Record::Outcome(body)
     };
-    append(
+    append_staged(
         tx,
         &id.owner,
         id.run,
         admitted.cursor().take(),
         Some(admitted.call()),
-        &record,
-    );
+        record,
+    )
 }

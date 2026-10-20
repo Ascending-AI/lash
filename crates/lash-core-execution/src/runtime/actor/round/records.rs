@@ -1,17 +1,20 @@
 //! The run records' bodies and where they go (the layout is in the module
 //! documentation of [`super`]).
 
+use std::sync::Arc;
+
 use lash_core_store::checkpoint_graph::{
-    EncodeBudget, ExplicitLimit, GraphDecoder, GraphRefusal, GraphStaging, NodeId,
+    DecodeLimits, EncodeBudget, ExplicitLimit, GraphDecoder, GraphRefusal, GraphStaging, NodeId,
+    NodeKind,
 };
 use lash_durable::domain::{
     Ordinal, OwnerKey, RunFactKind, RunFactRow, RunFactWrite, RunFacts, RunSeq,
 };
 use lash_durable::{ActorTx, DomainWrite};
 
-use super::ExecutionDraft;
-use super::graph::{self, AdmitMember, PinnedMember, RoundFact, SettledFact};
-use lash_core_store::tool_run::SettledOutput;
+use super::graph::{self, AdmitMember, MaterialNode, PinnedMember, RoundFact, SettledFact};
+use super::{CompletedCall, ExecutionDraft};
+use lash_core_store::tool_run::{Material, NamesMaterial, SettledOutput};
 use lash_protocol_types::ToolCallId;
 
 /// The admission's ordinal.
@@ -73,7 +76,7 @@ pub(super) enum Record {
 }
 
 impl Record {
-    fn kind(&self) -> RunFactKind {
+    pub(super) fn kind(&self) -> RunFactKind {
         match self {
             Self::Admit(_) => RunFactKind::Admit,
             Self::Start(_) => RunFactKind::XStart,
@@ -86,74 +89,131 @@ impl Record {
     }
 }
 
+/// `output` as its fact holds it: its material staged as the node it names,
+/// typed as the producer held it ([`graph::stage_material`]), and whether a
+/// read of that node gives back the material as it is held: a typed answer
+/// as its outcome, a text payload as its text.
 fn settled_fact(
     staging: &mut GraphStaging,
     output: &SettledOutput,
-) -> Result<SettledFact, GraphRefusal> {
-    Ok(SettledFact {
-        outcome: output.outcome(),
-        material: output
-            .payload()
-            .map(|payload| graph::stage_payload(staging, payload))
-            .transpose()?,
-    })
-}
-
-fn settled_output(
-    decoder: &mut GraphDecoder<'_>,
-    fact: SettledFact,
-) -> Result<SettledOutput, String> {
-    let payload = fact
-        .material
-        .map(|material| graph::load_payload(decoder, material))
-        .transpose()
-        .map_err(|refusal| refusal.to_string())?;
-    SettledOutput::new(fact.outcome, payload).map_err(|refusal| refusal.to_string())
-}
-
-/// Stages `record`'s RoundFact and returns its node.
-fn stage(staging: &mut GraphStaging, record: &Record) -> Result<NodeId, GraphRefusal> {
-    let fact = match record {
-        Record::Admit(body) if body.admissions.is_empty() => RoundFact::Admit {
-            members: body
-                .members
-                .iter()
-                .cloned()
-                .map(|member| AdmitMember::Pinned(Box::new(member)))
-                .collect(),
-        },
-        Record::Admit(body) => RoundFact::Admit {
-            members: body
-                .admissions
-                .iter()
-                .copied()
-                .map(AdmitMember::Admission)
-                .collect(),
-        },
-        Record::Start(body) => RoundFact::Start {
-            member: body.member,
-            attempt: body.attempt,
-        },
-        Record::Wait(body) => RoundFact::Wait {
-            start: body.start,
-            output: settled_fact(staging, &body.output)?,
-        },
-        Record::Outcome(body) => RoundFact::Outcome {
-            start: body.start,
-            output: settled_fact(staging, &body.output)?,
-            state: body.state.clone(),
-            ended_at_ms: body.ended_at_ms,
-            pages: body.pages,
-        },
-        Record::Retry(body) => RoundFact::Retry {
-            start: body.start,
-            output: settled_fact(staging, &body.output)?,
-            due_at_ms: body.due_at_ms,
-        },
-        Record::Present => RoundFact::Present,
-        Record::CellReport(report) => RoundFact::CellReport { report: *report },
+) -> Result<(SettledFact, bool), GraphRefusal> {
+    fn staged<T: NamesMaterial>(
+        staging: &mut GraphStaging,
+        material: &Material<T>,
+    ) -> Result<(MaterialNode, bool), GraphRefusal> {
+        let node = graph::stage_material(staging, material)?;
+        let held = match node {
+            MaterialNode::CallPayload(_) => material.typed::<CompletedCall>().is_some(),
+            MaterialNode::Value(_) => material.holds_text(),
+            MaterialNode::Outcome(_) => false,
+        };
+        Ok((node, held))
+    }
+    let (material, held) = match output {
+        SettledOutput::Completed(material) => staged(staging, material)?,
+        SettledOutput::Failed(material) => staged(staging, material)?,
+        SettledOutput::Waiting(material) => staged(staging, material)?,
+        SettledOutput::Interrupted
+        | SettledOutput::TimedOut { .. }
+        | SettledOutput::Cancelled { .. } => {
+            return Ok((
+                SettledFact {
+                    outcome: output.outcome(),
+                    material: None,
+                },
+                true,
+            ));
+        }
     };
-    fact.stage(staging)
+    Ok((
+        SettledFact {
+            outcome: output.outcome(),
+            material: Some(material),
+        },
+        held,
+    ))
+}
+
+/// Stages `record`'s RoundFact and returns its node, with whether a read of
+/// that node gives back `record` exactly ([`StagedRecord`]).
+fn stage(staging: &mut GraphStaging, record: &Record) -> Result<(NodeId, bool), GraphRefusal> {
+    let (fact, held) = match record {
+        Record::Admit(body) if body.admissions.is_empty() => (
+            RoundFact::Admit {
+                members: body
+                    .members
+                    .iter()
+                    .cloned()
+                    .map(|member| AdmitMember::Pinned(Box::new(member)))
+                    .collect(),
+            },
+            true,
+        ),
+        Record::Admit(body) => (
+            RoundFact::Admit {
+                members: body
+                    .admissions
+                    .iter()
+                    .copied()
+                    .map(AdmitMember::Admission)
+                    .collect(),
+            },
+            true,
+        ),
+        Record::Start(body) => (
+            RoundFact::Start {
+                member: body.member,
+                attempt: body.attempt,
+            },
+            true,
+        ),
+        Record::Wait(body) => {
+            let (output, held) = settled_fact(staging, &body.output)?;
+            (
+                RoundFact::Wait {
+                    start: body.start,
+                    output,
+                },
+                held,
+            )
+        }
+        Record::Outcome(body) => {
+            let (output, held) = settled_fact(staging, &body.output)?;
+            (
+                RoundFact::Outcome {
+                    start: body.start,
+                    output,
+                    state: body.state.clone(),
+                    ended_at_ms: body.ended_at_ms,
+                    pages: body.pages,
+                },
+                // The heap pages an outcome owns are its candidate's nodes:
+                // a fold reads its record, checking them.
+                held && body.pages.is_none(),
+            )
+        }
+        Record::Retry(body) => {
+            let (output, held) = settled_fact(staging, &body.output)?;
+            (
+                RoundFact::Retry {
+                    start: body.start,
+                    output,
+                    due_at_ms: body.due_at_ms,
+                },
+                held,
+            )
+        }
+        Record::Present => (RoundFact::Present, true),
+        Record::CellReport(report) => (RoundFact::CellReport { report: *report }, true),
+    };
+    let node = fact.stage_settled(staging)?;
+    // The fact's own body (its state trees among it) must read back as it
+    // was written, or a fold's read refuses it as it would any other.
+    let held = held
+        && GraphDecoder::new(&*staging, DecodeLimits::within_total(1 << 32))
+            .decode::<RoundFact>(node, NodeKind::ROUND_FACT)
+            .is_ok_and(|read| read == fact);
+    Ok((node, held))
 }
 
 /// `row`'s body, read from `facts`: refused unless its RoundFact is of the
@@ -164,7 +224,9 @@ fn stage(staging: &mut GraphStaging, record: &Record) -> Result<NodeId, GraphRef
 /// Why the record does not decode.
 pub(super) fn read(facts: &RunFacts, row: &RunFactRow) -> Result<Record, String> {
     let mut decoder = GraphDecoder::new(facts, facts.read_limits);
-    let fact = RoundFact::load(&mut decoder, row.record).map_err(|refusal| refusal.to_string())?;
+    let (fact, output) =
+        RoundFact::load_settled(&mut decoder, row.record).map_err(|refusal| refusal.to_string())?;
+    let output = output.ok_or_else(|| "a settled fact holds no output".to_owned());
     if fact.kind() != row.kind {
         return Err(format!(
             "a `{}` record holds a `{}` fact",
@@ -205,38 +267,83 @@ pub(super) fn read(facts: &RunFacts, row: &RunFactRow) -> Result<Record, String>
             })
         }
         RoundFact::Start { member, attempt } => Record::Start(StartBody { member, attempt }),
-        RoundFact::Wait { start, output } => Record::Wait(OutcomeBody {
+        RoundFact::Wait { start, .. } => Record::Wait(OutcomeBody {
             start,
-            output: settled_output(&mut decoder, output)?,
+            output: output?,
             state: Vec::new(),
             ended_at_ms: None,
             pages: None,
         }),
         RoundFact::Outcome {
             start,
-            output,
             state,
             ended_at_ms,
             pages,
+            ..
         } => Record::Outcome(OutcomeBody {
             start,
-            output: settled_output(&mut decoder, output)?,
+            output: output?,
             state,
             ended_at_ms,
             pages,
         }),
         RoundFact::Retry {
-            start,
-            output,
-            due_at_ms,
+            start, due_at_ms, ..
         } => Record::Retry(RetryBody {
             start,
-            output: settled_output(&mut decoder, output)?,
+            output: output?,
             due_at_ms,
         }),
         RoundFact::Present => Record::Present,
         RoundFact::CellReport { report } => Record::CellReport(report),
     })
+}
+
+/// A record its owner staged, and the node its row names: the record that
+/// owner's fold takes the row as once the commit that writes it is
+/// acknowledged ([`RunRecords::extend`](super::RunRecords::extend)),
+/// instead of reading and checking the node again. Held only when the node
+/// was checked, as it was staged, to read back as exactly this record.
+pub struct StagedRecord {
+    pub(super) node: NodeId,
+    pub(super) record: Option<Arc<Record>>,
+}
+
+impl std::fmt::Debug for StagedRecord {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StagedRecord")
+            .field("node", &self.node)
+            .field("held", &self.record.is_some())
+            .finish()
+    }
+}
+
+/// Append `record` to `owner`'s run `run` at `ordinal` in `tx`, as
+/// [`append`] does, and hand it back as staged.
+pub(super) fn append_staged(
+    tx: &mut ActorTx,
+    owner: &OwnerKey,
+    run: RunSeq,
+    ordinal: Ordinal,
+    call: Option<&ToolCallId>,
+    record: Record,
+) -> StagedRecord {
+    let (node, held) = append_held(tx, owner, run, ordinal, call, &record);
+    // A park's fact holds its start and output alone: its record reads
+    // back without the end the outcome after it records.
+    let record = match record {
+        Record::Wait(body) => Record::Wait(OutcomeBody {
+            state: Vec::new(),
+            ended_at_ms: None,
+            pages: None,
+            ..body
+        }),
+        record => record,
+    };
+    StagedRecord {
+        node,
+        record: held.then(|| Arc::new(record)),
+    }
 }
 
 /// Append `record` to `owner`'s run `run` at `ordinal` in `tx`: its fact's
@@ -249,13 +356,24 @@ pub(super) fn append(
     call: Option<&ToolCallId>,
     record: &Record,
 ) {
+    append_held(tx, owner, run, ordinal, call, record);
+}
+
+fn append_held(
+    tx: &mut ActorTx,
+    owner: &OwnerKey,
+    run: RunSeq,
+    ordinal: Ordinal,
+    call: Option<&ToolCallId>,
+    record: &Record,
+) -> (NodeId, bool) {
     let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
     #[expect(
         clippy::expect_used,
         reason = "a fact's typed body always encodes, and an unbounded staging area places \
                   every value it holds"
     )]
-    let node = stage(&mut staging, record).expect("a run fact stages");
+    let (node, held) = stage(&mut staging, record).expect("a run fact stages");
     tx.stage_all(staging);
     tx.write(DomainWrite::RunFact(RunFactWrite::Append {
         owner: owner.clone(),
@@ -265,6 +383,7 @@ pub(super) fn append(
         call: call.cloned(),
         record: node,
     }));
+    (node, held)
 }
 
 /// Append the admission record of `drafts`, naming each by its Admission

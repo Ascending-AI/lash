@@ -14,9 +14,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use lash_core_store::effect_opener::EffectOpener;
+use lash_core_store::tool_run::material::value_reference;
 use lash_core_store::tool_run::{
-    AvailableEvidence, CompletionSource, MaterialLocation, MaterialOwner, MaterialPayload,
-    MaterialRef, MaterialRole,
+    AvailableEvidence, CompletionSource, MaterialLocation, MaterialOwner, MaterialRef, MaterialRole,
 };
 use lash_durable::ActorTx;
 use lash_durable::domain::{OwnerKey, RunSeq};
@@ -249,30 +249,33 @@ pub trait RoundTools: Send + Sync {
 }
 
 /// A member's answer as journal-local material owned by `owner`'s turn: the
-/// output a completion or a known failure names.
+/// output a completion or a known failure names, held typed. Its digest is
+/// minted over the answer's canonical JSON, streamed from the value; the
+/// answer is never held as text.
 ///
 /// # Errors
 ///
 /// [`RoundCallsRefusal::Unencodable`].
 pub fn completed_material(
     owner: &EffectOpener,
-    completed: &CompletedCall,
+    completed: CompletedCall,
 ) -> Result<Material, RoundCallsRefusal> {
-    let text = serde_json::to_string(completed)
-        .map_err(|_| RoundCallsRefusal::Unencodable(completed.call_id.clone()))?;
-    Ok(Material::journal_local(
+    let call = completed.call_id.clone();
+    Material::journal_local_typed(
         MaterialOwner::Run {
             opener: owner.clone(),
         },
         MaterialRole::AttemptOutput,
-        text,
-    ))
+        completed,
+    )
+    .map_err(|_| RoundCallsRefusal::Unencodable(call))
 }
 
-/// The answer [`completed_material`] encoded.
+/// The answer [`completed_material`] holds, in the material `output` names:
+/// `None` for an output that names no material or holds another payload.
 #[must_use]
-pub fn decode_completed(material: &str) -> Option<CompletedCall> {
-    serde_json::from_str(material).ok()
+pub fn completed_call(output: &SettledOutput) -> Option<&CompletedCall> {
+    output.typed()
 }
 
 /// Why a round's calls do not match its admission.
@@ -301,17 +304,15 @@ pub fn request_material(
     owner: &EffectOpener,
     call: &PendingToolCall,
 ) -> Result<MaterialRef, RoundCallsRefusal> {
-    let unencodable = || RoundCallsRefusal::Unencodable(call.call_id.clone());
-    let text = serde_json::to_string(call).map_err(|_| unencodable())?;
-    MaterialPayload::new(
-        MaterialOwner::Run {
+    value_reference(
+        &MaterialOwner::Run {
             opener: owner.clone(),
         },
         MaterialRole::PreparedRequest,
-        text,
+        MaterialLocation::JournalLocal,
+        call,
     )
-    .reference(MaterialLocation::JournalLocal)
-    .map_err(|_| unencodable())
+    .map_err(|_| RoundCallsRefusal::Unencodable(call.call_id.clone()))
 }
 
 /// The draft `call` is admitted as in `owner`'s turn, pinned as `pin` says.

@@ -8,12 +8,15 @@
 //! stored form (an outcome or retry record, a step's settlement in engine
 //! state) decodes through [`SettledOutput`]'s own form and the same check.
 
-use std::sync::Arc;
+use std::any::Any;
+use std::fmt;
+use std::sync::{Arc, OnceLock};
 
+use super::material::{text_reference, value_reference};
 use super::{
     AttemptOutcome, AvailableEvidence, CompletionSource, KnownFailure, KnownFailureReason,
-    LimitCause, MaterialDigest, MaterialLocation, MaterialOwner, MaterialPayload, MaterialRef,
-    MaterialRefusal, MaterialRole,
+    LimitCause, MaterialDigest, MaterialLocation, MaterialOwner, MaterialRef, MaterialRefusal,
+    MaterialRole,
 };
 use serde::{Deserialize, Serialize};
 
@@ -43,13 +46,65 @@ impl NamesMaterial for CompletionSource {
 
 /// `T`, which names one material, with that material's journal-local
 /// payload, whose bytes hash to the digest `T` names.
-#[derive(Clone, Debug, PartialEq, Eq)]
+///
+/// The payload is its exact text, or the typed value whose canonical JSON is
+/// that text: a producer that holds its answer typed keeps it typed, and its
+/// digest is minted over the JSON streamed from the value. A reader asks for
+/// the value it expects ([`typed`](Self::typed)); a reader of text gets it
+/// projected once, on first ask ([`payload`](Self::payload)).
+#[derive(Clone, Debug)]
 pub struct Material<T = MaterialRef> {
     named: T,
     // Checked with `named` once; cloning a material never copies or rehashes
     // its immutable payload. String preserves ownership when into_parts is unique.
-    payload: Arc<String>,
+    payload: Arc<Payload>,
 }
+
+/// A material's payload: its text, or the value whose canonical JSON it is.
+#[derive(Debug)]
+enum Payload {
+    Text(String),
+    Typed {
+        value: Box<dyn TypedPayload>,
+        /// The value's canonical JSON, projected for a reader of text.
+        text: OnceLock<String>,
+    },
+}
+
+/// A value a material may hold typed: its canonical JSON is the material's
+/// text, the one spelling its digest names.
+trait TypedPayload: Any + fmt::Debug + Send + Sync {
+    /// Writes the value's canonical JSON to `out`.
+    ///
+    /// # Errors
+    ///
+    /// The value does not encode.
+    fn write_json(&self, out: &mut dyn std::io::Write) -> serde_json::Result<()>;
+
+    /// The value, to downcast.
+    fn as_any(&self) -> &dyn Any;
+}
+
+impl<V: Serialize + Any + fmt::Debug + Send + Sync> TypedPayload for V {
+    fn write_json(&self, out: &mut dyn std::io::Write) -> serde_json::Result<()> {
+        serde_json::to_writer(out, self)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+/// Two materials are equal when they are named alike: a material's payload
+/// always hashes to the digest it is named by, so equal names name equal
+/// bytes, whether a payload is held as text or typed.
+impl<T: PartialEq> PartialEq for Material<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.named == other.named
+    }
+}
+
+impl<T: Eq> Eq for Material<T> {}
 
 impl<T: NamesMaterial> Material<T> {
     /// `payload` as the material `named` names.
@@ -63,7 +118,34 @@ impl<T: NamesMaterial> Material<T> {
         reference.verify(&reference.owner, &digest(reference, &payload))?;
         Ok(Self {
             named,
-            payload: Arc::new(payload),
+            payload: Arc::new(Payload::Text(payload)),
+        })
+    }
+
+    /// `value` as the material `named` names: its canonical JSON is the
+    /// payload, streamed into the digest check without being held as text.
+    ///
+    /// # Errors
+    ///
+    /// [`MaterialRefusal::WrongOwner`], then [`MaterialRefusal::Corrupt`]
+    /// when the value's JSON does not hash to the named digest or does not
+    /// encode.
+    pub fn verified<V: Serialize + Any + fmt::Debug + Send + Sync>(
+        named: T,
+        value: V,
+    ) -> Result<Self, SettledOutputRefusal> {
+        let reference = named.material();
+        let found = value_reference(
+            &reference.owner,
+            reference.role,
+            reference.location.clone(),
+            &value,
+        )
+        .map_err(|_| SettledOutputRefusal::Unencodable)?;
+        reference.verify(&reference.owner, &found.digest)?;
+        Ok(Self {
+            named,
+            payload: Arc::new(Payload::typed(value)),
         })
     }
 
@@ -79,16 +161,66 @@ impl<T: NamesMaterial> Material<T> {
         self.named.material()
     }
 
-    /// The material's payload.
+    /// The material's payload text: for a payload held typed, its value's
+    /// canonical JSON, projected on the first ask and kept.
     #[must_use]
     pub fn payload(&self) -> &str {
-        &self.payload
+        self.payload.text()
     }
 
-    /// What names the material, and its payload.
+    /// The payload's value, when the material holds it typed as a `V`.
+    #[must_use]
+    pub fn typed<V: Any>(&self) -> Option<&V> {
+        match &*self.payload {
+            Payload::Typed { value, .. } => value.as_any().downcast_ref(),
+            Payload::Text(_) => None,
+        }
+    }
+
+    /// Whether the material holds its payload as text, not typed.
+    #[must_use]
+    pub fn holds_text(&self) -> bool {
+        matches!(&*self.payload, Payload::Text(_))
+    }
+
+    /// What names the material, and its payload text.
     #[must_use]
     pub fn into_parts(self) -> (T, String) {
-        (self.named, Arc::unwrap_or_clone(self.payload))
+        let text = match Arc::try_unwrap(self.payload) {
+            Ok(Payload::Text(text)) => text,
+            Ok(typed) => typed.text().to_owned(),
+            Err(shared) => shared.text().to_owned(),
+        };
+        (self.named, text)
+    }
+}
+
+impl Payload {
+    fn typed<V: TypedPayload>(value: V) -> Self {
+        Self::Typed {
+            value: Box::new(value),
+            text: OnceLock::new(),
+        }
+    }
+
+    fn text(&self) -> &str {
+        match self {
+            Self::Text(text) => text,
+            Self::Typed { value, text } => text.get_or_init(|| {
+                let mut json = Vec::new();
+                #[expect(
+                    clippy::expect_used,
+                    reason = "a typed payload's JSON encoded when its digest was minted, \
+                              and serde_json writes UTF-8"
+                )]
+                {
+                    value
+                        .write_json(&mut json)
+                        .expect("a typed payload encodes");
+                    String::from_utf8(json).expect("JSON is UTF-8")
+                }
+            }),
+        }
     }
 }
 
@@ -97,13 +229,33 @@ impl Material {
     /// reference the material codec mints for its bytes.
     #[must_use]
     pub fn journal_local(owner: MaterialOwner, role: MaterialRole, payload: String) -> Self {
-        let named = mint(owner, role, MaterialLocation::JournalLocal, &payload);
+        let named = mint(&owner, role, MaterialLocation::JournalLocal, &payload);
         Self {
             named,
-            payload: Arc::new(payload),
+            payload: Arc::new(Payload::Text(payload)),
         }
     }
 
+    /// `value` as `owner`'s journal-local material of `role`, held typed:
+    /// named by the reference the material codec mints for its canonical
+    /// JSON, streamed from the value. The one way a producer seals a typed
+    /// answer with its identity.
+    ///
+    /// # Errors
+    ///
+    /// [`RecordEncodingFailed`](crate::RuntimeErrorCode::RecordEncodingFailed)
+    /// when the value does not encode.
+    pub fn journal_local_typed<V: Serialize + Any + fmt::Debug + Send + Sync>(
+        owner: MaterialOwner,
+        role: MaterialRole,
+        value: V,
+    ) -> Result<Self, crate::runtime_error::RuntimeEffectControllerError> {
+        let named = value_reference(&owner, role, MaterialLocation::JournalLocal, &value)?;
+        Ok(Self {
+            named,
+            payload: Arc::new(Payload::typed(value)),
+        })
+    }
     /// This material as a known failure's output.
     #[must_use]
     pub fn failure(
@@ -145,7 +297,7 @@ impl Material<CompletionSource> {
 }
 
 fn mint(
-    owner: MaterialOwner,
+    owner: &MaterialOwner,
     role: MaterialRole,
     location: MaterialLocation,
     payload: &str,
@@ -154,15 +306,13 @@ fn mint(
         clippy::expect_used,
         reason = "a material payload is plain data whose encoding cannot fail"
     )]
-    MaterialPayload::new(owner, role, payload.to_owned())
-        .reference(location)
-        .expect("a material payload encodes")
+    text_reference(owner, role, location, payload).expect("a material payload encodes")
 }
 
 /// The digest `payload` hashes to as the material `reference` names.
 fn digest(reference: &MaterialRef, payload: &str) -> MaterialDigest {
     mint(
-        reference.owner.clone(),
+        &reference.owner,
         reference.role,
         reference.location.clone(),
         payload,
@@ -207,6 +357,9 @@ pub enum SettledOutputRefusal {
     /// A payload beside an outcome that names no material.
     #[error("an outcome that names no material settled with a payload")]
     StrayPayload,
+    /// A typed payload whose canonical JSON does not encode.
+    #[error("an outcome's typed payload does not encode")]
+    Unencodable,
     /// A payload whose bytes do not hash to the digest its outcome names.
     #[error(transparent)]
     Material(#[from] MaterialRefusal),
@@ -273,6 +426,18 @@ impl SettledOutput {
             Self::Completed(output) => Some(output.payload()),
             Self::Failed(failure) => Some(failure.payload()),
             Self::Waiting(source) => Some(source.payload()),
+            Self::Interrupted | Self::TimedOut { .. } | Self::Cancelled { .. } => None,
+        }
+    }
+
+    /// The payload's value, when the material the outcome names holds it
+    /// typed as a `V`.
+    #[must_use]
+    pub fn typed<V: Any>(&self) -> Option<&V> {
+        match self {
+            Self::Completed(output) => output.typed(),
+            Self::Failed(failure) => failure.typed(),
+            Self::Waiting(source) => source.typed(),
             Self::Interrupted | Self::TimedOut { .. } | Self::Cancelled { .. } => None,
         }
     }
@@ -363,10 +528,61 @@ impl From<SettledOutput> for SettledOutputForm {
 
 #[cfg(test)]
 mod tests {
-    use super::{MaterialOwner, MaterialRole};
+    use super::{MaterialLocation, MaterialOwner, MaterialRefusal, MaterialRole};
     use crate::effect_opener::EffectOpener;
+    use crate::tool_run::MaterialPayload;
 
-    use super::{Material, SettledOutput};
+    use super::{Material, SettledOutput, SettledOutputRefusal};
+
+    /// MATERIAL-IDENTITY (FIG-7056): a material is named by the BLAKE3 of its
+    /// payload's JSON object, whose `text` is a JSON string. A text material
+    /// hashes the borrowed text, and a typed one streams its value's JSON
+    /// through the string escaping; both mint exactly that digest for every
+    /// byte JSON escapes, and a typed material projects exactly its value's
+    /// JSON. A value whose JSON is not the named text is refused.
+    #[test]
+    fn a_typed_material_is_named_by_the_digest_of_its_json_text() {
+        let owner = MaterialOwner::Run {
+            opener: EffectOpener::turn("s", "t"),
+        };
+        let role = MaterialRole::AttemptOutput;
+        let controls: String = (0_u8..0x20).map(char::from).collect();
+        for value in [
+            serde_json::json!(controls),
+            serde_json::json!("quote \" backslash \\ slash / del \u{7f} é 😀"),
+            serde_json::json!({"nested": ["a\nb", 1, -0.0, 1.5e300, null, true], "": {}}),
+            serde_json::json!(""),
+        ] {
+            let text = serde_json::to_string(&value).unwrap();
+            let payload = MaterialPayload::new(owner.clone(), role, text.clone());
+            let mut preimage =
+                lash_protocol_types::core_support::Blake3DomainHasher::new("lash-tool-material/v1");
+            preimage.update(serde_json::to_vec(&payload).unwrap());
+            let expected = preimage.finalize_hex();
+            let typed = Material::journal_local_typed(owner.clone(), role, value.clone()).unwrap();
+            let plain = Material::journal_local(owner.clone(), role, text.clone());
+            assert_eq!(typed.reference().digest.as_str(), expected, "{text}");
+            assert_eq!(plain.reference(), typed.reference());
+            assert_eq!(
+                &payload.reference(MaterialLocation::JournalLocal).unwrap(),
+                typed.reference()
+            );
+            assert_eq!(typed.typed::<serde_json::Value>(), Some(&value));
+            assert_eq!(plain.typed::<serde_json::Value>(), None);
+            assert_eq!(typed.payload(), text);
+            assert_eq!(
+                Material::verified(typed.reference().clone(), value).unwrap(),
+                plain
+            );
+        }
+        let named = Material::journal_local(owner, role, "\"alpha\"".to_owned());
+        assert!(matches!(
+            Material::verified(named.reference().clone(), serde_json::json!("omega")),
+            Err(SettledOutputRefusal::Material(
+                MaterialRefusal::Corrupt { .. }
+            ))
+        ));
+    }
 
     /// A settled output decodes only with the payload its outcome names: a
     /// missing payload, bytes that do not hash to the outcome's digest, or a

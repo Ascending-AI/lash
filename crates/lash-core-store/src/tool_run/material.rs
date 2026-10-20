@@ -300,21 +300,7 @@ impl MaterialPayload {
         &self,
         location: MaterialLocation,
     ) -> Result<MaterialRef, crate::runtime_error::RuntimeEffectControllerError> {
-        let mut writer = MaterialHash(lash_protocol_types::core_support::Blake3DomainHasher::new(
-            MATERIAL_DOMAIN,
-        ));
-        serde_json::to_writer(&mut writer, self).map_err(|error| {
-            crate::runtime_error::RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RecordEncodingFailed,
-                error.to_string(),
-            )
-        })?;
-        Ok(MaterialRef {
-            owner: self.owner.clone(),
-            role: self.role,
-            location,
-            digest: MaterialDigest(writer.0.finalize_hex()),
-        })
+        text_reference(&self.owner, self.role, location, &self.text)
     }
 
     /// Validate a read without granting any execution or resolution authority.
@@ -368,6 +354,86 @@ impl From<MaterialRefusal> for crate::runtime_error::RuntimeEffectControllerErro
     }
 }
 
+/// The reference `owner`'s material of `role` at `location` takes when its
+/// canonical text is `text`: what a [`MaterialPayload`] of that text mints,
+/// hashed from the borrowed text.
+///
+/// # Errors
+///
+/// [`RecordEncodingFailed`](crate::RuntimeErrorCode::RecordEncodingFailed)
+/// when the owner does not encode.
+pub fn text_reference(
+    owner: &MaterialOwner,
+    role: MaterialRole,
+    location: MaterialLocation,
+    text: &str,
+) -> Result<MaterialRef, crate::runtime_error::RuntimeEffectControllerError> {
+    reference_with(owner, role, location, |hash| {
+        serde_json::to_writer(hash, text)
+    })
+}
+
+/// The reference `owner`'s material of `role` at `location` takes when its
+/// canonical text is `value`'s JSON: exactly what [`text_reference`] mints
+/// for `serde_json::to_string(value)`, with that JSON streamed through the
+/// text field's string escaping into the digest, never held as text.
+///
+/// # Errors
+///
+/// [`RecordEncodingFailed`](crate::RuntimeErrorCode::RecordEncodingFailed)
+/// when the owner or the value does not encode.
+pub fn value_reference<V: Serialize + ?Sized>(
+    owner: &MaterialOwner,
+    role: MaterialRole,
+    location: MaterialLocation,
+    value: &V,
+) -> Result<MaterialRef, crate::runtime_error::RuntimeEffectControllerError> {
+    reference_with(owner, role, location, |hash| {
+        hash.0.update(b"\"");
+        serde_json::to_writer(JsonStringContents(&mut *hash), value)?;
+        hash.0.update(b"\"");
+        Ok(())
+    })
+}
+
+/// The digest of a [`MaterialPayload`]'s JSON object, its `text` field's
+/// JSON string written by `text`: the one spelling of the material
+/// preimage, field for field the payload's own serialization.
+fn reference_with(
+    owner: &MaterialOwner,
+    role: MaterialRole,
+    location: MaterialLocation,
+    text: impl FnOnce(&mut MaterialHash) -> serde_json::Result<()>,
+) -> Result<MaterialRef, crate::runtime_error::RuntimeEffectControllerError> {
+    let mut hash = MaterialHash(lash_protocol_types::core_support::Blake3DomainHasher::new(
+        MATERIAL_DOMAIN,
+    ));
+    let encoded: serde_json::Result<()> = (|| {
+        hash.0.update(b"{\"owner\":");
+        serde_json::to_writer(&mut hash, owner)?;
+        hash.0.update(b",\"role\":");
+        serde_json::to_writer(&mut hash, &role)?;
+        hash.0.update(b",\"format\":");
+        serde_json::to_writer(&mut hash, &OUTCOME_MATERIAL_FORMAT_VERSION)?;
+        hash.0.update(b",\"text\":");
+        text(&mut hash)?;
+        hash.0.update(b"}");
+        Ok(())
+    })();
+    encoded.map_err(|error| {
+        crate::runtime_error::RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::RecordEncodingFailed,
+            error.to_string(),
+        )
+    })?;
+    Ok(MaterialRef {
+        owner: owner.clone(),
+        role,
+        location,
+        digest: MaterialDigest(hash.0.finalize_hex()),
+    })
+}
+
 /// Consume the exact serde JSON stream without retaining a second payload.
 struct MaterialHash(lash_protocol_types::core_support::Blake3DomainHasher);
 
@@ -379,5 +445,52 @@ impl std::io::Write for MaterialHash {
 
     fn flush(&mut self) -> std::io::Result<()> {
         Ok(())
+    }
+}
+
+/// The contents of a JSON string holding the bytes written through it,
+/// escaped as `serde_json` escapes a string: `"` and `\\`, the short escapes
+/// of backspace, form feed, newline, carriage return and tab, and any other
+/// control byte as a lowercase `\\u00XX`. Every other byte, UTF-8 included,
+/// passes as it is.
+struct JsonStringContents<W>(W);
+
+impl<W: std::io::Write> std::io::Write for JsonStringContents<W> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        let mut plain = 0;
+        for (at, &byte) in bytes.iter().enumerate() {
+            let control;
+            let escape: &[u8] = match byte {
+                b'"' => b"\\\"",
+                b'\\' => b"\\\\",
+                0x08 => b"\\b",
+                0x0c => b"\\f",
+                b'\n' => b"\\n",
+                b'\r' => b"\\r",
+                b'\t' => b"\\t",
+                0x00..=0x1f => {
+                    control = [
+                        b'\\',
+                        b'u',
+                        b'0',
+                        b'0',
+                        HEX[usize::from(byte >> 4)],
+                        HEX[usize::from(byte & 0xf)],
+                    ];
+                    &control
+                }
+                _ => continue,
+            };
+            self.0.write_all(&bytes[plain..at])?;
+            self.0.write_all(escape)?;
+            plain = at + 1;
+        }
+        self.0.write_all(&bytes[plain..])?;
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.flush()
     }
 }

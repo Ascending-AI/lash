@@ -44,7 +44,7 @@ use crate::RuntimeEffectControllerError;
 use crate::ToolCatalog;
 use crate::ToolId;
 use crate::runtime::actor::round::{
-    AdmittedExecution, MemberBody, MemberOutcome, RoundTools, decode_completed,
+    AdmittedExecution, MemberBody, MemberOutcome, RoundTools, completed_call,
 };
 use crate::runtime::actor::waits::Resolution;
 use lash_core_store::tool_run::Material;
@@ -543,16 +543,13 @@ pub fn tool_step_output(
             }
         }
         settled => {
-            let record = settled
-                .payload()
-                .and_then(decode_completed)
-                .map(|completed| crate::ToolCallRecord {
-                    call_id: completed.call_id,
-                    provider_call_id: completed.provider_call_id,
-                    tool: completed.tool_name,
-                    args: completed.args,
-                    output: completed.output,
-                });
+            let record = completed_call(&settled).map(|completed| crate::ToolCallRecord {
+                call_id: completed.call_id.clone(),
+                provider_call_id: completed.provider_call_id.clone(),
+                tool: completed.tool_name.clone(),
+                args: completed.args.clone(),
+                output: completed.output.clone(),
+            });
             replace_payload(
                 process,
                 settled,

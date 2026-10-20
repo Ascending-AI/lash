@@ -204,12 +204,11 @@ impl TurnTranscript {
                             reason: "a call's payload is text".to_owned(),
                         });
                     };
-                    let completed = super::decode_completed(&payload).ok_or_else(|| {
-                        GraphRefusal::InvalidBody {
+                    let completed: super::CompletedCall =
+                        serde_json::from_str(&payload).map_err(|_| GraphRefusal::InvalidBody {
                             kind: NodeKind::FROZEN_VALUE.0,
                             reason: "a call's payload is no readable tool answer".to_owned(),
-                        }
-                    })?;
+                        })?;
                     records.push(crate::ToolCallRecord {
                         call_id: completed.call_id,
                         provider_call_id: completed.provider_call_id,
