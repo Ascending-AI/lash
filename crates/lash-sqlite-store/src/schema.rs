@@ -21,7 +21,7 @@ pub(crate) const SCHEMA: &str = "
 -- 0 is opaque bytes an adapter's codec owns, with no edges; 1 is a canonical
 -- checkpoint graph node, whose edges are exactly its child table.
 CREATE TABLE IF NOT EXISTS blobs (
-    hash     TEXT PRIMARY KEY,
+    hash     BLOB PRIMARY KEY,
     content  BLOB NOT NULL,
     encoding INTEGER NOT NULL CONSTRAINT ck_blobs_encoding CHECK (encoding IN (0, 1))
 );
@@ -35,8 +35,8 @@ CREATE TABLE IF NOT EXISTS session_revisions (
     session_id     TEXT NOT NULL,
     head_revision  INTEGER NOT NULL,
     leaf_node_id   TEXT,
-    checkpoint_ref TEXT REFERENCES blobs(hash) ON DELETE RESTRICT,
-    config_ref TEXT NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
+    checkpoint_ref BLOB REFERENCES blobs(hash) ON DELETE RESTRICT,
+    config_ref BLOB NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
     terminal_ordinal INTEGER CONSTRAINT ck_session_revisions_terminal_ordinal CHECK (terminal_ordinal > 0),
     PRIMARY KEY (session_id, head_revision)
 ) WITHOUT ROWID;
@@ -122,7 +122,7 @@ CREATE TABLE IF NOT EXISTS session_meta (
     caused_by_node_id                 TEXT,
     source_session_id                 TEXT,
     source_node_id                    TEXT,
-    admission_base_checkpoint_ref     TEXT REFERENCES blobs(hash) ON DELETE RESTRICT,
+    admission_base_checkpoint_ref     BLOB REFERENCES blobs(hash) ON DELETE RESTRICT,
     closing_intent                    INTEGER,
     owning_process_id                 TEXT,
     retention_kind                    TEXT NOT NULL,
@@ -436,7 +436,7 @@ CREATE TABLE IF NOT EXISTS attachment_blobs (
 CREATE TABLE IF NOT EXISTS artifact_refs (
     namespace    TEXT NOT NULL,
     artifact_ref TEXT NOT NULL,
-    blob_ref     TEXT NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
+    blob_ref     BLOB NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
     PRIMARY KEY (namespace, artifact_ref)
 );
 
@@ -899,6 +899,29 @@ mod compat_tests {
                 tx.commit()
             })
             .expect("provision SQLite database");
+    }
+
+    /// HASH-KEY-WIDTH (FIG-6957): content addresses and every reference to
+    /// them are binary keys; widening them doubles the random-key B-trees.
+    #[test]
+    fn content_hash_columns_are_binary_keys() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        provision(&mut connection);
+        let columns = connection.prepare(
+            "SELECT m.name, p.name, p.type FROM sqlite_schema AS m, pragma_table_info(m.name) AS p
+             WHERE m.type = 'table' AND (p.name IN ('hash', 'parent_hash', 'child_hash', 'node_ref')
+               OR EXISTS (SELECT 1 FROM pragma_foreign_key_list(m.name) AS f
+                          WHERE f.\"from\" = p.name AND f.\"table\" IN ('blobs', 'prompt_texts'))
+               OR (m.name = 'prompt_text_edges' AND p.name IN ('parent', 'child')))"
+        ).unwrap().query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))
+            .unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
+        assert!(!columns.is_empty());
+        for (table, column, kind) in columns {
+            assert_eq!(
+                kind, "BLOB",
+                "{table}.{column} must store a binary content address"
+            );
+        }
     }
 
     #[test]

@@ -146,7 +146,7 @@ fn a_settled_inputs_run_and_pinned_revision_survive_without_a_binding_table() {
         "collection releases the unpinned revision"
     );
     let root: String = connection.query_row(
-        "SELECT config_ref FROM session_revisions WHERE session_id = 'session' AND head_revision = 2", [], |row| row.get(0)
+        "SELECT lower(hex(config_ref)) FROM session_revisions WHERE session_id = 'session' AND head_revision = 2", [], |row| row.get(0)
     ).expect("the head retains its config graph");
     let root = lash_core_store::checkpoint_graph::NodeId::from_hex(&root).expect("node id");
     let limits = lash_core_store::checkpoint_graph::DecodeLimits::within_total(1 << 20);
@@ -1602,7 +1602,7 @@ async fn unchanged_config_is_stored_once_across_retained_revisions() {
                     |row| row.get::<_, i64>(0),
                 )?,
                 conn.query_row(
-                    "SELECT count(*) FROM blobs WHERE hash = ?1 AND content = ?2",
+                    "SELECT count(*) FROM blobs WHERE hash = unhex(?1) AND content = ?2",
                     params![reference.as_str(), body],
                     |row| row.get::<_, i64>(0),
                 )?,
@@ -1765,7 +1765,7 @@ async fn receipt_replay_uses_scalar_columns_and_preserves_the_original_answer() 
         .conn
         .call(move |conn| {
             conn.query_row(
-                "SELECT count(*) FROM blobs WHERE hash = ?1",
+                "SELECT count(*) FROM blobs WHERE hash = unhex(?1)",
                 [original_root.as_str()],
                 |row| row.get::<_, i64>(0),
             )
@@ -2206,13 +2206,13 @@ async fn configuration_reuse_preserves_identity_and_cold_corruption_refusals() {
     let raw = Connection::open(&path).expect("corruption connection");
     let root: String = raw
         .query_row(
-            "SELECT config_ref FROM session_revisions WHERE session_id = ?1",
+            "SELECT lower(hex(config_ref)) FROM session_revisions WHERE session_id = ?1",
             [owner.as_str()],
             |row| row.get(0),
         )
         .expect("owner root");
     raw.execute(
-        "UPDATE session_revisions SET config_ref = ?1 WHERE session_id = ?2",
+        "UPDATE session_revisions SET config_ref = unhex(?1) WHERE session_id = ?2",
         params![root, foreign.as_str()],
     )
     .expect("mis-key the cached root");
@@ -2224,7 +2224,7 @@ async fn configuration_reuse_preserves_identity_and_cold_corruption_refusals() {
         matches!(error, StoreError::StoredDataCorrupt { record_kind: "SessionHeadMeta", message } if message.contains("row is keyed on session `config-foreign`"))
     );
     raw.execute(
-        "UPDATE blobs SET content = CAST('{' AS BLOB) WHERE hash = ?1",
+        "UPDATE blobs SET content = CAST('{' AS BLOB) WHERE hash = unhex(?1)",
         [root],
     )
     .expect("corrupt configuration graph body");

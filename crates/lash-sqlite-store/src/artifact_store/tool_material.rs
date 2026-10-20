@@ -106,13 +106,17 @@ impl ToolMaterialStore for SqliteStore {
                 crate::conn::cached_execute(
                     tx,
                     artifact_sql().refs.insert_pointer.sql(),
-                    params![TOOL_MATERIAL_NAMESPACE, artifact_ref, blob_ref.as_str()],
+                    params![
+                        TOOL_MATERIAL_NAMESPACE,
+                        artifact_ref,
+                        crate::codec::SqlHash(blob_ref.as_str())
+                    ],
                 )?;
                 let stored_blob_ref: String = tx
                     .prepare_cached(artifact_sql().refs.select_blob_ref.sql())
                     .and_then(|mut statement| {
                         statement.query_row(params![TOOL_MATERIAL_NAMESPACE, artifact_ref], |row| {
-                            row.get(0)
+                            crate::codec::hash_column(row, 0)
                         })
                     })?;
                 if stored_blob_ref != blob_ref.as_str() {
@@ -238,7 +242,7 @@ impl ToolMaterialStore for SqliteStore {
                     .prepare_cached(artifact_sql().refs.select_blob_ref.sql())
                     .and_then(|mut statement| {
                         statement.query_row(params![TOOL_MATERIAL_NAMESPACE, artifact_ref], |row| {
-                            row.get(0)
+                            crate::codec::hash_column(row, 0)
                         })
                     })?;
                 let bytes = Self::get_blob_conn(conn, &BlobRef(blob_ref))

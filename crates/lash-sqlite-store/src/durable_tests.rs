@@ -1,6 +1,7 @@
 //! The durability engine's fencing laws (`lash_durable::laws`) over SQLite,
 //! in memory and in a file.
 
+use lash_core_store::store::BlobRef;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -296,7 +297,7 @@ async fn a_model_start_binds_only_the_text_bodies_the_store_lacks() {
     let epoch = store.claim(&node, 1).await.expect("claim")[0].epoch;
     let run = lash_protocol_types::TurnId::from("prompt-bytes-turn");
     let text = |name: &str| PromptText {
-        hash: format!("hash-{name}"),
+        hash: BlobRef::for_content(format!("text {name}").as_bytes()).0,
         text: format!("text {name}").into(),
         children: Vec::new(),
     };
@@ -329,7 +330,7 @@ async fn a_model_start_binds_only_the_text_bodies_the_store_lacks() {
     };
     // Measure every INSERT binding, including bodies submitted again that
     // INSERT would ignore. SQLite reports SQL literal bytes: each fixture
-    // pair ["hash-N", "text N"] costs 17 + 2*len(N), plus array commas,
+    // pair [digest, "text N"] costs 76 + len(N), plus array commas,
     // brackets and the SQL string's quotes. The expected names below are
     // the fixture's missing bodies, independent of RETURNING rows.
     let bound = |writes: Vec<DomainWrite>, label: &'static str| {
@@ -372,7 +373,7 @@ async fn a_model_start_binds_only_the_text_bodies_the_store_lacks() {
             "model.start"
         )
         .await,
-        155,
+        419,
         "the first call binds every body"
     );
     assert_eq!(
@@ -384,7 +385,7 @@ async fn a_model_start_binds_only_the_text_bodies_the_store_lacks() {
             "model.start"
         )
         .await,
-        63,
+        169,
         "the second call binds only its changed section text and its body tail"
     );
     assert_eq!(bound(vec![settle(None)], "model.done").await, 0);
@@ -398,7 +399,7 @@ async fn a_model_start_binds_only_the_text_bodies_the_store_lacks() {
             "model.start"
         )
         .await,
-        97,
+        254,
         "after the settlement the next call binds its body chunks and contract, \
          not the section texts the snapshots hold"
     );
@@ -858,7 +859,7 @@ async fn prompt_reclamation_reads_one_edge_batch_per_level() {
     let session = lash_protocol_types::SessionId::from("sql-work-owner");
     let mut texts: Vec<_> = (0..16)
         .map(|leaf| PromptText {
-            hash: format!("leaf-{leaf}"),
+            hash: BlobRef::for_content(format!("leaf-{leaf}").as_bytes()).0,
             text: format!("leaf {leaf}").into(),
             children: Vec::new(),
         })
@@ -868,7 +869,7 @@ async fn prompt_reclamation_reads_one_edge_batch_per_level() {
     while frontier.len() > 1 {
         let mut next = Vec::new();
         for (index, pair) in frontier.as_chunks::<2>().0.iter().enumerate() {
-            let hash = format!("branch-{level}-{index}");
+            let hash = BlobRef::for_content(format!("branch-{level}-{index}").as_bytes()).0;
             texts.push(PromptText {
                 hash: hash.clone(),
                 text: format!("branch {level} {index}").into(),
@@ -986,15 +987,17 @@ async fn prompt_text_reads_are_batched_in_request_order() {
     let actor = ActorKey::session("sql-work-owner").unwrap();
     let mut texts: Vec<_> = (0..16)
         .map(|index| PromptText {
-            hash: format!("text-{index}"),
+            hash: BlobRef::for_content(format!("text-{index}").as_bytes()).0,
             text: format!("text {index}").into(),
             children: Vec::new(),
         })
         .collect();
     texts.push(PromptText {
-        hash: "branch".to_owned(),
+        hash: BlobRef::for_content(b"branch").0,
         text: "branch".to_owned().into(),
-        children: vec!["text-0".to_owned(), "text-1".to_owned()],
+        children: [b"text-0", b"text-1"]
+            .map(|text| BlobRef::for_content(text).0)
+            .to_vec(),
     });
     let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
     tx.write(DomainWrite::Prompt(PromptWrite::Record {
@@ -1017,7 +1020,7 @@ async fn prompt_text_reads_are_batched_in_request_order() {
         .unwrap();
     let mut hashes: Vec<_> = texts.iter().rev().map(|text| text.hash.clone()).collect();
     hashes.insert(2, "missing".to_owned());
-    hashes.push("branch".to_owned());
+    hashes.push(BlobRef::for_content(b"branch").0);
     let expected: Vec<_> = hashes
         .iter()
         .filter_map(|hash| texts.iter().find(|text| text.hash == *hash).cloned())

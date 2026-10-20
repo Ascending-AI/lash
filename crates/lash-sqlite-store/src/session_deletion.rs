@@ -56,7 +56,7 @@ pub(super) async fn delete_session_from_catalog(
                     |row| {
                         Ok((
                             row.get::<_, Option<String>>(0)?,
-                            row.get::<_, Option<String>>(1)?,
+                            crate::codec::optional_hash_column(row, 1)?,
                         ))
                     },
                 )
@@ -103,36 +103,47 @@ pub(super) async fn delete_session_from_catalog(
             // metadata go with it, so each root they held is retired here and
             // held below.
             let text_column =
-                |sql: &str| -> Result<Vec<String>, lash_core_store::store::StoreError> {
+                |sql: &str,
+                 hashes: bool|
+                 -> Result<Vec<String>, lash_core_store::store::StoreError> {
                     let mut stmt = tx.prepare(sql).map_err(sqlite_error)?;
                     let rows = stmt
-                        .query_map(params![session_id.as_str()], |row| row.get::<_, String>(0))
+                        .query_map(params![session_id.as_str()], |row| {
+                            if hashes {
+                                crate::codec::hash_column(row, 0)
+                            } else {
+                                row.get::<_, String>(0)
+                            }
+                        })
                         .map_err(sqlite_error)?;
                     rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)
                 };
-            let mut roots: std::collections::BTreeSet<String> =
-                text_column(session_sql().revisions.select_session_checkpoints.sql())?
-                    .into_iter()
-                    .chain(text_column(
-                        crate::session_runs::session_runs_sql()
-                            .runs
-                            .select_session_transcripts
-                            .sql(),
-                    )?)
-                    .collect();
+            let mut roots: std::collections::BTreeSet<String> = text_column(
+                session_sql().revisions.select_session_checkpoints.sql(),
+                true,
+            )?
+            .into_iter()
+            .chain(text_column(
+                crate::session_runs::session_runs_sql()
+                    .runs
+                    .select_session_transcripts
+                    .sql(),
+                true,
+            )?)
+            .collect();
             roots.extend(checkpoint_ref);
             roots.extend(
                 tx.query_row(
                     session_sql().meta.select_admission_base.sql(),
                     params![session_id.as_str()],
-                    |row| row.get::<_, Option<String>>(0),
+                    |row| crate::codec::optional_hash_column(row, 0),
                 )
                 .optional()
                 .map_err(sqlite_error)?
                 .flatten(),
             );
             let mut retained_leaves: std::collections::BTreeSet<String> =
-                text_column(session_sql().revisions.select_session_leaves.sql())?
+                text_column(session_sql().revisions.select_session_leaves.sql(), false)?
                     .into_iter()
                     .collect();
             retained_leaves.extend(leaf_node_id);

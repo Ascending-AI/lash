@@ -277,7 +277,7 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
                      UNION
                      SELECT edge.child_hash FROM blob_edges AS edge
                      JOIN reachable ON edge.parent_hash = reachable.hash
-                 ) SELECT hash FROM reachable",
+                 ) SELECT lower(hex(hash)) FROM reachable",
             )
             .expect("surviving config closure query");
         query
@@ -290,13 +290,13 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
     {
         let conn = rusqlite::Connection::open(catalog_uri(&root)).expect("open catalog");
         conn.execute(
-            "INSERT INTO blobs (hash, content, encoding) VALUES ('host-artifact-blob', X'02', 0)",
+            "INSERT INTO blobs (hash, content, encoding) VALUES (zeroblob(32), X'02', 0)",
             [],
         )
         .expect("insert host artifact blob");
         conn.execute(
             "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref)
-             VALUES ('kernel_document', 'shared-module', 'host-artifact-blob')",
+             VALUES ('kernel_document', 'shared-module', zeroblob(32))",
             [],
         )
         .expect("insert host artifact ref");
@@ -342,14 +342,16 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
         "factory artifact refs without session attribution remain host-owned"
     );
     let blobs = || {
-        conn.prepare("SELECT hash FROM blobs ORDER BY hash")
+        conn.prepare("SELECT lower(hex(hash)) FROM blobs ORDER BY hash")
             .expect("retained blob query")
             .query_map([], |row| row.get::<_, String>(0))
             .expect("retained blobs")
             .collect::<rusqlite::Result<std::collections::BTreeSet<_>>>()
             .expect("retained blob identities")
     };
-    let host_artifact = std::collections::BTreeSet::from(["host-artifact-blob".to_owned()]);
+    let host_artifact = std::collections::BTreeSet::from([
+        "0000000000000000000000000000000000000000000000000000000000000000".to_owned(),
+    ]);
     assert_eq!(
         blobs(),
         retained_config.union(&host_artifact).cloned().collect(),

@@ -27,7 +27,7 @@ fn window_roots(
     let checkpoint = checkpoint.map_or_else(
         || {
             conn.query_row(
-                "SELECT revision.checkpoint_ref FROM session_runs AS ended
+                "SELECT lower(hex(revision.checkpoint_ref)) FROM session_runs AS ended
                  JOIN session_revisions AS revision
                    ON revision.session_id = ended.session_id
                   AND revision.head_revision = ended.terminal_window_revision
@@ -40,7 +40,7 @@ fn window_roots(
         str::to_owned,
     );
     let mut sources = conn
-        .prepare("SELECT source FROM graph_root_catalog WHERE root_ref = ?1 ORDER BY source")
+        .prepare("SELECT source FROM graph_root_catalog WHERE root_ref = unhex(?1) ORDER BY source")
         .expect("root catalog")
         .query_map([checkpoint.as_str()], |row| row.get::<_, String>(0))
         .expect("read the root catalog")

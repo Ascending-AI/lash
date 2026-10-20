@@ -431,7 +431,7 @@ mod walk {
             .expect("write foreign data");
         raw.execute(
             "INSERT INTO session_revisions (session_id, config_ref, head_revision, leaf_node_id, checkpoint_ref)
-             VALUES ('orphaned', '{}', 0, NULL, 'missing-checkpoint-manifest')",
+             VALUES ('orphaned', zeroblob(32), 0, NULL, X'7777777777777777777777777777777777777777777777777777777777777777')",
             [],
         ).expect("record the fixture revision");
         raw.execute(
@@ -451,7 +451,12 @@ mod walk {
         assert_eq!(page.items[0].session_id.as_deref(), Some("orphaned"));
         match &page.items[0].payload {
             DurablePayload::Missing { reason } => {
-                assert!(reason.contains("missing-checkpoint-manifest"), "{reason}");
+                assert!(
+                    reason.contains(
+                        "7777777777777777777777777777777777777777777777777777777777777777"
+                    ),
+                    "{reason}"
+                );
                 assert!(reason.contains("orphaned"), "{reason}");
             }
             other => panic!("expected a Missing payload, got {other:?}"),
@@ -467,7 +472,7 @@ mod walk {
             .expect("provision durable core");
         let raw = rusqlite::Connection::open(&core).expect("open raw core");
         raw.execute(
-            "INSERT INTO blobs (hash, content, encoding) VALUES ('bare-checkpoint', ?1, 0)",
+            "INSERT INTO blobs (hash, content, encoding) VALUES (zeroblob(32), ?1, 0)",
             rusqlite::params![b"bare blob body".to_vec()],
         )
         .expect("install a bare checkpoint blob");
@@ -476,7 +481,7 @@ mod walk {
             &lash_protocol_types::SessionId::from("bare-checkpoint-session"),
             0,
             None,
-            Some("bare-checkpoint"),
+            Some("0000000000000000000000000000000000000000000000000000000000000000"),
             "{}",
         )
         .expect("record the fixture revision");

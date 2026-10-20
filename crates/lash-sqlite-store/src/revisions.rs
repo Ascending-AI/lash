@@ -41,7 +41,11 @@ pub(crate) fn record_revision_conn(
     let config_ref = root.blob_ref();
     let held: Option<String> = tx
         .prepare_cached(session_sql().revisions.select_config_ref.sql())
-        .and_then(|mut statement| statement.query_row([session_id.as_str()], |row| row.get(0)))
+        .and_then(|mut statement| {
+            statement.query_row([session_id.as_str()], |row| {
+                crate::codec::hash_column(row, 0)
+            })
+        })
         .optional()
         .map_err(sqlite_error)?;
     if held.as_deref() != Some(config_ref.as_str()) {
@@ -59,8 +63,8 @@ pub(crate) fn record_revision_conn(
             session_id.as_str(),
             head_revision,
             leaf_node_id,
-            checkpoint_ref,
-            config_ref.as_str(),
+            checkpoint_ref.map(crate::codec::SqlHash),
+            crate::codec::SqlHash(config_ref.as_str()),
         ],
     )
     .map_err(sqlite_error)?;
@@ -123,8 +127,8 @@ pub(crate) fn release_unretained_conn(
                 |row| {
                     Ok((
                         row.get::<_, Option<String>>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                        row.get::<_, Option<String>>(3)?,
+                        crate::codec::optional_hash_column(row, 2)?,
+                        crate::codec::optional_hash_column(row, 3)?,
                     ))
                 },
             )
@@ -300,8 +304,8 @@ fn revision_row_conn(
                 Ok(RevisionRow {
                     head_revision,
                     leaf_node_id: row.get(0)?,
-                    checkpoint_ref: row.get(1)?,
-                    config_ref: row.get(2)?,
+                    checkpoint_ref: crate::codec::optional_hash_column(row, 1)?,
+                    config_ref: crate::codec::optional_hash_column(row, 2)?,
                 })
             })
         })
@@ -404,8 +408,8 @@ pub(crate) fn revisions_conn(
                         row.get::<_, i64>(0)?,
                     )?,
                     leaf_node_id: row.get(1)?,
-                    checkpoint_ref: row.get(2)?,
-                    config_ref: row.get(3)?,
+                    checkpoint_ref: crate::codec::optional_hash_column(row, 2)?,
+                    config_ref: crate::codec::optional_hash_column(row, 3)?,
                 })
             })
             .map_err(sqlite_error)?;

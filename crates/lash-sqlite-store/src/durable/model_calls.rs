@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS model_call_records (
     run TEXT NOT NULL,
     call TEXT NOT NULL,
     call_id TEXT NOT NULL,
-    record_ref TEXT NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
+    record_ref BLOB NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
     ended_at_ms INTEGER NOT NULL,
     written_epoch INTEGER NOT NULL,
     PRIMARY KEY (session_id, run, call),
@@ -41,7 +41,7 @@ pub(super) fn apply(
             write.key.call.owner_column(),
             write.key.call.call_column(),
             write.call_id.0,
-            write.record.to_hex(),
+            write.record.0.as_slice(),
             commit.now.0,
             commit.epoch.0,
         ])?;
@@ -51,7 +51,7 @@ pub(super) fn apply(
             &write.key.call.owner_column(),
             &write.key.call.call_column(),
         ],
-        |row| row.get(0),
+        |row| crate::codec::hash_column(row, 0),
     )?;
     if retained != write.record.to_hex() {
         return Ok(Err(super::corrupt(
@@ -74,7 +74,7 @@ pub(super) fn delete_session(
     tx.prepare_cached(SQL.delete_pins.sql())?
         .execute([session.as_str()])?;
     tx.prepare_cached(SQL.delete_session.sql())?
-        .query_map([session.as_str()], |row| row.get(0))?
+        .query_map([session.as_str()], |row| crate::codec::hash_column(row, 0))?
         .collect()
 }
 
@@ -89,7 +89,7 @@ pub(super) fn read(
         .query_map([session.as_str(), owner], |row| {
             Ok((
                 row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
+                crate::codec::hash_column(row, 1)?,
                 row.get::<_, i64>(2)?,
             ))
         })?

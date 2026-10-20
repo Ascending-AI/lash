@@ -90,7 +90,7 @@ const SCOPED_READS: &[(&str, &str, &str, &str)] = &[
              SELECT checkpoint_ref FROM session_head JOIN session_revisions USING (session_id, head_revision)
              WHERE session_id = ?1 AND checkpoint_ref IS NOT NULL
              UNION SELECT e.child_hash FROM blob_edges e JOIN reach r ON e.parent_hash = r.hash)
-         SELECT parent_hash, child_hash FROM blob_edges WHERE parent_hash IN (SELECT hash FROM reach)",
+         SELECT lower(hex(parent_hash)), lower(hex(child_hash)) FROM blob_edges WHERE parent_hash IN (SELECT hash FROM reach)",
         "WITH RECURSIVE reach(hash) AS (
              SELECT checkpoint_ref FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision)
              WHERE session_id = $1 AND checkpoint_ref IS NOT NULL
@@ -106,7 +106,7 @@ const SCOPED_READS: &[(&str, &str, &str, &str)] = &[
              SELECT checkpoint_ref FROM session_head JOIN session_revisions USING (session_id, head_revision)
              WHERE session_id = ?1 AND checkpoint_ref IS NOT NULL
              UNION SELECT e.child_hash FROM blob_edges e JOIN reach r ON e.parent_hash = r.hash)
-         SELECT hash, hex(content), encoding FROM blobs WHERE hash IN (SELECT hash FROM reach)",
+         SELECT lower(hex(hash)), hex(content), encoding FROM blobs WHERE hash IN (SELECT hash FROM reach)",
         "WITH RECURSIVE reach(hash) AS (
              SELECT checkpoint_ref FROM lash_session_head JOIN lash_session_revisions USING (session_id, head_revision)
              WHERE session_id = $1 AND checkpoint_ref IS NOT NULL

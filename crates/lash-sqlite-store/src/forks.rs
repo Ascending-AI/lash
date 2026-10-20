@@ -69,7 +69,7 @@ pub(super) async fn fork_at_in_catalog(
                     |row| {
                         Ok((
                             row.get::<_, Option<String>>(0)?,
-                            row.get::<_, Option<String>>(1)?,
+                            crate::codec::optional_hash_column(row, 1)?,
                         ))
                     },
                 )
@@ -216,7 +216,7 @@ pub(super) async fn fork_at_in_catalog(
                 let exists = tx
                     .query_row(
                         crate::artifact_store::artifact_sql().blobs_sqlite.select_exists.sql(),
-                        params![retained_ref],
+                        params![crate::codec::SqlHash(&retained_ref)],
                         |row| row.get::<_, bool>(0),
                     )
                     .map_err(sqlite_error)?;

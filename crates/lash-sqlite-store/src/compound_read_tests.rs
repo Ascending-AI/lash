@@ -53,7 +53,7 @@ pub(crate) fn commit_competing(
 
 pub(crate) fn blob_rows(tx: &rusqlite::Connection, hash: &str) -> i64 {
     tx.query_row(
-        "SELECT COUNT(*) FROM blobs WHERE hash = ?1",
+        "SELECT COUNT(*) FROM blobs WHERE hash = unhex(?1)",
         params![hash],
         |row| row.get(0),
     )

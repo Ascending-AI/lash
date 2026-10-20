@@ -61,8 +61,8 @@ pub(crate) const TABLES: &str = "
 -- forward direction, so its peel reads its children there and deletes their
 -- edges (FIG-6939); a child cannot go while an edge names it.
 CREATE TABLE IF NOT EXISTS blob_edges (
-    parent_hash TEXT NOT NULL,
-    child_hash TEXT NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
+    parent_hash BLOB NOT NULL,
+    child_hash BLOB NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
     PRIMARY KEY (child_hash, parent_hash)
 ) WITHOUT ROWID;
 
@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS effect_admissions (
     owner_key TEXT,
     run_seq INTEGER,
     member_ordinal INTEGER,
-    admission_ref TEXT NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
+    admission_ref BLOB NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
     written_epoch INTEGER NOT NULL,
     PRIMARY KEY (exec_key, effect_id),
     UNIQUE (owner_key, run_seq, member_ordinal),
@@ -88,7 +88,7 @@ CREATE INDEX IF NOT EXISTS idx_effect_admissions_admission_ref
 -- A deliberately installed runnable release manifest.
 CREATE TABLE IF NOT EXISTS graph_release_pins (
     release_key TEXT PRIMARY KEY,
-    root_ref TEXT NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT
+    root_ref BLOB NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT
 );
 CREATE INDEX IF NOT EXISTS idx_graph_release_pins_root_ref ON graph_release_pins (root_ref);
 
@@ -100,7 +100,7 @@ CREATE INDEX IF NOT EXISTS idx_graph_release_pins_root_ref ON graph_release_pins
 CREATE TABLE IF NOT EXISTS root_leases (
     lease_id INTEGER PRIMARY KEY AUTOINCREMENT,
     owner_key BLOB NOT NULL,
-    root_ref TEXT NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
+    root_ref BLOB NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
     actor_key TEXT,
     epoch INTEGER,
     ttl_ms INTEGER NOT NULL CONSTRAINT ck_root_leases_ttl CHECK (ttl_ms > 0),
@@ -116,7 +116,7 @@ CREATE INDEX IF NOT EXISTS idx_root_leases_expiry ON root_leases (expires_at_ms)
 -- lease released. A root of the catalog until a step takes it; `closure` 0
 -- peels the node alone.
 CREATE TABLE IF NOT EXISTS retirement_holds (
-    root_ref TEXT PRIMARY KEY REFERENCES blobs(hash) ON DELETE RESTRICT,
+    root_ref BLOB PRIMARY KEY REFERENCES blobs(hash) ON DELETE RESTRICT,
     closure INTEGER NOT NULL CONSTRAINT ck_retirement_holds_closure CHECK (closure IN (0, 1)),
     queued_at_ms INTEGER NOT NULL
 );
@@ -128,7 +128,7 @@ CREATE INDEX IF NOT EXISTS idx_retirement_holds_queue
 -- yet. Only retirement steps write or take it: no root of the catalog and no
 -- foreign key; a node gone meanwhile is passed over.
 CREATE TABLE IF NOT EXISTS retirement_frontier (
-    node_ref TEXT PRIMARY KEY,
+    node_ref BLOB PRIMARY KEY,
     closure INTEGER NOT NULL CONSTRAINT ck_retirement_frontier_closure CHECK (closure IN (0, 1)),
     queued_at_ms INTEGER NOT NULL
 );
@@ -172,14 +172,14 @@ lash_store_sql::statements! {
 
         /// The encoding of every stored blob in JSON `?1`.
         stored_encodings = "SELECT hash, encoding FROM blobs
-             WHERE hash IN (SELECT value FROM json_each(?1))";
+             WHERE hash IN (SELECT unhex(value) FROM json_each(?1))";
 
         /// A cached configuration's graph root must exist in this snapshot.
         config_root_visible = "SELECT EXISTS (SELECT 1 FROM blobs WHERE hash = ?1 AND encoding = 1)";
 
         /// The bytes and encoding of every stored blob in JSON `?1`.
         stored_nodes = "SELECT hash, content, encoding FROM blobs
-             WHERE hash IN (SELECT value FROM json_each(?1))";
+             WHERE hash IN (SELECT unhex(value) FROM json_each(?1))";
 
         /// One bounded frontier of `[hash, read_opaque_body]` requests.
         /// Graph-only reads retain opaque identities without their payloads.
@@ -188,7 +188,7 @@ lash_store_sql::statements! {
                   THEN stored.content ELSE x'' END,
              stored.encoding
              FROM json_each(?1) AS wanted JOIN blobs AS stored
-               ON stored.hash = json_extract(wanted.value, '$[0]')";
+               ON stored.hash = unhex(json_extract(wanted.value, '$[0]'))";
 
         /// The one-row template for bounded graph-body VALUES batches.
         /// Graph encoding is fixed at 1; only digests and bytes are bound.
@@ -198,13 +198,13 @@ lash_store_sql::statements! {
         /// Every edge of JSON `?1`, an array of `[parent, child]` digests
         /// of freshly installed parents.
         insert_edges = "INSERT INTO blob_edges (parent_hash, child_hash)
-             SELECT value ->> 0, value ->> 1 FROM json_each(?1)";
+             SELECT unhex(value ->> 0), unhex(value ->> 1) FROM json_each(?1)";
 
         /// One level of a peel: delete every blob in JSON `?1` no root names
         /// and no edge reaches, and return each one deleted with its bytes
         /// and encoding, which name the children its edges reach.
         peel_orphans = "DELETE FROM blobs AS candidate
-             WHERE candidate.hash IN (SELECT value FROM json_each(?1))
+             WHERE candidate.hash IN (SELECT unhex(value) FROM json_each(?1))
                AND NOT EXISTS (
                    SELECT 1 FROM graph_root_catalog AS root WHERE root.root_ref = candidate.hash
                )
@@ -216,7 +216,7 @@ lash_store_sql::statements! {
         /// Delete the edges of JSON `?1`, `[child, parent]` digest pairs:
         /// the edges of peeled parents.
         delete_edges = "DELETE FROM blob_edges
-             WHERE (child_hash, parent_hash) IN (SELECT value ->> 0, value ->> 1 FROM json_each(?1))";
+             WHERE (child_hash, parent_hash) IN (SELECT unhex(value ->> 0), unhex(value ->> 1) FROM json_each(?1))";
 
         /// Delete every edge of parent `?1` by a scan, returning each child
         /// it reached: the edges of a peeled parent whose bytes no longer
@@ -332,14 +332,16 @@ pub(super) fn root_of(tx: &Connection, owner: &RootOwner) -> GraphAnswer<Option<
     ) -> rusqlite::Result<Option<String>> {
         Ok(tx
             .prepare_cached(sql)?
-            .query_row(params, |row| row.get::<_, Option<String>>(0))
+            .query_row(params, |row| crate::codec::optional_hash_column(row, 0))
             .optional()?
             .flatten())
     }
     let stored = match owner {
         RootOwner::Exec(exec) => tx
             .prepare_cached(SQL.snapshots.root.sql())?
-            .query_row([exec.stored()], |row| row.get::<_, Option<String>>(1))
+            .query_row([exec.stored()], |row| {
+                crate::codec::optional_hash_column(row, 1)
+            })
             .optional()?
             .flatten(),
         RootOwner::RunFact {
@@ -480,7 +482,7 @@ pub(crate) fn graph_closure(
 /// Prove snapshot membership without hydrating an already validated closure.
 pub(crate) fn config_root_visible(tx: &Connection, root: NodeId) -> rusqlite::Result<bool> {
     tx.prepare_cached(SQL.sqlite.config_root_visible.sql())?
-        .query_row([root.blob_ref().as_str()], |row| row.get(0))
+        .query_row([root.0.as_slice()], |row| row.get(0))
 }
 
 /// Installs the staged `nodes` in the caller's transaction (the session
@@ -597,7 +599,7 @@ impl FrontierReader {
             let mut statement = tx.prepare_cached(SQL.sqlite.hydration_nodes.sql())?;
             let mut rows = statement.query([json_array(&wanted)])?;
             while let Some(row) = rows.next()? {
-                let hash: String = row.get(0)?;
+                let hash = crate::codec::hash_column(row, 0)?;
                 let Some(node) = NodeId::from_hex(&hash) else {
                     continue;
                 };
@@ -850,7 +852,7 @@ pub(super) fn peel_level(
         .prepare_cached(SQL.sqlite.peel_orphans.sql())?
         .query_map([json_array(frontier)], |row| {
             Ok((
-                row.get::<_, String>(0)?,
+                crate::codec::hash_column(row, 0)?,
                 row.get::<_, Vec<u8>>(1)?,
                 row.get::<_, i64>(2)?,
             ))
@@ -870,7 +872,9 @@ pub(super) fn peel_level(
             // edges are found by the parent instead.
             None => children.extend(
                 tx.prepare_cached(SQL.sqlite.delete_parent_edges.sql())?
-                    .query_map([parent], |row| row.get::<_, String>(0))?
+                    .query_map([crate::codec::SqlHash(parent)], |row| {
+                        crate::codec::hash_column(row, 0)
+                    })?
                     .collect::<rusqlite::Result<Vec<_>>>()?,
             ),
         }
@@ -958,8 +962,23 @@ pub(crate) fn audit_page(
     let orphans = tx
         .prepare_cached(SQL.graph.orphans_after.sql())?
         .query_map(
-            rusqlite::params![after, i64::try_from(limit).unwrap_or(i64::MAX)],
-            |row| row.get::<_, String>(0),
+            rusqlite::params![
+                if after.is_empty() {
+                    Vec::new()
+                } else {
+                    lash_core_store::checkpoint_graph::NodeId::from_hex(after)
+                        .ok_or_else(|| {
+                            crate::sqlite_conversion_error(crate::stored_data_corrupt(
+                                "content address cursor",
+                                after,
+                            ))
+                        })?
+                        .0
+                        .to_vec()
+                },
+                i64::try_from(limit).unwrap_or(i64::MAX)
+            ],
+            |row| crate::codec::hash_column(row, 0),
         )?
         .collect::<rusqlite::Result<BTreeSet<_>>>()?;
     let last = orphans.last().cloned();
@@ -999,7 +1018,7 @@ pub(super) fn apply_admission(
                             .as_ref()
                             .map(|member| integer::<i64>(member.member))
                             .transpose()?,
-                        admission.to_hex(),
+                        admission.0.as_slice(),
                         commit.epoch.0
                     ],
                     |_| Ok(()),
@@ -1017,7 +1036,7 @@ pub(super) fn apply_admission(
             let removed = tx
                 .prepare_cached(SQL.graph.admission_remove.sql())?
                 .query_row(
-                    rusqlite::params![exec.stored(), &effect.0[..], expected.to_hex()],
+                    rusqlite::params![exec.stored(), &effect.0[..], expected.0.as_slice()],
                     |_| Ok(()),
                 )
                 .optional()?;
@@ -1034,7 +1053,7 @@ pub(super) fn apply_admission(
 /// the Admission nodes they held: the caller's to peel.
 pub(super) fn clear_admissions(tx: &Connection, exec_key: &str) -> rusqlite::Result<Vec<String>> {
     tx.prepare_cached(SQL.graph.admissions_clear.sql())?
-        .query_map([exec_key], |row| row.get(0))?
+        .query_map([exec_key], |row| crate::codec::hash_column(row, 0))?
         .collect()
 }
 
@@ -1045,7 +1064,7 @@ pub(super) fn clear_admissions_under(
     prefix: &str,
 ) -> rusqlite::Result<Vec<String>> {
     tx.prepare_cached(SQL.graph.admissions_clear_under.sql())?
-        .query_map([prefix], |row| row.get(0))?
+        .query_map([prefix], |row| crate::codec::hash_column(row, 0))?
         .collect()
 }
 
@@ -1060,12 +1079,12 @@ pub(super) fn apply_release_pin(
             let installed = cached_execute(
                 tx,
                 SQL.graph.release_install.sql(),
-                [release.as_str(), root.to_hex().as_str()],
+                rusqlite::params![release.as_str(), root.0.as_slice()],
             )?;
             if installed == 0 {
                 let pinned = tx
                     .prepare_cached(SQL.graph.release_root.sql())?
-                    .query_row([release.as_str()], |row| row.get::<_, String>(0))?;
+                    .query_row([release.as_str()], |row| crate::codec::hash_column(row, 0))?;
                 if pinned != root.to_hex() {
                     return graph_refused(GraphRefusal::RevisionConflict);
                 }
@@ -1074,7 +1093,10 @@ pub(super) fn apply_release_pin(
         ReleasePinWrite::Retire { release, expected } => {
             let retired = tx
                 .prepare_cached(SQL.graph.release_retire.sql())?
-                .query_row([release.as_str(), expected.to_hex().as_str()], |_| Ok(()))
+                .query_row(
+                    rusqlite::params![release.as_str(), expected.0.as_slice()],
+                    |_| Ok(()),
+                )
                 .optional()?;
             if retired.is_none() {
                 return graph_refused(GraphRefusal::RevisionConflict);
@@ -1112,7 +1134,7 @@ pub(super) fn install(
         let mut present = BTreeMap::new();
         let mut statement = tx.prepare_cached(SQL.sqlite.stored_encodings.sql())?;
         let rows = statement.query_map([digest_array(named)], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            Ok((crate::codec::hash_column(row, 0)?, row.get::<_, i64>(1)?))
         })?;
         for row in rows {
             let (hash, encoding) = row?;
@@ -1154,7 +1176,7 @@ pub(super) fn install(
         let mut statement = tx.prepare_cached(SQL.sqlite.stored_nodes.sql())?;
         let mut rows = statement.query([digest_array(staged.iter().map(|node| &node.id))])?;
         while let Some(row) = rows.next()? {
-            let hash: String = row.get(0)?;
+            let hash = crate::codec::hash_column(row, 0)?;
             let Some(id) = NodeId::from_hex(&hash) else {
                 continue;
             };
@@ -1187,7 +1209,6 @@ pub(super) fn install(
     let mut chunk: Vec<&CheckedNode> = Vec::with_capacity(chunk_rows);
     let mut full = tx.prepare_cached(&SQL.blob_batches[chunk_rows - 1])?;
     let mut tail = None;
-    let mut hash = String::with_capacity(64);
     let mut edges = String::from("[");
     loop {
         chunk.extend(fresh.by_ref().take(chunk_rows));
@@ -1202,9 +1223,7 @@ pub(super) fn install(
             tail.insert(tx.prepare_cached(&SQL.blob_batches[chunk.len() - 1])?)
         };
         for (index, node) in chunk.iter().enumerate() {
-            hash.clear();
-            node.id.write_hex(&mut hash);
-            insert.raw_bind_parameter(index * 2 + 1, hash.as_str())?;
+            insert.raw_bind_parameter(index * 2 + 1, node.id.0.as_slice())?;
             insert.raw_bind_parameter(index * 2 + 2, &node.bytes[..])?;
             installed.newly_installed_canonical_bytes += node.bytes.len() as u64;
             installed.new_nodes += 1;
@@ -1214,7 +1233,7 @@ pub(super) fn install(
                     edges.push(',');
                 }
                 edges.push_str("[\"");
-                edges.push_str(&hash);
+                node.id.write_hex(&mut edges);
                 edges.push_str("\",\"");
                 child.write_hex(&mut edges);
                 edges.push_str("\"]");
@@ -1308,5 +1327,83 @@ impl SqliteDurableStore {
                 None => return Ok(deleted),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// HASH-PUBLICATION-ATOMIC (FIG-6957): a binary root's foreign-key
+    /// refusal rolls back its preceding blob insert, preserving a rooted
+    /// control. Exactly-once recovery relies on this one transaction boundary.
+    #[tokio::test]
+    async fn binary_hash_publication_refusal_rolls_back_its_bytes() {
+        use crate::codec::{SqlHash, hash_column};
+        use lash_core_store::store::BlobRef;
+        let set = crate::SqliteStoreSet::memory().await.unwrap();
+        let store = set.session_store_factory();
+        let control = BlobRef::for_content(b"retained control");
+        let retained = control.clone();
+        store
+            .conn
+            .write(move |tx| {
+                tx.execute(
+                    "INSERT INTO blobs(hash, content, encoding) VALUES (?1, ?2, 0)",
+                    rusqlite::params![SqlHash(retained.as_str()), b"retained control".as_slice()],
+                )?;
+                tx.execute(
+                    "INSERT INTO graph_release_pins(release_key, root_ref) VALUES ('control', ?1)",
+                    [SqlHash(retained.as_str())],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let refusal = store
+            .conn
+            .write(move |tx| {
+                let candidate = BlobRef::for_content(b"unpublished candidate");
+                let absent = BlobRef::for_content(b"absent root");
+                tx.execute(
+                    "INSERT INTO blobs(hash, content, encoding) VALUES (?1, ?2, 0)",
+                    rusqlite::params![
+                        SqlHash(candidate.as_str()),
+                        b"unpublished candidate".as_slice()
+                    ],
+                )?;
+                tx.execute(
+                    "INSERT INTO graph_release_pins(release_key, root_ref) VALUES ('candidate', ?1)",
+                    [SqlHash(absent.as_str())],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(refusal, rusqlite::Error::SqliteFailure(ref code, _) if code.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_FOREIGNKEY)
+        );
+        store
+            .conn
+            .call(move |connection| {
+                let keys = connection
+                    .prepare("SELECT hash, typeof(hash), length(hash) FROM blobs ORDER BY hash")?
+                    .query_map([], |row| {
+                        Ok((
+                            hash_column(row, 0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, i64>(2)?,
+                        ))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                assert_eq!(keys, [(control.0, "blob".to_owned(), 32)]);
+                let rooted: i64 = connection.query_row(
+                    "SELECT count(*) FROM graph_release_pins JOIN blobs ON root_ref = hash",
+                    [],
+                    |row| row.get(0),
+                )?;
+                assert_eq!(rooted, 1, "the retained binary root still resolves");
+                Ok(())
+            })
+            .await
+            .unwrap();
     }
 }

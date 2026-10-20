@@ -41,7 +41,7 @@ lash_store_sql::statements! {
         /// Point each `[reference, blob]` of JSON `?2` in namespace `?1`. An
         /// artifact is immutable: a pointer already there is kept.
         insert_pointers = "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref)
-             SELECT ?1, value ->> 0, value ->> 1 FROM json_each(?2) WHERE true
+             SELECT ?1, value ->> 0, unhex(value ->> 1) FROM json_each(?2) WHERE true
              ON CONFLICT (namespace, artifact_ref) DO NOTHING";
 
         /// Referrer `?3`/`?4`'s edge to each reference of JSON `?2` in
@@ -178,7 +178,7 @@ impl SqliteStore {
                 let mut stored: BTreeMap<String, String> = tx
                     .prepare_cached(HELD_SQL.held.select_blob_refs.sql())?
                     .query_map(params![MODULE_ARTIFACT_NAMESPACE, refs], |row| {
-                        Ok((row.get(0)?, row.get(1)?))
+                        Ok((row.get(0)?, crate::codec::hash_column(row, 1)?))
                     })?
                     .collect::<rusqlite::Result<_>>()?;
                 let mut pointers = Vec::new();
@@ -230,7 +230,7 @@ impl SqliteStore {
                 for chunk in blobs.chunks(BLOB_BATCH_ROWS) {
                     let mut insert = tx.prepare_cached(&HELD_SQL.blob_batches[chunk.len() - 1])?;
                     for (index, (blob_ref, envelope)) in chunk.iter().enumerate() {
-                        insert.raw_bind_parameter(index * 2 + 1, blob_ref.as_str())?;
+                        insert.raw_bind_parameter(index * 2 + 1, crate::codec::SqlHash(blob_ref.as_str()))?;
                         insert.raw_bind_parameter(index * 2 + 2, &envelope[..])?;
                     }
                     insert.raw_execute()?;
@@ -335,7 +335,7 @@ impl SqliteStore {
         let blobs: BTreeSet<String> = tx
             .prepare_cached(HELD_SQL.held.delete_unreferenced.sql())?
             .query_map(params![namespace, json_set(&unreferenced)?], |row| {
-                row.get(0)
+                crate::codec::hash_column(row, 0)
             })?
             .collect::<rusqlite::Result<_>>()?;
         crate::durable::peel(tx, blobs)?;

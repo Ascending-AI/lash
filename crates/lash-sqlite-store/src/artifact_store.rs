@@ -181,7 +181,7 @@ pub(crate) fn acquire_process_env_tx(
         .prepare_cached(artifact_sql().refs.select_blob_ref.sql())
         .and_then(|mut statement| {
             statement.query_row(params![PROCESS_ENV_NAMESPACE, env.as_str()], |row| {
-                row.get(0)
+                crate::codec::hash_column(row, 0)
             })
         })
         .optional()
@@ -279,12 +279,18 @@ impl SqliteStore {
                 crate::conn::cached_execute(
                     tx,
                     artifact_sql().refs.insert_pointer.sql(),
-                    params![namespace, artifact_ref, blob_ref.as_str()],
+                    params![
+                        namespace,
+                        artifact_ref,
+                        crate::codec::SqlHash(blob_ref.as_str())
+                    ],
                 )?;
                 let stored_blob_ref: String = tx
                     .prepare_cached(artifact_sql().refs.select_blob_ref.sql())
                     .and_then(|mut statement| {
-                        statement.query_row(params![namespace, artifact_ref], |row| row.get(0))
+                        statement.query_row(params![namespace, artifact_ref], |row| {
+                            crate::codec::hash_column(row, 0)
+                        })
                     })?;
                 if stored_blob_ref != blob_ref.as_str() {
                     return Err(artifact_failure(ArtifactStoreError::Immutable {
@@ -529,11 +535,11 @@ impl SqliteStore {
                         crate::conn::cached_execute(
                             tx,
                             artifact_sql().refs.insert_pointer.sql(),
-                            params![PROCESS_DEFINITION_NAMESPACE, id, blob_ref.as_str()],
+                            params![PROCESS_DEFINITION_NAMESPACE, id, crate::codec::SqlHash(blob_ref.as_str())],
                         )?;
                         let stored_blob_ref: String = tx.prepare_cached(artifact_sql().refs.select_blob_ref.sql()).and_then(|mut statement| statement.query_row(
                             params![PROCESS_DEFINITION_NAMESPACE, id],
-                            |row| row.get(0),
+                            |row| crate::codec::hash_column(row, 0),
                         ))?;
                         if stored_blob_ref != blob_ref.as_str() {
                             return Err(artifact_failure(ArtifactStoreError::Immutable {
@@ -590,7 +596,7 @@ impl SqliteStore {
                     .prepare_cached(artifact_sql().refs.select_body_ref.sql())
                     .and_then(|mut statement| {
                         statement.query_row(params![namespace, artifact_ref], |row| {
-                            Ok((row.get(0)?, row.get(1)?))
+                            Ok((crate::codec::hash_column(row, 0)?, row.get(1)?))
                         })
                     })
                     .optional()?;
@@ -1288,12 +1294,12 @@ mod tests {
         conn.execute_batch(crate::schema::SCHEMA)
             .expect("create durable core");
         conn.execute(
-            "INSERT INTO blobs (hash, content, encoding) VALUES ('b', X'00', 0)",
+            "INSERT INTO blobs (hash, content, encoding) VALUES (zeroblob(32), X'00', 0)",
             [],
         )
         .expect("insert artifact blob");
         conn.execute(
-            "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref) VALUES ('kernel_document', 'm', 'b')",
+            "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref) VALUES ('kernel_document', 'm', zeroblob(32))",
             [],
         ).expect("insert artifact pointer");
         assert!(conn.execute(

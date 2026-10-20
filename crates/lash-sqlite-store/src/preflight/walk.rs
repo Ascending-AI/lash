@@ -179,7 +179,7 @@ fn read_module_artifacts(
         ],
         |row| {
             let artifact_ref: String = row.get(0)?;
-            let blob_ref: String = row.get(1)?;
+            let blob_ref: String = crate::codec::hash_column(row, 1)?;
             let stored: Option<Vec<u8>> = row.get(2)?;
             let encoding: Option<i64> = row.get(3)?;
             let payload = match stored {
@@ -248,7 +248,7 @@ fn read_session_checkpoints(
     )?;
     let rows = statement.query_map(params![after, limit_binding(limit)], |row| {
         let session_id: SessionId = crate::codec::sql_identity(row.get::<_, String>(0)?)?;
-        let checkpoint_ref: String = row.get(1)?;
+        let checkpoint_ref: String = crate::codec::hash_column(row, 1)?;
         let stored: Option<Vec<u8>> = row.get(2)?;
         let encoding: Option<i64> = row.get(3)?;
         let payload = match stored {
@@ -386,7 +386,7 @@ fn load_blob(conn: &Connection, blob_ref: &str) -> rusqlite::Result<Option<Vec<u
             .select_content
             .sql(),
     )?;
-    let mut rows = statement.query(params![blob_ref])?;
+    let mut rows = statement.query(params![crate::codec::SqlHash(blob_ref)])?;
     match rows.next()? {
         Some(row) => Ok(Some(row.get(0)?)),
         None => Ok(None),

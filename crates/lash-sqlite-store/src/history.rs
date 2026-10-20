@@ -274,10 +274,10 @@ fn terminal_head(
         .map_err(sqlite_error)?
         .query_row(params![session.as_str(), run.as_str()], |row| {
             Ok((
-                row.get::<_, Option<String>>(0)?,
+                crate::codec::optional_hash_column(row, 0)?,
                 row.get::<_, i64>(1)?,
                 row.get::<_, Option<String>>(2)?,
-                row.get::<_, Option<String>>(3)?,
+                crate::codec::optional_hash_column(row, 3)?,
                 row.get::<_, Option<String>>(4)?,
                 row.get::<_, Option<i64>>(5)?,
             ))

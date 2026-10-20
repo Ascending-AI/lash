@@ -101,7 +101,7 @@ impl Tier {
             .connection_for_testing()
             .call(move |conn| {
                 conn.prepare(sql)?
-                    .query_map([], |row| row.get::<_, String>(0))?
+                    .query_map([], |row| crate::codec::hash_column(row, 0))?
                     .collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -114,7 +114,7 @@ fn text(value: impl Into<String>) -> rusqlite::types::Value {
 }
 
 fn hex(node: &NodeId) -> rusqlite::types::Value {
-    text(node.to_hex())
+    rusqlite::types::Value::Blob(node.0.to_vec())
 }
 
 #[async_trait::async_trait]
@@ -139,7 +139,7 @@ impl GraphTier for Tier {
                 use rusqlite::OptionalExtension;
                 conn.query_row(
                     "SELECT content, encoding FROM blobs WHERE hash = ?1",
-                    [hash],
+                    [crate::codec::SqlHash(&hash)],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .optional()
@@ -156,7 +156,9 @@ impl GraphTier for Tier {
                 conn.prepare(
                     "SELECT child_hash FROM blob_edges WHERE parent_hash = ?1 ORDER BY child_hash",
                 )?
-                .query_map([parent], |row| row.get::<_, String>(0))?
+                .query_map([crate::codec::SqlHash(&parent)], |row| {
+                    crate::codec::hash_column(row, 0)
+                })?
                 .collect::<rusqlite::Result<Vec<_>>>()
             })
             .await
@@ -194,7 +196,10 @@ impl GraphTier for Tier {
 
             ForeignWrite::OpaqueBlob { hash, bytes } => (
                 "INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 0)",
-                vec![text(hash), Value::Blob(bytes)],
+                vec![
+                    rusqlite::types::Value::Blob(NodeId::from_hex(&hash).unwrap().0.to_vec()),
+                    Value::Blob(bytes),
+                ],
             ),
             ForeignWrite::OverwriteBlob { node, bytes } => (
                 "UPDATE blobs SET content = ?2 WHERE hash = ?1",
@@ -340,7 +345,10 @@ impl PageTier for Tier {
             .call(|conn| {
                 conn.prepare("SELECT parent_hash, child_hash FROM blob_edges")?
                     .query_map([], |row| {
-                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                        Ok((
+                            crate::codec::hash_column(row, 0)?,
+                            crate::codec::hash_column(row, 1)?,
+                        ))
                     })?
                     .collect::<rusqlite::Result<Vec<_>>>()
             })

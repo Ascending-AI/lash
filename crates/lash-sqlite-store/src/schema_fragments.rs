@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS session_runs (
     terminal_head_revision  INTEGER,
     terminal_at_ms          INTEGER,
     terminal_window_revision       INTEGER,
-    terminal_transcript_ref TEXT REFERENCES blobs(hash) ON DELETE RESTRICT,
+    terminal_transcript_ref BLOB REFERENCES blobs(hash) ON DELETE RESTRICT,
     PRIMARY KEY (session_id, run),
     CONSTRAINT ck_session_runs_transcript CHECK (terminal_transcript_ref IS NULL OR terminal_kind IS NOT NULL),
     CONSTRAINT ck_session_runs_terminal_window CHECK (terminal_window_revision IS NULL OR terminal_kind IS NOT NULL),

@@ -277,7 +277,7 @@ pub(crate) fn retain_admission_base_conn(
         .prepare_cached(session_sql().meta.select_admission_base.sql())
         .and_then(|mut statement| {
             statement.query_row(rusqlite::params![session_id.as_str()], |row| {
-                row.get::<_, Option<String>>(0)
+                crate::codec::optional_hash_column(row, 0)
             })
         })
         .optional()
@@ -289,7 +289,7 @@ pub(crate) fn retain_admission_base_conn(
         session_sql().meta.retain_admission_base.sql(),
         rusqlite::params![
             session_id.as_str(),
-            checkpoint_ref.map(|blob_ref| blob_ref.as_str())
+            checkpoint_ref.map(|blob_ref| crate::codec::SqlHash(blob_ref.as_str()))
         ],
     )
     .map_err(sqlite_error)?;

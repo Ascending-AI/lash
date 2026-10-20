@@ -3,6 +3,42 @@
 use super::*;
 use lash_protocol_types::SessionId;
 
+/// A content address bound at the SQLite boundary. Domain values stay hex;
+/// SQLite keys are the digest's 32 bytes, ordered identically to canonical hex.
+pub(crate) struct SqlHash<'a>(pub &'a str);
+
+impl rusqlite::ToSql for SqlHash<'_> {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        let node =
+            lash_core_store::checkpoint_graph::NodeId::from_hex(self.0).ok_or_else(|| {
+                sqlite_conversion_error(stored_data_corrupt("content address", self.0))
+            })?;
+        Ok(rusqlite::types::ToSqlOutput::Owned(
+            rusqlite::types::Value::Blob(node.0.to_vec()),
+        ))
+    }
+}
+
+/// Decode only the binary baseline; a text key is corrupt stored data.
+pub(crate) fn hash_column(row: &rusqlite::Row<'_>, column: usize) -> rusqlite::Result<String> {
+    let bytes: Vec<u8> = row.get(column)?;
+    let digest: [u8; 32] = bytes.try_into().map_err(|_| {
+        sqlite_conversion_error(stored_data_corrupt("content address", "expected 32 bytes"))
+    })?;
+    Ok(lash_core_store::checkpoint_graph::NodeId(digest).to_hex())
+}
+
+pub(crate) fn optional_hash_column(
+    row: &rusqlite::Row<'_>,
+    column: usize,
+) -> rusqlite::Result<Option<String>> {
+    if matches!(row.get_ref(column)?, rusqlite::types::ValueRef::Null) {
+        Ok(None)
+    } else {
+        hash_column(row, column).map(Some)
+    }
+}
+
 /// Only committed reads may publish decoded material. A write transaction
 /// can reuse a committed entry but must keep its misses private, including
 /// inside a group-commit member that may roll back independently.
@@ -238,10 +274,10 @@ pub(crate) fn select_session_head_row(
         .and_then(|mut statement| {
             statement.query_row(params![session_id.as_str()], |row| {
                 Ok(SessionHeadRow {
-                    head_json: row.get(0)?,
+                    head_json: crate::codec::optional_hash_column(row, 0)?,
                     head_revision: row.get(1)?,
                     leaf_node_id: row.get(2)?,
-                    checkpoint_ref: row.get(3)?,
+                    checkpoint_ref: crate::codec::optional_hash_column(row, 3)?,
                     current_frame_node_id: row.get(4)?,
                 })
             })

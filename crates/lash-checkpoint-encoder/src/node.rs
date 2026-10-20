@@ -38,8 +38,9 @@ pub const LEAF_PAYLOAD_MAX: usize = 65_520;
 pub const INDEX_FANOUT: usize = 32;
 
 /// A node's identity: the digest of its complete envelope under the blob hash
-/// domain. Its lowercase hex is the node's SQL key; its raw bytes are how a
-/// body references it.
+/// domain. Its lowercase hex is the canonical textual form; its raw bytes
+/// are how a body references it. Stores choose their key representation at
+/// their boundary.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NodeId(pub [u8; 32]);
 
@@ -52,7 +53,7 @@ impl NodeId {
         Self(BlobRef::digest_for_content(bytes))
     }
 
-    /// The lowercase hex SQL key.
+    /// The canonical lowercase hex representation.
     #[must_use]
     pub fn to_hex(&self) -> String {
         let mut text = String::with_capacity(64);
@@ -60,7 +61,7 @@ impl NodeId {
         text
     }
 
-    /// Appends the lowercase hex SQL key to `out`.
+    /// Appends the canonical lowercase hex representation to `out`.
     pub fn write_hex(&self, out: &mut String) {
         const HEX: &[u8; 16] = b"0123456789abcdef";
         for byte in self.0 {
@@ -69,7 +70,7 @@ impl NodeId {
         }
     }
 
-    /// Reads a lowercase hex SQL key back. Uppercase is refused: one spelling.
+    /// Reads canonical lowercase hex back. Uppercase is refused: one spelling.
     #[must_use]
     pub fn from_hex(text: &str) -> Option<Self> {
         let bytes = text.as_bytes();

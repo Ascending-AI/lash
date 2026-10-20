@@ -54,7 +54,7 @@ lash_store_sql::statements! {
         /// keeps the wider hold and its place in the queue.
         hold = "INSERT INTO retirement_holds (root_ref, closure, queued_at_ms)
              SELECT blobs.hash, ?2, ?3 FROM blobs
-             WHERE blobs.hash IN (SELECT value FROM json_each(?1))
+             WHERE blobs.hash IN (SELECT unhex(value) FROM json_each(?1))
              ON CONFLICT (root_ref) DO UPDATE SET closure = max(closure, excluded.closure)";
 
         /// The oldest hold.
@@ -65,7 +65,7 @@ lash_store_sql::statements! {
         /// when `?2` is 1 or the node alone when 0, queued at `?3`. A node
         /// already there keeps the wider peel and its place in the queue.
         frontier_put = "INSERT INTO retirement_frontier (node_ref, closure, queued_at_ms)
-             SELECT value, ?2, ?3 FROM json_each(?1) WHERE true
+             SELECT unhex(value), ?2, ?3 FROM json_each(?1) WHERE true
              ON CONFLICT (node_ref) DO UPDATE SET closure = max(closure, excluded.closure)";
 
         /// Up to `?2` leases expired by `?1`, oldest first.
@@ -74,17 +74,17 @@ lash_store_sql::statements! {
 
         /// The bytes and encoding of every blob of JSON `?1`.
         pages = "SELECT hash, content, encoding FROM blobs
-             WHERE hash IN (SELECT value FROM json_each(?1))";
+             WHERE hash IN (SELECT unhex(value) FROM json_each(?1))";
 
         /// The encoding of every blob of JSON `?1`.
         encodings = "SELECT hash, encoding FROM blobs
-             WHERE hash IN (SELECT value FROM json_each(?1))";
+             WHERE hash IN (SELECT unhex(value) FROM json_each(?1))";
 
         /// Every edge of JSON `?1`, `[parent, child]` digest pairs, that is
         /// not stored yet: a supplied node another commit installed already
         /// has its edges.
         insert_edges_once = "INSERT INTO blob_edges (parent_hash, child_hash)
-             SELECT value ->> 0, value ->> 1 FROM json_each(?1) WHERE true
+             SELECT unhex(value ->> 0), unhex(value ->> 1) FROM json_each(?1) WHERE true
              ON CONFLICT (parent_hash, child_hash) DO NOTHING";
     }
 }
@@ -220,7 +220,7 @@ fn install_nodes(
                 .iter(),
         )])?;
         while let Some(row) = rows.next()? {
-            let hash: String = row.get(0)?;
+            let hash: String = crate::codec::hash_column(row, 0)?;
             let encoding = match graph::encoding_of(row.get(2)?) {
                 Ok(encoding) => encoding,
                 Err(refusal) => return Ok(Err(refusal)),
@@ -250,13 +250,10 @@ fn install_nodes(
             (InstallEntry::Supplied(node), None) => fresh.push(node),
         }
     }
-    let mut hash = String::with_capacity(64);
     for chunk in fresh.chunks(graph::BLOB_BATCH_ROWS) {
         let mut insert = tx.prepare_cached(graph::blob_batch_sql(chunk.len()))?;
         for (index, node) in chunk.iter().enumerate() {
-            hash.clear();
-            node.id.write_hex(&mut hash);
-            insert.raw_bind_parameter(index * 2 + 1, hash.as_str())?;
+            insert.raw_bind_parameter(index * 2 + 1, node.id.0.as_slice())?;
             insert.raw_bind_parameter(index * 2 + 2, &node.bytes[..])?;
             installed.newly_installed_canonical_bytes += node.bytes.len() as u64;
             installed.new_nodes += 1;
@@ -279,7 +276,7 @@ fn install_edges(
         let present: BTreeSet<String> = tx
             .prepare_cached(SQL.sqlite.encodings.sql())?
             .query_map([graph::digest_array(children.iter())], |row| {
-                row.get::<_, String>(0)
+                crate::codec::hash_column(row, 0)
             })?
             .collect::<rusqlite::Result<_>>()?;
         if let Some(missing) = children
@@ -392,7 +389,7 @@ pub(crate) fn retire_step_in(
         if let Some(root) = tx
             .prepare_cached(SQL.pages.lease_reap.sql())?
             .query_row(rusqlite::params![lease, now.0], |row| {
-                row.get::<_, String>(0)
+                crate::codec::hash_column(row, 0)
             })
             .optional()?
         {
@@ -469,7 +466,7 @@ fn next_retired(tx: &Connection) -> rusqlite::Result<Option<(String, bool)>> {
     let continued = tx
         .prepare_cached(SQL.pages.frontier_take.sql())?
         .query_row([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
+            Ok((crate::codec::hash_column(row, 0)?, row.get::<_, bool>(1)?))
         })
         .optional()?;
     if continued.is_some() {
@@ -477,14 +474,14 @@ fn next_retired(tx: &Connection) -> rusqlite::Result<Option<(String, bool)>> {
     }
     let Some(root) = tx
         .prepare_cached(SQL.sqlite.hold_next.sql())?
-        .query_row([], |row| row.get::<_, String>(0))
+        .query_row([], |row| crate::codec::hash_column(row, 0))
         .optional()?
     else {
         return Ok(None);
     };
     let closure: bool = tx
         .prepare_cached(SQL.pages.hold_take.sql())?
-        .query_row([&root], |row| row.get(0))?;
+        .query_row([crate::codec::SqlHash(&root)], |row| row.get(0))?;
     Ok(Some((root, closure)))
 }
 
@@ -519,7 +516,7 @@ impl PageStore for SqliteDurableStore {
             let id: i64 = tx.prepare_cached(SQL.pages.lease_insert.sql())?.query_row(
                 rusqlite::params![
                     owner_bytes(&request.owner),
-                    request.expected.to_hex(),
+                    request.expected.0.as_slice(),
                     fence_actor(&request.fence),
                     fence_epoch(&request.fence),
                     request.ttl_millis,
@@ -549,7 +546,7 @@ impl PageStore for SqliteDurableStore {
                 .query_row(
                     rusqlite::params![
                         lease.id.0.cast_signed(),
-                        lease.root.to_hex(),
+                        lease.root.0.as_slice(),
                         fence_epoch(&lease.fence),
                         now.0
                     ],
@@ -571,7 +568,9 @@ impl PageStore for SqliteDurableStore {
         self.write(PAGES_LEASE, move |tx, now| {
             let root = tx
                 .prepare_cached(SQL.pages.lease_release.sql())?
-                .query_row([lease.0.cast_signed()], |row| row.get::<_, String>(0))
+                .query_row([lease.0.cast_signed()], |row| {
+                    crate::codec::hash_column(row, 0)
+                })
                 .optional()?;
             // What only the lease kept is peeled by a later step.
             if let Some(root) = root {
@@ -594,7 +593,7 @@ impl PageStore for SqliteDurableStore {
             let live = tx
                 .prepare_cached(SQL.pages.lease_live.sql())?
                 .query_row(
-                    rusqlite::params![id.0.cast_signed(), root.to_hex(), now.0],
+                    rusqlite::params![id.0.cast_signed(), root.0.as_slice(), now.0],
                     |_| Ok(()),
                 )
                 .optional()?;
@@ -606,7 +605,7 @@ impl PageStore for SqliteDurableStore {
                 let mut statement = tx.prepare_cached(SQL.sqlite.pages.sql())?;
                 let mut rows = statement.query([graph::digest_array(pages.iter())])?;
                 while let Some(row) = rows.next()? {
-                    let hash: String = row.get(0)?;
+                    let hash: String = crate::codec::hash_column(row, 0)?;
                     match graph::encoding_of(row.get(2)?) {
                         Ok(BlobEncoding::Graph) => {}
                         Ok(BlobEncoding::Opaque) => {

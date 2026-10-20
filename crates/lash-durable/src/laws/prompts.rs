@@ -13,14 +13,25 @@ use lash_protocol_types::{SessionId, TurnId};
 
 fn text(name: &str) -> PromptText {
     PromptText {
-        hash: format!("hash-{name}"),
+        hash: lash_core_store::store::BlobRef::for_content(format!("text {name}").as_bytes()).0,
         text: format!("text {name}").into(),
         children: Vec::new(),
     }
 }
 
+fn sorted_hashes(names: &[&str]) -> Vec<String> {
+    let mut hashes = hashes(names);
+    hashes.sort();
+    hashes
+}
+
 fn hashes(names: &[&str]) -> Vec<String> {
-    names.iter().map(|name| format!("hash-{name}")).collect()
+    names
+        .iter()
+        .map(|name| {
+            lash_core_store::store::BlobRef::for_content(format!("text {name}").as_bytes()).0
+        })
+        .collect()
 }
 
 /// A call's prompt snapshot is an audit root. Recording it stores each text
@@ -137,7 +148,7 @@ pub async fn prompt_snapshot_roots_survive_phase_pruning_until_released(
         .ok_or_else(|| LawBroken("ending the turn pruned its prompt root".into()))?;
     ensure!(
         root.snapshot == Some(format!("snapshot of {first}"))
-            && root.snapshot_texts == hashes(&["a", "b"]),
+            && root.snapshot_texts == sorted_hashes(&["a", "b"]),
         "the root reads back as {root:?}"
     );
     ensure!(
@@ -288,7 +299,7 @@ pub async fn deleting_a_session_releases_its_prompt_roots_and_keeps_shared_text(
         .await?
         .ok_or_else(|| LawBroken("deleting one session released another's root".into()))?;
     ensure!(
-        root.snapshot_texts == hashes(&["kept", "shared"]),
+        root.snapshot_texts == sorted_hashes(&["kept", "shared"]),
         "the live root reads back as {root:?}"
     );
     let stored = store
@@ -399,7 +410,7 @@ pub async fn settling_a_turns_calls_releases_their_requests_and_keeps_their_snap
                 call: call(&run, 1),
                 snapshot: Some(format!("snapshot of {}", call(&run, 1).call)),
                 request: None,
-                snapshot_texts: hashes(&["dual", "s"]),
+                snapshot_texts: sorted_hashes(&["dual", "s"]),
                 request_texts: Vec::new(),
                 written_epoch: first.written_epoch,
             },
@@ -407,7 +418,7 @@ pub async fn settling_a_turns_calls_releases_their_requests_and_keeps_their_snap
     );
     let second = root(call(&run, 2)).await?;
     ensure!(
-        second.request.is_some() && second.request_texts == hashes(&["body2", "shared"]),
+        second.request.is_some() && second.request_texts == sorted_hashes(&["body2", "shared"]),
         "settling call 1 released the request of call 2, the call its commit admits: {second:?}"
     );
     ensure!(
@@ -422,7 +433,7 @@ pub async fn settling_a_turns_calls_releases_their_requests_and_keeps_their_snap
     ensure!(
         second.request.is_none()
             && second.request_texts.is_empty()
-            && second.snapshot_texts == hashes(&["s"]),
+            && second.snapshot_texts == sorted_hashes(&["s"]),
         "the settled call 2 reads back as {second:?}"
     );
     ensure!(

@@ -215,7 +215,7 @@ pub(crate) fn retire_process_rows(
 pub(crate) fn engine_rows_for_testing(conn: &Connection) -> rusqlite::Result<Vec<String>> {
     let mut rows = Vec::new();
     for sql in [
-        "SELECT 'run_records ' || owner_key || ' ' || run_seq || '/' || ordinal || ' ' || record_ref
+        "SELECT 'run_records ' || owner_key || ' ' || run_seq || '/' || ordinal || ' ' || lower(hex(record_ref))
              FROM run_records",
         "SELECT 'exec_snapshots ' || exec_key FROM exec_snapshots",
         "SELECT 'effect_admissions ' || exec_key FROM effect_admissions",
@@ -289,115 +289,7 @@ CREATE TABLE IF NOT EXISTS actor_mail (
 );
 ";
 
-lash_store_sql::statements! {
-    /// The engine statements only SQLite issues.
-    pub(crate) struct SqliteDurableStatements @ "durable_sqlite" {
-        /// Whether boot `?2` of node `?1` holds a lease: its draining flag,
-        /// or no row.
-        node_live = "SELECT draining FROM nodes WHERE node_id = ?1 AND boot_id = ?2";
-
-        /// Every registered boot.
-        boots = "SELECT node_id, boot_id FROM nodes ORDER BY node_id, boot_id";
-
-        /// Up to `?3` actors claimable at `?1` in a format set of JSON array
-        /// `?2` whose claim requirements are served by JSON array `?5`,
-        /// including retired-owner tokens; process
-        /// actors in another set or with another requirement with mail of
-        /// kind `?4` (a cancel) pending; and session actors in a set of `?2`
-        /// with another requirement whose open turn holds an `immediate`
-        /// cancel request, with mail of kind `?6` (a close) pending, or
-        /// whose close has not reached its tombstone (FIG-6072); oldest
-        /// first, with the state that made each claimable, its format set
-        /// and its requirements.
-        claimable = "SELECT a.actor_key, a.state, a.formats, a.requires FROM actors a
-             WHERE ((a.state = 'ready' AND a.ready_at_ms <= ?1)
-                 OR (a.state = 'waiting' AND a.next_due_ms <= ?1))
-               AND ((a.formats IN (SELECT value FROM json_each(?2))
-                     AND (a.requires IS NULL OR NOT EXISTS (
-                         SELECT 1 FROM json_each(a.requires) r
-                         WHERE NOT EXISTS (
-                             SELECT 1 FROM json_each(?5) s
-                             WHERE s.value = r.value OR (
-                                 substr(r.value, 1, 9) = 'callback:'
-                                 AND substr(s.value, -1) = '/'
-                                 AND substr(r.value, 1, length(s.value)) = s.value
-                                 AND instr(substr(r.value, length(s.value) + 1), '/') = 0)))))
-                 OR (a.kind = 'process' AND EXISTS (
-                     SELECT 1 FROM actor_mail m
-                     WHERE m.actor_key = a.actor_key AND m.seq > a.acked_seq
-                       AND m.kind = ?4))
-                 OR (a.kind = 'session' AND a.formats IN (SELECT value FROM json_each(?2))
-                     AND (EXISTS (
-                             SELECT 1 FROM turn_cancel_requests c
-                             WHERE c.session_id = substr(a.actor_key, 3)
-                               AND c.mode = 'immediate')
-                         OR EXISTS (
-                             SELECT 1 FROM actor_mail m
-                             WHERE m.actor_key = a.actor_key AND m.seq > a.acked_seq
-                               AND m.kind = ?6)
-                         OR EXISTS (
-                             SELECT 1 FROM session_close s
-                             WHERE s.session_id = substr(a.actor_key, 3)
-                               AND (s.done_step IS NULL OR s.done_step <> 'tombstone')))))
-             ORDER BY COALESCE(a.ready_at_ms, a.next_due_ms), a.actor_key
-             LIMIT ?3";
-
-        /// Session `?1`'s unfinished turn with its phase row, in the turn
-        /// read's column order, and the cancel request the turn accepted, in
-        /// the cancel read's (FIG-6617): one statement, as the open's turn.
-        turn = "SELECT r.run, r.admission_json, p.phase, p.phase_arg, p.iteration,
-                    p.checkpoint_ref, p.model_request_ref, p.model_deadline_ms,
-                    p.turn_deadline_ms, p.written_epoch, p.model_calls,
-                    p.model_stream_from, p.working_execution_ref, p.answer_ref, p.tool_calls,
-                    c.request_id, c.origin, c.reason, c.disposition, c.mode
-             FROM session_runs AS r
-             JOIN turn_phases AS p ON p.session_id = r.session_id AND p.run = r.run
-             LEFT JOIN turn_cancel_requests AS c
-                 ON c.session_id = r.session_id AND c.turn_id = r.run
-             WHERE r.session_id = ?1 AND r.admission_json IS NOT NULL
-               AND r.terminal_kind IS NULL";
-
-        /// Actor `?1`'s epoch, state, revision and mail marks with each mail
-        /// past its acknowledgement, in order (one row with NULL mail columns
-        /// when none); and, when `?2` names its session, on every row that
-        /// session's unfinished turn with its phase row, in the turn read's
-        /// column order, and the cancel request the turn accepted, in the
-        /// cancel read's (FIG-6399). One statement, so one snapshot answers
-        /// the open; the turn is looked up once.
-        open = "WITH t AS MATERIALIZED (
-                 SELECT r.run, r.admission_json, p.phase, p.phase_arg, p.iteration,
-                        p.checkpoint_ref, p.model_request_ref, p.model_deadline_ms,
-                        p.turn_deadline_ms, p.written_epoch, p.model_calls,
-                        p.model_stream_from, p.working_execution_ref, p.answer_ref, p.tool_calls,
-                        c.request_id, c.origin, c.reason, c.disposition, c.mode
-                 FROM session_runs AS r
-                 JOIN turn_phases AS p ON p.session_id = r.session_id AND p.run = r.run
-                 LEFT JOIN turn_cancel_requests AS c
-                     ON c.session_id = r.session_id AND c.turn_id = r.run
-                 WHERE r.session_id = ?2 AND r.admission_json IS NOT NULL
-                   AND r.terminal_kind IS NULL)
-             SELECT a.epoch, a.state, a.state_revision, a.acked_seq, a.mail_seq,
-                    m.seq, m.kind, m.body, m.appended_at_ms, t.*
-             FROM actors a
-             LEFT JOIN actor_mail m ON m.actor_key = a.actor_key AND m.seq > a.acked_seq
-             LEFT JOIN t ON TRUE
-             WHERE a.actor_key = ?1
-             ORDER BY m.seq";
-
-        /// Give actor `?1` to boot `?3` of node `?2`, bumping its epoch. A
-        /// claim that finds no commit advanced the actor since the previous
-        /// claim counts one more failed activation; any such commit resets
-        /// the count.
-        claim = "UPDATE actors
-             SET state = 'owned', epoch = epoch + 1, owner_node = ?2, owner_boot = ?3,
-                 ready_at_ms = NULL, next_due_ms = NULL,
-                 failed_activations = CASE WHEN claimed_revision = state_revision
-                                           THEN failed_activations + 1 ELSE 0 END,
-                 claimed_revision = state_revision
-             WHERE actor_key = ?1
-             RETURNING epoch";
-    }
-}
+use access::SqliteDurableStatements;
 
 struct Sql {
     node: NodeStatements,
@@ -871,10 +763,11 @@ fn apply_owner(
                     .optional()?
                     .is_some();
             let stored: String = if stopped {
-                tx.prepare_cached(SQL.actor.release.sql())?.query_row(
-                    rusqlite::params![actor, "ready", Option::<i64>::None, now.0],
-                    |row| row.get(0),
-                )?
+                tx.prepare_cached(SQL.sqlite.release_without_due.sql())?
+                    .query_row(
+                        rusqlite::params![actor, "ready", Option::<i64>::None, now.0],
+                        |row| row.get(0),
+                    )?
             } else {
                 tx.prepare_cached(SQL.park.park.sql())?
                     .query_row([&actor], |row| row.get(0))?
@@ -901,7 +794,11 @@ fn apply_owner(
                 _ => ("idle", None),
             };
             let stored: String = tx
-                .prepare_cached(SQL.actor.release.sql())?
+                .prepare_cached(if due.is_some() {
+                    SQL.actor.release.sql()
+                } else {
+                    SQL.sqlite.release_without_due.sql()
+                })?
                 .query_row(rusqlite::params![actor, state, due, now.0], |row| {
                     row.get(0)
                 })?;

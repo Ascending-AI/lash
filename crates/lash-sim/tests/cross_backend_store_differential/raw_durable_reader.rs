@@ -290,7 +290,7 @@ pub(super) async fn read_sqlite_durable_state(
 
     let head: Option<(i64, Option<String>, Option<String>)> = connection
         .query_row(
-            "SELECT head_revision, leaf_node_id, checkpoint_ref
+            "SELECT head_revision, leaf_node_id, CASE WHEN checkpoint_ref IS NULL THEN NULL ELSE lower(hex(checkpoint_ref)) END
              FROM session_head JOIN session_revisions USING (session_id, head_revision)
              WHERE session_id = ?1",
             [session_id.as_str()],
@@ -421,7 +421,7 @@ pub(super) async fn read_sqlite_durable_state(
     let revisions = {
         let mut statement = connection
             .prepare(
-                "SELECT head_revision, leaf_node_id, checkpoint_ref
+                "SELECT head_revision, leaf_node_id, CASE WHEN checkpoint_ref IS NULL THEN NULL ELSE lower(hex(checkpoint_ref)) END
                  FROM session_revisions
                  WHERE session_id = ?1
                  ORDER BY head_revision ASC",

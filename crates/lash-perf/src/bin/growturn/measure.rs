@@ -176,7 +176,8 @@ fn store(path: &std::path::Path) -> Result<Value> {
     let mut outcome_refs = Vec::new();
     let mut marker_leaf_bytes = 0;
     {
-        let mut statement = db.prepare("SELECT hash, content FROM blobs WHERE encoding=1")?;
+        let mut statement =
+            db.prepare("SELECT lower(hex(hash)), content FROM blobs WHERE encoding=1")?;
         let mut rows = statement.query([])?;
         while let Some(row) = rows.next()? {
             let bytes: Vec<u8> = row.get(1)?;

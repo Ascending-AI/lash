@@ -44,9 +44,9 @@ CREATE TABLE IF NOT EXISTS turn_phases (
     -- The phase's PhaseRoot node and the post-cell working SessionExecution
     -- (FIG-5887 §6, §7), and the pinned call's receipt: its placed text,
     -- from model.answer until the next phase.
-    checkpoint_ref TEXT REFERENCES blobs(hash) ON DELETE RESTRICT,
-    working_execution_ref TEXT REFERENCES blobs(hash) ON DELETE RESTRICT,
-    answer_ref TEXT REFERENCES blobs(hash) ON DELETE RESTRICT,
+    checkpoint_ref BLOB REFERENCES blobs(hash) ON DELETE RESTRICT,
+    working_execution_ref BLOB REFERENCES blobs(hash) ON DELETE RESTRICT,
+    answer_ref BLOB REFERENCES blobs(hash) ON DELETE RESTRICT,
     model_request_ref TEXT,
     model_deadline_ms INTEGER,
     model_stream_from TEXT,
@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS turn_namespaces (
     entry TEXT NOT NULL,
     -- The namespace's NamespaceValue node; NULL exactly for base values
     -- (FIG-5887 §7).
-    graph_root_ref TEXT REFERENCES blobs(hash) ON DELETE RESTRICT,
+    graph_root_ref BLOB REFERENCES blobs(hash) ON DELETE RESTRICT,
     PRIMARY KEY (session_id, run, plugin)
 );
 CREATE INDEX IF NOT EXISTS idx_turn_phases_checkpoint_ref ON turn_phases (checkpoint_ref);
@@ -86,6 +86,35 @@ CREATE INDEX IF NOT EXISTS idx_turn_namespaces_graph_root_ref ON turn_namespaces
 
 static SQL: LazyLock<TurnStatements> =
     LazyLock::new(|| TurnStatements::render(crate::schema_layout::MAIN));
+
+lash_store_sql::statements! {
+    /// SQLite avoids an index update when the old root is already NULL.
+    struct SqliteTurnStatements @ "durable_turn_sqlite" {
+        /// Advance without rewriting an already empty answer root.
+        advance_without_answer = "UPDATE turn_phases
+             SET phase = ?3, phase_arg = ?4, iteration = ?5, checkpoint_ref = ?6,
+                 model_request_ref = ?7, model_deadline_ms = ?8, written_epoch = ?9,
+                 model_calls = COALESCE(?10, model_calls), model_stream_from = ?11
+             WHERE session_id = ?1 AND run = ?2
+             RETURNING run";
+        /// End without rewriting the transcript root, which is NULL for an
+        /// unfinished run. The typed terminal has no transcript in this shape.
+        end_without_transcript = "UPDATE session_runs
+             SET terminal_kind = ?3, terminal_cause_json = ?4,
+                 terminal_head_revision = ?5, terminal_at_ms = ?6,
+                 terminal_window_revision = (
+                     SELECT revision.head_revision FROM session_head AS head
+                     JOIN session_revisions AS revision
+                       ON revision.session_id = head.session_id
+                      AND revision.head_revision = head.head_revision
+                     WHERE head.session_id = ?1)
+             WHERE session_id = ?1 AND run = ?2
+               AND admission_json IS NOT NULL AND terminal_kind IS NULL AND ?7 IS NULL
+             RETURNING run";
+    }
+}
+static SQLITE_SQL: LazyLock<SqliteTurnStatements> =
+    LazyLock::new(|| SqliteTurnStatements::render(crate::schema_layout::MAIN));
 
 fn refuse<T>(refusal: DomainRefusal) -> Answer<T> {
     Ok(Err(DurableError::Domain(refusal)))
@@ -184,15 +213,19 @@ pub(super) fn apply(
                     .prepare_cached(SQL.phase_roots.sql())?
                     .query_row([session.as_str(), run.as_str()], |row| {
                         Ok((
-                            row.get::<_, Option<String>>(0)?,
-                            row.get::<_, Option<String>>(1)?,
+                            crate::codec::optional_hash_column(row, 0)?,
+                            crate::codec::optional_hash_column(row, 1)?,
                         ))
                     })
                     .optional()?
                     .unwrap_or_default(),
             };
             let advanced = tx
-                .prepare_cached(SQL.advance_phase.sql())?
+                .prepare_cached(if consumed.is_some() {
+                    SQL.advance_phase.sql()
+                } else {
+                    SQLITE_SQL.advance_without_answer.sql()
+                })?
                 .query_row(
                     rusqlite::params![
                         session.as_str(),
@@ -200,7 +233,7 @@ pub(super) fn apply(
                         stored,
                         argument.map(integer::<i64>).transpose()?,
                         i64::from(*iteration),
-                        phase.checkpoint().to_hex(),
+                        phase.checkpoint().0.as_slice(),
                         pin.map(|pin| pin.request_ref.as_str()),
                         pin.map(|pin| pin.deadline.0),
                         commit.epoch.0,
@@ -251,7 +284,7 @@ pub(super) fn apply(
                     rusqlite::params![
                         session.as_str(),
                         run.as_str(),
-                        answer.to_hex(),
+                        answer.0.as_slice(),
                         commit.epoch.0
                     ],
                     |_| Ok(()),
@@ -297,7 +330,7 @@ pub(super) fn apply(
                         .prepare_cached(SQL.namespace_root.sql())?
                         .query_row(
                             [session.as_str(), run.as_str(), namespace.plugin.as_str()],
-                            |row| row.get::<_, Option<String>>(0),
+                            |row| crate::codec::optional_hash_column(row, 0),
                         )
                         .optional()?
                         .flatten();
@@ -313,7 +346,7 @@ pub(super) fn apply(
                         run.as_str(),
                         namespace.plugin,
                         entry,
-                        values,
+                        values.as_deref().map(crate::codec::SqlHash),
                         matches!(namespace.values, StoredValues::Held),
                     ],
                 )?;
@@ -332,8 +365,8 @@ pub(super) fn apply(
                     rusqlite::params![
                         session.as_str(),
                         run.as_str(),
-                        working.map(|working| working.to_hex()),
-                        expected.map(|expected| expected.to_hex()),
+                        working.map(|working| working.0),
+                        expected.map(|expected| expected.0),
                         commit.epoch.0,
                     ],
                     |_| Ok(()),
@@ -386,7 +419,11 @@ pub(super) fn apply(
                 Err(error) => return Ok(Err(encoding(&error))),
             };
             let ended = tx
-                .prepare_cached(SQL.end_run.sql())?
+                .prepare_cached(if transcript.is_some() {
+                    SQL.end_run.sql()
+                } else {
+                    SQLITE_SQL.end_without_transcript.sql()
+                })?
                 .query_row(
                     rusqlite::params![
                         session.as_str(),
@@ -395,7 +432,7 @@ pub(super) fn apply(
                         stored,
                         head_revision.map(integer::<i64>).transpose()?,
                         commit.now.0,
-                        transcript.map(|transcript| transcript.to_hex()),
+                        transcript.map(|transcript| transcript.0),
                     ],
                     |_| Ok(()),
                 )
@@ -418,9 +455,9 @@ pub(super) fn apply(
                 .prepare_cached(SQL.delete_phase.sql())?
                 .query_row([session.as_str(), run.as_str()], |row| {
                     Ok((
-                        row.get::<_, Option<String>>(0)?,
-                        row.get::<_, Option<String>>(1)?,
-                        row.get::<_, Option<String>>(2)?,
+                        crate::codec::optional_hash_column(row, 0)?,
+                        crate::codec::optional_hash_column(row, 1)?,
+                        crate::codec::optional_hash_column(row, 2)?,
                     ))
                 })
                 .optional()?;
@@ -435,7 +472,7 @@ pub(super) fn apply(
             let namespaces = tx
                 .prepare_cached(SQL.delete_namespaces.sql())?
                 .query_map([session.as_str(), run.as_str()], |row| {
-                    row.get::<_, Option<String>>(0)
+                    crate::codec::optional_hash_column(row, 0)
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             for root in namespaces.into_iter().flatten() {
@@ -702,7 +739,7 @@ pub(super) fn turn_namespaces(
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
-                row.get::<_, Option<String>>(2)?,
+                crate::codec::optional_hash_column(row, 2)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -844,9 +881,9 @@ impl StoredTurn {
             phase: row.get(first + 2)?,
             argument: row.get(first + 3)?,
             iteration: row.get(first + 4)?,
-            checkpoint: row.get(first + 5)?,
-            working: row.get(first + 12)?,
-            answer: row.get(first + 13)?,
+            checkpoint: crate::codec::optional_hash_column(row, first + 5)?,
+            working: crate::codec::optional_hash_column(row, first + 12)?,
+            answer: crate::codec::optional_hash_column(row, first + 13)?,
             request: row.get(first + 6)?,
             deadline: row.get(first + 7)?,
             turn_deadline: row.get(first + 8)?,

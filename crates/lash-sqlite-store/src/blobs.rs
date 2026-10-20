@@ -34,12 +34,12 @@ lash_store_sql::statements! {
         /// PostgreSQL's counterpart also takes `FOR KEY SHARE`, which SQLite
         /// does not need under `BEGIN IMMEDIATE`.
         select_existing_hashes = "SELECT hash FROM blobs
-             WHERE hash IN (SELECT value FROM json_each(?1))";
+             WHERE hash IN (SELECT unhex(value) FROM json_each(?1))";
 
         /// The stored bytes for every content address in the JSON array `?1`.
         /// Same `json_each` fork as select_existing_hashes.
         select_bodies_by_hash = "SELECT hash, content FROM blobs
-             WHERE hash IN (SELECT value FROM json_each(?1))";
+             WHERE hash IN (SELECT unhex(value) FROM json_each(?1))";
 
         /// One preflight page of sessions that have published a checkpoint
         /// root, after session `?1`, at most `?2` rows.
@@ -189,7 +189,7 @@ impl SqliteStore {
         crate::conn::cached_execute(
             conn,
             artifact_sql().blobs_sqlite.insert_ignore.sql(),
-            params![blob_ref.as_str(), stored],
+            params![crate::codec::SqlHash(blob_ref.as_str()), stored],
         )
         .map_err(sqlite_error)?;
         Ok(())
@@ -367,7 +367,7 @@ impl SqliteStore {
                 .prepare_cached(artifact_sql().blobs_sqlite.select_existing_hashes.sql())
                 .map_err(sqlite_error)?;
             let rows = statement
-                .query_map(params![encoded], |row| row.get::<_, String>(0))
+                .query_map(params![encoded], |row| crate::codec::hash_column(row, 0))
                 .map_err(sqlite_error)?;
             existing.extend(rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?);
         }
@@ -398,7 +398,10 @@ impl SqliteStore {
                 .map_err(sqlite_error)?;
             let rows = statement
                 .query_map(params![encoded], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+                    Ok((
+                        crate::codec::hash_column(row, 0)?,
+                        row.get::<_, Vec<u8>>(1)?,
+                    ))
                 })
                 .map_err(sqlite_error)?;
             for row in rows {
@@ -414,10 +417,15 @@ impl SqliteStore {
         conn: &Connection,
         blob_ref: &BlobRef,
     ) -> Result<Option<Vec<u8>>, StoreError> {
+        if lash_core_store::checkpoint_graph::NodeId::from_hex(blob_ref.as_str()).is_none() {
+            return Ok(None);
+        }
         let bytes: Option<Vec<u8>> = conn
             .prepare_cached(artifact_sql().blobs.select_content.sql())
             .and_then(|mut statement| {
-                statement.query_row(params![blob_ref.as_str()], |row| row.get(0))
+                statement.query_row(params![crate::codec::SqlHash(blob_ref.as_str())], |row| {
+                    row.get(0)
+                })
             })
             .optional()
             .map_err(sqlite_error)?;
@@ -432,23 +440,7 @@ impl SqliteStore {
     ) -> Result<Option<(SessionCheckpoint, crate::durable::GraphClosure)>, StoreError> {
         let Some(root) = lash_core_store::checkpoint_graph::NodeId::from_hex(blob_ref.as_str())
         else {
-            // No node is stored under a reference that is not a digest: no
-            // row is an absent checkpoint, and a blob stored there is no
-            // manifest.
-            let stored = conn
-                .prepare_cached(artifact_sql().blobs.select_content.sql())
-                .and_then(|mut statement| {
-                    statement.query_row(params![blob_ref.as_str()], |_| Ok(()))
-                })
-                .optional()
-                .map_err(sqlite_error)?;
-            return match stored {
-                None => Ok(None),
-                Some(()) => Err(stored_data_corrupt(
-                    "SessionCheckpoint",
-                    format_args!("`{blob_ref}` is not a node reference"),
-                )),
-            };
+            return Ok(None);
         };
         let limits = lash_core_store::checkpoint_graph::DecodeLimits::within_total(1 << 32);
         let closure =

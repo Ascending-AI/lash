@@ -34,14 +34,14 @@ lash_store_sql::statements! {
     struct SqlitePromptStatements @ "durable_prompt_sqlite" {
         /// Every content address in the JSON array `?1` already stored.
         held_texts = "SELECT hash FROM prompt_texts
-             WHERE hash IN (SELECT value FROM json_each(?1))";
+             WHERE hash IN (SELECT unhex(value) FROM json_each(?1))";
 
         /// Store each `[hash, text]` leaf and `[hash, text, children]`
         /// index node of the JSON array `?1`, returning each address
         /// stored. The caller binds only addresses it found unstored under
         /// the one writer, so every element is a new row.
         insert_texts = "INSERT INTO prompt_texts (hash, text, children)
-             SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'),
+             SELECT unhex(json_extract(value, '$[0]')), json_extract(value, '$[1]'),
                     json_extract(value, '$[2]')
                FROM json_each(?1)
              RETURNING hash";
@@ -49,23 +49,23 @@ lash_store_sql::statements! {
         /// Root each text of the `[part, hash]` pairs of the JSON array `?4`
         /// under that part of call `?3` of owner `?2` in session `?1`.
         insert_edges = "INSERT INTO prompt_snapshot_texts (session_id, owner, call, part, hash)
-             SELECT ?1, ?2, ?3, json_extract(value, '$[0]'), json_extract(value, '$[1]')
+             SELECT ?1, ?2, ?3, json_extract(value, '$[0]'), unhex(json_extract(value, '$[1]'))
                FROM json_each(?4)";
 
         /// Install the edges of newly stored immutable index nodes only.
         insert_index_edges = "INSERT INTO prompt_text_edges (parent, child)
-             SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]')
+             SELECT unhex(json_extract(value, '$[0]')), unhex(json_extract(value, '$[1]'))
                FROM json_each(?1)";
 
         /// Delete the edges of JSON `?1`, `[child, parent]` pairs: the
         /// edges of reclaimed parents.
         delete_index_edges = "DELETE FROM prompt_text_edges
-             WHERE (child, parent) IN (SELECT value ->> 0, value ->> 1 FROM json_each(?1))";
+             WHERE (child, parent) IN (SELECT unhex(value ->> 0), unhex(value ->> 1) FROM json_each(?1))";
 
         /// Stored texts in caller order, including repeated addresses and
         /// omitting missing ones, just like individual lookups.
         read_texts = "SELECT stored.hash, stored.text, stored.children
-             FROM json_each(?1) AS wanted JOIN prompt_texts AS stored ON stored.hash = wanted.value
+             FROM json_each(?1) AS wanted JOIN prompt_texts AS stored ON stored.hash = unhex(wanted.value)
              ORDER BY wanted.key";
 
         /// The texts call `?3` of owner `?2` roots, each with its part.
@@ -74,7 +74,7 @@ lash_store_sql::statements! {
 
         /// The stored children of every text in the JSON array `?1`.
         read_text_children = "SELECT hash, children FROM prompt_texts
-             WHERE hash IN (SELECT value FROM json_each(?1))";
+             WHERE hash IN (SELECT unhex(value) FROM json_each(?1))";
 
         /// Whether calls eligible for settlement hold a snapshot.
         settling_calls = "SELECT snapshot IS NOT NULL FROM prompt_snapshots
@@ -106,7 +106,7 @@ lash_store_sql::statements! {
 
         /// Candidates whose last root or immutable parent was released.
         unreferenced_texts = "SELECT stored.hash FROM prompt_texts AS stored
-             WHERE stored.hash IN (SELECT value FROM json_each(?1))
+             WHERE stored.hash IN (SELECT unhex(value) FROM json_each(?1))
                AND NOT EXISTS (
                    SELECT 1 FROM prompt_snapshot_texts AS edge WHERE edge.hash = stored.hash
                ) AND NOT EXISTS (
@@ -118,7 +118,7 @@ lash_store_sql::statements! {
         /// Reclaim every text in the JSON array `?1` no root references any
         /// more, returning each with its children.
         reclaim_texts = "DELETE FROM prompt_texts AS stored
-             WHERE stored.hash IN (SELECT value FROM json_each(?1))
+             WHERE stored.hash IN (SELECT unhex(value) FROM json_each(?1))
                AND NOT EXISTS (
                    SELECT 1 FROM prompt_snapshot_texts AS edge WHERE edge.hash = stored.hash
                ) AND NOT EXISTS (
@@ -158,7 +158,7 @@ CREATE INDEX IF NOT EXISTS idx_prompt_snapshots_settled
     WHERE request IS NULL AND snapshot IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS prompt_texts (
-    hash TEXT PRIMARY KEY,
+    hash BLOB PRIMARY KEY,
     text TEXT NOT NULL,
     -- An index node's children, a JSON array in address order; NULL for a
     -- leaf. The forward direction of its edges.
@@ -171,7 +171,7 @@ CREATE TABLE IF NOT EXISTS prompt_snapshot_texts (
     call TEXT NOT NULL,
     part TEXT NOT NULL CONSTRAINT ck_prompt_snapshot_texts_part
         CHECK (part IN ('snapshot', 'request')),
-    hash TEXT NOT NULL,
+    hash BLOB NOT NULL,
     PRIMARY KEY (session_id, owner, call, part, hash),
     FOREIGN KEY (session_id, owner, call)
         REFERENCES prompt_snapshots (session_id, owner, call),
@@ -181,13 +181,13 @@ CREATE TABLE IF NOT EXISTS prompt_snapshot_texts (
 CREATE INDEX IF NOT EXISTS idx_prompt_snapshot_texts_hash ON prompt_snapshot_texts (hash);
 
 CREATE TABLE IF NOT EXISTS prompt_text_edges (
-    parent TEXT NOT NULL,
-    child TEXT NOT NULL REFERENCES prompt_texts(hash),
+    parent BLOB NOT NULL,
+    child BLOB NOT NULL REFERENCES prompt_texts(hash),
     PRIMARY KEY (child, parent)
 ) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS prompt_prefixes (
     session_id TEXT PRIMARY KEY,
-    hash TEXT NOT NULL REFERENCES prompt_texts(hash)
+    hash BLOB NOT NULL REFERENCES prompt_texts(hash)
 ) WITHOUT ROWID;
 ";
 
@@ -294,7 +294,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &PromptWrit
                         cached_execute(
                             tx,
                             SQL.set_prefix.sql(),
-                            rusqlite::params![session, prefix],
+                            rusqlite::params![session, crate::codec::SqlHash(prefix)],
                         )?;
                     }
                     old
@@ -457,7 +457,10 @@ fn reclaim(tx: &Connection, released: &BTreeSet<String>) -> rusqlite::Result<()>
         let reclaimed = tx
             .prepare_cached(SQLITE_SQL.reclaim_texts.sql())?
             .query_map([encode(&frontier)?], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+                Ok((
+                    crate::codec::hash_column(row, 0)?,
+                    row.get::<_, Option<String>>(1)?,
+                ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let mut edges = Vec::new();
@@ -510,7 +513,7 @@ fn hash_set(
     params: impl rusqlite::Params,
 ) -> rusqlite::Result<BTreeSet<String>> {
     let mut statement = tx.prepare_cached(sql)?;
-    let rows = statement.query_map(params, |row| row.get::<_, String>(0))?;
+    let rows = statement.query_map(params, |row| crate::codec::hash_column(row, 0))?;
     rows.collect()
 }
 
@@ -540,7 +543,7 @@ pub(super) fn snapshot(tx: &Connection, call: &PromptCallKey) -> Answer<Option<P
     let roots = tx
         .prepare_cached(SQLITE_SQL.read_roots.sql())?
         .query_map(rusqlite::params![session, owner, ordinal], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            Ok((row.get::<_, String>(0)?, crate::codec::hash_column(row, 1)?))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let closure_of = |part: &str| -> rusqlite::Result<Vec<String>> {
@@ -587,7 +590,7 @@ pub(super) fn texts(tx: &Connection, hashes: &[String]) -> Answer<Vec<PromptText
     let texts = statement
         .query_map([&list], |row| {
             Ok((
-                row.get::<_, String>(0)?,
+                crate::codec::hash_column(row, 0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, Option<String>>(2)?,
             ))
@@ -628,7 +631,7 @@ mod tests {
             },
         };
         let text = |hash: &str| PromptText {
-            hash: hash.to_owned(),
+            hash: lash_core_store::store::BlobRef::for_content(hash.as_bytes()).0,
             text: hash.to_owned().into(),
             children: Vec::new(),
         };
@@ -640,7 +643,7 @@ mod tests {
                 request: format!("exact-request-{ordinal}"),
                 snapshot_texts: vec![text("shared"), text(&format!("unique-{ordinal}"))],
                 request_texts: vec![text("request"), text("prefix")].into(),
-                prefix: Some("prefix".to_owned()),
+                prefix: Some(text("prefix").hash),
             }));
         }
         tx.write(DomainWrite::Prompt(PromptWrite::Settle {
@@ -656,12 +659,12 @@ mod tests {
         // The last call deliberately remains unconsumed even past revision
         // release: recovery owns its request and snapshot until settlement.
         store.conn.write(|tx| {
-            tx.execute("INSERT INTO blobs (hash, content, encoding) VALUES ('config', X'00', 0)", [])?;
+            tx.execute("INSERT INTO blobs (hash, content, encoding) VALUES (zeroblob(32), X'00', 0)", [])?;
             tx.execute("INSERT INTO session_meta (session_id, relation_kind, retention_kind)
                 VALUES ('sql-work-owner', 'root', 'head_only')", [])?;
             for revision in [1, 2] {
                 tx.execute("INSERT INTO session_revisions (session_id, head_revision, config_ref)
-                    VALUES ('sql-work-owner', ?1, 'config')", [revision])?;
+                    VALUES ('sql-work-owner', ?1, zeroblob(32))", [revision])?;
             }
             tx.execute("INSERT INTO session_head (session_id, head_revision) VALUES ('sql-work-owner', 2)", [])?;
             tx.execute("INSERT INTO session_runs (session_id, run, terminal_kind, terminal_cause_json,
@@ -718,13 +721,10 @@ mod tests {
             "request",
             "prefix",
         ]
-        .map(str::to_owned);
+        .map(|name| text(name).hash);
         let found = store.prompt_texts(&hashes).await.unwrap();
         assert_eq!(
-            found
-                .iter()
-                .map(|text| text.hash.as_str())
-                .collect::<Vec<_>>(),
+            found.iter().map(|text| &*text.text).collect::<Vec<_>>(),
             ["shared", "unique-131", "request", "prefix"]
         );
         // Settling the last request does not erase previously expired identities.

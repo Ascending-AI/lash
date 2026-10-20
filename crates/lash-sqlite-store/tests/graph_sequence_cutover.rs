@@ -32,7 +32,7 @@ async fn sqlite_retained_prior_durable_core_is_refused_at_open() {
     let blob_ref = lash_core_store::store::BlobRef::for_content(b"pre-cutover payload");
     connection
         .execute(
-            "INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 0)",
+            "INSERT INTO blobs (hash, content, encoding) VALUES (unhex(?1), ?2, 0)",
             rusqlite::params![blob_ref.as_str(), prior_envelope],
         )
         .expect("retain an envelope with the deleted kind field");
@@ -53,7 +53,7 @@ async fn sqlite_retained_prior_durable_core_is_refused_at_open() {
     let connection = rusqlite::Connection::open(&path).expect("inspect refused catalog");
     let stored: Vec<u8> = connection
         .query_row(
-            "SELECT content FROM blobs WHERE hash = ?1",
+            "SELECT content FROM blobs WHERE hash = unhex(?1)",
             [blob_ref.as_str()],
             |row| row.get(0),
         )

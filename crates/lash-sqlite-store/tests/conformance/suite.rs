@@ -371,7 +371,7 @@ impl FenceIntegrityInjector for SqliteFenceIntegrityInjector {
         match target {
             FenceIntegrityTarget::SessionHeadRevision { session_id } => conn
                 .query_row(
-                    "SELECT head.head_revision, revision.config_ref, revision.leaf_node_id, revision.checkpoint_ref
+                    "SELECT head.head_revision, lower(hex(revision.config_ref)), revision.leaf_node_id, CASE WHEN revision.checkpoint_ref IS NULL THEN NULL ELSE lower(hex(revision.checkpoint_ref)) END
                      FROM session_head AS head JOIN session_revisions AS revision USING (session_id)
                      WHERE head.session_id = ?1 ORDER BY revision.head_revision DESC LIMIT 1",
                     [session_id.as_str()],

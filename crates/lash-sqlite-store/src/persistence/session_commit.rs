@@ -34,7 +34,7 @@ fn commit_frame_transition_tx(
             .query_row(
                 sql.refs.select_blob_ref.sql(),
                 params!["process_definition", carry.artifact_ref],
-                |row| row.get(0),
+                |row| crate::codec::hash_column(row, 0),
             )
             .map_err(sqlite_error)?;
         let bytes = SqliteStore::get_blob_conn(tx, &lash_core_store::store::BlobRef(blob))?

@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS exec_snapshots (
     exec_key TEXT PRIMARY KEY,
     rev INTEGER NOT NULL CONSTRAINT ck_exec_snapshots_rev CHECK (rev >= 1),
     -- The execution's ExecRoot node (FIG-5887 §7) and the commit that wrote it.
-    root_ref TEXT NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
+    root_ref BLOB NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
     commit_id BLOB NOT NULL CONSTRAINT ck_exec_snapshots_commit_id CHECK (length(commit_id) = 32),
     written_epoch INTEGER NOT NULL
 );
@@ -67,7 +67,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ExecRootWr
                 (None, None) => tx
                     .prepare_cached(SQL.put_first.sql())?
                     .query_row(
-                        rusqlite::params![key, root.to_hex(), &commit_id.0[..], commit.epoch.0],
+                        rusqlite::params![key, root.0.as_slice(), &commit_id.0[..], commit.epoch.0],
                         |_| Ok(()),
                     )
                     .optional()?,
@@ -77,10 +77,10 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ExecRootWr
                         rusqlite::params![
                             key,
                             integer::<i64>(rev.0)?,
-                            root.to_hex(),
+                            root.0.as_slice(),
                             &commit_id.0[..],
                             commit.epoch.0,
-                            expected_root.to_hex(),
+                            expected_root.0.as_slice(),
                         ],
                         |_| Ok(()),
                     )
@@ -103,7 +103,10 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ExecRootWr
         ExecRootWrite::Retire { exec, expected } => {
             let retired = tx
                 .prepare_cached(SQL.retire.sql())?
-                .query_row([exec.stored(), expected.to_hex()], |_| Ok(()))
+                .query_row(
+                    rusqlite::params![exec.stored(), expected.0.as_slice()],
+                    |_| Ok(()),
+                )
                 .optional()?;
             if retired.is_none() {
                 return conflict(exec, None, None);
@@ -123,7 +126,7 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &ExecRootWr
         ExecRootWrite::Clear { exec } => {
             let cleared = tx
                 .prepare_cached(SQL.clear.sql())?
-                .query_row([exec.stored()], |row| row.get::<_, String>(0))
+                .query_row([exec.stored()], |row| crate::codec::hash_column(row, 0))
                 .optional()?;
             if let Some(root) = cleared {
                 commit.retired.stored(root);
@@ -162,7 +165,7 @@ pub(super) fn read(tx: &Connection, exec: &ExecKey) -> Answer<Option<ExecRootRow
         .query_row([exec.stored()], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
-                row.get::<_, String>(1)?,
+                crate::codec::hash_column(row, 1)?,
                 row.get::<_, i64>(2)?,
                 row.get::<_, Vec<u8>>(3)?,
             ))
@@ -183,7 +186,7 @@ pub(super) fn read(tx: &Connection, exec: &ExecKey) -> Answer<Option<ExecRootRow
 pub(super) fn retire_under(tx: &Connection, prefix: &str) -> rusqlite::Result<Vec<String>> {
     let mut roots: Vec<String> = tx
         .prepare_cached(SQL.clear_under.sql())?
-        .query_map([prefix], |row| row.get(0))?
+        .query_map([prefix], |row| crate::codec::hash_column(row, 0))?
         .collect::<rusqlite::Result<_>>()?;
     roots.extend(super::graph::clear_admissions_under(tx, prefix)?);
     roots.extend(super::run_records::delete_under(tx, prefix)?);
@@ -214,7 +217,7 @@ pub(super) fn under_limited(
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, i64>(1)?,
-                row.get::<_, String>(2)?,
+                crate::codec::hash_column(row, 2)?,
                 row.get::<_, i64>(3)?,
                 row.get::<_, Vec<u8>>(4)?,
             ))

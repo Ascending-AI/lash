@@ -35,7 +35,7 @@ impl lash_conformance::SessionDeleteBlobProbe for SqliteBlobProbe {
         let config_ref: String = rusqlite::Connection::open(&self.catalog)
             .expect("open SQLite config-root probe")
             .query_row(
-                "SELECT revision.config_ref FROM session_head AS head
+                "SELECT lower(hex(revision.config_ref)) FROM session_head AS head
                  JOIN session_revisions AS revision USING (session_id, head_revision)
                  WHERE head.session_id = ?1",
                 rusqlite::params![session_id.as_str()],
@@ -49,7 +49,7 @@ impl lash_conformance::SessionDeleteBlobProbe for SqliteBlobProbe {
         rusqlite::Connection::open(&self.catalog)
             .expect("open SQLite blob probe")
             .query_row(
-                "SELECT EXISTS(SELECT 1 FROM blobs WHERE hash = ?1)",
+                "SELECT EXISTS(SELECT 1 FROM blobs WHERE hash = unhex(?1))",
                 rusqlite::params![blob_ref.as_str()],
                 |row| row.get(0),
             )
@@ -92,7 +92,7 @@ impl lash_conformance::SessionDeleteBlobProbe for SqliteBlobProbe {
                 .query_row(
                     "SELECT EXISTS(
                          SELECT 1 FROM blob_edges
-                         WHERE parent_hash = ?1 AND child_hash = ?2
+                         WHERE parent_hash = unhex(?1) AND child_hash = unhex(?2)
                      )",
                     rusqlite::params![checkpoint_ref.as_str(), blob_ref.as_str()],
                     |row| row.get(0),
@@ -125,7 +125,7 @@ impl lash_conformance::DefinitionGraphProbe for SqliteDefinitionGraphProbe {
         let row: Option<(String, Option<i64>)> = self
             .open()
             .query_row(
-                "SELECT refs.blob_ref, blobs.encoding FROM artifact_refs AS refs
+                "SELECT lower(hex(refs.blob_ref)), blobs.encoding FROM artifact_refs AS refs
                  LEFT JOIN blobs ON blobs.hash = refs.blob_ref
                  WHERE refs.namespace = 'kernel_document' AND refs.artifact_ref = ?1",
                 rusqlite::params![artifact_ref],
@@ -142,7 +142,7 @@ impl lash_conformance::DefinitionGraphProbe for SqliteDefinitionGraphProbe {
 
     async fn graph_nodes(&self) -> std::collections::BTreeSet<String> {
         self.open()
-            .prepare("SELECT hash FROM blobs WHERE encoding = 1")
+            .prepare("SELECT lower(hex(hash)) FROM blobs WHERE encoding = 1")
             .expect("prepare the SQLite graph node read")
             .query_map([], |row| row.get(0))
             .expect("read the SQLite graph nodes")

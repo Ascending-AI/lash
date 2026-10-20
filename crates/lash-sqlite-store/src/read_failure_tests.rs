@@ -54,14 +54,14 @@ async fn corrupt_non_msgpack_blob_surfaces_stored_data_corrupt_from_get_blob() {
     let store = crate::test_support::sqlite_memory_store()
         .await
         .expect("open store");
-    let blob_ref = BlobRef("corrupt-non-msgpack-blob".to_string());
+    let blob_ref = BlobRef::for_content(b"corrupt-non-msgpack-blob");
     let blob_hash = blob_ref.as_str().to_string();
     let raw_content = b"bare blob body is not an artifact envelope".to_vec();
     store
         .conn
         .call(move |conn| {
             conn.execute(
-                "INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 0)",
+                "INSERT INTO blobs (hash, content, encoding) VALUES (unhex(?1), ?2, 0)",
                 params![blob_hash, raw_content],
             )?;
             Ok(())
@@ -98,13 +98,13 @@ async fn blob_envelope_refuses_an_unknown_version_and_keeps_the_bytes() {
             "future blob fixture",
         )
         .expect("encode future envelope");
-        let hash = name.to_string();
+        let hash = BlobRef::for_content(name.as_bytes()).0;
         let bytes = encoded.clone();
         store
             .conn
             .call(move |conn| {
                 conn.execute(
-                    "INSERT INTO blobs (hash, content, encoding) VALUES (?1, ?2, 0)",
+                    "INSERT INTO blobs (hash, content, encoding) VALUES (unhex(?1), ?2, 0)",
                     params![hash, bytes],
                 )?;
                 Ok(())
@@ -113,7 +113,7 @@ async fn blob_envelope_refuses_an_unknown_version_and_keeps_the_bytes() {
             .expect("seed future blob");
 
         let refusal = store
-            .get_blob(&BlobRef(name.to_string()))
+            .get_blob(&BlobRef::for_content(name.as_bytes()))
             .await
             .expect_err("future blob must refuse");
         if version != SQLITE_BLOB_ENVELOPE_VERSION {
@@ -128,13 +128,15 @@ async fn blob_envelope_refuses_an_unknown_version_and_keeps_the_bytes() {
         } else {
             assert!(matches!(refusal, StoreError::Incompatible { .. }));
         }
-        let hash = name.to_string();
+        let hash = BlobRef::for_content(name.as_bytes()).0;
         let persisted: Vec<u8> = store
             .conn
             .call(move |conn| {
-                conn.query_row("SELECT content FROM blobs WHERE hash = ?1", [hash], |row| {
-                    row.get(0)
-                })
+                conn.query_row(
+                    "SELECT content FROM blobs WHERE hash = unhex(?1)",
+                    [hash],
+                    |row| row.get(0),
+                )
             })
             .await
             .expect("read retained bytes");
@@ -378,7 +380,7 @@ async fn sqlite_persisted_record_decode_classification() {
 
     let checkpoint_ref: String = raw
         .query_row(
-            "SELECT checkpoint_ref FROM session_head JOIN session_revisions USING (session_id, head_revision) WHERE session_id = ?1",
+            "SELECT lower(hex(checkpoint_ref)) FROM session_head JOIN session_revisions USING (session_id, head_revision) WHERE session_id = ?1",
             [checkpoint_session_id.as_str()],
             |row| row.get(0),
         )
@@ -394,7 +396,7 @@ async fn sqlite_persisted_record_decode_classification() {
     .expect("encode valid blob envelope");
     assert_eq!(
         raw.execute(
-            "UPDATE blobs SET content = ?1 WHERE hash = ?2",
+            "UPDATE blobs SET content = ?1 WHERE hash = unhex(?2)",
             params![malformed_manifest, checkpoint_ref],
         )
         .expect("corrupt checkpoint MessagePack"),
@@ -674,11 +676,12 @@ async fn malformed_durable_rows_surface_typed_corruption() {
     .expect("repair relation");
 
     raw.execute(
-        "INSERT INTO blobs (hash, content, encoding) VALUES ('corrupt-blob', X'C1', 0)",
+        "INSERT INTO blobs (hash, content, encoding) VALUES (X'2222222222222222222222222222222222222222222222222222222222222222', X'C1', 0)",
         [],
     )
     .expect("insert malformed blob");
-    let corrupt_blob = BlobRef("corrupt-blob".to_string());
+    let corrupt_blob =
+        BlobRef("2222222222222222222222222222222222222222222222222222222222222222".to_string());
     assert_corrupt(
         store
             .get_typed_blob::<serde_json::Value>(&corrupt_blob)
@@ -690,7 +693,7 @@ async fn malformed_durable_rows_surface_typed_corruption() {
         "SessionCheckpoint",
     );
     raw.execute(
-        "INSERT INTO blobs (hash, content, encoding) VALUES ('corrupt-compressed', ?1, 0)",
+        "INSERT INTO blobs (hash, content, encoding) VALUES (X'3333333333333333333333333333333333333333333333333333333333333333', ?1, 0)",
         params![
             encode_msgpack(
                 &StoredBlobEnvelope {
@@ -706,7 +709,9 @@ async fn malformed_durable_rows_surface_typed_corruption() {
     .expect("insert malformed compressed blob");
     assert_corrupt(
         store
-            .get_blob(&BlobRef("corrupt-compressed".to_string()))
+            .get_blob(&BlobRef(
+                "3333333333333333333333333333333333333333333333333333333333333333".to_string(),
+            ))
             .await,
         "compressed artifact blob",
     );
@@ -732,7 +737,7 @@ async fn malformed_durable_rows_surface_typed_corruption() {
         .expect("write foreign data");
     raw.execute(
         "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref)
-         VALUES (?1, 'dangling-artifact', 'missing-artifact-blob')",
+         VALUES (?1, 'dangling-artifact', X'7777777777777777777777777777777777777777777777777777777777777777')",
         params![MODULE_ARTIFACT_NAMESPACE],
     )
     .expect("insert dangling artifact reference");
@@ -750,10 +755,10 @@ async fn malformed_durable_rows_surface_typed_corruption() {
         "expected typed StoredDataCorrupt for dangling artifact reference, got {artifact_error:?}"
     );
 
-    raw.execute("INSERT INTO blobs (hash, content, encoding) VALUES ('corrupt-config', CAST('{' AS BLOB), 0)", []).expect("foreign config");
+    raw.execute("INSERT INTO blobs (hash, content, encoding) VALUES (X'4444444444444444444444444444444444444444444444444444444444444444', CAST('{' AS BLOB), 0)", []).expect("foreign config");
     raw.execute(
         "INSERT INTO session_revisions (session_id, head_revision, config_ref)
-         VALUES ('corrupt', 0, 'corrupt-config')",
+         VALUES ('corrupt', 0, X'4444444444444444444444444444444444444444444444444444444444444444')",
         [],
     )
     .expect("insert malformed head revision");
@@ -778,7 +783,7 @@ async fn malformed_durable_rows_surface_typed_corruption() {
         &session_id,
         1,
         None,
-        Some("missing-checkpoint-manifest"),
+        Some("6666666666666666666666666666666666666666666666666666666666666666"),
         &encode_json(&SessionHeadPayload {
             session_id: SessionId::from("corrupt"),
             ..Default::default()
@@ -800,13 +805,13 @@ async fn malformed_durable_rows_surface_typed_corruption() {
             Err(StoreError::CheckpointComponentMissing {
                 key,
                 blob_ref,
-            }) if key == "manifest" && blob_ref.as_str() == "missing-checkpoint-manifest"
+            }) if key == "manifest" && blob_ref.as_str() == "6666666666666666666666666666666666666666666666666666666666666666"
         ),
         "a dangling checkpoint manifest must refuse the window read, got {dangling:?}"
     );
     raw.execute("INSERT INTO session_runs (session_id, run, terminal_kind, terminal_cause_json, terminal_at_ms, terminal_window_revision) VALUES ('corrupt', 'missing-config-window', 'answered', '{\"cause\":\"commands_applied\"}', 0, 0)", []).expect("terminal on revision 0");
     raw.execute(
-        "UPDATE session_revisions SET config_ref = 'missing-config' WHERE session_id = 'corrupt'",
+        "UPDATE session_revisions SET config_ref = X'5555555555555555555555555555555555555555555555555555555555555555' WHERE session_id = 'corrupt'",
         [],
     )
     .expect("dangling revision config");
