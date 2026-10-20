@@ -488,6 +488,10 @@ async fn launch(
                 &lash::workflow::document::DocumentBytes::from(document.clone()),
                 &Name::new("flow"),
                 &env,
+                artifacts
+                    .cell_packages()
+                    .await
+                    .expect("the package gate answers"),
                 None,
             )
             .await

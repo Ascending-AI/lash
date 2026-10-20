@@ -264,8 +264,16 @@ pub(crate) async fn hold_launch_performing(
             (env, Some(held))
         }
     };
+    let linked = engines
+        .link_package_namespaces(kind, payload, env.clone())
+        .map_err(HoldEnvError::Fault)?;
+    let (selection, held) = if linked == env {
+        (selection, held)
+    } else {
+        (ProcessEnvSelection::New(linked.clone()), None)
+    };
     engines
-        .check_links(kind, &std::sync::Arc::new(env), performed, &choice.fits)
+        .check_links(kind, &std::sync::Arc::new(linked), performed, &choice.fits)
         .map_err(HoldEnvError::Refused)?;
     let env_ref = match held {
         Some(env_ref) => env_ref,

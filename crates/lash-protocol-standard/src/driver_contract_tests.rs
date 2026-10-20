@@ -299,6 +299,7 @@ fn the_preamble_offers_batch_only_when_enabled() {
             config: StandardProtocolConfig::default().batch(batch),
         }
         .build_preamble(ProtocolBuildInput {
+            packages: std::sync::Arc::new(lash_kernel_dialect::NoPackages),
             tool_catalog: Arc::new(catalog.clone()),
             plugin_extensions: Default::default(),
             writer_formats: lash_core::build_newest_writer_formats(),

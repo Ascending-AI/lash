@@ -68,6 +68,14 @@ impl WorkflowEnvironment {
     pub fn checker(&self) -> Environment<'_> {
         let mut environment = Environment::new(self.functions.as_ref());
         environment.effects = requirements(&self.operations);
+        environment.internal = Box::new(|effect| {
+            lash_kernel_dialect::QualifiedOperation::from_effect(effect)
+                .ok()
+                .and_then(|operation| self.operations.get(&operation))
+                .is_some_and(|offered| {
+                    offered.visibility == lash_kernel_dialect::Visibility::Internal
+                })
+        });
         environment
     }
 }
@@ -87,6 +95,7 @@ fn requirements(
 /// The catalog a process would run under, whose environment is asked for.
 #[derive(Clone, Debug)]
 pub struct WorkflowEnvironmentRequest {
+    pub packages: lash_execution_contracts::CellPackages,
     pub tool_catalog: Arc<lash_core::ToolCatalog>,
 }
 
@@ -94,6 +103,7 @@ pub struct WorkflowEnvironmentRequest {
 /// opaque bytes once; admission shares that decoded value with publication.
 #[derive(Clone, Debug)]
 pub struct WorkflowAdmissionRequest {
+    pub packages: lash_execution_contracts::CellPackages,
     pub document: IdentifiedDocument,
     /// The entry the definition starts.
     pub entry: Name,
@@ -165,6 +175,57 @@ impl lash_execution_contracts::process::ProcessDocumentProvider for KernelDocume
         performed: &lash_execution_contracts::process::PerformedEffects,
     ) -> lash_execution_contracts::process::OwnedOperations {
         self.engine.owned_operations(performed)
+    }
+
+    fn definition_packages(
+        &self,
+        payload: &serde_json::Value,
+    ) -> Result<Option<lash_kernel_doc::PackageSetDigest>, lash_execution_contracts::PluginError>
+    {
+        let pin = super::payload_definition(payload)?.packages;
+        if let Some(pin) = pin {
+            self.package_view(pin)?;
+        }
+        Ok(pin)
+    }
+
+    fn initial_packages(
+        &self,
+    ) -> Result<lash_kernel_doc::PackageSetDigest, lash_execution_contracts::PluginError> {
+        self.engine
+            .workers
+            .config()
+            .packages
+            .clone()
+            .map_or_else(lash_vm_releases::lash_packages, Ok)
+            .map(|held| held.own())
+            .map_err(|error| lash_execution_contracts::PluginError::Registration(error.to_string()))
+    }
+
+    fn package_view(
+        &self,
+        packages: lash_kernel_doc::PackageSetDigest,
+    ) -> Result<
+        Arc<dyn lash_kernel_dialect::ExportView + Send + Sync>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
+        let held = self
+            .engine
+            .workers
+            .config()
+            .packages
+            .clone()
+            .map_or_else(lash_vm_releases::lash_packages, Ok)
+            .map_err(|error| {
+                lash_execution_contracts::plugin_error::PluginError::Registration(error.to_string())
+            })?;
+        lash_kernel_package::SharedPackageView::new(held, packages)
+            .map(|view| Arc::new(view) as Arc<dyn lash_kernel_dialect::ExportView + Send + Sync>)
+            .map_err(
+                |_| lash_execution_contracts::plugin_error::PluginError::PackagesNotHeld {
+                    packages,
+                },
+            )
     }
 
     async fn document(
@@ -290,8 +351,9 @@ impl lash_execution_contracts::process::ProcessDocumentProvider for KernelDocume
                     "the kernel engine answers a `WorkflowEnvironmentRequest`".to_owned(),
                 )
             })?;
-        let boundary = HostBoundary::of_catalog(&request.tool_catalog)
+        let mut boundary = HostBoundary::of_catalog(&request.tool_catalog)
             .map_err(|error| unresolvable(error.to_string()))?;
+        boundary.in_packages(self.package_view(request.packages.digest())?.as_ref());
         Ok(lash_execution_contracts::process::ProcessDocument::new(
             WorkflowEnvironment {
                 operations: boundary.operations().clone(),
@@ -350,7 +412,7 @@ impl lash_execution_contracts::process::ProcessDocumentProvider for KernelDocume
                 WorkflowAdmissionOutcome::Refused(refusal),
             ))
         };
-        let boundary = match HostBoundary::of_catalog(&request.tool_catalog) {
+        let mut boundary = match HostBoundary::of_catalog(&request.tool_catalog) {
             Ok(boundary) => boundary,
             Err(error) => {
                 return refused(WorkflowAdmissionRefusal::Boundary {
@@ -358,10 +420,16 @@ impl lash_execution_contracts::process::ProcessDocumentProvider for KernelDocume
                 });
             }
         };
+        boundary.in_packages(self.package_view(request.packages.digest())?.as_ref());
         let identified = request.document;
         let admission = {
             let mut environment = Environment::new(self.engine.functions.as_ref());
             environment.effects = requirements(boundary.operations());
+            environment.internal = Box::new(|effect| {
+                boundary.effect(effect).is_some_and(|(_, offered)| {
+                    offered.visibility == lash_kernel_dialect::Visibility::Internal
+                })
+            });
             WorkflowDocument::admit(
                 identified.document().clone(),
                 WorkflowDocumentEntry::Entry {
@@ -383,6 +451,7 @@ impl lash_execution_contracts::process::ProcessDocumentProvider for KernelDocume
             document.document(),
             document.identity(),
             request.entry.clone(),
+            Some(request.packages.digest()),
         ))
         .map_err(|error| unresolvable(error.to_string()))?;
         // Only an admitted document is held, with the declarations it was

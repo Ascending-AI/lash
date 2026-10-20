@@ -281,7 +281,16 @@ impl KernelSteps {
                     .map_err(|refusal| format!("the env builds: {refusal}"))?;
                 let imported = core
                     .host_artifacts()
-                    .import_workflow(language, self.source, &env, None)
+                    .import_workflow(
+                        language,
+                        self.source,
+                        &env,
+                        core.host_artifacts()
+                            .cell_packages()
+                            .await
+                            .expect("the package gate answers"),
+                        None,
+                    )
                     .await
                     .map_err(|error| format!("import the workflow: {error}"))?;
                 let lash::workflow::WorkflowImport::Imported { document, .. } = imported else {
@@ -314,6 +323,7 @@ impl KernelSteps {
             .await
             .map_err(|error| format!("publish the document: {error}"))?;
         let payload = serde_json::to_value(lash_vm_runtime::KernelProcessInput {
+            packages: None,
             document: identity,
             functions: document.manifest.functions.keys().copied().collect(),
             entry: lash::workflow::document::Name::new("worker"),
@@ -406,7 +416,7 @@ impl Scenario for KernelSteps {
     }
 
     async fn start(&self, nodes: &Arc<SimNodes>) -> Result<(), String> {
-        let process = self.start_process().await?;
+        let process = Box::pin(self.start_process()).await?;
         *self.process.lock_recover() = Some(process);
         // A starts and claims first, B once A is settled, so the matrix
         // cuts the uncut run's writes by node.

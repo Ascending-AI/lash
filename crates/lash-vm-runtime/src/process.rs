@@ -296,6 +296,9 @@ pub fn definition_draft(
         "document": definition.document,
         "entry": definition.entry,
     });
+    if let Some(packages) = definition.packages {
+        value["packages"] = serde_json::json!(packages);
+    }
     if !definition.functions.is_empty() {
         value["functions"] = serde_json::json!(definition.functions);
     }
@@ -331,6 +334,7 @@ pub fn definition_of_entry(
         document,
         identity,
         function.clone(),
+        None,
     ))
     .map_err(|error| error.to_string())?;
     serde_json::to_value(lash_execution_contracts::process::ProcessDefinition::new(

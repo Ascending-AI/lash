@@ -233,6 +233,7 @@ impl Counted {
             .await
             .expect("the document publishes");
         serde_json::to_value(lash_vm_runtime::KernelProcessInput {
+            packages: None,
             document: identity,
             functions: document.manifest.functions.keys().copied().collect(),
             entry: lash::workflow::document::Name::new("counted"),

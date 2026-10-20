@@ -126,6 +126,7 @@ pub(crate) async fn publish(
     core: &LashCore,
     draft: &Draft,
     entry: &Name,
+    packages: lash::package::CellPackages,
     source: Option<(&lash::workflow::document::SourceMap, &str)>,
 ) -> Result<Publication, RunError> {
     let pin = HostArtifactPin::mint();
@@ -158,6 +159,7 @@ pub(crate) async fn publish(
                 &lash::workflow::document::DocumentBytes::from(draft.document().clone()),
                 entry,
                 &environment,
+                packages,
                 source,
             )
             .await?

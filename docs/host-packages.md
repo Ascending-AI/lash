@@ -172,11 +172,21 @@ contract than the package declares, or at the segment of one of the
 package's functions, types or errors, is refused when the namespaces are
 composed, naming both; a tool never shadows package code.
 
-The `internal` declaration records own-package-only visibility on the
-export. End-to-end enforcement across direct calls, discovery, Standard
-mode and dynamic resolution is still in progress. Treat it as declaration
-metadata until that enforcement lands; it is not an authorization boundary.
-Keep host authorization at the runner boundary.
+An `internal` operation is callable only from bodies installed by its declaring
+package. It is absent from Standard catalogs, discovery and prompts. A direct
+perform from document code is refused with its unit; deferred and dynamic
+attempts are refused before any operation link is recorded.
+
+Installed package namespaces are closed to deferred providers. Their surface
+links public members and operations, refuses internal operations, and reports
+unknown paths as “no such member.” Neither cell discovery nor dynamic dispatch
+sends a package path to a deferred provider. Computed strings cannot call package
+operations, including public ones. Paths outside installed package namespaces
+continue to resolve through the recorded deferred provider. The selected cell or
+definition surface supplies this decision; a provider cannot override it.
+At process start its linked package roots are stored in `ProcessEnv`.
+A granted tool’s dynamic dispatch reads those roots on every activation, including resume,
+without reconstructing a package view from the deployment's current set.
 
 ## Write and replace a runner
 

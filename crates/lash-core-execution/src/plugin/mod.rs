@@ -32,7 +32,7 @@ mod process_components;
 pub use process_components::{
     ProcessComponentContext, ProcessComponentDeclaration, ProcessComponentFactory,
     ProcessComponentHost, ProcessComponentPorts, ProcessComponentRegistry, ProcessComponentSpec,
-    ProcessComposition, ProcessSessionReads, StaticProcessComponent, StepLink,
+    ProcessComposition, ProcessSessionReads, StaticProcessComponent, StepLink, refuse_package_path,
 };
 mod execution_views;
 pub use composition::ExecutionComposition;

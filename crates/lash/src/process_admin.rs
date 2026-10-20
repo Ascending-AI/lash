@@ -845,7 +845,7 @@ impl Processes {
             .await
             .map_err(refused)?;
         engines
-            .capture_env(kind, &performed, candidate)
+            .capture_env(kind, &payload, &performed, candidate)
             .map_err(refused)
     }
 

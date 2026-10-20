@@ -35,6 +35,9 @@ pub const KERNEL_RUN_STEP: &str = "kernel_run";
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct KernelProcessInput {
+    /// The imported definition's surface snapshot; raw function values name none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub packages: Option<lash_kernel_doc::PackageSetDigest>,
     pub document: DocumentId,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub functions: BTreeSet<FunctionId>,
@@ -57,6 +60,7 @@ impl KernelProcessInput {
     /// without arguments.
     pub fn definition(&self) -> KernelProcessDefinition {
         KernelProcessDefinition {
+            packages: self.packages,
             document: self.document,
             functions: self.functions.clone(),
             entry: self.entry.clone(),
@@ -69,6 +73,9 @@ impl KernelProcessInput {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct KernelProcessDefinition {
+    /// The imported definition's surface snapshot; raw function values name none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub packages: Option<lash_kernel_doc::PackageSetDigest>,
     pub document: DocumentId,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub functions: BTreeSet<FunctionId>,
@@ -78,8 +85,14 @@ pub struct KernelProcessDefinition {
 impl KernelProcessDefinition {
     /// The definition of `entry` of `document`, whose identity is
     /// `identity`: pure, from the document alone.
-    pub fn of(document: &lash_kernel_doc::Document, identity: DocumentId, entry: Name) -> Self {
+    pub fn of(
+        document: &lash_kernel_doc::Document,
+        identity: DocumentId,
+        entry: Name,
+        packages: Option<lash_kernel_doc::PackageSetDigest>,
+    ) -> Self {
         Self {
+            packages,
             document: identity,
             functions: document.manifest.functions.keys().copied().collect(),
             entry,
@@ -89,6 +102,7 @@ impl KernelProcessDefinition {
     /// A start of this definition with `args`.
     pub fn start(&self, args: serde_json::Map<String, serde_json::Value>) -> KernelProcessInput {
         KernelProcessInput {
+            packages: self.packages,
             document: self.document,
             functions: self.functions.clone(),
             entry: self.entry.clone(),

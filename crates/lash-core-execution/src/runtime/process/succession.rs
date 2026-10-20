@@ -109,7 +109,7 @@ pub async fn request_process_successor(
         .await?
         .into_identity()
         .definition_id;
-    let request = ProcessSuccessorRequest {
+    let mut request = ProcessSuccessorRequest {
         payload: successor.payload,
         env: successor.env,
         definition_id,
@@ -138,6 +138,25 @@ pub async fn request_process_successor(
         }
     };
     let new_env = load(request.env.clone()).await?;
+    let linked = engines.link_package_namespaces(kind, &request.payload, new_env.clone())?;
+    if linked != new_env {
+        let claim = ReferrerClaim::unguarded(ArtifactReferrer::ProcessRecord(process.clone()))
+            .map_err(|error| PluginError::Session(error.to_string()))?;
+        request.env = super::hold_process_env(
+            &super::ProcessEnvPorts::admitting(env_store.as_ref(), engines.components()),
+            &claim,
+            &super::ProcessEnvSelection::New(linked.clone()),
+        )
+        .await
+        .map_err(|error| match error {
+            super::HoldEnvError::Fault(error) => error,
+            super::HoldEnvError::Refused(refusal) => link(refusal),
+        })?;
+    }
+    if lash_execution_contracts::process::succession::successor_is_current(&request, &record) {
+        return Ok(ProcessSuccession::AlreadyCurrent);
+    }
+    let new_env = linked;
     let performed = engines
         .performed_effects(kind, &request.payload)
         .await

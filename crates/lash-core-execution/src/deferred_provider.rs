@@ -168,6 +168,8 @@ pub enum DispatchRefusal {
     /// This node's deferred provider registration does not grant the
     /// linked tool: only a granted tool dispatches.
     NotGranted { effect: String, tool: crate::ToolId },
+    /// The transform or provider alias entered a statically linked package root.
+    PackageNamespace { path: String },
     /// The grant's transform refused the tool's input.
     InputRefused { tool: crate::ToolId, reason: String },
     /// The grant's transform, run again for the call of the matched tool,
@@ -184,6 +186,12 @@ impl DispatchRefusal {
     #[must_use]
     pub fn failure(&self) -> crate::ToolFailure {
         match self {
+            Self::PackageNamespace { path } => crate::ToolFailure::runtime(
+                crate::ToolFailureClass::InvalidRequest,
+                "package_namespace",
+                format!("computed calls cannot enter the linked package namespace `{path}`"),
+            )
+            .with_cause(crate::ToolFailureCause::PackageNamespace { path: path.clone() }),
             Self::NotGranted { effect, tool } => crate::ToolFailure::runtime(
                 crate::ToolFailureClass::PermissionDenied,
                 "dispatch_not_granted",

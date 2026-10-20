@@ -181,6 +181,12 @@ pub struct CellFailureRepair {
 )]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CellDefect {
+    /// OP-INTERNAL: an authored unit tried to perform a package-private operation.
+    InternalOperation {
+        operation: lash_kernel_doc::EffectName,
+        unit: lash_kernel_doc::Unit,
+    },
+
     /// The cell used a binding an earlier cell left that held a function or
     /// a task: neither outlives the cell that created it, so the binding
     /// was not carried.

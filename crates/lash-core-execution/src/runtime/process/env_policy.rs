@@ -234,8 +234,12 @@ impl<'a> ProcessEnvCx<'a> {
             effects.insert(effect.clone(), link);
         }
         let candidate = ProcessEnv::from_run(run, effects, components)?;
-        self.engines
-            .capture_env(&self.target.engine_kind, performed, &candidate)
+        self.engines.capture_env(
+            &self.target.engine_kind,
+            &self.target.payload,
+            performed,
+            &candidate,
+        )
     }
 
     /// Restrict the enclosing process's environment to the effects the
@@ -272,6 +276,7 @@ impl ProcessEngineRegistry {
     pub fn capture_env(
         &self,
         kind: &str,
+        payload: &serde_json::Value,
         performed: &lash_execution_contracts::process::PerformedEffects,
         candidate: &ProcessEnv,
     ) -> Result<ProcessEnv, ProcessEnvRefusal> {
@@ -282,6 +287,11 @@ impl ProcessEngineRegistry {
                     ProcessEnvRefusal::EffectNotLinked { effect }
                 }
                 refusal => refusal,
+            })?;
+        let env = self
+            .link_package_namespaces(kind, payload, env)
+            .map_err(|error| ProcessEnvRefusal::Uncertified {
+                reason: error.to_string(),
             })?;
         self.components().admit(&env)?;
         self.check_links(kind, &Arc::new(env.clone()), performed, &Default::default())

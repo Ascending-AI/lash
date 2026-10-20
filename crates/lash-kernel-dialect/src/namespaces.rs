@@ -30,6 +30,9 @@ pub struct Offered {
     /// Whether the host performs it as a read.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub read: bool,
+    /// The declaring package's visibility, projected from this cell's view.
+    #[serde(skip)]
+    pub visibility: crate::Visibility,
     pub source: OfferedSource,
 }
 
@@ -43,6 +46,7 @@ impl Offered {
             controls: BTreeSet::new(),
             read: false,
             source: OfferedSource::Catalog { tool: tool.into() },
+            visibility: crate::Visibility::Public,
         }
     }
 
@@ -193,6 +197,9 @@ pub enum NamespaceRefusal {
     /// An offered effect name that is no canonical operation.
     #[error("`{effect}` is not an operation: {message}")]
     NotAnOperation { effect: String, message: String },
+    /// An offered operation cannot add a member to an installed package.
+    #[error("no such member `{operation}` is declared by installed package `{package}`")]
+    UndeclaredOperation { operation: String, package: String },
     /// A package root no package may take.
     #[error("the package path `{path}` takes the root `{root}`, which is {by}")]
     ReservedRoot {
@@ -282,38 +289,6 @@ impl Namespaces {
             .cloned()
             .chain(operations.keys().map(|operation| operation.package.clone()))
             .collect::<BTreeSet<_>>();
-        // One path, one owner. An offered operation at a segment a code
-        // package exports as anything but an operation would shadow the
-        // code, so it is refused naming both. One the package declares is
-        // performed under the package's declared requirement, the one its
-        // own bodies state: a runner serves it under that contract
-        // (PKG-RUNNER), so a direct perform and a member body's state one
-        // requirement.
-        for (operation, offered) in &mut operations {
-            let Some(export) = code
-                .get(&operation.package)
-                .and_then(|members| members.get(&operation.name))
-            else {
-                continue;
-            };
-            let package = dotted(operation.package.iter());
-            let Export::Operation(declared) = export else {
-                return Err(NamespaceRefusal::OperationIsExport {
-                    operation: operation.effect_name().to_string(),
-                    export: format!("{package}.{}", operation.name),
-                    package,
-                });
-            };
-            if offered.requirement.contract != declared.requirement.contract {
-                return Err(NamespaceRefusal::OperationContractDiffers {
-                    operation: operation.effect_name().to_string(),
-                    package,
-                    offered: offered.requirement.contract.to_string(),
-                    declared: declared.requirement.contract.to_string(),
-                });
-            }
-            offered.requirement.clone_from(&declared.requirement);
-        }
         // What each node exports, by segment: its code exports and its
         // operations, named for a refusal.
         let mut exports = BTreeMap::<Vec<Segment>, BTreeMap<Segment, String>>::new();
@@ -356,6 +331,52 @@ impl Namespaces {
                 }
                 nodes.insert(segments[..end].to_vec());
             }
+        }
+        // One path, one owner. An offered operation at a segment a code
+        // package exports as anything but an operation would shadow the
+        // code, so it is refused naming both. One the package declares is
+        // performed under the package's declared requirement, the one its
+        // own bodies state: a runner serves it under that contract
+        // (PKG-RUNNER), so a direct perform and a member body's state one
+        // requirement.
+        for (operation, offered) in &mut operations {
+            let mut path = operation.package.as_slice().to_vec();
+            path.push(operation.name.clone());
+            let class = crate::classify_package_path(view, &path);
+            offered.visibility = if class == crate::PackagePathClass::Internal {
+                crate::Visibility::Internal
+            } else {
+                crate::Visibility::Public
+            };
+            let Some(export) = code
+                .get(&operation.package)
+                .and_then(|members| members.get(&operation.name))
+            else {
+                if class != crate::PackagePathClass::Outside {
+                    return Err(NamespaceRefusal::UndeclaredOperation {
+                        operation: operation.effect_name().to_string(),
+                        package: path[0].as_str().to_owned(),
+                    });
+                }
+                continue;
+            };
+            let package = dotted(operation.package.iter());
+            let Export::Operation(declared) = export else {
+                return Err(NamespaceRefusal::OperationIsExport {
+                    operation: operation.effect_name().to_string(),
+                    export: format!("{package}.{}", operation.name),
+                    package,
+                });
+            };
+            if offered.requirement.contract != declared.requirement.contract {
+                return Err(NamespaceRefusal::OperationContractDiffers {
+                    operation: operation.effect_name().to_string(),
+                    package,
+                    offered: offered.requirement.contract.to_string(),
+                    declared: declared.requirement.contract.to_string(),
+                });
+            }
+            offered.requirement.clone_from(&declared.requirement);
         }
         Ok(Self {
             operations,

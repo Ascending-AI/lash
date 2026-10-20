@@ -248,6 +248,27 @@
       "description": "A rule of a session's cells that a cell's program broke.",
       "oneOf": [
         {
+          "description": "OP-INTERNAL: an authored unit tried to perform a package-private operation.",
+          "properties": {
+            "kind": {
+              "const": "internal_operation",
+              "type": "string"
+            },
+            "operation": {
+              "$ref": "#/$defs/QualifiedName"
+            },
+            "unit": {
+              "$ref": "#/$defs/Unit"
+            }
+          },
+          "required": [
+            "kind",
+            "operation",
+            "unit"
+          ],
+          "type": "object"
+        },
+        {
           "description": "The cell used a binding an earlier cell left that held a function or\na task: neither outlives the cell that created it, so the binding\nwas not carried.",
           "properties": {
             "binding": {
@@ -1672,6 +1693,10 @@
         "model"
       ],
       "type": "object"
+    },
+    "QualifiedName": {
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
+      "type": "string"
     },
     "ResponsePhase": {
       "description": "Provider replay phase tag: the two-value vocabulary the kernel interprets\n(`\"commentary\"`/`\"final_answer\"` on the wire). An unknown spelling fails\ndecoding rather than silently meaning \"neither\".",

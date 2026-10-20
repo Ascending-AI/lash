@@ -21,6 +21,8 @@ pub struct Environment<'a> {
     /// The effects it can run, each with the requirement it offers them
     /// under: its signature and the contract its runner serves.
     pub effects: BTreeMap<EffectName, OperationRequirement>,
+    /// Whether the operation is internal to its declaring package.
+    pub internal: Box<dyn Fn(&EffectName) -> bool + Send + Sync + 'a>,
     /// The library functions it holds, by identity.
     pub functions: &'a dyn FunctionCatalog,
     /// The session bindings `main` starts with (`K-SES-001`).
@@ -32,8 +34,43 @@ impl<'a> Environment<'a> {
     pub fn new(functions: &'a dyn FunctionCatalog) -> Self {
         Self {
             effects: BTreeMap::new(),
+            internal: Box::new(|_| false),
             functions,
             bindings: BTreeSet::new(),
+        }
+    }
+
+    /// OP-INTERNAL: checks the performing unit, rather than the transitive
+    /// effect set, so package bodies keep their authority and closures do not.
+    pub fn check_visibility(&self, graph: &Graph) -> Result<(), Refusal> {
+        let errors: Vec<_> = graph
+            .nodes()
+            .iter()
+            .filter_map(|node| {
+                let effect = match &node.kind {
+                    crate::NodeKind::Action(crate::ActionNode::Perform { effect, .. })
+                    | crate::NodeKind::Expr(crate::ExprNode::Act {
+                        kind: crate::ActNode::Perform { effect, .. },
+                        ..
+                    }) => effect,
+                    _ => return None,
+                };
+                ((self.internal)(effect) && !matches!(node.site.unit, Unit::Library(_))).then(
+                    || {
+                        refused(
+                            Some(&node.site),
+                            RefusalReason::InternalOperation {
+                                effect: effect.clone(),
+                            },
+                        )
+                    },
+                )
+            })
+            .collect();
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(Refusal { errors })
         }
     }
 }
@@ -165,6 +202,9 @@ pub fn admit(document: &Document, environment: &Environment<'_>) -> Result<Admit
     }
     let graph = check(document, environment.functions, &mut errors);
     if let Some(graph) = &graph {
+        if let Err(refusal) = environment.check_visibility(graph) {
+            errors.extend(refusal.errors);
+        }
         for (name, nodes) in graph.session_reads() {
             if environment.bindings.contains(name) {
                 continue;

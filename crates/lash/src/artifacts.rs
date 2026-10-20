@@ -262,13 +262,33 @@ impl HostArtifacts {
         &self,
         tool_catalog: Arc<lash_core::ToolCatalog>,
     ) -> Result<Option<crate::workflow::WorkflowEnvironment>> {
+        if self
+            .engines
+            .document_provider(lash_vm_runtime::LASH_VM_ENGINE_KIND)
+            .is_none()
+        {
+            return Ok(None);
+        }
+        self.workflow_environment_for_packages(tool_catalog, self.cell_packages().await?)
+            .await
+    }
+
+    #[cfg(feature = "codemode")]
+    async fn workflow_environment_for_packages(
+        &self,
+        tool_catalog: Arc<lash_core::ToolCatalog>,
+        packages: lash_execution_contracts::CellPackages,
+    ) -> Result<Option<crate::workflow::WorkflowEnvironment>> {
         let Some(provider) = self
             .engines
             .document_provider(lash_vm_runtime::LASH_VM_ENGINE_KIND)
         else {
             return Ok(None);
         };
-        let request = lash_vm_runtime::WorkflowEnvironmentRequest { tool_catalog };
+        let request = lash_vm_runtime::WorkflowEnvironmentRequest {
+            tool_catalog,
+            packages,
+        };
         let answer = provider
             .environment(lash_execution_contracts::process::ProcessDocument::new(
                 request,
@@ -277,8 +297,29 @@ impl HostArtifacts {
         Ok(answer.downcast().ok())
     }
 
-    /// Lower a host-authored workflow module in `language` and admit it
-    /// against the same process environment as [`Self::publish_workflow`].
+    /// The single fleet-gate answer for authoring and publishing a workflow.
+    #[cfg(feature = "codemode")]
+    pub async fn cell_packages(&self) -> Result<lash_execution_contracts::CellPackages> {
+        if let Some(hold) = self.core.backend.packages() {
+            use lash_execution_contracts::PackageGate as _;
+            return crate::packages::FleetPackages::new(self.core.backend.clone(), hold.clone())
+                .writable()
+                .await
+                .map_err(|error| lash_execution_contracts::PluginError::from(error).into());
+        }
+        let provider = self
+            .engines
+            .document_provider(lash_vm_runtime::LASH_VM_ENGINE_KIND)
+            .ok_or_else(|| {
+                lash_execution_contracts::PluginError::Registration(
+                    "this core has no package producer".into(),
+                )
+            })?;
+        Ok(lash_execution_contracts::CellPackages(
+            provider.initial_packages()?,
+        ))
+    }
+
     /// Every dialect lowers a module under one workflow contract
     /// ([`crate::dialect::workflow`]): each top-level async function, by
     /// declaration or by `const` (TypeScript) or `async def` (Python), is an
@@ -302,9 +343,10 @@ impl HostArtifacts {
         language: crate::workflow::document::SourceLanguage,
         source: &str,
         environment: &ProcessEnv,
+        packages: lash_execution_contracts::CellPackages,
         limits: Option<crate::dialect::workflow::WorkflowSourceLimits>,
     ) -> Result<crate::workflow::WorkflowImport> {
-        let checked = match self.import_context(environment).await? {
+        let checked = match self.import_context(environment, packages).await? {
             Ok(context) => context,
             Err(refused) => return Ok(refused),
         };
@@ -312,6 +354,7 @@ impl HostArtifacts {
             checked.worker_service(),
             language,
             source,
+            packages,
             checked.operations(),
             &checked.checker(),
             limits,
@@ -337,7 +380,10 @@ impl HostArtifacts {
         base: &crate::workflow::document::Document,
         environment: &ProcessEnv,
     ) -> Result<crate::workflow::WorkflowImport> {
-        let checked = match self.import_context(environment).await? {
+        let checked = match self
+            .import_context(environment, self.cell_packages().await?)
+            .await?
+        {
             Ok(context) => context,
             Err(refused) => return Ok(refused),
         };
@@ -363,6 +409,7 @@ impl HostArtifacts {
     async fn import_context(
         &self,
         environment: &ProcessEnv,
+        packages: lash_execution_contracts::CellPackages,
     ) -> Result<
         std::result::Result<crate::workflow::WorkflowEnvironment, crate::workflow::WorkflowImport>,
     > {
@@ -387,7 +434,7 @@ impl HostArtifacts {
             )));
         }
         let Some(checked) = self
-            .workflow_environment_from_catalog(Arc::clone(&catalog))
+            .workflow_environment_for_packages(Arc::clone(&catalog), packages)
             .await?
         else {
             return Ok(Err(WorkflowImport::Unsupported(
@@ -426,6 +473,7 @@ impl HostArtifacts {
         document: &crate::workflow::document::DocumentBytes,
         entry: &crate::workflow::document::Name,
         environment: &ProcessEnv,
+        packages: lash_execution_contracts::CellPackages,
         source: Option<(&crate::workflow::document::SourceMap, &str)>,
     ) -> Result<crate::workflow::WorkflowPublish> {
         use crate::workflow::{WorkflowPublication, WorkflowPublish};
@@ -453,6 +501,7 @@ impl HostArtifacts {
         }
         let claim = claim(pin)?;
         let request = lash_vm_runtime::WorkflowAdmissionRequest {
+            packages,
             document: typed,
             entry: entry.clone(),
             tool_catalog: self.core.process_tool_catalog(environment)?,

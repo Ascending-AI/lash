@@ -64,6 +64,9 @@ pub enum RefusalReason {
     /// `K-ADM-001`: the environment provides no such effect.
     #[error("the environment provides no effect `{effect}`")]
     MissingEffect { effect: EffectName },
+    /// OP-INTERNAL: only the declaring package's bodies may perform it.
+    #[error("internal operation `{effect}` may only be performed by its package bodies")]
+    InternalOperation { effect: EffectName },
     /// `K-ADM-002`: the environment's effect does not serve the signature
     /// the document expects.
     #[error(
@@ -163,6 +166,7 @@ impl RefusalReason {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Invalid(_) => "invalid",
+            Self::InternalOperation { .. } => "internal_operation",
             Self::MissingEffect { .. } => "missing_effect",
             Self::EffectSignature { .. } => "effect_signature",
             Self::MissingFunction { .. } => "missing_function",

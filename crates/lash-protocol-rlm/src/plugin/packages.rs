@@ -9,29 +9,7 @@
 //! saved functions relink to it, and an actor whose state pins the cell's
 //! code is stamped with it.
 
-use lash_kernel_doc::PackageSetDigest;
-
-/// The package set a cell is written under: the gate's answer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct CellPackages(pub PackageSetDigest);
-
-impl CellPackages {
-    /// The set's digest.
-    #[must_use]
-    pub fn digest(&self) -> PackageSetDigest {
-        self.0
-    }
-}
-
-/// The package set a cell lowered now is written under.
-#[async_trait::async_trait]
-pub trait PackageGate: Send + Sync {
-    /// The first candidate set every live node serving these sessions
-    /// holds. A typed retryable error defers lowering when none is held by
-    /// every serving node or when the live capability survey is
-    /// unavailable.
-    async fn writable(&self) -> Result<CellPackages, lash_core::RuntimeEffectControllerError>;
-}
+pub use lash_execution_contracts::{CellPackages, PackageGate};
 
 /// A gate that always answers one set: a host whose fleet runs one build,
 /// or one that stands in for a build of it.

@@ -166,3 +166,49 @@ async fn an_empty_invalid_version_batch_emits_only_a_batch_refusal() {
         "no per-intent activity was invented"
     );
 }
+
+/// OP-INTERNAL: a round cannot recover a hidden operation from its full
+/// recorded provider routes after the protocol projects its callable catalog.
+#[test]
+fn an_operation_absent_from_the_callable_catalog_cannot_be_admitted_from_routes() {
+    let definition = crate::ToolDefinition::raw(
+        "private",
+        "dataframe.run",
+        "private",
+        serde_json::json!({}),
+        serde_json::json!({}),
+    )
+    .unwrap()
+    .with_execution(std::time::Duration::from_secs(1));
+    let entry = crate::SurfaceEntry::advertised(
+        crate::testing::test_tools_provider(),
+        definition.clone(),
+        None,
+    );
+    let registry = Arc::new(crate::ToolRegistry::default());
+    let routes = crate::SurfaceTools::of_entries([entry], registry);
+    for visible in [false, true] {
+        let catalog = crate::ToolCatalog::from_tool_definitions(if visible {
+            vec![definition.clone()]
+        } else {
+            Vec::new()
+        });
+        let context = crate::testing::TestExecutionContextBuilder::over_controller(
+            crate::ActorContext::unavailable(),
+        )
+        .routes(routes.clone())
+        .tool_catalog(catalog)
+        .build()
+        .into_runtime();
+        let handlers = ProductionToolHandlers::new(context);
+        let call = crate::sansio::PendingToolCall {
+            call_id: crate::ToolCallId::fixture("private"),
+            provider_call_id: None,
+            tool_name: "dataframe.run".into(),
+            args: serde_json::json!({}),
+            replay: None,
+        };
+        let invocation = ToolInvocation::from_pending(call, definition.manifest.id.clone());
+        assert_eq!(handlers.leaf_definition(&invocation).is_some(), visible);
+    }
+}

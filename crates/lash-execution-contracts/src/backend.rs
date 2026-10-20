@@ -142,6 +142,17 @@ struct BackendInner {
 /// serving node holds it (FLEET-SET).
 #[async_trait::async_trait]
 pub trait NodePackages: Send + Sync {
+    /// Candidate surface sets from this node's existing registration.
+    fn candidates(
+        &self,
+        catalog: &lash_durable::PackageCatalog,
+    ) -> Vec<(
+        lash_durable::PackageSetDigest,
+        std::collections::BTreeSet<lash_durable::HeldArtifact>,
+    )>;
+    /// The declared surface for a new Standard catalog.
+    fn surface_view(&self) -> Arc<dyn lash_kernel_dialect::ExportView + Send + Sync>;
+
     /// Installs the node's artifacts and sets in `backend`'s store, surveys
     /// what its dependents list, and answers the artifacts the node holds.
     ///

@@ -156,6 +156,7 @@ fn main() -> Result<()> {
     };
     let environment = lash_kernel_check::Environment {
         effects: document.manifest.effects.clone(),
+        internal: Box::new(|_| false),
         functions: catalog,
         bindings: BTreeSet::new(),
     };

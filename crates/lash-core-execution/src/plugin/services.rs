@@ -83,6 +83,7 @@ impl PluginOperationInvokeError {
 
 #[derive(Clone)]
 pub struct RuntimeServices {
+    pub packages: Arc<dyn lash_kernel_dialect::ExportView + Send + Sync>,
     pub tool_live: Arc<crate::ToolLive>,
     pub plugins: Arc<PluginSession>,
 
@@ -240,6 +241,7 @@ impl RuntimeServices {
         process_env_store: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
     ) -> Self {
         Self {
+            packages: Arc::new(lash_kernel_dialect::NoPackages),
             tool_live: Arc::new(crate::ToolLive::default()),
             plugins,
 
@@ -249,6 +251,14 @@ impl RuntimeServices {
             store: None,
             attachment_referrers_store: None,
         }
+    }
+
+    pub fn with_packages(
+        mut self,
+        packages: Arc<dyn lash_kernel_dialect::ExportView + Send + Sync>,
+    ) -> Self {
+        self.packages = packages;
+        self
     }
 
     pub fn with_clock(mut self, clock: Arc<dyn crate::Clock>) -> Self {
@@ -285,6 +295,7 @@ impl PersistentRuntimeServices {
         process_env_store: Arc<dyn lash_execution_contracts::process::ProcessEnvStore>,
     ) -> Self {
         Self(RuntimeServices {
+            packages: Arc::new(lash_kernel_dialect::NoPackages),
             tool_live: Arc::new(crate::ToolLive::default()),
             plugins,
 

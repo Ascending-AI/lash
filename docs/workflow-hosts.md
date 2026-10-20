@@ -416,6 +416,7 @@ editor; a host that edited one converts `draft.document().clone()` to
 
 ```rust,ignore
 let pin = HostArtifactPin::mint();
+let packages = core.host_artifacts().cell_packages().await?;
 match core
     .host_artifacts()
     .publish_workflow(
@@ -423,6 +424,7 @@ match core
         &DocumentBytes::from(draft.document().clone()),
         &Name::new("order_review"),
         &env_spec,
+        packages,
         Some((&source_map, &source)),   // or None
     )
     .await?
@@ -888,13 +890,15 @@ A document can have no TypeScript spelling. The printer then answers a
 diagnostic, and the document stays readable, editable, publishable and
 runnable.
 
-`HostArtifacts::import_workflow(language, source, &environment, limits).await`
-takes a whole workflow module in TypeScript or Python
+`HostArtifacts::import_workflow(language, source, &environment, packages, limits).await`
+takes the gate's `CellPackages` and a whole workflow module in TypeScript or Python
 (`SourceLanguage::TypeScript` or `SourceLanguage::Python`) and the
 `ProcessEnv` you pass to `workflow_environment` and `publish_workflow`. Lash
 builds the dialect environment from the operations that environment admits from
 the process components it names and the selected package view; the
-worker lowers the source, and lash admits the document. It runs no effect,
+worker lowers the source, and lash admits the document. Obtain `packages` once
+from `HostArtifacts::cell_packages`; keep the `packages` returned by an imported
+workflow and pass it to `publish_workflow` after editing. It runs no effect,
 publishes nothing and links no parser into your process. `limits`
 (`lash::dialect::workflow::WorkflowSourceLimits`) narrows the dialect's source
 policy; `None` keeps its standard one.

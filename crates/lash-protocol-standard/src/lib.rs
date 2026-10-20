@@ -47,7 +47,6 @@ use lash_core::session_model::{
     reassign_part_ids, shared_parts,
 };
 use lash_execution_contracts::config_error::ConfigRegistrationError;
-use lash_execution_contracts::plugin_error::PluginError;
 
 mod batch;
 mod finish;
@@ -736,7 +735,7 @@ impl StandardProtocolPlugin {
             move |this, _state| {
                 let discovery = this.config.discovery.clone();
                 Ok(Arc::new(move |ctx| {
-                    validate_discovery(&ctx.tools, discovery.as_ref())?;
+                    tool_presentation::validate_discovery(&ctx.tools, discovery.as_ref())?;
                     // A host's own finish tool takes the place of `finish`.
                     Ok(lash_core::suppress_default_finish(
                         &ctx,
@@ -747,22 +746,6 @@ impl StandardProtocolPlugin {
         )?;
         Ok(())
     }
-}
-
-fn validate_discovery(
-    tools: &[lash_core::ToolManifest],
-    discovery: Option<&lash_core::ToolDiscovery>,
-) -> Result<(), PluginError> {
-    if let Some(discovery) = discovery
-        && !tools
-            .iter()
-            .any(|tool| tool.inline && tool.tool() == discovery.operation)
-    {
-        return Err(PluginError::InvalidToolDiscovery {
-            operation: discovery.operation.clone(),
-        });
-    }
-    Ok(())
 }
 
 /// The standard protocol's session plugin: it keeps no protocol state.
@@ -834,11 +817,30 @@ impl ProtocolDriverPlugin for StandardProtocolDriver {
     fn prompt_tools(
         &self,
         catalog: Arc<lash_core::ToolCatalog>,
+        packages: &dyn lash_kernel_dialect::ExportView,
     ) -> lash_core::plugin::prompt::OfferedTools {
-        lash_core::plugin::prompt::OfferedTools::new(catalog, self.config.discovery.is_some())
+        lash_core::plugin::prompt::OfferedTools::new(
+            Arc::new(catalog.public_operations(packages)),
+            self.config.discovery.is_some(),
+        )
+    }
+
+    fn model_catalog(
+        &self,
+        catalog: &lash_core::ToolCatalog,
+        packages: &dyn lash_kernel_dialect::ExportView,
+    ) -> lash_core::ToolCatalog {
+        catalog.public_operations(packages)
     }
 
     fn build_preamble(&self, input: ProtocolBuildInput) -> TurnDriverPreamble {
+        let public = input
+            .tool_catalog
+            .public_operations(input.packages.as_ref());
+        let input = ProtocolBuildInput {
+            tool_catalog: Arc::new(public),
+            ..input
+        };
         let tool_names = input.tool_catalog.tool_names();
         let visible_catalog;
         let catalog = if self.config.discovery.is_some() {

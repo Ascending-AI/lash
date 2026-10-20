@@ -381,6 +381,7 @@ pub(super) async fn publish(core: &lash::LashCore, document: &str) -> Result<Pub
             &lash::workflow::document::DocumentBytes::from(document.clone()),
             &Name::new(ENTRY),
             &environment,
+            artifacts.cell_packages().await?,
             None,
         ),
     )

@@ -44,6 +44,7 @@ pub fn embed<M: Machine>(
     // by its document. The matching row is consumed at the admitted park.
     environment.effects = document.manifest.effects.clone();
     lash_kernel_check::admit(&document, &environment).map_err(|e| e.to_string())?;
+    drop(environment);
     let program = Program {
         closure: PageId([7; 32]),
         document: Arc::new(document),

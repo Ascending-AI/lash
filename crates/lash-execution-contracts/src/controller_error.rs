@@ -29,7 +29,10 @@ impl From<PluginError> for RuntimeEffectControllerError {
                     terminal_reason,
                 })
                 .into(),
-            error @ (PluginError::Preflight(_)
+            error @ (PluginError::PackagesNotHeld { .. }
+            | PluginError::PackageNamespace { .. }
+            | PluginError::InternalOperation { .. }
+            | PluginError::Preflight(_)
             | PluginError::ProviderConfig { .. }
             | PluginError::ProviderRegistryMismatch { .. }) => {
                 let failure = lash_protocol_types::PluginOperationFailure::from(error);

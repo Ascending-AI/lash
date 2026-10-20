@@ -44,10 +44,11 @@ pub struct OperationExport {
 pub struct Intent(pub String);
 
 /// Who may perform an operation.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Visibility {
     /// Any document, and the model.
+    #[default]
     Public,
     /// Only the declaring package's own bodies.
     Internal,
@@ -130,8 +131,83 @@ pub const BRAND_FIELD: &str = "__lash_brand";
 /// The field every package value holds its building artifact's digest in.
 pub const BUILT_FIELD: &str = "__lash_built";
 
+/// The visibility declared by the operation's owning package. An operation
+/// outside the view belongs to an operation-only provider and is public.
+pub fn operation_visibility(
+    view: &dyn ExportView,
+    operation: &crate::QualifiedOperation,
+) -> Visibility {
+    let mut path = operation.package.as_slice().to_vec();
+    path.push(operation.name.clone());
+    if classify_package_path(view, &path) == PackagePathClass::Internal {
+        Visibility::Internal
+    } else {
+        Visibility::Public
+    }
+}
+
+/// A path's authority under one pinned package surface.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PackagePathClass {
+    Public,
+    Internal,
+    Unknown,
+    Outside,
+}
+
+/// Classify canonical segments without confusing a root with a textual prefix.
+/// Exported functions, types and members are public; absent descendants stay
+/// inside their installed root and cannot be supplied by a deferred provider.
+pub fn classify_package_path(view: &dyn ExportView, path: &[Segment]) -> PackagePathClass {
+    let Some(root) = path.first() else {
+        return PackagePathClass::Outside;
+    };
+    if !view.namespace_roots().contains(root.as_str()) {
+        return PackagePathClass::Outside;
+    }
+    for package in view.paths() {
+        let Some(tail) = path.strip_prefix(package.as_slice()) else {
+            continue;
+        };
+        let Some((name, members)) = tail.split_first() else {
+            continue;
+        };
+        let Some(export) = view.exports(&package).and_then(|exports| exports.get(name)) else {
+            continue;
+        };
+        return match (export, members) {
+            (Export::Operation(operation), []) if operation.visibility == Visibility::Internal => {
+                PackagePathClass::Internal
+            }
+            (Export::Operation(_) | Export::Function(_) | Export::Type(_) | Export::Error, []) => {
+                PackagePathClass::Public
+            }
+            (Export::Type(ty), [member]) if ty.members.contains_key(member) => {
+                PackagePathClass::Public
+            }
+            _ => PackagePathClass::Unknown,
+        };
+    }
+    PackagePathClass::Unknown
+}
+
 /// The code exports of the packages a namespace is composed from.
 pub trait ExportView {
+    /// Whether `path` starts in an installed package namespace. Nested package
+    /// paths reserve their common root too: an unknown child stays a package error.
+    fn owns_namespace(&self, path: &str) -> bool {
+        let root = path.split('.').next().unwrap_or(path);
+        self.namespace_roots().contains(root)
+    }
+
+    /// Installed namespace roots, including libraries with no user exports.
+    fn namespace_roots(&self) -> BTreeSet<String> {
+        self.paths()
+            .iter()
+            .map(|package| package.as_slice()[0].as_str().to_owned())
+            .collect()
+    }
+
     /// The exports of the package that owns `path`, or `None` when no
     /// package of the view owns it.
     fn exports(&self, path: &PackagePath) -> Option<&BTreeMap<Segment, Export>>;
@@ -168,6 +244,10 @@ pub struct Reserving<'a> {
 }
 
 impl ExportView for Reserving<'_> {
+    fn namespace_roots(&self) -> BTreeSet<String> {
+        self.view.namespace_roots()
+    }
+
     fn exports(&self, path: &PackagePath) -> Option<&BTreeMap<Segment, Export>> {
         self.view.exports(path)
     }

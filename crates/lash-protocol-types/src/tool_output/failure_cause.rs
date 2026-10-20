@@ -78,6 +78,11 @@ pub enum ToolFailureCause {
         tool: crate::ToolId,
         reason: String,
     },
+    /// A computed target or returned alias entered a statically linked
+    /// package namespace. No target tool ran.
+    PackageNamespace {
+        path: String,
+    },
     /// A process's call of a tool its env links as a dispatch grant that
     /// the deferred provider's registration on this node does not grant:
     /// only a granted tool dispatches. Nothing was resolved.

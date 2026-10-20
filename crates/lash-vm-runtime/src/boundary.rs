@@ -72,6 +72,7 @@ pub fn offered_tool(
     source: OfferedSource,
 ) -> Offered {
     Offered {
+        visibility: lash_kernel_dialect::Visibility::Public,
         requirement: OperationRequirement {
             signature: lash_protocol_types::tool_signature(
                 &contract.input_schema.canonical,
@@ -136,6 +137,13 @@ impl HostBoundary {
             )?;
         }
         Ok(boundary)
+    }
+
+    /// Project the offered operations through this cell's package view.
+    pub fn in_packages(&mut self, view: &dyn lash_kernel_dialect::ExportView) {
+        for (operation, offered) in &mut self.operations {
+            offered.visibility = lash_kernel_dialect::operation_visibility(view, operation);
+        }
     }
 
     /// Admits projection handles of `kind`.

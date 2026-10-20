@@ -60,6 +60,7 @@ pub(super) fn config_with_dialect(
     let preamble = session
         .protocol_driver()
         .build_preamble(lash_core::ProtocolBuildInput {
+            packages: std::sync::Arc::new(lash_kernel_dialect::NoPackages),
             tool_catalog: session.resolved_tool_catalog().unwrap(),
             plugin_extensions: Default::default(),
             writer_formats: lash_core::build_newest_writer_formats(),
@@ -780,6 +781,7 @@ async fn factory_selects_native_abi_and_completed_cell_events() {
     let preamble = session
         .protocol_driver()
         .build_preamble(lash_core::ProtocolBuildInput {
+            packages: std::sync::Arc::new(lash_kernel_dialect::NoPackages),
             tool_catalog: catalog,
             plugin_extensions: Default::default(),
             writer_formats: lash_core::build_newest_writer_formats(),

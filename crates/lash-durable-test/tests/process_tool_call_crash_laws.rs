@@ -577,16 +577,21 @@ async fn sleeping_cell(deployment: &Holding) -> lash_core::llm::types::LlmRespon
         .build()
         .expect("the sleeping workflow's environment");
     let artifacts = deployment.core().host_artifacts();
+    let selected = artifacts.cell_packages().await.expect("the workflow gate");
     let imported = artifacts
         .import_workflow(
             lash::workflow::document::SourceLanguage::TypeScript,
             &body,
             &environment,
+            selected,
             None,
         )
         .await
         .expect("the sleeping workflow imports");
-    let lash::workflow::WorkflowImport::Imported { document, .. } = imported else {
+    let lash::workflow::WorkflowImport::Imported {
+        document, packages, ..
+    } = imported
+    else {
         panic!("the sleeping workflow is admitted: {imported:?}");
     };
     let published = artifacts
@@ -595,6 +600,7 @@ async fn sleeping_cell(deployment: &Holding) -> lash_core::llm::types::LlmRespon
             &document,
             &lash::workflow::document::Name::new("body"),
             &environment,
+            packages,
             None,
         )
         .await
@@ -972,7 +978,14 @@ fn dynamic() {
   } catch e {
     set missing = {kind: e.kind, data: e.data}
   }
-  return [refused, missing]
+  let package_request = {target: "package"}
+  let package_refused = null
+  try {
+    set package_refused = perform tools.call_tool(package_request) as Any
+  } catch e {
+    set package_refused = {kind: e.kind, data: e.data}
+  }
+  return [refused, missing, package_refused]
 }
 
 main {
@@ -1090,6 +1103,8 @@ impl DynamicCalls {
                 })?;
             let path = if diverging && earlier > 0 {
                 DIVERGED_PATH.to_owned()
+            } else if target == "package" {
+                "kernel.nosuch".to_owned()
             } else {
                 format!("search.{target}")
             };
@@ -1226,13 +1241,14 @@ impl DynamicCalls {
             .await
             .map_err(|error| format!("publish the document: {error}"))?;
         let payload = serde_json::to_value(lash_vm_runtime::KernelProcessInput {
+            packages: None,
             document: identity,
             functions: document.manifest.functions.keys().copied().collect(),
             entry: lash::workflow::document::Name::new("dynamic"),
             args: serde_json::Map::new(),
         })
         .expect("the input encodes");
-        let env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(LIMIT))
+        let env = lash::process::ProcessEnv::builder(lash::MaxToolCalls::new(3))
             .component(DYNAMIC_COMPONENT, &())
             .link(
                 lash::workflow::document::EffectName::new(CALL_TOOL_EFFECT).unwrap(),
@@ -1399,17 +1415,28 @@ impl DynamicCalls {
         for (index, cause, path) in [
             (0, "dynamic_call_refused", REFUSED_PATH),
             (1, "dynamic_call_unavailable", MISSING_PATH),
+            (2, "package_namespace", "kernel.nosuch"),
         ] {
             let caught = &answer[index];
             if caught["kind"] != lash_vm_runtime::TOOL_FAILED
                 || caught["data"]["cause"]["kind"] != cause
                 || caught["data"]["cause"]["path"] != path
+                || (cause == "package_namespace" && caught["data"]["class"] != "invalid_request")
             {
                 violations.push(format!(
                     "the body did not catch `{path}` as a tool failure caused by {cause}: \
                      {caught}"
                 ));
             }
+        }
+        if self
+            .seen
+            .resolved
+            .lock_recover()
+            .iter()
+            .any(|(path, _)| path == "kernel.nosuch")
+        {
+            violations.push("a linked package namespace reached the provider".into());
         }
         let explanation = dynamic_host_explanation();
         if answer[0]["data"]["cause"]["reason"] != explanation

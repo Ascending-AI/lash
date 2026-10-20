@@ -58,15 +58,28 @@ fn operations(names: &[&str]) -> Operations {
 fn dataframe() -> Packages {
     Packages(BTreeMap::from([(
         PackagePath::parse("dataframe").expect("a path"),
-        BTreeMap::from([(
-            Segment::new("col").expect("a segment"),
-            Export::Function(Member {
-                definition: FunctionName::new("dataframe.col").expect("a function name"),
-                signature: signature(),
-                asynchronous: false,
-                rest: false,
-            }),
-        )]),
+        BTreeMap::from([
+            (
+                Segment::new("run").unwrap(),
+                Export::Operation(crate::OperationExport {
+                    requirement: lash_kernel_doc::OperationRequirement::new(
+                        signature(),
+                        lash_kernel_doc::ContractId::new("1"),
+                    ),
+                    intents: Default::default(),
+                    visibility: crate::Visibility::Public,
+                }),
+            ),
+            (
+                Segment::new("col").expect("a segment"),
+                Export::Function(Member {
+                    definition: FunctionName::new("dataframe.col").expect("a function name"),
+                    signature: signature(),
+                    asynchronous: false,
+                    rest: false,
+                }),
+            ),
+        ]),
     )]))
 }
 
@@ -341,4 +354,47 @@ fn a_value_type_and_its_static_resolve_by_their_own_spellings() {
             "{written:?}"
         );
     }
+}
+
+/// CLOSED-NAMESPACE: offers cannot invent package members, including under
+/// an installed nested namespace, while external operations remain valid.
+#[test]
+fn a_package_surface_refuses_undeclared_operation_offers() {
+    for (path, expected) in [
+        ("dataframe.run", crate::PackagePathClass::Public),
+        ("dataframe.col", crate::PackagePathClass::Public),
+        ("dataframe.nosuch", crate::PackagePathClass::Unknown),
+        ("dataframe.sub.nosuch", crate::PackagePathClass::Unknown),
+        ("dataframe_other.run", crate::PackagePathClass::Outside),
+    ] {
+        let segments = path
+            .split('.')
+            .map(Segment::new)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(
+            crate::classify_package_path(&dataframe(), &segments),
+            expected,
+            "{path}"
+        );
+    }
+    for path in ["dataframe.nosuch", "dataframe.nested.nosuch"] {
+        assert!(
+            matches!(Namespaces::build(&dataframe(), operations(&[path])),
+            Err(NamespaceRefusal::UndeclaredOperation { operation, .. }) if operation == path)
+        );
+    }
+    let namespaces = Namespaces::build(
+        &dataframe(),
+        operations(&["dataframe.run", "outside.lookup"]),
+    )
+    .unwrap();
+    assert!(matches!(
+        namespaces.resolve(&["dataframe", "run"], Spelling::Python),
+        Resolution::Operation { .. }
+    ));
+    assert!(matches!(
+        namespaces.resolve(&["outside", "lookup"], Spelling::Python),
+        Resolution::Operation { .. }
+    ));
 }

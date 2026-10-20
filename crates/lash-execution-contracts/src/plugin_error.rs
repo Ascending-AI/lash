@@ -250,6 +250,33 @@ define_plugin_errors! {
         => Self::ProcessSuccessorRefused { .. }
         => "process_successor_refused"
         => crate::ToolFailureClass::InvalidRequest;
+/// The definition names a surface snapshot absent from this node.
+    #[error("package set {packages} is not held by this node")]
+    PackagesNotHeld { packages: lash_kernel_doc::PackageSetDigest }
+        => PluginError::PackagesNotHeld { packages }
+        => { packages: lash_kernel_doc::PackageSetDigest }
+        => Self::PackagesNotHeld { packages: *packages }
+        => Self::PackagesNotHeld { .. }
+        => "packages_not_held"
+        => crate::ToolFailureClass::Execution;
+/// An installed package's namespace is closed to deferred resolution.
+    #[error("package path `{path}` cannot be resolved dynamically; use a public member offered by its surface (no such member is offered by a deferred provider)")]
+    PackageNamespace { path: String }
+        => PluginError::PackageNamespace { path }
+        => { path: String }
+        => Self::PackageNamespace { path: path.clone() }
+        => Self::PackageNamespace { .. }
+        => "package_namespace"
+        => crate::ToolFailureClass::InvalidRequest;
+/// OP-INTERNAL: document code cannot resolve a package-private operation.
+    #[error("internal operation `{operation}` may only be performed by its package bodies")]
+    InternalOperation { operation: String }
+        => PluginError::InternalOperation { operation }
+        => { operation: String }
+        => Self::InternalOperation { operation: operation.clone() }
+        => Self::InternalOperation { .. }
+        => "internal_operation"
+        => crate::ToolFailureClass::InvalidRequest;
 /// Discovery must itself be an inline member of the tool catalogue.
     #[error("discovery operation `{operation}` must be an inline catalogue member")]
     InvalidToolDiscovery { operation: String }
@@ -977,7 +1004,9 @@ impl PluginError {
             ),
             // the substrate faulted, or the owning shift releases the head
             // at its boundary.
-            Self::StoreUnavailable { .. } | Self::SessionHeadOwned { .. } => Retryable,
+            Self::PackagesNotHeld { .. }
+            | Self::StoreUnavailable { .. }
+            | Self::SessionHeadOwned { .. } => Retryable,
             Self::Runtime(error) => {
                 if error.is_retryable() {
                     Retryable
@@ -1013,7 +1042,9 @@ impl PluginError {
             // answer is `StoreUnavailable`, and infrastructure that did not
             // is an attempt fault ([`Self::attempt_fault`]): neither is a
             // session, registration or invoke error.
-            Self::ProviderFailure { .. }
+            Self::PackageNamespace { .. }
+            | Self::InternalOperation { .. }
+            | Self::ProviderFailure { .. }
             | Self::UnusableSchema { .. }
             | Self::UnusableToolSchema { .. }
             | Self::ValueMismatch { .. }
@@ -1266,7 +1297,10 @@ impl From<PluginError> for lash_protocol_types::PluginOperationFailure {
         // These direct refusals are wrapped in a PluginOperation cause by
         // the controller. Build their envelope without reentering that conversion.
         let runtime = match &error {
-            PluginError::Preflight(_)
+            PluginError::PackageNamespace { .. }
+            | PluginError::InternalOperation { .. }
+            | PluginError::PackagesNotHeld { .. }
+            | PluginError::Preflight(_)
             | PluginError::ProviderConfig { .. }
             | PluginError::ProviderRegistryMismatch { .. } => {
                 crate::RuntimeError::new(crate::RuntimeErrorCode::Plugin, error.to_string())

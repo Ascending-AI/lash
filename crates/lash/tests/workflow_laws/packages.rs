@@ -141,21 +141,33 @@ async fn a_direct_perform_and_a_member_body_state_the_packages_one_requirement()
         )
         .build()
         .expect("the runner environment");
+    let selected = artifacts.cell_packages().await.expect("the workflow gate");
     let imported = artifacts
         .import_workflow(
             lash::workflow::document::SourceLanguage::TypeScript,
             ROWS,
             &environment,
+            selected,
             None,
         )
         .await
         .expect("import answers");
-    let lash::workflow::WorkflowImport::Imported { document, .. } = imported else {
+    let lash::workflow::WorkflowImport::Imported {
+        document, packages, ..
+    } = imported
+    else {
         panic!("the workflow imports: {imported:?}");
     };
     let publication = published(
         artifacts
-            .publish_workflow(&pin, &document, &Name::new("rows"), &environment, None)
+            .publish_workflow(
+                &pin,
+                &document,
+                &Name::new("rows"),
+                &environment,
+                packages,
+                None,
+            )
             .await
             .expect("publish"),
     );

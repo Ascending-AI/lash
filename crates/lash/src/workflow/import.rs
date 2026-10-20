@@ -21,6 +21,7 @@ pub enum WorkflowImport {
     /// the document to keep them. `captions` are those the source spelled:
     /// they replace whatever the host held for this workflow.
     Imported {
+        packages: lash_execution_contracts::CellPackages,
         document: DocumentBytes,
         source_map: SourceMap,
         source: String,
@@ -57,12 +58,13 @@ pub(crate) async fn import(
     workers: &lash_vm_client::service::Service,
     language: SourceLanguage,
     source: &str,
+    packages: lash_execution_contracts::CellPackages,
     operations: &lash_kernel_dialect::Operations,
     checker: &lash_kernel_check::Environment<'_>,
     limits: Option<WorkflowSourceLimits>,
 ) -> crate::Result<WorkflowImport> {
     let (document, source_map, captions) = match workers
-        .import_workflow(language, source, operations, None, limits)
+        .import_workflow(language, source, operations, packages.digest(), limits)
         .await
     {
         Ok(imported) => imported,
@@ -74,6 +76,7 @@ pub(crate) async fn import(
         Err(refusal) => return Ok(WorkflowImport::Admission(refusal)),
     };
     Ok(WorkflowImport::Imported {
+        packages,
         document: bytes,
         source_map,
         source: source.to_owned(),

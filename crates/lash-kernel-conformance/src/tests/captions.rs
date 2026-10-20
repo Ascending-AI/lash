@@ -860,6 +860,7 @@ fn rekey_imported(dialect: &CaptionDialect<'_>) -> Result<(), crate::HarnessErro
                     )
                 })
                 .collect(),
+            internal: Box::new(|_| false),
             functions: dialect.environment.library,
             bindings: BTreeSet::new(),
         };
@@ -953,6 +954,7 @@ fn rekey_canvas_edits(dialect: &CaptionDialect<'_>) -> Result<(), crate::Harness
                     )
                 })
                 .collect(),
+            internal: Box::new(|_| false),
             functions: dialect.environment.library,
             bindings: BTreeSet::new(),
         };

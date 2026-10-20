@@ -1995,12 +1995,24 @@ fn authored_workflow_import_is_worker_owned_and_preserves_source_policy() {
     runtime.block_on(async {
         let source = "export async function digest(inbox: string) { return inbox; }";
         let (document, _, _) = workers
-            .import_workflow(typescript, source, &environment, None, limits(1024))
+            .import_workflow(
+                typescript,
+                source,
+                &environment,
+                lash_vm_releases::lash_packages().unwrap().own(),
+                limits(1024),
+            )
             .await
             .expect("workflow import");
         assert!(document.entries.contains_key(&Name::new("digest")));
         let refused = workers
-            .import_workflow(typescript, source, &environment, None, limits(1))
+            .import_workflow(
+                typescript,
+                source,
+                &environment,
+                lash_vm_releases::lash_packages().unwrap().own(),
+                limits(1),
+            )
             .await;
         assert!(matches!(
             refused,
@@ -2011,7 +2023,7 @@ fn authored_workflow_import_is_worker_owned_and_preserves_source_policy() {
                 typescript,
                 "export const broken = ;",
                 &environment,
-                None,
+                lash_vm_releases::lash_packages().unwrap().own(),
                 limits(1024),
             )
             .await;

@@ -46,7 +46,21 @@ pub(crate) fn perform(
                             .collect(),
                     },
                 ) {
-                    Ok(calls) => Response::ToolCalls(calls),
+                    Ok(calls) => {
+                        let view = embedding.packages().view(&packages).map_err(|_| {
+                            PoolError::breach(
+                                lash_vm_protocol::SequenceFault::UnexpectedServiceResponse,
+                            )
+                        })?;
+                        Response::ToolCalls(
+                            calls
+                                .into_iter()
+                                .filter(|path| {
+                                    !lash_kernel_dialect::ExportView::owns_namespace(&view, path)
+                                })
+                                .collect(),
+                        )
+                    }
                     Err(diagnostic) => Response::DialectRefused(refusal(diagnostic)),
                 },
             }
@@ -111,7 +125,6 @@ pub(crate) fn perform(
             packages,
             limits,
         } => {
-            let packages = packages.unwrap_or_else(|| embedding.packages().own());
             let library = match library_of(embedding, &packages)? {
                 Ok(library) => library,
                 Err(not_held) => return respond(&not_held),
@@ -465,7 +478,7 @@ mod tests {
                 language: SourceLanguage::TypeScript,
                 source: source.clone(),
                 operations: Default::default(),
-                packages: Some(unheld),
+                packages: unheld,
                 limits: None,
             },
         ] {

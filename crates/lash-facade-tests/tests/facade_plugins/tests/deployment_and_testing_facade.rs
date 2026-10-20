@@ -112,6 +112,10 @@ async fn definition_args_checks_partial_and_complete_inputs_without_starting() {
             &lash::workflow::document::DocumentBytes::from(document.clone()),
             &lash::workflow::document::Name::new("handler"),
             &environment,
+            core.host_artifacts()
+                .cell_packages()
+                .await
+                .expect("the package gate answers"),
             None,
         )
         .await
@@ -302,6 +306,10 @@ async fn a_saved_definition_start_read_fault_is_an_outer_store_error() {
             &lash::workflow::document::DocumentBytes::from(document.clone()),
             &lash::workflow::document::Name::new("handler"),
             &environment,
+            core.host_artifacts()
+                .cell_packages()
+                .await
+                .expect("the package gate answers"),
             None,
         )
         .await

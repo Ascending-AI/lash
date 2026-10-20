@@ -78,7 +78,9 @@ impl RuntimeTurnDriver<'static> {
             }
         };
         let state = self.turn_pipeline.state();
-        let offered = plugins.protocol_driver().prompt_tools(offered_catalog);
+        let offered = plugins
+            .protocol_driver()
+            .prompt_tools(offered_catalog, self.session.package_view());
         let profile = self.policy.llm_profile_config();
         let cut = prompt_cut(
             PromptCutParts {

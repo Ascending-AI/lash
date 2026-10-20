@@ -63,6 +63,7 @@ fn start(program: Program, bounds: CaseBounds, session: &crate::pages::Session) 
     admission.effects = program.document.manifest.effects.clone();
     admission.bindings = session.names();
     lash_kernel_check::admit(&program.document, &admission).expect("admit protocol document");
+    drop(admission);
     KernelMachine::start(
         program,
         bounds.into(),

@@ -890,7 +890,17 @@ async fn a_declared_inline_start_realizes_once_across_a_crash_at_each_realizatio
         let environment = launching("launch");
         let publication = published(
             artifacts
-                .publish_workflow(&pin, &spawner, &Name::new("spawner"), &environment, None)
+                .publish_workflow(
+                    &pin,
+                    &spawner,
+                    &Name::new("spawner"),
+                    &environment,
+                    artifacts
+                        .cell_packages()
+                        .await
+                        .expect("the package gate answers"),
+                    None,
+                )
                 .await
                 .expect("the spawner publishes"),
         );
@@ -1005,6 +1015,10 @@ async fn an_uncommitted_declared_inline_start_leaves_no_process_and_holds_nothin
                 &spawner("launch_once"),
                 &Name::new("spawner"),
                 &environment,
+                artifacts
+                    .cell_packages()
+                    .await
+                    .expect("the package gate answers"),
                 None,
             )
             .await
@@ -1129,6 +1143,10 @@ async fn an_inline_start_past_the_value_or_batch_bound_publishes_and_starts_noth
                 &spawner("launch"),
                 &Name::new("spawner"),
                 &environment,
+                artifacts
+                    .cell_packages()
+                    .await
+                    .expect("the package gate answers"),
                 None,
             )
             .await

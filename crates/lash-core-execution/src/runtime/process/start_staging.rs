@@ -22,6 +22,9 @@
 //! registration; and the adoption of what was staged once the row committed
 //! ([`StartStaging::adopt`]).
 
+#[path = "start_namespace.rs"]
+mod namespace;
+
 use lash_execution_contracts::process::StagedRegistration;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -753,8 +756,8 @@ async fn stage<'a>(
     registration: ProcessStartRegistration,
     observers: &[SessionId],
 ) -> Result<PreparedProcessStart<'a>, RuntimeEffectControllerError> {
-    let submitted_env_ref = registration.input.launch().map(|launch| launch.env.clone());
-    let env = stage_env(stores, &claim, submitted_env_ref.clone()).await?;
+    let mut submitted_env_ref = registration.input.launch().map(|launch| launch.env.clone());
+    let mut env = stage_env(stores, &claim, submitted_env_ref.clone()).await?;
     mark(stores.phases, Phase::Environment);
     let (definition, mut registration) = resolve_start_target(
         stores,
@@ -774,7 +777,11 @@ async fn stage<'a>(
         registration.trace_class == lash_execution_contracts::process::ProcessTraceClass::Workflow;
     check_sealed_settings(stores, &registration)?;
     mark(stores.phases, Phase::Admit);
-    let loaded = load_staged_env(stores, env.as_ref()).await?;
+    let loaded = namespace::link(stores, &claim, &mut registration, &mut env).await?;
+    submitted_env_ref = env
+        .as_ref()
+        .map(|env| env.env_ref.clone())
+        .or(submitted_env_ref);
     mark(stores.phases, Phase::Environment);
     registration.requires = loaded
         .as_ref()

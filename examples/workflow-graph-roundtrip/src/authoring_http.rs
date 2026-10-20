@@ -32,7 +32,7 @@ pub(crate) async fn import_source(
     let _publishing = state.publishing.lock().await;
     let current = state.current();
     check_version(request.version, current.version)?;
-    let (document, map, captions) = if let Some(format) = request.format {
+    let (document, map, captions, packages) = if let Some(format) = request.format {
         let read = state
             .core
             .host_artifacts()
@@ -52,6 +52,15 @@ pub(crate) async fn import_source(
                     .map_err(|error| ErrorResponse::invalid("document_bytes", error))?,
                 None,
                 captions,
+                match current.package_set {
+                    Some(packages) => packages,
+                    None => state
+                        .core
+                        .host_artifacts()
+                        .cell_packages()
+                        .await
+                        .map_err(|error| ErrorResponse::invalid("packages", error))?,
+                },
             ),
             other => {
                 return Err(ErrorResponse::invalid(
@@ -88,6 +97,7 @@ pub(crate) async fn import_source(
                 }
             } else {
                 Origin::Imported {
+                    packages,
                     dialect: request.dialect,
                     text: request.source,
                     map,
@@ -110,12 +120,29 @@ pub(crate) async fn import(
     core: &lash::LashCore,
     dialect: Dialect,
     source: &str,
-) -> Result<(Document, Option<SourceMap>, Captions), ErrorResponse> {
+) -> Result<
+    (
+        Document,
+        Option<SourceMap>,
+        Captions,
+        lash::package::CellPackages,
+    ),
+    ErrorResponse,
+> {
     let environment =
         runtime::environment().map_err(|error| ErrorResponse::invalid("environment", error))?;
     let imported = core
         .host_artifacts()
-        .import_workflow(dialect.language(), source, &environment, None)
+        .import_workflow(
+            dialect.language(),
+            source,
+            &environment,
+            core.host_artifacts()
+                .cell_packages()
+                .await
+                .map_err(|error| ErrorResponse::invalid("packages", error))?,
+            None,
+        )
         .await
         .map_err(|error| ErrorResponse::invalid("source_import", error))?;
     match imported {
@@ -123,6 +150,7 @@ pub(crate) async fn import(
             document,
             source_map,
             captions,
+            packages,
             ..
         } => Ok((
             document
@@ -130,6 +158,7 @@ pub(crate) async fn import(
                 .map_err(|error| ErrorResponse::invalid("document_bytes", error))?,
             Some(source_map),
             captions,
+            packages,
         )),
         WorkflowImport::Refused(diagnostics) => Err(ErrorResponse::new(
             StatusCode::UNPROCESSABLE_ENTITY,

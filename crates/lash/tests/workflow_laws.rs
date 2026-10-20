@@ -410,6 +410,10 @@ main { finish null }
                 &lash::workflow::document::DocumentBytes::from(document.clone()),
                 &Name::new("list"),
                 &list_env,
+                artifacts
+                    .cell_packages()
+                    .await
+                    .expect("the package gate answers"),
                 None,
             )
             .await
@@ -504,6 +508,10 @@ async fn a_host_captures_exactly_the_published_entrys_environment() {
                 &lash::workflow::document::DocumentBytes::from(document.clone()),
                 &Name::new("supervisor"),
                 &candidate,
+                artifacts
+                    .cell_packages()
+                    .await
+                    .expect("the package gate answers"),
                 None,
             )
             .await
@@ -516,7 +524,14 @@ async fn a_host_captures_exactly_the_published_entrys_environment() {
         .expect("capture");
     assert_eq!(
         captured,
-        linking(&candidate, &["processes.start", "processes.await"])
+        linking(&candidate, &["processes.start", "processes.await"]).with_package_roots(
+            lash_kernel_dialect::ExportView::namespace_roots(
+                &lash_vm_runtime::lash_packages()
+                    .expect("the fixture's packages")
+                    .view(&lash_vm_runtime::lash_packages().unwrap().own())
+                    .unwrap(),
+            ),
+        )
     );
     let WorkflowRead::Inspected(inspection) = artifacts
         .definition_graph(&publication.definition.id)
@@ -701,6 +716,10 @@ async fn a_document_is_published_read_edited_in_a_try_region_republished_and_run
                 &lash::workflow::document::DocumentBytes::from(document.clone()),
                 &entry,
                 &environment,
+                artifacts
+                    .cell_packages()
+                    .await
+                    .expect("the package gate answers"),
                 None,
             )
             .await
@@ -764,6 +783,10 @@ async fn a_document_is_published_read_edited_in_a_try_region_republished_and_run
                 &lash::workflow::document::DocumentBytes::from(draft.document().clone()),
                 &entry,
                 &environment,
+                artifacts
+                    .cell_packages()
+                    .await
+                    .expect("the package gate answers"),
                 None,
             )
             .await
@@ -835,6 +858,10 @@ async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
                 &lash::workflow::document::DocumentBytes::from(document.clone()),
                 &Name::new("guarded"),
                 &environment,
+                artifacts
+                    .cell_packages()
+                    .await
+                    .expect("the package gate answers"),
                 None,
             )
             .await
@@ -1030,6 +1057,10 @@ main { finish null }
                 &lash::workflow::document::DocumentBytes::from(document.clone()),
                 &Name::new("computed"),
                 &environment,
+                artifacts
+                    .cell_packages()
+                    .await
+                    .expect("the package gate answers"),
                 None,
             )
             .await
@@ -1146,6 +1177,10 @@ async fn a_fan_out_overlay_holds_one_row_for_each_elements_effect() {
                 &lash::workflow::document::DocumentBytes::from(document.clone()),
                 &entry,
                 &environment,
+                artifacts
+                    .cell_packages()
+                    .await
+                    .expect("the package gate answers"),
                 None,
             )
             .await
@@ -1316,6 +1351,10 @@ async fn a_process_starts_another_entry_of_its_document_by_function_reference_an
                 &lash::workflow::document::DocumentBytes::from(document),
                 &Name::new("supervisor"),
                 &environment,
+                artifacts
+                    .cell_packages()
+                    .await
+                    .expect("the package gate answers"),
                 None,
             )
             .await
@@ -1491,6 +1530,10 @@ async fn a_process_parked_in_its_inner_loop_resumes_on_another_node_and_finishes
                 &lash::workflow::document::DocumentBytes::from(document.clone()),
                 &Name::new("guarded"),
                 &environment,
+                artifacts
+                    .cell_packages()
+                    .await
+                    .expect("the package gate answers"),
                 None,
             )
             .await
@@ -1587,6 +1630,10 @@ async fn a_sealed_env_naming_a_retired_component_builds_without_it_and_resumes()
                 &lash::workflow::document::DocumentBytes::from(document.clone()),
                 &Name::new("guarded"),
                 &environment,
+                artifacts
+                    .cell_packages()
+                    .await
+                    .expect("the package gate answers"),
                 None,
             )
             .await
@@ -1700,6 +1747,10 @@ async fn a_sealed_env_linking_a_retired_components_effect_parks_with_the_typed_r
                 &lash::workflow::document::DocumentBytes::from(document.clone()),
                 &Name::new("echoed"),
                 &environment,
+                artifacts
+                    .cell_packages()
+                    .await
+                    .expect("the package gate answers"),
                 None,
             )
             .await
@@ -1765,6 +1816,7 @@ fn workflow_import_future_is_send() {
                 lash::workflow::document::SourceLanguage::Python,
                 "async def main():\n    return None\n",
                 environment,
+                lash::package::CellPackages(lash::package::lash_packages().unwrap().own()),
                 Some(lash::dialect::workflow::WorkflowSourceLimits {
                     max_bytes: 1024,
                     max_nesting: 16,
@@ -1798,7 +1850,16 @@ async fn typescript_and_python_modules_share_one_entry_contract() {
         let environment = environment.clone();
         async move {
             artifacts
-                .import_workflow(language, source, &environment, None)
+                .import_workflow(
+                    language,
+                    source,
+                    &environment,
+                    artifacts
+                        .cell_packages()
+                        .await
+                        .expect("the package gate answers"),
+                    None,
+                )
                 .await
                 .expect("import answers")
         }

@@ -321,8 +321,14 @@ impl<'a> PackageView<'a> {
 
 /// The set's host packages and their code exports, as namespace
 /// composition and member dispatch read them. lash's own packages export
-/// nothing and take no namespace: their roots are reserved instead.
+/// nothing to user code; their reserved roots still belong to the snapshot.
 impl ExportView for PackageView<'_> {
+    fn namespace_roots(&self) -> BTreeSet<String> {
+        self.packages()
+            .map(|package| package.path().as_slice()[0].as_str().to_owned())
+            .collect()
+    }
+
     fn exports(&self, path: &PackagePath) -> Option<&BTreeMap<Segment, Export>> {
         self.package(path)
             .filter(|package| package.origin() == Origin::Host)
@@ -464,4 +470,49 @@ fn interpreted(
         }
     }
     Ok((registry, roots))
+}
+
+/// An owned handle to one explicit package set, for runtime service boundaries.
+#[derive(Clone, Debug)]
+pub struct SharedPackageView {
+    held: Arc<HeldPackages>,
+    digest: PackageSetDigest,
+}
+
+impl SharedPackageView {
+    /// The set this producer registered at node construction.
+    pub fn declared(held: Arc<HeldPackages>) -> Self {
+        let digest = held.own;
+        Self { held, digest }
+    }
+
+    pub fn new(held: Arc<HeldPackages>, digest: PackageSetDigest) -> Result<Self, SetNotHeld> {
+        held.view(&digest)?;
+        Ok(Self { held, digest })
+    }
+}
+
+impl ExportView for SharedPackageView {
+    fn namespace_roots(&self) -> BTreeSet<String> {
+        self.held
+            .view(&self.digest)
+            .map_or_else(|_| BTreeSet::new(), |view| view.namespace_roots())
+    }
+
+    fn exports(&self, path: &PackagePath) -> Option<&BTreeMap<Segment, Export>> {
+        self.held
+            .view(&self.digest)
+            .ok()?
+            .package(path)
+            .filter(|package| package.origin() == Origin::Host)
+            .map(Package::exports)
+    }
+    fn reserves(&self, root: &str) -> Option<String> {
+        self.held.view(&self.digest).ok()?.reserves(root)
+    }
+    fn paths(&self) -> Vec<PackagePath> {
+        self.held
+            .view(&self.digest)
+            .map_or_else(|_| Vec::new(), |view| view.paths())
+    }
 }

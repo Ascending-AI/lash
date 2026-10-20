@@ -23,6 +23,15 @@ impl ProductionToolHandlers<'_> {
                 contract: grant.contract().clone(),
             })
             .or_else(|| {
+                if !self
+                    .context
+                    .tool_catalog()
+                    .entries()
+                    .iter()
+                    .any(|entry| entry.manifest.id == invocation.tool_id)
+                {
+                    return None;
+                }
                 self.context
                     .dispatch()
                     .routes

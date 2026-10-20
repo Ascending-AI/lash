@@ -1056,6 +1056,28 @@
         },
         {
           "additionalProperties": false,
+          "description": "OP-INTERNAL: only the declaring package's bodies may perform it.",
+          "properties": {
+            "internal_operation": {
+              "additionalProperties": false,
+              "properties": {
+                "effect": {
+                  "$ref": "#/$defs/QualifiedName"
+                }
+              },
+              "required": [
+                "effect"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "internal_operation"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "`K-ADM-002`: the environment's effect does not serve the signature\nthe document expects.",
           "properties": {
             "effect_signature": {

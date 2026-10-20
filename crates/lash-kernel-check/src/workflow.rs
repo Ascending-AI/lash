@@ -269,6 +269,9 @@ fn admit_entry(
     }
     let graph = derive_entry(document, environment.functions, entry)
         .map_err(WorkflowAdmissionRefusal::Document)?;
+    environment
+        .check_visibility(&graph)
+        .map_err(WorkflowAdmissionRefusal::Document)?;
     let effects = entry_effects(document, &graph, environment.functions, entry)
         .map_err(WorkflowAdmissionRefusal::EntryEffects)?;
     let mut errors = Vec::new();

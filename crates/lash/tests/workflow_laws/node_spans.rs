@@ -141,6 +141,10 @@ async fn publish_nodes(
                 &lash::workflow::document::DocumentBytes::from(draft.document().clone()),
                 &Name::new("nodes"),
                 &environment,
+                artifacts
+                    .cell_packages()
+                    .await
+                    .expect("the package gate answers"),
                 None,
             )
             .await
@@ -323,11 +327,17 @@ async fn a_definition_start_attributes_loading_resolution_acquisition_and_claim_
     let pin = lash::process::HostArtifactPin::mint();
     let env = environment(false);
     let source = "export async function run(name: string) { const values = [name, name.toUpperCase()]; return values.join(\",\"); }";
-    let lash::workflow::WorkflowImport::Imported { document, .. } = artifacts
+    let lash::workflow::WorkflowImport::Imported {
+        document, packages, ..
+    } = artifacts
         .import_workflow(
             lash::workflow::document::SourceLanguage::TypeScript,
             source,
             &env,
+            artifacts
+                .cell_packages()
+                .await
+                .expect("the package gate answers"),
             None,
         )
         .await
@@ -337,7 +347,7 @@ async fn a_definition_start_attributes_loading_resolution_acquisition_and_claim_
     };
     let publication = published(
         artifacts
-            .publish_workflow(&pin, &document, &Name::new("run"), &env, None)
+            .publish_workflow(&pin, &document, &Name::new("run"), &env, packages, None)
             .await
             .expect("publish"),
     );

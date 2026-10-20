@@ -21,7 +21,9 @@ impl StandardProtocolConfig {
     pub fn tool_docs(
         &self,
         catalog: &lash_core::ToolCatalog,
+        packages: &dyn lash_kernel_dialect::ExportView,
     ) -> Result<PresentedToolSection, PresentationRefusal> {
+        let catalog = catalog.public_operations(packages);
         let config = self.tool_presenter.admit(&self.tool_presentation)?.config;
         // A Standard-mode model calls each tool by its derived name.
         let names = catalog
@@ -63,4 +65,22 @@ pub(crate) fn tool_presentation_refused(
         code: refusal.code().to_owned(),
         message: refusal.to_string(),
     }
+}
+
+pub(crate) fn validate_discovery(
+    tools: &[lash_core::ToolManifest],
+    discovery: Option<&lash_core::ToolDiscovery>,
+) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
+    if let Some(discovery) = discovery
+        && !tools
+            .iter()
+            .any(|tool| tool.inline && tool.tool() == discovery.operation)
+    {
+        return Err(
+            lash_execution_contracts::plugin_error::PluginError::InvalidToolDiscovery {
+                operation: discovery.operation.clone(),
+            },
+        );
+    }
+    Ok(())
 }

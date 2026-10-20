@@ -357,6 +357,18 @@ pub trait ProcessDocumentProvider: Send + Sync {
     /// package declares (PKG-RUNNER).
     fn owned_operations(&self, performed: &PerformedEffects) -> OwnedOperations;
 
+    /// The producer's package set for a host start with no parent cell.
+    fn definition_packages(
+        &self,
+        payload: &serde_json::Value,
+    ) -> Result<Option<lash_kernel_doc::PackageSetDigest>, crate::PluginError>;
+    fn initial_packages(&self) -> Result<lash_kernel_doc::PackageSetDigest, crate::PluginError>;
+    /// Resolve the definition's selected surface snapshot.
+    fn package_view(
+        &self,
+        packages: lash_kernel_doc::PackageSetDigest,
+    ) -> Result<std::sync::Arc<dyn lash_kernel_dialect::ExportView + Send + Sync>, crate::PluginError>;
+
     /// The document of the definition `payload` names: a start payload or a
     /// definition value, as [`ProcessEngine::start_artifacts`] reads it.
     async fn document(

@@ -60,6 +60,7 @@ pub(crate) struct CatalogWorkflow {
     python: Option<ImportedTwin>,
 }
 pub(crate) struct ImportedTwin {
+    packages: lash::package::CellPackages,
     pub(crate) document: Document,
     pub(crate) entry: Name,
     dialect: Dialect,
@@ -70,6 +71,7 @@ pub(crate) struct ImportedTwin {
 impl ImportedTwin {
     pub(crate) fn origin(&self) -> crate::Origin {
         crate::Origin::Imported {
+            packages: self.packages,
             dialect: self.dialect,
             text: self.source.into(),
             map: self.map.clone(),
@@ -141,7 +143,7 @@ impl Catalog {
                     }
                     twins.push(None);
                 } else {
-                    let (document, map, captions) = imported.map_err(|error| {
+                    let (document, map, captions, packages) = imported.map_err(|error| {
                         RunError::Invalid(format!("{} ({dialect:?}): {:?}", case.name, error.body))
                     })?;
                     let entries: Vec<_> =
@@ -153,6 +155,7 @@ impl Catalog {
                         )));
                     }
                     twins.push(Some(ImportedTwin {
+                        packages,
                         document,
                         entry: Name::new(&entries[0]),
                         dialect,

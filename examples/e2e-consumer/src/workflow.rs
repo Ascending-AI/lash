@@ -480,6 +480,11 @@ async fn publish_draft(State(host): State<Host>, Json(request): Json<PublishDraf
             &lash::workflow::document::DocumentBytes::from(draft.document().clone()),
             &request.entry,
             &environment().map_err(api_error)?,
+            host.core
+                .host_artifacts()
+                .cell_packages()
+                .await
+                .map_err(api_error)?,
             None,
         )
         .await

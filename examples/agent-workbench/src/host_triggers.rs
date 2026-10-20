@@ -271,6 +271,7 @@ impl HostTriggers {
                definition_json TEXT NOT NULL,
                -- The inline snapshot lets pending publication recover after a crash.
                function_json TEXT NOT NULL,
+               packages TEXT NOT NULL,
                event_arg TEXT NOT NULL,
                args_json TEXT NOT NULL,
                -- The host pin that holds the definition once the row is pinned.

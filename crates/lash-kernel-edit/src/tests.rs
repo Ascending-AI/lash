@@ -1308,6 +1308,7 @@ fn canvas_atomic() {
         &environment,
     );
     assert_eq!(error.diagnostics[0].edit, Some(1));
+    drop(environment);
     let bounds = Bounds {
         memory_meter: lash_kernel_vm::MemoryMeter::On,
         charge: lash_kernel_vm::Charge::Exact,

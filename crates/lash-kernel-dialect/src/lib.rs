@@ -45,7 +45,8 @@ pub use dialect::{
 };
 pub use exports::{
     BRAND_FIELD, BUILT_FIELD, Export, ExportView, Intent, Member, NoPackages, OperationExport,
-    Reserving, TypeMember, ValueType, Visibility, brand_tuple, brand_type,
+    PackagePathClass, Reserving, TypeMember, ValueType, Visibility, brand_tuple, brand_type,
+    classify_package_path, operation_visibility,
 };
 pub use lash_kernel_state::WaitId;
 pub use library::{Library, LibraryError, NamedLibrary, require_through_bodies};

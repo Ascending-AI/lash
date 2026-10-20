@@ -48,6 +48,7 @@ struct ToolCatalogArtifact {
     tools: crate::SurfaceTools,
     tool_catalog: Arc<crate::ToolCatalog>,
     preamble: Arc<crate::TurnDriverPreamble>,
+    packages: Arc<dyn lash_kernel_dialect::ExportView + Send + Sync>,
     derived: ToolCatalogDerived,
 }
 
@@ -85,7 +86,12 @@ impl ToolCatalogHandle {
     fn catalog(&self) -> Arc<Vec<serde_json::Value>> {
         Arc::clone(self.0.derived.catalog.get_or_init(|| {
             Arc::new(crate::tool_registry::project_tool_catalog(
-                self.0.tool_catalog.entries().iter().cloned(),
+                self.0
+                    .tool_catalog
+                    .public_operations(self.0.packages.as_ref())
+                    .entries()
+                    .iter()
+                    .cloned(),
             ))
         }))
     }
@@ -321,6 +327,10 @@ impl Session {
         }
     }
 
+    pub fn package_view(&self) -> &(dyn lash_kernel_dialect::ExportView + Send + Sync) {
+        self.services.packages.as_ref()
+    }
+
     pub fn session_id(&self) -> &SessionId {
         &self.session_id
     }
@@ -348,10 +358,16 @@ impl Session {
         surface: Arc<crate::RecordedSurface>,
         tool_catalog: Arc<crate::ToolCatalog>,
     ) -> ToolCatalogHandle {
+        let tool_catalog = Arc::new(
+            self.plugins()
+                .protocol_driver()
+                .model_catalog(&tool_catalog, self.services.packages.as_ref()),
+        );
         let preamble = self
             .plugins()
             .protocol_driver()
             .build_preamble(crate::ProtocolBuildInput {
+                packages: Arc::clone(&self.services.packages),
                 tool_catalog: Arc::clone(&tool_catalog),
                 plugin_extensions: self.plugins().extensions().clone(),
                 writer_formats: Arc::new(crate::FleetWriterFormats(self.fleet_format())),
@@ -361,6 +377,7 @@ impl Session {
             surface,
             tool_catalog,
             preamble: Arc::new(preamble),
+            packages: Arc::clone(&self.services.packages),
             derived: ToolCatalogDerived::default(),
         }))
     }
@@ -405,6 +422,7 @@ impl Session {
             .plugins()
             .protocol_driver()
             .build_preamble(crate::ProtocolBuildInput {
+                packages: Arc::clone(&self.services.packages),
                 tool_catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(Vec::new())),
                 plugin_extensions: self.plugins().extensions().clone(),
                 writer_formats: Arc::new(crate::FleetWriterFormats(self.fleet_format())),

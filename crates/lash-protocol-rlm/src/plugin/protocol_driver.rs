@@ -53,8 +53,12 @@ impl ProtocolDriverPlugin for RlmProtocolDriver {
     fn prompt_tools(
         &self,
         catalog: Arc<lash_core::ToolCatalog>,
+        packages: &dyn lash_kernel_dialect::ExportView,
     ) -> lash_core::plugin::prompt::OfferedTools {
-        lash_core::plugin::prompt::OfferedTools::new(catalog, self.config.discovery.is_some())
+        lash_core::plugin::prompt::OfferedTools::new(
+            Arc::new(catalog.public_operations(packages)),
+            self.config.discovery.is_some(),
+        )
     }
 
     fn build_preamble(&self, input: ProtocolBuildInput) -> TurnDriverPreamble {

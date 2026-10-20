@@ -152,7 +152,7 @@ impl NodeHold {
         let mut dependents = lash_vm_runtime::retained_processes(backend)
             .await
             .map_err(survey_failed)?;
-        #[cfg(feature = "rlm")]
+        #[cfg(feature = "codemode")]
         dependents.extend(parked_cells(backend).await?);
         Ok(lash_vm_runtime::RetainSurvey::of(
             &self.packages,
@@ -173,7 +173,7 @@ fn survey_failed(error: lash_vm_runtime::KernelMigrationSurveyError) -> DurableE
 
 /// Every cell of every open turn of `backend`'s sessions, with the
 /// identities its document lists: a parked root pins them.
-#[cfg(feature = "rlm")]
+#[cfg(feature = "codemode")]
 async fn parked_cells(
     backend: &crate::Backend,
 ) -> Result<
@@ -231,6 +231,18 @@ async fn parked_cells(
 
 #[async_trait::async_trait]
 impl lash_execution_contracts::backend::NodePackages for NodeHold {
+    fn candidates(
+        &self,
+        catalog: &PackageCatalog,
+    ) -> Vec<(PackageSetDigest, BTreeSet<HeldArtifact>)> {
+        NodeHold::candidates(self, catalog)
+    }
+    fn surface_view(&self) -> Arc<dyn lash_kernel_dialect::ExportView + Send + Sync> {
+        Arc::new(lash_kernel_package::SharedPackageView::declared(
+            Arc::clone(&self.packages),
+        ))
+    }
+
     async fn hold(&self, backend: &crate::Backend) -> Result<BTreeSet<HeldArtifact>, DurableError> {
         let (artifacts, sets) = install_rows(&self.packages);
         backend
@@ -293,20 +305,23 @@ pub(crate) fn fleet_package_set(
 }
 
 /// The package set a node of `backend` writes a cell under: the fleet gate.
-#[cfg(feature = "rlm")]
+#[cfg(feature = "codemode")]
 pub(crate) struct FleetPackages {
     backend: crate::Backend,
-    hold: Arc<NodeHold>,
+    hold: Arc<dyn lash_execution_contracts::backend::NodePackages>,
 }
 
-#[cfg(feature = "rlm")]
+#[cfg(feature = "codemode")]
 impl FleetPackages {
-    pub(crate) fn new(backend: crate::Backend, hold: Arc<NodeHold>) -> Self {
+    pub(crate) fn new(
+        backend: crate::Backend,
+        hold: Arc<dyn lash_execution_contracts::backend::NodePackages>,
+    ) -> Self {
         Self { backend, hold }
     }
 }
 
-#[cfg(feature = "rlm")]
+#[cfg(feature = "codemode")]
 fn packages_unavailable(message: impl Into<String>) -> lash_core::RuntimeEffectControllerError {
     lash_core::RuntimeEffectControllerError::new(
         lash_core::RuntimeErrorCode::RunDefinitionUnavailable,
@@ -315,12 +330,13 @@ fn packages_unavailable(message: impl Into<String>) -> lash_core::RuntimeEffectC
     .retryable_uncommitted_derivation()
 }
 
-#[cfg(feature = "rlm")]
+#[cfg(feature = "codemode")]
 #[async_trait::async_trait]
-impl lash_protocol_rlm::PackageGate for FleetPackages {
+impl lash_execution_contracts::PackageGate for FleetPackages {
     async fn writable(
         &self,
-    ) -> Result<lash_protocol_rlm::CellPackages, lash_core::RuntimeEffectControllerError> {
+    ) -> Result<lash_execution_contracts::CellPackages, lash_core::RuntimeEffectControllerError>
+    {
         let durable = self.backend.durable();
         let unavailable = |error: DurableError| {
             tracing::warn!(
@@ -341,9 +357,13 @@ impl lash_protocol_rlm::PackageGate for FleetPackages {
             chosen = ?chosen.map(|digest| digest.short()),
             "package set fleet gate"
         );
-        chosen.map(lash_protocol_rlm::CellPackages).ok_or_else(|| {
-            packages_unavailable("no package set is held by every live node serving these sessions")
-        })
+        chosen
+            .map(lash_execution_contracts::CellPackages)
+            .ok_or_else(|| {
+                packages_unavailable(
+                    "no package set is held by every live node serving these sessions",
+                )
+            })
     }
 }
 

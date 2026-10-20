@@ -495,6 +495,25 @@ impl ProcessEngineRegistry {
             .await
     }
 
+    /// Freeze namespace roots from the definition's linked snapshot into its env.
+    /// The runtime needs no package view to refuse computed package paths.
+    pub fn link_package_namespaces(
+        &self,
+        kind: &str,
+        payload: &serde_json::Value,
+        env: crate::ProcessEnv,
+    ) -> Result<crate::ProcessEnv, lash_execution_contracts::PluginError> {
+        let Some(provider) = self.document_provider(kind) else {
+            return Ok(env);
+        };
+        let digest = provider
+            .definition_packages(payload)?
+            .unwrap_or(provider.initial_packages()?);
+        let view = provider.package_view(digest)?;
+        let roots = view.namespace_roots();
+        Ok(env.with_package_roots(roots))
+    }
+
     /// Check that `env` links exactly `performed`, what a run on the `kind`
     /// engine performs, each to a tool its components serve under the
     /// contract the code requires and, on a path a package owns in the

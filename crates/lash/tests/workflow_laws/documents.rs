@@ -107,6 +107,10 @@ async fn a_running_process_draws_its_view_after_its_pin_and_helper_release_are_g
                 &lash::workflow::document::DocumentBytes::from(document.clone()),
                 &entry,
                 &environment,
+                artifacts
+                    .cell_packages()
+                    .await
+                    .expect("the package gate answers"),
                 None,
             )
             .await
@@ -142,6 +146,10 @@ async fn a_running_process_draws_its_view_after_its_pin_and_helper_release_are_g
                 &lash::workflow::document::DocumentBytes::from(marker.clone()),
                 &Name::new("marker"),
                 &environment,
+                artifacts
+                    .cell_packages()
+                    .await
+                    .expect("the package gate answers"),
                 None,
             )
             .await
@@ -242,7 +250,7 @@ async fn an_unpublished_import_draws_from_shipped_declarations_and_refuses_a_cor
         .import_workflow(
             lash::workflow::document::SourceLanguage::TypeScript,
             "export async function digest(items: string[]) { const out = items.map((item) => item); return out; }",
-            &environment,
+            &environment, artifacts.cell_packages().await.expect("the package gate answers"),
             None,
         )
         .await
@@ -333,6 +341,10 @@ async fn a_publication_holds_its_checked_source_map_and_refuses_one_that_does_no
                     lash::workflow::document::SourceLanguage::TypeScript,
                     source,
                     &environment,
+                    artifacts
+                        .cell_packages()
+                        .await
+                        .expect("the package gate answers"),
                     None,
                 )
                 .await
@@ -376,6 +388,10 @@ async fn a_publication_holds_its_checked_source_map_and_refuses_one_that_does_no
                     &lash::workflow::document::DocumentBytes::from(document.clone()),
                     &entry,
                     &environment,
+                    artifacts
+                        .cell_packages()
+                        .await
+                        .expect("the package gate answers"),
                     Some((&map, "other source"))
                 )
                 .await
@@ -391,6 +407,10 @@ async fn a_publication_holds_its_checked_source_map_and_refuses_one_that_does_no
                     &lash::workflow::document::DocumentBytes::from(other.clone()),
                     &entry,
                     &environment,
+                    artifacts
+                        .cell_packages()
+                        .await
+                        .expect("the package gate answers"),
                     Some((&map, &printed.source))
                 )
                 .await
@@ -413,6 +433,10 @@ async fn a_publication_holds_its_checked_source_map_and_refuses_one_that_does_no
                     &lash::workflow::document::DocumentBytes::from(document.clone()),
                     &entry,
                     &environment,
+                    artifacts
+                        .cell_packages()
+                        .await
+                        .expect("the package gate answers"),
                     Some((&stray, &printed.source))
                 )
                 .await
@@ -446,6 +470,10 @@ async fn a_publication_holds_its_checked_source_map_and_refuses_one_that_does_no
                 &lash::workflow::document::DocumentBytes::from(document.clone()),
                 &entry,
                 &environment,
+                artifacts
+                    .cell_packages()
+                    .await
+                    .expect("the package gate answers"),
                 Some((&map, &printed.source)),
             )
             .await
@@ -486,7 +514,17 @@ async fn a_host_runs_opaque_document_bytes_without_json() {
     let _ = document_work::take();
     let publication = published(
         artifacts
-            .publish_workflow(&pin, &received, &Name::new("answer"), &env, None)
+            .publish_workflow(
+                &pin,
+                &received,
+                &Name::new("answer"),
+                &env,
+                artifacts
+                    .cell_packages()
+                    .await
+                    .expect("the package gate answers"),
+                None,
+            )
             .await
             .expect("publish bytes"),
     );
@@ -534,6 +572,10 @@ async fn a_publication_acknowledges_admission_and_reads_its_pinned_document() {
                 &lash::workflow::document::DocumentBytes::from(document.clone()),
                 &Name::new("answer"),
                 &environment(false),
+                artifacts
+                    .cell_packages()
+                    .await
+                    .expect("the package gate answers"),
                 None,
             )
             .await
@@ -627,7 +669,17 @@ async fn host_document_bytes_refuse_tampering_and_wrong_grammar_typed() {
     ));
     for (bad, expected) in cases {
         let WorkflowPublish::Refused(WorkflowAdmissionRefusal::Bytes(refusal)) = artifacts
-            .publish_workflow(&pin, &bad, &Name::new("missing"), &env, None)
+            .publish_workflow(
+                &pin,
+                &bad,
+                &Name::new("missing"),
+                &env,
+                artifacts
+                    .cell_packages()
+                    .await
+                    .expect("the package gate answers"),
+                None,
+            )
             .await
             .expect("typed answer")
         else {

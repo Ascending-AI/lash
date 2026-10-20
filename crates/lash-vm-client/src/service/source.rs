@@ -65,7 +65,7 @@ impl Service {
 
     /// Lower a whole authored workflow module in the dialect of `language`,
     /// against the names of the package set `packages` (the worker's own
-    /// set when `None`), under the host's
+    /// set), under the host's
     /// source limits or, without them, the dialect's
     /// standard policy. Exported source is read back against its base
     /// document with [`Self::read_exported`] instead.
@@ -74,7 +74,7 @@ impl Service {
         language: lash_kernel_doc::SourceLanguage,
         source: &str,
         operations: &lash_kernel_dialect::Operations,
-        packages: Option<lash_kernel_doc::PackageSetDigest>,
+        packages: lash_kernel_doc::PackageSetDigest,
         limits: Option<lash_kernel_dialect::workflow::WorkflowSourceLimits>,
     ) -> Result<(Document, lash_kernel_doc::SourceMap, Captions), SourceServiceError> {
         let response = self

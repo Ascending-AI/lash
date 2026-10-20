@@ -58,10 +58,8 @@ pub enum Request {
         /// The operations the workflow is offered.
         #[serde(with = "lash_kernel_dialect::operation_keys")]
         operations: lash_kernel_dialect::Operations,
-        /// The package set whose names the module resolves against; `None`
-        /// is the worker's own set, for host authoring outside any cell.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        packages: Option<PackageSetDigest>,
+        /// The gate's package set whose names the module resolves against.
+        packages: PackageSetDigest,
         limits: Option<lash_kernel_dialect::workflow::WorkflowSourceLimits>,
     },
     /// Print `document` (its token body) in the selected generated format,

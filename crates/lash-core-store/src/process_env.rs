@@ -51,6 +51,10 @@ pub struct ProcessEnv {
     components: Vec<ProcessComponentEntry>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     capabilities: BTreeMap<SlotId, CapabilityRef>,
+    /// Namespace roots of the snapshot this process was linked against.
+    /// Dynamic strings cannot enter any of these statically linked namespaces.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    package_roots: BTreeSet<String>,
 }
 
 /// The model data a process's direct calls and tools read (D16): the data
@@ -486,6 +490,7 @@ impl ProcessEnv {
                 effects: BTreeMap::new(),
                 components: Vec::new(),
                 capabilities: BTreeMap::new(),
+                package_roots: BTreeSet::new(),
             },
             refusal: None,
         }
@@ -548,6 +553,17 @@ impl ProcessEnv {
             })
             .collect::<Result<_, _>>()?;
         Ok(restricted)
+    }
+
+    pub fn package_roots(&self) -> &BTreeSet<String> {
+        &self.package_roots
+    }
+
+    /// Record the namespace decision made at linking, before the start is stored.
+    #[must_use]
+    pub fn with_package_roots(mut self, roots: BTreeSet<String>) -> Self {
+        self.package_roots = roots;
+        self
     }
 
     pub fn model(&self) -> Option<&ProcessModel> {

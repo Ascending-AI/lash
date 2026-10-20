@@ -115,6 +115,15 @@ impl ToolCatalog {
         &self.0.tools
     }
 
+    /// Public operations of this explicit package view. Standard assembly and
+    /// discovery use this catalog; code-mode execution keeps the full catalog.
+    pub fn public_operations(&self, view: &dyn lash_kernel_dialect::ExportView) -> Self {
+        self.filtered(|entry| {
+            lash_kernel_dialect::operation_visibility(view, &entry.manifest.operation)
+                == lash_kernel_dialect::Visibility::Public
+        })
+    }
+
     /// Prompt-only projection. The original catalogue retains execution authority.
     pub fn inline_tools(&self) -> Self {
         self.filtered(|entry| entry.manifest.inline)

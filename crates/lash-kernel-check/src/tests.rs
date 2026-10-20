@@ -831,6 +831,7 @@ fn a_structural_fault_refuses_in_the_document_and_in_a_reached_body() {
         }]
     );
 
+    drop(environment);
     // A body that nests a call of a function with no native implementation.
     let nested = register(
         &mut library.catalog,
@@ -1448,4 +1449,42 @@ fn one_effect_under_two_requirements_is_refused_naming_both() {
             },
         }]
     );
+}
+
+/// OP-INTERNAL: authored units, including closures passed into library code,
+/// cannot perform an internal operation; the package body itself may.
+#[test]
+fn internal_operations_are_refused_in_authored_units_only() {
+    let (catalog, fetch, outer, requirement) = reached_perform();
+    let internal = |effect: &EffectName| effect.as_str() == "web.fetch";
+    let mut environment = Environment::new(&catalog);
+    environment.internal = Box::new(internal);
+    environment.effects.insert(effect("web.fetch"), requirement);
+    let header = "kernel 1\nnumbers float\neffect web.fetch(value?: Any) -> Any contract \"3\"\n";
+    for body in [
+        "main { let x = perform web.fetch(1) as Any finish x }",
+        "main { finish [perform web.fetch(1) as Any][0] }",
+        "fn sneak() { let x = perform web.fetch(1) as Any return x } main { let x = call sneak() finish x }",
+        "main { let f = fn() { let x = perform web.fetch(1) as Any return x } let x = apply f() finish x }",
+    ] {
+        let refusal = admit(&document(&format!("{header}{body}")), &environment)
+            .expect_err("an authored perform of an internal operation is refused");
+        assert!(
+            refusal.errors.iter().any(|error| {
+                error.reason
+                    == RefusalReason::InternalOperation {
+                        effect: effect("web.fetch"),
+                    }
+                    && error
+                        .site
+                        .as_ref()
+                        .is_some_and(|site| !matches!(site.unit, Unit::Library(_)))
+            }),
+            "{refusal}"
+        );
+    }
+    let through_body = document(&format!(
+        "{header}use probe.outer = @{outer}\nuse probe.fetch = @{fetch}\nmain {{ let x = invoke probe.outer(1) finish x }}"
+    ));
+    admit(&through_body, &environment).expect("the library body's perform is permitted");
 }

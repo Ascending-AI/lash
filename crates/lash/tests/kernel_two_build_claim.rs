@@ -267,6 +267,7 @@ async fn payload(backend: &lash::Backend, text: &str) -> serde_json::Value {
             &document,
             identity,
             lash::workflow::document::Name::new("worker"),
+            None,
         )
         .start(serde_json::Map::new()),
     )
@@ -999,6 +1000,7 @@ async fn payload_under(
         .await
         .expect("the document publishes");
     serde_json::to_value(lash_vm_runtime::KernelProcessInput {
+        packages: None,
         document: identity,
         functions: document.manifest.functions.keys().copied().collect(),
         entry: lash::workflow::document::Name::new("worker"),

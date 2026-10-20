@@ -92,11 +92,17 @@ async fn a_function_a_process_ships_runs_from_its_own_document_as_it_was() {
         )
         .build()
         .expect("the capture environment");
-    let lash::workflow::WorkflowImport::Imported { document, .. } = artifacts
+    let lash::workflow::WorkflowImport::Imported {
+        document, packages, ..
+    } = artifacts
         .import_workflow(
             lash::workflow::document::SourceLanguage::TypeScript,
             SHIPS,
             &environment,
+            artifacts
+                .cell_packages()
+                .await
+                .expect("the package gate answers"),
             None,
         )
         .await
@@ -106,7 +112,14 @@ async fn a_function_a_process_ships_runs_from_its_own_document_as_it_was() {
     };
     let publication = published(
         artifacts
-            .publish_workflow(&pin, &document, &Name::new("ships"), &environment, None)
+            .publish_workflow(
+                &pin,
+                &document,
+                &Name::new("ships"),
+                &environment,
+                packages,
+                None,
+            )
             .await
             .expect("publish"),
     );

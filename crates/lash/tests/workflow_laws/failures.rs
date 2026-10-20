@@ -25,6 +25,7 @@ pub(super) struct Module {
     map: lash::workflow::document::SourceMap,
     pin: lash::process::HostArtifactPin,
     document: lash::workflow::document::DocumentBytes,
+    packages: lash::package::CellPackages,
     environment: lash::process::ProcessEnv,
 }
 
@@ -36,16 +37,26 @@ impl Module {
     ) -> Self {
         let artifacts = core.host_artifacts();
         let environment = environment(false);
-        let (document, source_map) = match artifacts
-            .import_workflow(language, source, &environment, None)
+        let (document, source_map, packages) = match artifacts
+            .import_workflow(
+                language,
+                source,
+                &environment,
+                artifacts
+                    .cell_packages()
+                    .await
+                    .expect("the package gate answers"),
+                None,
+            )
             .await
             .expect("import answers")
         {
             lash::workflow::WorkflowImport::Imported {
                 document,
                 source_map,
+                packages,
                 ..
-            } => (document, source_map),
+            } => (document, source_map, packages),
             other => panic!("the module imports: {other:?}\n{source}"),
         };
         Self {
@@ -54,6 +65,7 @@ impl Module {
             map: source_map,
             pin: lash::process::HostArtifactPin::mint(),
             document,
+            packages,
             environment,
         }
     }
@@ -79,6 +91,7 @@ impl Module {
                     &self.document,
                     &Name::new(entry),
                     &self.environment,
+                    self.packages,
                     None,
                 )
                 .await

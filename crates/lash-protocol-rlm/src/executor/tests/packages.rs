@@ -903,3 +903,53 @@ async fn a_package_value_holding_a_user_lambda_carries_and_crosses_in_the_next_c
         );
     }
 }
+
+/// P3 / R3: a displayed snapshot stays authoritative even on a node that
+/// cannot serve it; asking the gate again could disclose newly public names.
+#[tokio::test]
+async fn an_unavailable_shown_snapshot_is_refused_without_a_second_gate_answer() {
+    struct Counts(std::sync::atomic::AtomicUsize, PackageSetDigest);
+    #[async_trait::async_trait]
+    impl crate::plugin::PackageGate for Counts {
+        async fn writable(
+            &self,
+        ) -> Result<crate::CellPackages, lash_core::RuntimeEffectControllerError> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(crate::CellPackages(self.1))
+        }
+    }
+    let held = lash_vm_runtime::lash_packages().unwrap();
+    let unavailable = PackageSetDigest::from_bytes([9; 32]);
+    let gate = Arc::new(Counts(std::sync::atomic::AtomicUsize::new(0), held.own()));
+    let mut services = cell_services(
+        &CellDialect::typescript(),
+        lash_vm_client::service::Service::default(),
+    );
+    services.packages = Some(gate.clone());
+    let mut state = crate::testing::session_state(&CellDialect::typescript());
+    state.shows_packages(crate::CellPackages(unavailable));
+    let host = open_host().await;
+    let response = run_cell(
+        &mut state,
+        cell_context(
+            &host,
+            SESSION,
+            TURN,
+            "exec-code:0",
+            Arc::new(CellTools::default()),
+        ),
+        &services,
+        "const safe = 1;",
+    )
+    .await;
+    assert!(
+        matches!(response.error().map(|failure| &failure.kind), Some(lash_core::CellFailureKind::PackagesNotHeld { packages }) if *packages == unavailable),
+        "{:?}",
+        response.result
+    );
+    assert_eq!(
+        gate.0.load(Ordering::SeqCst),
+        0,
+        "the displayed snapshot is the round's only answer"
+    );
+}

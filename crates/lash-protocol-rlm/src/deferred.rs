@@ -62,6 +62,7 @@ pub(crate) fn offer_unavailable_notes(
         // A note has no runner: its offer states the fixed contract of an
         // operation no runner serves, and a perform of it raises the note.
         let offered = lash_kernel_dialect::Offered {
+            visibility: lash_kernel_dialect::Visibility::Public,
             requirement: lash_kernel_doc::OperationRequirement {
                 signature,
                 contract: lash_kernel_doc::ContractId::new(UNAVAILABLE_CONTRACT),
@@ -75,6 +76,33 @@ pub(crate) fn offer_unavailable_notes(
         }
     }
     notes
+}
+
+/// Refuse before a resolved grant can be committed or offered.
+fn refuse_internal(
+    outcome: DeferredOutcome,
+    view: &dyn lash_kernel_dialect::ExportView,
+) -> Result<DeferredOutcome, lash_execution_contracts::plugin_error::PluginError> {
+    if let DeferredOutcome::Resolved { link } = &outcome
+        && let Some(definition) = link.resolution()
+        && lash_kernel_dialect::operation_visibility(view, &definition.manifest.operation)
+            == lash_kernel_dialect::Visibility::Internal
+    {
+        return Err(
+            lash_execution_contracts::plugin_error::PluginError::InternalOperation {
+                operation: definition.manifest.operation.effect_name().to_string(),
+            },
+        );
+    }
+    if let DeferredOutcome::Resolved { link } = &outcome
+        && let Some(definition) = link.resolution()
+        && view.owns_namespace(definition.manifest.operation.effect_name().as_str())
+    {
+        return Err(lash_execution_contracts::PluginError::PackageNamespace {
+            path: definition.manifest.operation.effect_name().to_string(),
+        });
+    }
+    Ok(outcome)
 }
 
 /// A cell could not decide or offer its deferred matches.
@@ -135,7 +163,54 @@ impl DeferredResolutionError {
 pub(crate) async fn journal_deferred_matches(
     candidates: BTreeSet<String>,
     ctx: &lash_core::RuntimeExecutionContext<'_>,
+    view: &(dyn lash_kernel_dialect::ExportView + Sync),
 ) -> Result<Option<BTreeMap<String, DeferredMatch>>, DeferredResolutionError> {
+    let mut local = BTreeMap::new();
+    let mut external = BTreeSet::new();
+    for path in candidates {
+        let segments = path
+            .split('.')
+            .map(lash_kernel_dialect::Segment::new)
+            .collect::<Result<Vec<_>, _>>();
+        let classified = segments.as_ref().map_or_else(
+            |_| {
+                if view.owns_namespace(&path) {
+                    lash_kernel_dialect::PackagePathClass::Unknown
+                } else {
+                    lash_kernel_dialect::PackagePathClass::Outside
+                }
+            },
+            |segments| lash_kernel_dialect::classify_package_path(view, segments),
+        );
+        match classified {
+            lash_kernel_dialect::PackagePathClass::Outside => {
+                external.insert(path);
+                continue;
+            }
+            lash_kernel_dialect::PackagePathClass::Internal => {
+                return Err(DeferredResolutionError::ProviderRegistry(
+                    lash_execution_contracts::PluginError::InternalOperation { operation: path },
+                ));
+            }
+            lash_kernel_dialect::PackagePathClass::Public
+            | lash_kernel_dialect::PackagePathClass::Unknown => {}
+        }
+        local.insert(
+            path.clone(),
+            DeferredMatch {
+                requested: path.clone(),
+                outcome: DeferredOutcome::Refused {
+                    reason: format!(
+                        "no such member `{path}` is offered by the installed package surface"
+                    ),
+                },
+            },
+        );
+    }
+    if external.is_empty() {
+        return Ok(Some(local));
+    }
+    let candidates = external;
     let (provider_handle, provider) = match ctx.deferred_provider() {
         Ok(Some((handle, provider))) => {
             ctx.owner_config()
@@ -143,7 +218,7 @@ pub(crate) async fn journal_deferred_matches(
                 .map_err(DeferredResolutionError::ProviderRegistry)?;
             (handle.clone(), std::sync::Arc::clone(provider))
         }
-        Ok(None) => return Ok(None),
+        Ok(None) => return Ok((!local.is_empty()).then_some(local)),
         Err(provider) => {
             ctx.owner_config()
                 .validate_provider(&provider)
@@ -179,13 +254,18 @@ pub(crate) async fn journal_deferred_matches(
             let mut resolved = provider.resolve(&cx, &paths).await;
             let matches = paths
                 .into_iter()
-                .map(|path| DeferredMatch {
-                    requested: path.to_owned(),
-                    outcome: resolved
-                        .remove(path)
-                        .unwrap_or(DeferredOutcome::Unavailable { note: None }),
+                .map(|path| {
+                    Ok(DeferredMatch {
+                        requested: path.to_owned(),
+                        outcome: refuse_internal(
+                            resolved
+                                .remove(path)
+                                .unwrap_or(DeferredOutcome::Unavailable { note: None }),
+                            view,
+                        )?,
+                    })
                 })
-                .collect::<Vec<_>>();
+                .collect::<Result<Vec<_>, lash_execution_contracts::plugin_error::PluginError>>()?;
             for matched in &matches {
                 if let Some(link) = matched.resolved() {
                     config
@@ -218,6 +298,7 @@ pub(crate) async fn journal_deferred_matches(
         matches
             .into_iter()
             .map(|matched| (matched.requested.clone(), matched))
+            .chain(local)
             .collect(),
     ))
 }
@@ -322,9 +403,13 @@ mod tests {
             .routes(routes)
             .build()
             .into_runtime();
-        let error = journal_deferred_matches(BTreeSet::new(), &context)
-            .await
-            .expect_err("the process address cannot resolve a session");
+        let error = journal_deferred_matches(
+            BTreeSet::from(["outside.lookup".into()]),
+            &context,
+            &lash_kernel_dialect::NoPackages,
+        )
+        .await
+        .expect_err("the process address cannot resolve a session");
         assert!(
             matches!(&error, DeferredResolutionError::ProviderRegistry(lash_execution_contracts::plugin_error::PluginError::ProviderRegistryMismatch { expected: lash_core::RegistryKind::Session, provider }) if provider == &handle)
         );

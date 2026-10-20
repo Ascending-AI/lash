@@ -481,6 +481,31 @@ impl LashRuntime {
         // with no manifest, never through an in-memory stand-in.
         let attachment_store = Arc::clone(&host.core.durability.attachment_store);
         let process_env_store = Arc::clone(&host.core.durability.process_env_store);
+        let package_view = match host.core.backend().packages() {
+            Some(packages) => packages.surface_view(),
+            None => {
+                // A kernel-only host contributes its surface through its document
+                // provider. This projects metadata; it registers no node holdings.
+                let mut selected = None;
+                for kind in host.core.process_engines.engine_kinds() {
+                    if let Some(provider) = host.core.process_engines.document_provider(&kind) {
+                        let packages = provider.initial_packages()?;
+                        if let Some((previous, _)) = &selected
+                            && *previous != packages
+                        {
+                            return Err(lash_execution_contracts::PluginError::Registration(
+                                "session producers declare different package surfaces".into(),
+                            )
+                            .into());
+                        }
+                        selected = Some((packages, provider.package_view(packages)?));
+                    }
+                }
+                selected
+                    .map(|(_, view)| view)
+                    .unwrap_or_else(|| Arc::new(lash_kernel_dialect::NoPackages))
+            }
+        };
         let runtime = match store {
             Some(store) => {
                 let mut services = PersistentRuntimeServices::new(
@@ -495,7 +520,9 @@ impl LashRuntime {
                 Self::from_host_state(
                     policy,
                     host,
-                    services.into_runtime_services(),
+                    services
+                        .into_runtime_services()
+                        .with_packages(Arc::clone(&package_view)),
                     state,
                     runtime_lease_owner.clone(),
                     runtime_lease_executor_id.clone(),
@@ -509,6 +536,7 @@ impl LashRuntime {
                 // durable.
                 let mut services =
                     RuntimeServices::new(plugin_session, attachment_store, process_env_store);
+                services.packages = Arc::clone(&package_view);
                 services.attachment_referrers_store = attachment_referrers_store;
                 Self::from_host_state(
                     policy,

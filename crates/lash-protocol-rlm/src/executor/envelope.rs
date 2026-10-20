@@ -152,6 +152,7 @@ impl CellEnvelope {
                 .offer_operation(
                     operation,
                     Offered {
+                        visibility: lash_kernel_dialect::Visibility::Public,
                         requirement: effect.requirement.clone(),
                         controls: lash_vm_runtime::effect_controls(&effect.controls),
                         read: false,
