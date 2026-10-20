@@ -244,7 +244,9 @@ async fn a_function_that_cannot_cross_raises_before_the_call() {
 }
 
 /// `slots.take`: a tool shaped like `processes.start`: a function slot the
-/// `x-lash` marker declares, an open object, a text and a closed object.
+/// `x-lash` marker declares, the same marker under `anyOf` beside null (as
+/// pydantic and MCP spell an optional function), an open object, a text
+/// and a closed object.
 fn slots() -> lash_core::ToolDefinition {
     typed_definition(
         "tool:slots_take",
@@ -255,6 +257,9 @@ fn slots() -> lash_core::ToolDefinition {
             "type": "object",
             "properties": {
                 "definition": { "x-lash": { "kind": "function" } },
+                "fallback": {
+                    "anyOf": [{ "x-lash": { "kind": "function" } }, { "type": "null" }]
+                },
                 "args": { "type": "object" },
                 "label": { "type": "string" },
                 "plan": {
@@ -319,6 +324,50 @@ async fn a_function_crosses_in_a_slot_the_x_lash_function_marker_declares() {
             function_value(&received[0]["definition"]).entry.as_str(),
             "run"
         );
+    }
+}
+
+/// X-LASH-ONE under composition (FIG-6951): a slot spelled
+/// `anyOf: [{x-lash function}, {type: null}]` is presented as a function or
+/// null in either dialect, and takes either: a function crosses into it as
+/// a function value, and null reaches the tool as null. Main typed every
+/// composition `Json`, so the function raised `not_data` there.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_function_crosses_in_a_nullable_slot_the_x_lash_marker_declares_under_any_of() {
+    for (dialect, function, null, callable, none) in [
+        (
+            CellDialect::typescript(),
+            "{ fallback: f }",
+            "{ fallback: null }",
+            "=> Promise<unknown>",
+            "null",
+        ),
+        (
+            CellDialect::python(),
+            "{'fallback': f}",
+            "{'fallback': None}",
+            "Callable[..., Any]",
+            "None",
+        ),
+    ] {
+        let signature = crate::loaded_tool_signature(&dialect, &serde_json::json!({}), &slots())
+            .expect("an addressable tool");
+        // The slot's spelling: from its name to its null member.
+        let slot = signature
+            .split_once("fallback")
+            .and_then(|(_, rest)| rest.split_once(none))
+            .map(|(slot, _)| slot)
+            .unwrap_or_else(|| panic!("{signature}: the slot is presented nullable"));
+        assert!(slot.contains(callable), "{}: {signature}", dialect.name());
+        let (raised, received) = slots_raised(&dialect, function).await;
+        assert_eq!(raised, "none", "{}", dialect.name());
+        assert_eq!(
+            function_value(&received[0]["fallback"]).entry.as_str(),
+            "run"
+        );
+        let (raised, received) = slots_raised(&dialect, null).await;
+        assert_eq!(raised, "none", "{}", dialect.name());
+        assert_eq!(received[0]["fallback"], serde_json::Value::Null);
     }
 }
 

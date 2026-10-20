@@ -423,6 +423,10 @@ impl TraceEvent {
                             lash_protocol_types::SchemaAdmissionError::Compilation {
                                 message,
                                 ..
+                            }
+                            | lash_protocol_types::SchemaAdmissionError::Unprojectable {
+                                message,
+                                ..
                             } => text(C::CodeOutput, "code_output.error.schema", message, f),
                             lash_protocol_types::SchemaAdmissionError::NonLocalReference {
                                 reference,

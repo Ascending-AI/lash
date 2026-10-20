@@ -120,7 +120,7 @@ fn admits_data(ty: &Type) -> bool {
 
 /// Every value of `ty` is data ([`Type::Json`]): it holds no function,
 /// task or handle anywhere. An error's data may hold one.
-fn data_only(ty: &Type) -> bool {
+pub(crate) fn data_only(ty: &Type) -> bool {
     match ty {
         Type::Json
         | Type::Null

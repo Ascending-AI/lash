@@ -29,7 +29,10 @@ pub use binding::{
     ToolDefinitionBindingExt, ToolManifestBindingExt, required_tool_binding,
     required_tool_executable,
 };
-pub use boundary::{BoundaryError, HostBoundary, HostEffect, tool_input, type_of_schema};
+pub use boundary::{
+    BoundaryError, HostBoundary, HostEffect, SchemaConflict, SchemaProjectionRefusal, tool_input,
+    type_of_schema,
+};
 pub use formats::{
     KERNEL_DOCUMENT_SCHEMA_VERSION, KERNEL_HELPER_RELEASE, KERNEL_PARKED_STATE_VERSION,
     KERNEL_SAVED_FUNCTION_VERSION, LASH_KERNEL_VERSION, previous_kernel_version,

@@ -2,7 +2,7 @@
 //! declared schema is the contract: the value must be an instance of it
 //! ([`JsonSchema::validate`]), so maps, open objects and numeric bounds are
 //! checked. The schema's kernel result type
-//! ([`lash_kernel_check::result_type_of_schema`]) is the program's typed
+//! ([`JsonSchema::result_type`]) is the program's typed
 //! view of the value, and the value must also decode by it (`K-EFF-007`):
 //! a value this admits is one the cell's `perform` of the tool decodes.
 
@@ -32,7 +32,7 @@ pub(crate) fn admit_value(
     }
     let value = value();
     schema.validate(&value)?;
-    let ty = lash_kernel_check::result_type_of_schema(schema.as_value());
+    let ty = schema.result_type();
     // Every value a cell can receive decodes as `Any`, and every JSON value
     // as `Json`.
     if matches!(ty, Type::Any | Type::Json) {
@@ -51,7 +51,7 @@ pub(crate) fn admit_value(
         declared: &|_| false,
     };
     decoder
-        .decode(&datum, &ty)
+        .decode(&datum, ty)
         .map(drop)
         .map_err(|mismatch| ValueMismatch {
             instance_path: mismatch

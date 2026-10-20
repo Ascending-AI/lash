@@ -347,6 +347,12 @@ pub fn trace_cell_failure(
                         reference: String::new(),
                     }
                 }
+                SchemaAdmissionError::Unprojectable { schema_path, .. } => {
+                    SchemaAdmissionError::Unprojectable {
+                        schema_path: schema_path.clone(),
+                        message: String::new(),
+                    }
+                }
             })
         }),
         feedback: failure

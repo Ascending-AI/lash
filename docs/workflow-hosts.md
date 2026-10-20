@@ -462,7 +462,15 @@ it. A run reports against its sites.
 A tool takes a function only in a slot its input schema marks
 `{"x-lash": {"kind": "function"}}` (optionally with a `signature`): JSON
 Schema describes data, so a function anywhere else in a tool's input raises
-`not_data` at the call, naming its path. A function a run handed to a tool
+`not_data` at the call, naming its path. The marker may stand under a
+composition: `{"anyOf": [{"x-lash": {"kind": "function"}}, {"type": "null"}]}`
+takes a function or null, as pydantic and MCP spell an optional slot. `anyOf`,
+`oneOf` and a `type` list are typed as the union of their members (`oneOf`'s
+exclusivity is left to the tool's own validation), and `allOf` as the meet of
+its members; a schema whose `allOf` no kernel type states, such as a string
+that is also an integer or a required field another member's closed object
+leaves out, is refused when it is admitted, with
+`SchemaAdmissionError::Unprojectable` naming the composition's JSON pointer. A function a run handed to a tool
 there arrives as a function value, `{"$lash_function": <FunctionValue>}`,
 and needs no publication to start.
 `ProcessStartRequest::inline(LASH_VM_ENGINE_KIND, value, args, launch, ..)`

@@ -99,7 +99,8 @@ pub use lash_vm_worker::{
 #[cfg(feature = "codemode")]
 pub use lash_vm_runtime::{
     BoundaryError, HostBoundary, HostEffect, ProjectionCatalog, ProjectionProvider,
-    ProjectionRefusal, ToolBindingError, required_tool_executable, type_of_schema,
+    ProjectionRefusal, SchemaConflict, SchemaProjectionRefusal, ToolBindingError,
+    required_tool_executable, type_of_schema,
 };
 
 // The vocabulary this module's signatures name (the facade-completeness rule).

@@ -176,8 +176,11 @@ fn tool_keywords_name_the_declared_input_fields() {
     use lash_kernel_vm::{End, Outcome, Request};
 
     let show = EffectName::new("display.show_message").expect("a tool's name");
+    let projected = |schema: serde_json::Value| {
+        lash_kernel_check::type_of_schema(&schema).expect("a tool's input type")
+    };
     let signature = lash_kernel_check::tool_signature(
-        &serde_json::json!({
+        projected(serde_json::json!({
             "type": "object",
             "properties": {
                 "text": {"type": "string"},
@@ -185,9 +188,9 @@ fn tool_keywords_name_the_declared_input_fields() {
             },
             "required": ["text"],
             "additionalProperties": false
-        }),
+        })),
         false,
-        &serde_json::json!({"type": "null"}),
+        lash_kernel_doc::Type::Null,
     );
     let effects = BTreeMap::from([(show.clone(), signature.clone())]);
     let environment = Environment {

@@ -39,6 +39,22 @@ pub enum SchemaAdmissionError {
         schema_path: String,
         reference: String,
     },
+    /// A composition whose members no kernel type states, at the JSON
+    /// pointer `schema_path`: a value of the schema could not be typed.
+    #[error("JSON schema at `{schema_path}` has no kernel type: {message}")]
+    Unprojectable {
+        schema_path: String,
+        message: String,
+    },
+}
+
+impl From<lash_kernel_check::SchemaProjectionRefusal> for SchemaAdmissionError {
+    fn from(refusal: lash_kernel_check::SchemaProjectionRefusal) -> Self {
+        Self::Unprojectable {
+            schema_path: refusal.path,
+            message: refusal.conflict.to_string(),
+        }
+    }
 }
 
 #[derive(
@@ -49,13 +65,22 @@ pub struct ValueMismatch {
     pub message: String,
 }
 
-/// A schema admitted before it can enter a tool, payload, or wire contract.
-/// Clones share the immutable JSON body and compiled validator. Serialization
-/// contains only the JSON body; extracting an owned value leaves other clones intact.
+/// A schema admitted before it can enter a tool, payload, or wire contract:
+/// one that compiles and has a kernel type. Clones share the immutable JSON
+/// body, compiled validator and kernel types. Serialization contains only
+/// the JSON body; extracting an owned value leaves other clones intact.
 #[derive(Clone)]
 pub struct JsonSchema {
     value: Arc<Value>,
     validator: Arc<jsonschema::Validator>,
+    types: Arc<KernelTypes>,
+}
+
+/// The kernel types an admitted schema projects to, as an input and as an
+/// open result.
+struct KernelTypes {
+    input: lash_kernel_doc::Type,
+    result: lash_kernel_doc::Type,
 }
 
 impl JsonSchema {
@@ -104,9 +129,14 @@ impl JsonSchema {
                     }
                 }
             })?;
+        let types = KernelTypes {
+            input: lash_kernel_check::type_of_schema(&value)?,
+            result: lash_kernel_check::result_type_of_schema(&value)?,
+        };
         Ok(Self {
             value: Arc::new(value),
             validator: Arc::new(validator),
+            types: Arc::new(types),
         })
     }
 
@@ -125,6 +155,18 @@ impl JsonSchema {
 
     pub fn as_value(&self) -> &Value {
         &self.value
+    }
+
+    /// The kernel type this schema describes as a tool's input
+    /// ([`lash_kernel_check::type_of_schema`]).
+    pub fn input_type(&self) -> &lash_kernel_doc::Type {
+        &self.types.input
+    }
+
+    /// The kernel type this schema describes as a tool's result, each
+    /// record of it open ([`lash_kernel_check::result_type_of_schema`]).
+    pub fn result_type(&self) -> &lash_kernel_doc::Type {
+        &self.types.result
     }
 
     pub fn into_value(self) -> Value {
@@ -177,9 +219,9 @@ impl JsonSchema {
 #[must_use]
 pub fn tool_signature(input: &JsonSchema, output: &JsonSchema) -> lash_kernel_doc::Signature {
     lash_kernel_check::tool_signature(
-        input.as_value(),
+        input.input_type().clone(),
         input.accepts_empty_object(),
-        output.as_value(),
+        output.result_type().clone(),
     )
 }
 

@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-pub use lash_kernel_check::type_of_schema;
+pub use lash_kernel_check::{SchemaConflict, SchemaProjectionRefusal, type_of_schema};
 use lash_kernel_doc::{EffectName, Signature, Type};
 use lash_protocol_types::ToolId;
 
@@ -255,7 +255,7 @@ mod tests {
             "the added field fits the projected result"
         );
         let closed = Signature {
-            result: type_of_schema(&earlier),
+            result: type_of_schema(&earlier).expect("a result type"),
             ..expected.clone()
         };
         assert!(
@@ -264,7 +264,7 @@ mod tests {
         );
         assert_eq!(
             provided.params[0].ty,
-            type_of_schema(&input),
+            type_of_schema(&input).expect("an input type"),
             "input stays a closed record"
         );
         json_serves(
@@ -275,8 +275,9 @@ mod tests {
     }
 
     /// Target 4: a tool's signature is stated in the kernel type grammar. A
-    /// closed object schema is a record with its optional fields marked, and
-    /// a schema the grammar has no exact type for is `Any`.
+    /// closed object schema is a record with its optional fields marked, a
+    /// schema the grammar has no exact type for is `Json`, and a composition
+    /// with no member has none.
     #[test]
     fn a_tool_schema_is_a_kernel_type() {
         let schema = serde_json::json!({
@@ -295,7 +296,7 @@ mod tests {
             optional,
         };
         assert_eq!(
-            type_of_schema(&schema),
+            type_of_schema(&schema).expect("a record type"),
             Type::Record(RecordType {
                 fields: vec![
                     field("lines", Type::List(Box::new(Type::Int)), true),
@@ -311,9 +312,9 @@ mod tests {
         );
         assert_eq!(
             type_of_schema(&serde_json::json!({"type": "object"})),
-            Type::Any
+            Ok(Type::Json)
         );
-        assert_eq!(type_of_schema(&serde_json::json!({"oneOf": []})), Type::Any);
+        assert!(type_of_schema(&serde_json::json!({"oneOf": []})).is_err());
     }
 
     /// Law 11 (FIG-5781): a process cannot end a session turn, so the

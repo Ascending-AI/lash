@@ -1485,13 +1485,23 @@ fn omitted_schema_admission_diagnostics_keep_classification_without_text() {
             },
             "non_local_reference",
         ),
+        (
+            lash_protocol_types::SchemaAdmissionError::Unprojectable {
+                schema_path: "/properties/mode/allOf".into(),
+                message: COMPILATION.into(),
+            },
+            "unprojectable",
+        ),
     ];
     for (diagnostic, kind) in cases {
         let path = match &diagnostic {
             lash_protocol_types::SchemaAdmissionError::Compilation { schema_path, .. }
             | lash_protocol_types::SchemaAdmissionError::NonLocalReference {
                 schema_path, ..
-            } => schema_path.clone(),
+            }
+            | lash_protocol_types::SchemaAdmissionError::Unprojectable { schema_path, .. } => {
+                schema_path.clone()
+            }
             lash_protocol_types::SchemaAdmissionError::InvalidKind { .. } => unreachable!(),
         };
         let mut event = exec_code_completed_event();

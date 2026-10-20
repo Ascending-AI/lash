@@ -2069,6 +2069,27 @@
             "reference"
           ],
           "type": "object"
+        },
+        {
+          "description": "A composition whose members no kernel type states, at the JSON\npointer `schema_path`: a value of the schema could not be typed.",
+          "properties": {
+            "kind": {
+              "const": "unprojectable",
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "schema_path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "schema_path",
+            "message"
+          ],
+          "type": "object"
         }
       ]
     },

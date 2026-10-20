@@ -694,8 +694,15 @@ fn an_effect_signature_refusal_names_the_output_openness_difference() {
     });
     let mut open = closed.clone();
     open.as_object_mut().unwrap().remove("additionalProperties");
-    let expected = crate::tool_signature(&input, true, &closed);
-    let provided = crate::tool_signature(&input, true, &open);
+    let signature = |output: &serde_json::Value| {
+        crate::tool_signature(
+            crate::type_of_schema(&input).unwrap(),
+            true,
+            crate::result_type_of_schema(output).unwrap(),
+        )
+    };
+    let expected = signature(&closed);
+    let provided = signature(&open);
     let mut document = document(
         "kernel 1\nnumbers float\neffect chat.message_to_self(input?: Any) -> Any\n\nmain {\n  let sent = perform chat.message_to_self() as Any\n}\n",
     );
@@ -737,7 +744,7 @@ fn an_effect_signature_refusal_names_the_output_openness_difference() {
     assert_eq!(mismatch.provided, provided.result);
     // A native closed record retains its closedness in the signature.
     let closed = Signature {
-        result: crate::type_of_schema(&closed),
+        result: crate::type_of_schema(&closed).unwrap(),
         ..expected.clone()
     };
     let mismatch = crate::signature_mismatch(provided, &closed).expect("closed vs unconstrained");

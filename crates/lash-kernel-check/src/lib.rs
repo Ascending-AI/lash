@@ -57,6 +57,7 @@ pub use manifest::{
 };
 pub use refusal::{Refusal, RefusalReason, Refused, RequiredBy, SignatureMismatch, SignatureSide};
 pub use schema::{
-    result_type_of_schema, signature_mismatch, signature_serves, tool_signature, type_of_schema,
+    SchemaConflict, SchemaProjectionRefusal, result_type_of_schema, signature_mismatch,
+    signature_serves, tool_signature, type_of_schema,
 };
 pub use workflow::{WorkflowAdmissionRefusal, WorkflowDocument, WorkflowDocumentError};

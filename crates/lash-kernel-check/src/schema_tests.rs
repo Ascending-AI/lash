@@ -7,7 +7,17 @@ use lash_kernel_doc::{MapType, Name, Param, RecordType, RecordTypeField, Signatu
 use lash_tool_shape::{SchemaDocument, ShapeKind};
 use serde_json::{Value, json};
 
-use crate::{result_type_of_schema, signature_serves, type_of_schema};
+use crate::{SchemaConflict, SchemaProjectionRefusal, signature_serves};
+
+/// The kernel type `schema` projects to as an input.
+fn type_of_schema(schema: &Value) -> Type {
+    crate::type_of_schema(schema).unwrap_or_else(|refusal| panic!("{schema}: {refusal}"))
+}
+
+/// The kernel type `schema` projects to as a result.
+fn result_type_of_schema(schema: &Value) -> Type {
+    crate::result_type_of_schema(schema).unwrap_or_else(|refusal| panic!("{schema}: {refusal}"))
+}
 
 /// Some value of `ty` holds a function somewhere: what the crossing walk
 /// lets cross.
@@ -246,4 +256,292 @@ fn json_is_the_data_part_of_any() {
     for some in [Type::Any, data, Type::Error, Type::Text] {
         assert!(!crate::types::disjoint(&some, &Type::Json), "{some:?}");
     }
+}
+
+/// A closed object schema of `properties`, requiring `required`.
+fn closed_object(properties: Value, required: &[&str]) -> Value {
+    json!({
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": false
+    })
+}
+
+fn field(name: &str, ty: Type, optional: bool) -> RecordTypeField {
+    RecordTypeField {
+        name: name.into(),
+        ty,
+        optional,
+    }
+}
+
+fn refusal(schema: &Value) -> SchemaProjectionRefusal {
+    crate::type_of_schema(schema).expect_err("no kernel type")
+}
+
+/// SCHEMA-UNION (FIG-6951): `anyOf`, `oneOf` and a `type` list project to
+/// the union of their members, flattened and with `{"type": "null"}` as the
+/// null member, `oneOf` typed as `anyOf`; `Json` absorbs the members whose
+/// every value is data; a composition with no member is refused.
+#[test]
+fn an_alternative_composition_projects_to_the_union_of_its_members() {
+    let cases = [
+        (
+            json!({"anyOf": [{"type": "string"}, {"type": "null"}]}),
+            Type::Union(vec![Type::Text, Type::Null]),
+        ),
+        (
+            json!({"oneOf": [{"type": "integer"}, {"type": "string"}]}),
+            Type::Union(vec![Type::Int, Type::Text]),
+        ),
+        (
+            json!({"type": ["string", "null"]}),
+            Type::Union(vec![Type::Text, Type::Null]),
+        ),
+        (
+            json!({"anyOf": [
+                {"oneOf": [{"type": "string"}, {"type": "integer"}]},
+                {"type": "null"},
+                {"type": "string"}
+            ]}),
+            Type::Union(vec![Type::Text, Type::Int, Type::Null]),
+        ),
+        (json!({"anyOf": [{"type": "null"}]}), Type::Null),
+        (
+            json!({"enum": ["low", "high", null]}),
+            Type::Union(vec![
+                Type::Enum(vec!["low".into(), "high".into()]),
+                Type::Null,
+            ]),
+        ),
+        (
+            json!({"anyOf": [{"type": "string"}, {"$ref": "#/$defs/thing"}],
+                "$defs": {"thing": {}}}),
+            Type::Json,
+        ),
+        (
+            json!({"type": "array", "items": {"anyOf": [{"type": "number"}, {"type": "null"}]}}),
+            Type::List(Box::new(Type::Union(vec![Type::Number, Type::Null]))),
+        ),
+    ];
+    for (schema, expected) in cases {
+        assert_eq!(type_of_schema(&schema), expected, "{schema}");
+    }
+    for (schema, path) in [
+        (json!({"anyOf": []}), "/anyOf"),
+        (json!({"oneOf": []}), "/oneOf"),
+        (json!({"allOf": []}), "/allOf"),
+        (
+            closed_object(json!({"mode": {"type": []}}), &[]),
+            "/properties/mode/type",
+        ),
+    ] {
+        assert_eq!(
+            refusal(&schema),
+            SchemaProjectionRefusal {
+                path: path.into(),
+                conflict: SchemaConflict::NoMembers
+            },
+            "{schema}"
+        );
+    }
+}
+
+/// SCHEMA-MEET (FIG-6951): `allOf`, and a composition beside a schema's
+/// own type, projects to the meet of its members: compatible records merge
+/// their fields, each required when either member requires it and closed
+/// out where the schema's own `additionalProperties: false` says so. A meet
+/// no kernel type states refuses the schema, naming the composition.
+#[test]
+fn a_conjunction_projects_to_the_meet_of_its_members_or_is_refused_naming_where() {
+    let narrowed = json!({"allOf": [
+        closed_object(json!({"mode": {"type": "string"}, "limit": {"type": "number"}}), &[]),
+        closed_object(
+            json!({"mode": {"enum": ["read", "write"]}, "limit": {"type": "integer"}}),
+            &["mode"],
+        ),
+    ]});
+    let mode = Type::Enum(vec!["read".into(), "write".into()]);
+    assert_eq!(
+        type_of_schema(&narrowed),
+        Type::Record(RecordType {
+            fields: vec![field("limit", Type::Int, true), field("mode", mode, false),],
+            rest: None,
+        })
+    );
+    // A required member beside the record it refines adds nothing the
+    // grammar states: the record stands.
+    let refined = json!({
+        "type": "object",
+        "properties": {"a": {"type": "string"}, "b": {"type": "string"}},
+        "additionalProperties": false,
+        "oneOf": [{"required": ["a"]}, {"required": ["b"]}]
+    });
+    assert_eq!(
+        type_of_schema(&refined),
+        Type::Record(RecordType {
+            fields: vec![field("a", Type::Text, true), field("b", Type::Text, true)],
+            rest: None,
+        })
+    );
+    // Each member's own openness: as an input, closed members leave no room
+    // for each other's optional fields; as an open result, they merge.
+    let split = json!({"allOf": [
+        closed_object(json!({"a": {"type": "string"}}), &[]),
+        closed_object(json!({"b": {"type": "integer"}}), &[]),
+    ]});
+    assert_eq!(
+        type_of_schema(&split),
+        Type::Record(RecordType {
+            fields: Vec::new(),
+            rest: None
+        })
+    );
+    assert_eq!(
+        result_type_of_schema(&split),
+        Type::Record(RecordType {
+            fields: vec![field("a", Type::Text, true), field("b", Type::Int, true)],
+            rest: Some(Box::new(Type::Json)),
+        })
+    );
+    // A meet distributes over a union and keeps the members that meet.
+    assert_eq!(
+        type_of_schema(&json!({
+            "type": "string",
+            "anyOf": [{"enum": ["a", "b"]}, {"type": "null"}, {"type": "string"}]
+        })),
+        Type::Union(vec![Type::Enum(vec!["a".into(), "b".into()]), Type::Text])
+    );
+
+    let disjoint = closed_object(
+        json!({"limit": {"allOf": [{"type": "string"}, {"type": "integer"}]}}),
+        &[],
+    );
+    let refused = refusal(&disjoint);
+    assert_eq!(
+        refused,
+        SchemaProjectionRefusal {
+            path: "/properties/limit/allOf".into(),
+            conflict: SchemaConflict::Meet {
+                fields: Vec::new(),
+                left: Type::Text,
+                right: Type::Int,
+            },
+        }
+    );
+    assert_eq!(
+        refused.to_string(),
+        "the schema at `/properties/limit/allOf` has no kernel type: no kernel type is both `Text` and `Int`"
+    );
+    let required_out = json!({"allOf": [
+        closed_object(json!({"a": {"type": "string"}}), &["a"]),
+        closed_object(json!({"b": {"type": "integer"}}), &[]),
+    ]});
+    assert_eq!(
+        refusal(&required_out),
+        SchemaProjectionRefusal {
+            path: "/allOf".into(),
+            conflict: SchemaConflict::ClosedOut {
+                fields: Vec::new(),
+                field: "a".into()
+            },
+        }
+    );
+    // The open result has room for the required field.
+    assert!(crate::result_type_of_schema(&required_out).is_ok());
+    let nested = json!({"allOf": [
+        closed_object(json!({"plan": closed_object(json!({"step": {"type": "string"}}), &[])}), &[]),
+        closed_object(json!({"plan": closed_object(json!({"step": {"type": "boolean"}}), &[])}), &[]),
+    ]});
+    assert_eq!(
+        refusal(&nested).conflict,
+        SchemaConflict::Meet {
+            fields: vec!["plan".into(), "step".into()],
+            left: Type::Text,
+            right: Type::Bool,
+        }
+    );
+    assert_eq!(
+        refusal(&json!({"anyOf": [{"type": "string"}], "allOf": [{"type": "null"}]})).path,
+        "/anyOf"
+    );
+}
+
+/// X-LASH-ONE under composition (FIG-6951): a marker under `anyOf` or
+/// `oneOf` beside the null member types its slot as the marked kind or
+/// null, and under `allOf` as the marked kind, through the one decode; the
+/// presenter shows the same member callable, and the null member null.
+#[test]
+fn a_marker_under_a_composition_types_and_presents_its_slot_as_the_marked_kind() {
+    let presented = |schema: &Value| {
+        SchemaDocument::from_json_schema(schema, 8)
+            .unwrap_or_else(|refusal| panic!("{schema}: {refusal:?}"))
+            .roots[0]
+            .kind
+            .clone()
+    };
+    let callable =
+        |kind: &ShapeKind| matches!(kind, ShapeKind::Function(_) | ShapeKind::Process(_));
+    for (marked, expected) in marked_forms() {
+        for (schema, nullable) in [
+            (
+                json!({"anyOf": [marked, {"type": "null"}]}),
+                crate::types::union([expected.clone(), Type::Null]),
+            ),
+            (
+                json!({"oneOf": [{"type": "null"}, marked]}),
+                crate::types::union([Type::Null, expected.clone()]),
+            ),
+        ] {
+            assert_eq!(type_of_schema(&schema), nullable, "{schema}");
+            assert!(admits_function(&nullable), "{schema}");
+            let ShapeKind::Union(members) = presented(&schema) else {
+                panic!("{schema}: presented as a union");
+            };
+            assert_eq!(members.len(), 2, "{schema}");
+            assert!(
+                members.iter().any(|member| callable(&member.kind)),
+                "{schema}"
+            );
+            assert!(
+                members.iter().any(|member| member.kind == ShapeKind::Null),
+                "{schema}"
+            );
+            let slot = closed_object(json!({"definition": schema}), &[]);
+            assert_eq!(
+                type_of_schema(&slot),
+                Type::Record(RecordType {
+                    fields: vec![field("definition", nullable.clone(), true)],
+                    rest: None,
+                }),
+                "{slot}"
+            );
+        }
+        let conjunction = json!({"allOf": [marked]});
+        assert_eq!(type_of_schema(&conjunction), expected, "{conjunction}");
+        assert!(callable(&presented(&conjunction)), "{conjunction}");
+    }
+    // A signature under a composition is projected as one beside none.
+    let typed = json!({"anyOf": [
+        {"x-lash": {"kind": "function", "signature": {
+            "params": [{"name": "event", "schema": {"anyOf": [{"type": "string"}, {"type": "null"}]}}],
+            "output": {"type": "string"}
+        }}},
+        {"type": "null"}
+    ]});
+    assert_eq!(
+        type_of_schema(&typed),
+        Type::Union(vec![
+            Type::Function(Box::new(Signature {
+                params: vec![Param {
+                    name: Name::new("event"),
+                    ty: Type::Union(vec![Type::Text, Type::Null]),
+                    optional: false,
+                }],
+                result: Type::Text,
+            })),
+            Type::Null,
+        ])
+    );
 }
