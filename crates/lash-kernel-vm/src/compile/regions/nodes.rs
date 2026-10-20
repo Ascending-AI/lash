@@ -322,7 +322,13 @@ pub(super) fn compile(
         {
             node
         }
-        Kind::Operator { lib, args, .. } => match fused(libs, *lib, args, &mut node) {
+        Kind::Operator { lib, args, .. } => match fused(
+            libs,
+            *lib,
+            args,
+            |expr| Leaf::of(expr, &mut node),
+            fresh(args),
+        ) {
             Some(fused) => fused,
             None => operator(libs, *lib, nodes(args, &mut node)?, fresh(args))?,
         },
@@ -429,7 +435,14 @@ fn conditional(condition: Node, then: (Node, u64), otherwise: (Node, u64)) -> No
 /// The compiled statement-root invoke of operator `id` on `args`, each a
 /// frame variable or a resident literal.
 pub(super) fn action(libs: &Libs<'_>, id: LibId, args: &[super::super::Atom]) -> Option<Node> {
-    operator(libs, id, atoms(libs, args)?, Fresh::default())
+    fused(
+        libs,
+        id,
+        args,
+        |atom| Leaf::atom(libs, atom),
+        Fresh::default(),
+    )
+    .or_else(|| operator(libs, id, atoms(libs, args)?, Fresh::default()))
 }
 
 /// The compiled statement-root guest call `call` of `callee` on `args`,
@@ -627,6 +640,17 @@ enum Leaf {
 }
 
 impl Leaf {
+    fn atom(libs: &Libs<'_>, atom: &super::super::Atom) -> Option<Self> {
+        Some(match atom {
+            super::super::Atom::Var(super::super::Var::Local(local)) if !local.shared => {
+                Self::Slot(local.at as usize)
+            }
+            super::super::Atom::Literal(Constant::Resident(value)) => Self::Const(*value),
+            super::super::Atom::Var(var) => Self::Node(variable(libs, var)?),
+            _ => return None,
+        })
+    }
+
     fn of(expr: &Expr, node: &mut impl FnMut(&Expr) -> Option<Node>) -> Option<Self> {
         Some(match &expr.kind {
             Kind::Local {
@@ -679,11 +703,12 @@ fn typed(pair: &lash_kernel_doc::scalar::Pair, x: Value, y: Value) -> Option<Val
 /// entry's typed path called on two floats or two word integers, its
 /// answer charged by its scalar table as the entry's certified sizes
 /// index it. Every other answer runs as the unfused node does.
-fn fused(
+fn fused<A>(
     libs: &Libs<'_>,
     id: LibId,
-    args: &[Expr],
-    node: &mut impl FnMut(&Expr) -> Option<Node>,
+    args: &[A],
+    mut leaf: impl FnMut(&A) -> Option<Leaf>,
+    fresh: Fresh,
 ) -> Option<Node> {
     let [a, b] = args else {
         return None;
@@ -691,8 +716,7 @@ fn fused(
     let function = libs.exe.lib(id);
     let pair = function.prepared.as_ref()?.0.pair()?;
     let answer = Answer::of(function)?;
-    let fresh = fresh(args);
-    let (a, b) = (Leaf::of(a, node)?, Leaf::of(b, node)?);
+    let (a, b) = (leaf(a)?, leaf(b)?);
     Some(match (libs.general, libs.charging) {
         (true, _) => Box::new(move |slots, cx| {
             let x = a.eval(slots, cx)?;

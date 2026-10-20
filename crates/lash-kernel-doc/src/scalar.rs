@@ -15,6 +15,8 @@ pub enum ScalarOp {
     Mul,
     Div,
     RemTrunc,
+    RemFloor,
+    FloorDiv,
     Eq,
     Lt,
     Le,
@@ -52,6 +54,7 @@ pub fn floats(op: ScalarOp, a: Float, b: Float) -> Option<Value> {
                 r => r as f64,
             }))
         }
+        ScalarOp::RemFloor | ScalarOp::FloorDiv => return None,
         ScalarOp::Eq => Value::Bool(a == b),
         ScalarOp::Lt => Value::Bool(a < b),
         ScalarOp::Le => Value::Bool(a <= b),
@@ -68,6 +71,23 @@ pub fn ints(op: ScalarOp, a: i64, b: i64) -> Option<Value> {
         ScalarOp::Sub => Value::Int(a.checked_sub(b)?),
         ScalarOp::Mul => Value::Int(a.checked_mul(b)?),
         ScalarOp::RemTrunc => Value::Int(a.checked_rem(b)?),
+        ScalarOp::RemFloor => {
+            let r = a.checked_rem(b)?;
+            Value::Int(if r != 0 && (r < 0) != (b < 0) {
+                r.checked_add(b)?
+            } else {
+                r
+            })
+        }
+        ScalarOp::FloorDiv => {
+            let q = a.checked_div(b)?;
+            let r = a.checked_rem(b)?;
+            Value::Int(if r != 0 && (r < 0) != (b < 0) {
+                q.checked_sub(1)?
+            } else {
+                q
+            })
+        }
         ScalarOp::Div => return None,
         ScalarOp::Eq => Value::Bool(a == b),
         ScalarOp::Lt => Value::Bool(a < b),

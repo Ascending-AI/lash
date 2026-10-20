@@ -7700,7 +7700,7 @@ const PY_FLOORDIV_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_floordiv,
-    template: Some(p::HelperTemplate { entry: Some(py_floordiv_template), depth: 2, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("e6cd29e23878b70c30d6243e68ec3cd427006b152f6d63b42d7fc9dee624c9eb"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: py_floordiv_heap, depth: 2, writes: false, callees: &[p::function("273429fdbb65bda49dca8037d10a093d406bdff05ba437eb869bd4941b1f7dee"), p::function("e6cd29e23878b70c30d6243e68ec3cd427006b152f6d63b42d7fc9dee624c9eb"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(py_floordiv_template), depth: 2, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("e6cd29e23878b70c30d6243e68ec3cd427006b152f6d63b42d7fc9dee624c9eb"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: py_floordiv_heap, depth: 2, writes: false, callees: &[p::function("273429fdbb65bda49dca8037d10a093d406bdff05ba437eb869bd4941b1f7dee"), p::function("e6cd29e23878b70c30d6243e68ec3cd427006b152f6d63b42d7fc9dee624c9eb"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), ] }), forwards: p::Forwards { floats: None, ints: Some(1) } }),
 };
 
 /// `py.floordiv`.
@@ -7889,7 +7889,7 @@ const PY_MOD_PLAN: p::HelperPlan = p::HelperPlan {
     ],
     sites: &[],
     run: py_mod,
-    template: Some(p::HelperTemplate { entry: Some(py_mod_template), depth: 2, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("29af527b6d9c66e48a3f2f3d6c0fd85b2a209aa9c6b3b640b9970c53a7046c9e"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: py_mod_heap, depth: 2, writes: false, callees: &[p::function("273429fdbb65bda49dca8037d10a093d406bdff05ba437eb869bd4941b1f7dee"), p::function("29af527b6d9c66e48a3f2f3d6c0fd85b2a209aa9c6b3b640b9970c53a7046c9e"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), ] }), forwards: p::Forwards { floats: None, ints: None } }),
+    template: Some(p::HelperTemplate { entry: Some(py_mod_template), depth: 2, callees: &[p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), p::function("29af527b6d9c66e48a3f2f3d6c0fd85b2a209aa9c6b3b640b9970c53a7046c9e"), p::function("740c324347c666f1713aef804c355509918da319708a6a1ad8665e9a1e85306d"), ], heap: Some(p::HeapTemplate { entry: py_mod_heap, depth: 2, writes: false, callees: &[p::function("273429fdbb65bda49dca8037d10a093d406bdff05ba437eb869bd4941b1f7dee"), p::function("29af527b6d9c66e48a3f2f3d6c0fd85b2a209aa9c6b3b640b9970c53a7046c9e"), p::function("b50ea78f1b8899c52026719706a58480a99f1d90dcd04a6954be8f2c23cd8954"), ] }), forwards: p::Forwards { floats: None, ints: Some(1) } }),
 };
 
 /// `py.mod`.

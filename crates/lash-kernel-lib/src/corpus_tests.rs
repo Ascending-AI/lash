@@ -692,5 +692,5 @@ fn typed_scalar_kernels_agree_with_general_entries_on_edge_pairs() {
             }
         }
     }
-    assert_eq!(seen.len(), 10, "every scalar operator has a library entry");
+    assert_eq!(seen.len(), 12, "every scalar operator has a library entry");
 }

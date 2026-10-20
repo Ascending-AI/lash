@@ -543,3 +543,149 @@ fn template_bearing_invokes_are_prepared_operator_sites() {
     }
     assert_eq!(ANSWERED.load(Ordering::Relaxed), 1);
 }
+
+/// FIG-6959 / PLAN-INDEP: statement-root invokes use the same typed kernel
+/// as nested operators, in scalar and allocating regions. An operator
+/// expression in a call island already uses its typed kernel.
+/// Their certified fallback has identical values, occurrence counts and
+/// charge events, including an uncharged run and every charge-bound prefix.
+#[test]
+fn statement_root_operators_use_the_kernel_with_the_certified_charge() {
+    use lash_kernel_doc::scalar::{Pair, ScalarOp};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static PREPARED: AtomicUsize = AtomicUsize::new(0);
+    struct PairProbe<const PAIRED: bool>;
+    impl<const PAIRED: bool> NativeFunction for PairProbe<PAIRED> {
+        fn call(&self, call: NativeCall<'_, '_>) -> Result<Value, NativeError> {
+            let [Value::Int(a), Value::Int(b)] = call.args.values() else {
+                return Err(NativeError::Decline);
+            };
+            lash_kernel_doc::scalar::ints(ScalarOp::Add, *a, *b).ok_or(NativeError::Decline)
+        }
+        fn prepare(&self) -> Option<PreparedNative> {
+            Some(PreparedNative {
+                pair: PAIRED.then_some(Pair {
+                    floats: None,
+                    ints: Some(ScalarOp::Add),
+                }),
+                entry: |args| {
+                    PREPARED.fetch_add(1, Ordering::Relaxed);
+                    let [Value::Int(a), Value::Int(b)] = args else {
+                        return None;
+                    };
+                    lash_kernel_doc::scalar::ints(ScalarOp::Add, *a, *b)
+                },
+                charged_entry: None,
+                operation: "law.pair",
+            })
+        }
+    }
+    fn register<const PAIRED: bool>(
+        registry: &mut FunctionRegistry,
+        _: &BTreeMap<&'static str, FunctionId>,
+    ) -> Vec<(&'static str, FunctionId)> {
+        let definition = parse_definition("function law.pair(a: Any, b: Any) -> Any\nkernel 1\ncharge sum(5, size(a), size(b), size(result))\nnative\n").unwrap();
+        vec![(
+            "law.pair",
+            registry
+                .register(definition, Some(Arc::new(PairProbe::<PAIRED>)))
+                .unwrap(),
+        )]
+    }
+    fn run_pair<const PAIRED: bool>(
+        source: &str,
+        bounds: Bounds,
+        record: bool,
+        layout: Layout,
+    ) -> (
+        String,
+        Option<u64>,
+        Vec<lash_kernel_exec::Weight>,
+        Vec<crate::conformance::Checkpoint>,
+    ) {
+        let mut embedder = Embedder::with(
+            source,
+            Setup {
+                probes: Some(register::<PAIRED>),
+                bounds,
+                layout,
+                ..Setup::default()
+            },
+        );
+        let tape = crate::ChargeTape::new();
+        if record {
+            embedder.machine.record_charges(tape.clone());
+        }
+        let mut checkpoints = Vec::new();
+        let end = loop {
+            match embedder.run() {
+                Step::Ended(end) => {
+                    break match end {
+                        End::Finished(finished) => format!("finished {:?}", finished.result),
+                        other => format!("{other:?}"),
+                    };
+                }
+                Step::Parked(_) => {
+                    checkpoints.push(embedder.machine.semantic_checkpoint());
+                    embedder.deliver_next();
+                }
+                Step::Slice => panic!("an unbounded slice yielded"),
+            }
+        };
+        let steps = tape
+            .steps()
+            .into_iter()
+            .flat_map(|weight| match weight {
+                lash_kernel_exec::Weight::Units(n) => {
+                    vec![lash_kernel_exec::Weight::Units(1); n as usize]
+                }
+                atomic => vec![atomic],
+            })
+            .collect();
+        (end, embedder.machine.meters().charged, steps, checkpoints)
+    }
+    for source in [
+        "main { let i = 0 let s = 0 while num.lt(i, 5) { set s = invoke law.pair(s, i) set i = num.add(i, 1) } let answer = perform echo(s) as Any return answer }",
+        "main { let out = [] let i = 0 let s = 0 while num.lt(i, 5) { set s = invoke law.pair(s, i) set out[list.len(out)] = s set i = num.add(i, 1) } let answer = perform echo(s) as Any return answer }",
+        "fn sum(a, b) { let s = law.pair(a, b) return s } main { let s = call sum(3, 7) let answer = perform echo(s) as Any return answer }",
+    ] {
+        for charge in [crate::Charge::Exact, crate::Charge::Off] {
+            let bounds = Bounds { charge, ..ROOMY };
+            for record in [false, true] {
+                PREPARED.store(0, Ordering::Relaxed);
+                let expected = run_pair::<false>(source, bounds, record, Layout(0));
+                assert!(
+                    PREPARED.load(Ordering::Relaxed) > 0,
+                    "the certified path is exercised: {source}"
+                );
+                PREPARED.store(0, Ordering::Relaxed);
+                let actual = run_pair::<true>(source, bounds, record, Layout(0));
+                assert_eq!(actual, expected, "{source}, {charge:?}, tape {record}");
+                assert_eq!(
+                    PREPARED.load(Ordering::Relaxed),
+                    0,
+                    "statement-root invokes bypass the fused node: {source}"
+                );
+                if record && charge == crate::Charge::Exact {
+                    let charged = expected.1.unwrap();
+                    for charge_limit in 0..=charged {
+                        let bounds = Bounds {
+                            charge_limit,
+                            ..bounds
+                        };
+                        assert_eq!(
+                            run_pair::<true>(source, bounds, true, Layout(0)),
+                            run_pair::<false>(source, bounds, true, Layout(0)),
+                            "{source}, bound {charge_limit}"
+                        );
+                    }
+                    assert_eq!(
+                        actual,
+                        run_pair::<true>(source, bounds, true, Layout(0).without_regions()),
+                        "reference: {source}"
+                    );
+                }
+            }
+        }
+    }
+}

@@ -151,6 +151,8 @@ const fn kernel<S: Scalar>() -> Option<ScalarOp> {
         Operation::Binary(Binary::Mul) => Some(K::Mul),
         Operation::Binary(Binary::Div) => Some(K::Div),
         Operation::Binary(Binary::RemTrunc) => Some(K::RemTrunc),
+        Operation::Binary(Binary::RemFloor) => Some(K::RemFloor),
+        Operation::Binary(Binary::DivFloor) => Some(K::FloorDiv),
         Operation::Eq => Some(K::Eq),
         Operation::Lt => Some(K::Lt),
         Operation::Le => Some(K::Le),
@@ -164,11 +166,12 @@ const fn kernel<S: Scalar>() -> Option<ScalarOp> {
 /// `DOMAIN`.
 fn pair<const DOMAIN: u8, S: Scalar>() -> Option<lash_kernel_doc::scalar::Pair> {
     let op = kernel::<S>()?;
-    if S::ARITY != 2 {
+    if S::ARITY != 2 || (DOMAIN == 3 && matches!(op, ScalarOp::RemFloor | ScalarOp::FloorDiv)) {
         return None;
     }
     Some(lash_kernel_doc::scalar::Pair {
-        floats: (DOMAIN != 2).then_some(op),
+        floats: (DOMAIN != 2 && !matches!(op, ScalarOp::RemFloor | ScalarOp::FloorDiv))
+            .then_some(op),
         ints: (DOMAIN != 3).then_some(op),
     })
 }

@@ -1156,6 +1156,53 @@ struct Pass {
 }
 
 impl Evaluator<'_> {
+    /// A path returning one native's unchanged arguments. Integer floor
+    /// kernels also cover a preceding nonzero-divisor guard: they decline
+    /// zero (and word overflow), leaving the template's error path intact.
+    /// Float paths retain their guard and never use this exception.
+    fn forwarded(&self, kinds: &[&str], steps: &[Step], value: &Symbol) -> Option<u8> {
+        use lash_kernel_doc::scalar::ScalarOp;
+        let (Step::Entry { name, native, args }, prefix) = steps.split_last()? else {
+            return None;
+        };
+        if value.code != *name || args != "args[0], args[1]" {
+            return None;
+        }
+        match prefix {
+            [] => {}
+            [
+                Step::Entry {
+                    name: zero,
+                    native: equal,
+                    args,
+                },
+                Step::Guard { test, holds: false },
+            ] if kinds == ["Int(_)", "Int(_)"]
+                && test == zero
+                && args == "args[1], Value::Int(0)" =>
+            {
+                let pair = |native: usize| {
+                    self.library
+                        .registry
+                        .get(self.callees.get(native)?)?
+                        .native()?
+                        .prepare()?
+                        .pair
+                };
+                if pair(*equal)?.ints != Some(ScalarOp::Eq)
+                    || !matches!(
+                        pair(*native)?.ints,
+                        Some(ScalarOp::RemFloor | ScalarOp::FloorDiv)
+                    )
+                {
+                    return None;
+                }
+            }
+            _ => return None,
+        }
+        u8::try_from(*native).ok()
+    }
+
     /// Every combination of `kinds` over `definition`'s parameters whose
     /// paths reduce.
     fn pass(
@@ -1263,17 +1310,13 @@ impl Evaluator<'_> {
                             .code,
                     );
                 }
-                // Preserve the single native forwarding fact before rendering
-                // the arm: no guards, wrappers or reordered arguments qualify.
+                // Preserve the forwarding fact before rendering the arm.
                 if let [(state, Some(value))] = results.as_slice()
-                    && let [Step::Entry { name, native, args }] = state.steps.as_slice()
-                    && value.code == *name
-                    && args == "args[0], args[1]"
+                    && let Some(native) = self.forwarded(&names, &state.steps, value)
                 {
-                    let native = u8::try_from(*native).ok();
                     match names.as_slice() {
-                        ["Float(_)", "Float(_)"] => pass.forwards.floats = native,
-                        ["Int(_)", "Int(_)"] => pass.forwards.ints = native,
+                        ["Float(_)", "Float(_)"] => pass.forwards.floats = Some(native),
+                        ["Int(_)", "Int(_)"] => pass.forwards.ints = Some(native),
                         _ => {}
                     }
                 }
