@@ -69,7 +69,8 @@ or constant schedules.
 | `ts.array.unshift` | `8` | `sum(8, size(this), deep(args), size(result))` | 1 × 2/test | Dynamic or shrinking traversal pays 2 per test; formula covers the remaining work. |
 | `ts.array.toSpliced` | `8` | `sum(8, size(this), deep(args), size(result))` | 3 × 2/test | Dynamic or shrinking traversal pays 2 per test; formula covers the remaining work. |
 | `ts.array.with` | `8` | `sum(8, size(this), deep(args), size(result))` | 1 × 2/test | Dynamic or shrinking traversal pays 2 per test; formula covers the remaining work. |
-| `ts.array.sort` | `8` | `sum(8, size(this), deep(args), size(result))` | 6 × 2/test | Dynamic or shrinking traversal pays 2 per test; formula covers the remaining work. A comparator sort runs `list.sort`'s merge in the body itself, one metered loop over each pass placing one element per test, and the comparator is its only callback (FIG-6886). |
+| `ts.array.sort` | `8` | `sum(8, size(this), deep(args), size(result))` | 0 × 2/test | Container copying, scans and delegated collection work scale with operands and output. It reads the length and the comparator and invokes `ts.array.sort_slots`. |
+| `ts.array.sort_slots` | `sum(8, size(this), size(result))` | `sum(8, size(this), size(result))` | 7 × 2/test | Dynamic or shrinking traversal pays 2 per test; formula covers the remaining work. The comparator sort's merge runs in the body, one metered loop over each pass placing one element per test; a default sort of primitives takes each string once (FIG-6886, FIG-6948). |
 | `ts.array.toSorted` | `8` | `sum(8, size(this), deep(args), size(result))` | 0 × 2/test | Container copying, scans and delegated collection work scale with operands and output. |
 | `ts.array.flatten` | `8` | `sum(8, size(source), size(depth), size(output), size(result))` | 0 × 2/test | Container copying, scans and delegated collection work scale with operands and output. |
 | `ts.array.flat` | `8` | `sum(8, size(this), deep(args), size(result))` | 0 × 2/test | Container copying, scans and delegated collection work scale with operands and output. |
@@ -346,6 +347,27 @@ output traversal; `py.method.sort` allows four receiver traversals for
 copying, key collection, clearing and replacement. It retains the metered
 replacement loop. Neither wrapper reserves the old closure sort's
 `256 × n × (1 + ceil_log2(n))` allowance (FIG-6904).
+TypeScript's sort (`ts.array.sort_slots`) bills its completion formula and
+two units per test of its metered loops. With a comparator the merge adds
+no charge of its own per comparison: each of its `ceil_log2(n)` passes
+places one element per test, `n + 1` tests a pass, and reading the pair,
+applying the comparator, coercing its answer by `ts.to_number` and taking
+the decision are body forms that K-CHG-007 covers. The comparator's own
+code is charged exactly as it runs, wherever. So the charge is the formula,
+`2 × ceil_log2(n) × (n + 2) + 2` units of merge tests (each pass's own test
+included) and the comparator calls' own charges, plus the gather and
+write-back tests. The machine steps the merge natively in the helper
+plan's region (FIG-6948), performing the body's forms in its order, so the
+charge and every bound's stopping point are the same with regions and
+islands on or off. A default sort whose
+elements are all primitives takes each string once, in element order and
+only when two or more elements remain. A primitive's string is pure, so no
+comparison observes the difference. It then applies one ordinary closure
+that calls `list.sort_by_keys` over the strings' UTF-16 code units, so the
+native bills its own formula over the actual keys, as `py.sorted` does. A
+default sort with any other element keeps SortCompare's two `ts.to_string`
+calls and a `text.utf16_compare` per comparison, charged as the closure's
+code (FIG-6948).
 `tasks.wait_all` and `tasks.cancel_all` declare two units per task-set test;
 their trip counts come from live tasks rather than call arguments.
 

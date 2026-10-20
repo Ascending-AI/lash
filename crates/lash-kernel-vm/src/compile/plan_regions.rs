@@ -31,6 +31,8 @@
 //! carries that entry, and each statement names the plan registers it
 //! uses, which its end empties.
 
+pub(crate) mod merge;
+
 use lash_kernel_doc::Value;
 use lash_kernel_doc::plan::{HelperPlan, SiteCall};
 use lash_kernel_exec::{LocalRef, Op, Reg};
@@ -52,9 +54,13 @@ pub(crate) struct PlanRegion {
     /// The units each test of the loop charges.
     pub(crate) metered: u64,
     pub(crate) body: Block,
+    /// The merge pass of a comparator sort the body is, which the machine
+    /// walks natively ([`merge`]).
+    pub(crate) merge: Option<merge::Merge>,
 }
 
 /// A block of the loop's body, its statements in order.
+#[derive(Clone)]
 pub(crate) struct Block {
     pub(crate) steps: Box<[Step]>,
     /// The plan variables it declares, which its end empties.
@@ -64,11 +70,13 @@ pub(crate) struct Block {
 /// One statement: each opens a statement of the plan, which puts its
 /// operands in the plan registers below `span` where its forms answer as
 /// fused; a form that does not widens the statement to all of them.
+#[derive(Clone)]
 pub(crate) struct Step {
     pub(crate) span: u32,
     pub(crate) kind: StepKind,
 }
 
+#[derive(Clone)]
 pub(crate) enum StepKind {
     If {
         cond: Node,
@@ -96,11 +104,13 @@ pub(crate) enum StepKind {
 }
 
 /// A value a statement computes into its register.
+#[derive(Clone)]
 pub(crate) struct Node {
     pub(crate) reg: u32,
     pub(crate) kind: NodeKind,
 }
 
+#[derive(Clone)]
 pub(crate) enum NodeKind {
     /// A plan variable's value.
     Local(u32),
@@ -416,11 +426,13 @@ impl Former<'_, '_> {
         let mut written = vec![binding];
         body.written(&mut written);
         body.settle(&written);
+        let merge = merge::Recognise { lib: self.lib }.merge(&body);
         Some(PlanRegion {
             walked,
             binding,
             metered: *metered,
             body,
+            merge,
         })
     }
 

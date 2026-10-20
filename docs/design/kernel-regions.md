@@ -85,6 +85,20 @@ of region are built from one unit.
   is cold, as a conditional arm of other ops is: reaching it exits at its
   first op once its unit is charged, so a guard's fallback (`ts.read` of a
   record the island cannot read in place) leaves the body an island.
+- **Merge pass.** A helper plan's loop region whose body is exactly one
+  pass of a stable bottom-up merge (TypeScript's comparator sort,
+  `ts.array.sort_slots`): place one element per test, applying the
+  comparator where both runs have one and coercing its answer. The region's
+  machine steps it natively (FIG-6948): the integer bookkeeping and the
+  decision run as Rust on the plan's variables, and every other form (the
+  item reads and writes, the comparator's application at its steady site,
+  the coercion offered at its site, answered by its prepared entry where
+  the plan's offer would be) runs as the region's own form, in the plan's
+  order on its registers. A comparator that does not return at once stands
+  the plan at its site exactly as the region would, and the plan's resumed
+  code finishes that step; the next step is native again. A step whose
+  variables are not small integers and lists runs as the region's pass.
+  Only a charge tape may observe the run.
 
 **Barriers.** These ops end a region, so the reference runs them: every action
 and effect (`perform`, `sleep`, `spawn`, `join`, `yield`, `cancel`); the host

@@ -689,6 +689,7 @@ fn check_in(
     counts.work.iterations += natural.work.iterations;
     counts.work.calls += natural.work.calls;
     counts.work.passes += natural.work.passes;
+    counts.work.merges += natural.work.merges;
     counts.ran += usize::from(natural.work != RegionWork::default());
     let program = Weight::expand(natural.tape.iter().copied());
     let whole = natural.observations.charged.unwrap_or(0);
@@ -2040,6 +2041,77 @@ fn a_walk_leaves_to_the_reference_the_callbacks_past_its_headroom() {
         counts.runs,
         failures.join("\n")
     );
+}
+
+/// FIG-6948: a TypeScript comparator sort's merge passes step natively in
+/// its helper's plan region, applying the comparator through the region's
+/// own steady entry and standing the plan at its site where a call does not
+/// return at once. Under PLAN-INDEP's sweep (every bound around the charge
+/// program's events, every slice, each plan resuming the other's images,
+/// charge Exact and Off) the sort program `name` runs as the reference
+/// runs it: end, charge, tape and images. A comparator sort's natural run
+/// steps some merge pass natively; a default sort steps none.
+fn sorts_as_the_reference_sorts(name: &str) {
+    let mut counts = Counts::default();
+    let mut failures = Vec::new();
+    let (lowered, program, compared) = crate::helper_plans::sorts::comparator_sort_program(name);
+    let registry = program.library.registry();
+    let on = prepare_with_layout(Arc::clone(registry), Layout(ON));
+    let off = prepare_with_layout(Arc::clone(registry), Layout(OFF));
+    let mut case = program_case(&lowered.id, "main { return null }", 16);
+    case.document = print_document(&program.document);
+    formed_alike(&on, &off, &case);
+    let work = check(&on, &off, &case, &mut counts, &mut failures);
+    if compared != (work.merges > 0) {
+        failures.push(format!(
+            "{}: its natural run stepped {} merge passes natively",
+            case.name, work.merges
+        ));
+    }
+    assert!(
+        failures.is_empty(),
+        "{} of {} paired runs disagree:\n{}",
+        failures.len(),
+        counts.runs,
+        failures.join("\n")
+    );
+}
+
+/// Stable ties, and NaN, text and object answers, the last coerced through
+/// its `valueOf` at the coercion's site.
+#[test]
+fn comparator_sorts_order_ties_and_answers_as_the_reference() {
+    sorts_as_the_reference_sorts("comparator sorts: ties and answers");
+}
+
+/// Undefined elements sort last uncompared and holes stay at the end, in
+/// place and through `toSorted`.
+#[test]
+fn comparator_sorts_keep_undefined_and_holes_as_the_reference() {
+    sorts_as_the_reference_sorts("comparator sorts: undefined, holes and toSorted");
+}
+
+/// A comparator that throws leaves the array as the reference leaves it;
+/// one that grows the array and calls methods leaves its island at every
+/// call, standing the plan where the reference stands.
+#[test]
+fn comparators_that_throw_or_mutate_run_as_the_reference() {
+    sorts_as_the_reference_sorts("comparator sorts: throwing and mutating comparators");
+}
+
+/// The sort has fewer charge events than the sweep's bounds: a bound at
+/// each of them, inside every comparison and between, stops the run where
+/// the reference stops it, with its charge.
+#[test]
+fn a_bound_anywhere_in_a_small_comparator_sort_stops_as_the_reference() {
+    sorts_as_the_reference_sorts("comparator sorts: every bound of a small sort");
+}
+
+/// Default sorts take an object's string per comparison and a
+/// primitive's once, ordering by UTF-16 units, as the reference does.
+#[test]
+fn default_sorts_run_as_the_reference() {
+    sorts_as_the_reference_sorts("comparator sorts: default sorts");
 }
 
 macro_rules! program_shards {

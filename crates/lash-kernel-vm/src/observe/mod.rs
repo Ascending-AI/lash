@@ -182,6 +182,9 @@ pub struct RegionWork {
     /// Loop passes a helper plan's region ran to their end
     /// (`machine::plan_regions`).
     pub passes: u64,
+    /// Of those, the passes a comparator sort's merge stepped natively
+    /// (FIG-6948).
+    pub merges: u64,
 }
 
 impl ChargeTape {
@@ -217,9 +220,12 @@ impl ChargeTape {
         self.lock().work.iterations += iterations;
     }
 
-    /// Counts a pass a helper plan's loop region ran to its end.
-    pub(crate) fn passed(&self) {
-        self.lock().work.passes += 1;
+    /// Counts a pass a helper plan's loop region ran to its end, `merged`
+    /// when a merge stepped it natively.
+    pub(crate) fn passed(&self, merged: bool) {
+        let mut recorded = self.lock();
+        recorded.work.passes += 1;
+        recorded.work.merges += u64::from(merged);
     }
 
     /// Counts a call an island entered.

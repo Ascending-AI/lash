@@ -8,6 +8,7 @@
 
 mod conversions;
 mod numeric;
+pub(crate) mod sorts;
 
 use crate::projection::{Plan, Projector};
 use lash_kernel_doc::{Datum, ErrorDatum, Handle, Integer, Timestamp};

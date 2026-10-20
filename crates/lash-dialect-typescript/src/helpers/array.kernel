@@ -22,12 +22,14 @@ use num.is_nan
 use num.to_float
 use text.join
 use text.join_or_index
+use text.to_utf16_units
 use text.utf16_compare
 use list.len
 use list.get
 use list.copy
 use list.slice
 use list.sort
+use list.sort_by_keys
 use list.index_of_range
 use ts.require_object_coercible
 use ts.get
@@ -36,6 +38,8 @@ use ts.delete
 use ts.has_own
 use ts.to_number
 use ts.to_string
+use ts.is_primitive
+use ts.primitive_to_string
 use ts.to_boolean
 use ts.strict_equals
 use ts.is_nullish
@@ -1529,22 +1533,60 @@ body {
   let values = []
   let undefined_count = 0
   let index = 0.0
+  # A list's slots are read in place, as indexOf reads them: an empty
+  # tuple is a missing slot, and a list has no getters (FIG-6948).
+  let actual_list = same(kind(this), "list")
   while num.lt(index, length) metered 2 {
-    let present = invoke ts.has_own(this, index)
+    let present = false
+    let value = absent
+    if actual_list {
+      if num.lt(index, list.len(this)) {
+        set value = this[index]
+        set present = bool.not(same(value, ()))
+      }
+    } else {
+      set present = invoke ts.has_own(this, index)
+      if present { set value = invoke ts.get(this, index) }
+    }
     if present {
-      let value = invoke ts.get(this, index)
       if same(value, absent) { set undefined_count = num.add(undefined_count, 1) }
       else { set values[list.len(values)] = value }
     }
     set index = num.add(index, 1)
   }
   if same(callback, absent) {
-    let compare = fn(a, b) {
-      let left = invoke ts.to_string(a)
-      let right = invoke ts.to_string(b)
-      return text.utf16_compare(left, right)
+    # SortCompare takes both strings at each comparison. A primitive's
+    # string is pure, so where every element is one, each is taken once,
+    # before any comparison and only when there is one to make. Its UTF-16
+    # code units order it as the default comparison does, and the native
+    # merge takes the keys stably. An ordinary frame bills its formula over
+    # the actual keys (K-CHG-007, FIG-6904). Any other element's ToString
+    # may be observed, so such a sort takes both strings per comparison
+    # (FIG-6948).
+    if num.lt(1, list.len(values)) {
+      let keys = []
+      let primitive = true
+      for value in values metered 2 {
+        set primitive = invoke ts.is_primitive(value)
+        if primitive {} else { break }
+        let spelled = invoke ts.primitive_to_string(value)
+        set keys[list.len(keys)] = text.to_utf16_units(spelled)
+      }
+      if primitive {
+        let sort = fn(items, ranks) {
+          return list.sort_by_keys(items, ranks, false)
+        }
+        let ordered = apply sort(values, keys)
+        set values = ordered
+      } else {
+        let compare = fn(a, b) {
+          let left = invoke ts.to_string(a)
+          let right = invoke ts.to_string(b)
+          return text.utf16_compare(left, right)
+        }
+        do invoke list.sort(values, compare)
+      }
     }
-    do invoke list.sort(values, compare)
   } else {
     # list.sort's merge, with the callback applied where list.sort applies
     # its comparator: the same pairs in the same order, with no closure
@@ -1595,8 +1637,14 @@ body {
     set values = sorted
   }
   set index = 0.0
+  # A list's existing slot is written in place, as ts.set writes it. A
+  # comparator may have shortened the list; past its end the write is the
+  # general one (FIG-6948).
   for value in values metered 2 {
-    do invoke ts.array.set(this, index, value)
+    let in_place = false
+    if actual_list { set in_place = num.lt(index, list.len(this)) }
+    if in_place { set this[index] = value }
+    else { do invoke ts.array.set(this, index, value) }
     set index = num.add(index, 1)
   }
   while num.lt(0, undefined_count) metered 2 {

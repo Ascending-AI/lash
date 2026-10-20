@@ -34,6 +34,8 @@
 //! rooted by its own register, and a constant is resident. A statement's
 //! end empties only the registers it uses.
 
+mod merge;
+
 use lash_kernel_doc::plan::{Cursor as PlanCursor, PlanContext, PlanExit, Test};
 use lash_kernel_doc::{NativeError, Retry, Value};
 
@@ -68,6 +70,17 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
         let region = &prepared.regions[region as usize];
         // Its steady callbacks are resolved afresh for each walk.
         self.steady = None;
+        // A merge pass steps natively where nothing but a charge tape
+        // observes the run: its forms charge nothing, and the walk's tests
+        // and the comparator's island record their own charges (FIG-6948).
+        let merge = region.merge.as_ref().filter(|_| {
+            !self.machine.charging
+                && self
+                    .machine
+                    .observer
+                    .as_deref()
+                    .is_none_or(|observer| observer.only_charges())
+        });
         let mut tested = true;
         loop {
             // The next test, in its own statement.
@@ -79,14 +92,22 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
                 return Ok(false);
             };
             self.bind_value(region.binding, element)?;
-            let went = self.pass(&region.body)?;
+            let stepped = match merge {
+                Some(merge) => self.merge_step(merge)?,
+                None => None,
+            };
+            let merged = stepped.is_some();
+            let went = match stepped {
+                Some(went) => went,
+                None => self.pass(&region.body)?,
+            };
             if let Some(tape) = self
                 .machine
                 .observer
                 .as_deref()
                 .and_then(|observer| observer.charges.as_ref())
             {
-                tape.passed();
+                tape.passed(merged);
             }
             match went {
                 Went::Broke => return Ok(false),
@@ -106,17 +127,7 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
                     then,
                     otherwise,
                 } => {
-                    let arm = match self.value(cond)? {
-                        Value::Bool(true) => then,
-                        Value::Bool(false) => otherwise,
-                        // The plan's test of what is no bool raises.
-                        other => {
-                            self.widen();
-                            self.machine.put(self.base + cond.reg as usize, other);
-                            self.test(cond.reg, Test::If)?;
-                            return Err(self.lost_form("a plan region's test passed no bool"));
-                        }
-                    };
+                    let arm = if self.truth(cond)? { then } else { otherwise };
                     if let Went::Broke = self.pass(arm)? {
                         return Ok(Went::Broke);
                     }
@@ -152,12 +163,28 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
         Ok(Went::Through)
     }
 
+    /// Whether the `if` test `cond` holds.
+    #[inline(always)]
+    fn truth(&mut self, cond: &Node) -> Result<bool, PlanExit> {
+        match self.value(cond)? {
+            Value::Bool(holds) => Ok(holds),
+            // The plan's test of what is no bool raises.
+            other => {
+                self.widen();
+                self.machine.put(self.base + cond.reg as usize, other);
+                self.test(cond.reg, Test::If)?;
+                Err(self.lost_form("a plan region's test passed no bool"))
+            }
+        }
+    }
+
     /// `set target[index] = value`, its three operands `order` in the
     /// plan's order, the target's register `target` and the value's `src`.
     /// A list is written from the values in place, as the plan's member
     /// write writes it; any other write reads its operands from their
     /// registers, where the plan's code leaves them, as does one whose
     /// operands go to their registers as they are evaluated (`placed`).
+    #[inline(always)]
     fn store(
         &mut self,
         order: &[Node; 3],
@@ -192,6 +219,7 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
     /// `index` a position up to its length that the arena holds resident,
     /// as the plan's member write writes it: `false`, having written
     /// nothing, otherwise, for that write to raise or decode first.
+    #[inline(always)]
     fn write_list(&mut self, target: Value, index: Value, value: Value) -> Result<bool, PlanExit> {
         let (Value::List(list), Some(at)) = (target, position(&index)) else {
             return Ok(false);

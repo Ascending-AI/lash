@@ -319,6 +319,34 @@ fn sort_uses_utf16_stability_and_undefined_before_holes() {
     "#);
 }
 
+/// FIG-6948: a default sort takes both strings at each comparison, as
+/// SortCompare does, wherever an element's ToString may be observed: an
+/// object's `toString` runs twice per comparison and not at all for a
+/// single element, and one that throws leaves the array as it was. Where
+/// every element is a primitive, the strings order by UTF-16 code units,
+/// stably.
+#[test]
+fn default_sort_takes_an_objects_string_at_each_comparison() {
+    law(r#"
+        let made = 0;
+        const spell = (v) => ({ v, toString() { made++; return String(v); } });
+        const xs = [spell(10), spell(9), spell(1), spell(100)];
+        xs.sort();
+        const order = xs.map(x => x.v).join() === '1,10,100,9';
+        const each = made >= 6 && made % 2 === 0;
+        made = 0;
+        [spell(7)].sort();
+        const none = made === 0;
+        const ys = [spell(2), 1, { toString() { throw new Error('no'); } }];
+        let thrown = false;
+        try { ys.sort(); } catch (e) { thrown = e.message === 'no'; }
+        const kept = ys[0].v === 2 && ys[1] === 1 && ys.length === 3;
+        const zs = [10, 'b', 9, true, null, 'B', 1, '\uE000', '\uD83D\uDE00', 'b'].sort();
+        const units = zs.map(String).join('|') === '1|10|9|B|b|b|null|true|\uD83D\uDE00|\uE000';
+        await finish(order && each && none && thrown && kept && units);
+    "#);
+}
+
 /// FIG-6886: a comparator sort applies its comparator exactly where a
 /// bottom-up merge of runs 1, 2, 4… compares, to the same (left, right)
 /// pairs in the same order: at most n⌈log2 n⌉ applications, stably.
