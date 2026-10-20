@@ -136,7 +136,12 @@ effect the checkpoint names.
   a restore after it derives the response again from the receipt and never
   re-sends the call. A crash before the receipt commits re-sends the pinned
   request as the next attempt while the deadline allows, even if the
-  provider already answered and charged for it. A cell may hold the derived
+  provider already answered and charged for it. A final answer whose
+  receipt owes no callback, in a turn no checkpoint or after-turn callback
+  runs in, derives in memory and commits its receipt with the turn's
+  `turn.commit` (FIG-6955); any other effect before that commit, a
+  cancel, a failure or a `turn.commit` that wrote nothing commits the
+  receipt on its own first. A cell may hold the derived
   response until its first save
   ([ADR 0142](0142-a-cells-first-save-carries-its-turns-model-response.md)).
   The call's sealed fact and `model_call_records` row commit beside a sealed

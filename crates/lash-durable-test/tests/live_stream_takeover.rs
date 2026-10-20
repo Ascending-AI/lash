@@ -2,7 +2,8 @@
 //! (FIG-5366).
 //!
 //! - **Takeover:** node A streams a turn's model call and dies before the
-//!   call's receipt commits, leaving it unanswered; node B reaps it and re-sends the pinned call
+//!   call's receipt commits (with the turn's commit, FIG-6955), leaving it
+//!   unanswered; node B reaps it and re-sends the pinned call
 //!   as its next attempt (ADR 0132 §4). A host's feed opened before the turn
 //!   and one opened after A died both follow the turn to its commit without
 //!   a replay gap: the live stream retracts A's partial prose with one
@@ -215,7 +216,10 @@ impl Takeover {
             ))
             .expect("the core builds");
         let script = Script::new();
-        script.cut_on("a", CommitLabel::MODEL_ANSWER, 1, Fault::Abort);
+        // The call's receipt owes no callback, so it commits with the
+        // turn's commit (FIG-6955): A dies there, its answer derived and
+        // published but never durable.
+        script.cut_on("a", CommitLabel::TURN_COMMIT, 1, Fault::Abort);
         let nodes = SimNodes::new(
             database,
             Arc::clone(&clock),

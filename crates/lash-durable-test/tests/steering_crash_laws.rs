@@ -807,6 +807,7 @@ fn uncut_labels(arrival: Arrival) -> Vec<CommitLabel> {
         // Two rounds of plain outcomes, each committed with its
         // presentation and the next model start: the admission of what
         // arrived commits with the first round's.
+        // The final answer's receipt commits with the turn (FIG-6955).
         arrival if arrival.at_work() => vec![
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
@@ -816,7 +817,6 @@ fn uncut_labels(arrival: Arrival) -> Vec<CommitLabel> {
             CommitLabel::MODEL_ANSWER,
             CommitLabel::MODEL_DONE,
             CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
-            CommitLabel::MODEL_ANSWER,
             CommitLabel::TURN_COMMIT,
             CommitLabel::SESSION_RELEASE,
         ],
@@ -836,15 +836,14 @@ fn uncut_labels(arrival: Arrival) -> Vec<CommitLabel> {
             CommitLabel::TURN_COMMIT,
             CommitLabel::SESSION_RELEASE,
         ],
-        // The first run answers; what arrived is the next run.
+        // The first run answers; what arrived is the next run. Each answer's
+        // receipt commits with its turn (FIG-6955).
         _ => vec![
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
-            CommitLabel::MODEL_ANSWER,
             CommitLabel::TURN_COMMIT,
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
-            CommitLabel::MODEL_ANSWER,
             CommitLabel::TURN_COMMIT,
             CommitLabel::SESSION_RELEASE,
         ],

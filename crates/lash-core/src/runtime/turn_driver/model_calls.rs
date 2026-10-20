@@ -74,8 +74,8 @@ impl RuntimeTurnDriver<'_> {
     }
 
     pub(super) fn publish_committed_model_calls(&mut self, event_tx: &TurnObserver) {
-        for id in std::mem::take(&mut self.staged_model_calls) {
-            self.publish_model_call(event_tx, &id);
+        for fact in std::mem::take(&mut self.staged_model_calls) {
+            self.publish_model_call(event_tx, &fact.call_id);
         }
     }
 

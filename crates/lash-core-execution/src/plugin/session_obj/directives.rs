@@ -62,6 +62,16 @@ impl PluginSession {
             .is_empty()
     }
 
+    /// Whether any checkpoint callback is registered: a turn's checkpoint
+    /// runs plugin code only then.
+    pub fn has_checkpoint_hooks(&self) -> bool {
+        !self
+            .capabilities()
+            .contributions
+            .checkpoint_hooks
+            .is_empty()
+    }
+
     /// Whether any after-turn callback is registered: a turn records the
     /// slot's decisions only then.
     pub fn has_after_turn_hooks(&self) -> bool {

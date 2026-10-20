@@ -71,7 +71,9 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// Facts awaiting the existing commit that settles them. Never retained
     /// here after their transaction is staged.
     pub(super) pending_model_calls: Vec<lash_core_store::model_calls::ModelCallFact>,
-    pub(super) staged_model_calls: Vec<crate::LlmCallId>,
+    /// Facts a transaction staged, published once it is acknowledged, and
+    /// pending again when it fails.
+    pub(super) staged_model_calls: Vec<lash_core_store::model_calls::ModelCallFact>,
     /// Calls this activation has published: each committed fact is
     /// published once, whichever of its staging commit, its derivation or
     /// the committed turn's reread reaches it first.

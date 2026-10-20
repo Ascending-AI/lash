@@ -20,10 +20,14 @@
 //!   derivation is handed what the receipt reads back, never what only the
 //!   live outcome held (FIG-6263): the provider's diagnostic is absent on
 //!   both.
-//! - **EMPTY-PLAN-HAS-THE-SAME-RECEIPT:** a call with no response hooks has
-//!   a receipt too: A loses its `turn.commit`, and B, whose build installs a
-//!   response hook, answers the raw receipt, never runs the new hook, sends
-//!   nothing and charges the usage once.
+//! - **FUSED-RECEIPT (FIG-6955):** a final answer whose receipt owes no
+//!   callback, in a turn no checkpoint or after-turn callback runs in,
+//!   commits its receipt with the turn's commit: the uncut run commits no
+//!   `model.answer`. Cut at that `turn.commit` under every fault, the turn
+//!   recovers as the reference protocol does at the same point: one
+//!   `turn.commit`, one answer (the purchase that commit carried), one
+//!   retained model-call record, the usage charged once, and a second
+//!   purchase only when nothing durable held the first.
 //! - **RAW-RECEIPT-GATES-HOOKS:** while the receipt's acknowledgement is
 //!   delayed, no response hook or stream finish runs and nothing commits
 //!   after it. A node paused before the receipt enters the store leaves the
@@ -1073,45 +1077,105 @@ async fn a_receipt_whose_acknowledgement_was_lost_is_reconciled_from_the_store()
     deployment.end();
 }
 
-/// EMPTY-PLAN-HAS-THE-SAME-RECEIPT: A's build installs no response hook,
-/// and its call's receipt commits like any other. A dies before its
-/// `turn.commit` enters the store; B's build installs a response hook. B
-/// answers the raw receipt: no send, the new hook never runs, the usage is
-/// charged once and one receipt committed.
-#[tokio::test]
-async fn an_answer_with_no_response_hooks_has_the_same_receipt() {
-    let deployment = Deployment::new(
-        Setup::new(Answer::Text, Hooks::StreamOnly).b_on_its_own_core(Hooks::All),
-        |script| {
-            script.cut_on("a", CommitLabel::TURN_COMMIT, 1, Fault::Abort);
-        },
-    )
+/// FUSED-RECEIPT (FIG-6955): a final answer whose receipt owes no callback
+/// (a stream hook needs no finish), on a turn no checkpoint or after-turn
+/// callback runs in, commits its
+/// receipt with the turn's commit: the uncut run commits no `model.answer`.
+/// Cut at that `turn.commit`, the turn recovers to the outcome the
+/// reference protocol gives for the same point: a commit that surely wrote
+/// nothing (a store failure) commits the receipt on its own and the call is
+/// never bought again; one that landed (its reply lost, or its node killed
+/// after it) is the turn's; one that never entered the store (its node
+/// killed or reaped first) leaves the call unanswered at `model.start`, as a
+/// crash before `model.answer` does, and the successor buys it again. Every
+/// cut commits one `turn.commit`, one assistant answer (the purchase that
+/// commit carried) and one retained model-call record.
+async fn a_hook_free_answer_cut_at_its_turn_commit(fault: Option<Fault>) {
+    let deployment = Deployment::new(Setup::new(Answer::Text, Hooks::StreamOnly), |script| {
+        if let Some(fault) = fault {
+            script.cut_on("a", CommitLabel::TURN_COMMIT, 1, fault);
+        }
+    })
     .await;
     let _handle = deployment.send().await;
-    deployment
-        .until("A dies at its turn commit", |deployment| {
-            deployment.cut(CommitLabel::TURN_COMMIT)
-        })
-        .await;
-    deployment.take_over().await;
+    match fault {
+        Some(Fault::Zombie) => {
+            deployment
+                .until("A pauses before its turn commit", |d| {
+                    d.nodes.paused().contains(&"a".to_owned())
+                })
+                .await;
+            deployment.nodes.start("b");
+        }
+        Some(fault) if fault.kills() => {
+            deployment
+                .until("A dies at its turn commit", |d| {
+                    d.cut(CommitLabel::TURN_COMMIT)
+                })
+                .await;
+            deployment.take_over().await;
+        }
+        _ => {}
+    }
     deployment.settle().await;
+    let trace = deployment.nodes.script().rendered_trace();
+    let bought_again = matches!(fault, Some(Fault::Abort | Fault::Zombie));
     assert_eq!(
         deployment.world.sends(),
-        1,
-        "the paid answer is bought once"
+        if bought_again { 2 } else { 1 },
+        "{fault:?}: a receipt is bought again only when nothing durable held it:\n{trace}"
     );
-    assert_eq!(deployment.committed(CommitLabel::MODEL_ANSWER), 1);
-    assert!(
-        deployment.world.derived().is_empty(),
-        "a hook B installed derives nothing of a call admitted without it"
-    );
-    assert_eq!(answered(&deployment.transcript().await), ANSWERS[0]);
     assert_eq!(
-        deployment.usage().await,
-        USAGE,
-        "the paid answer is charged once"
+        deployment.committed(CommitLabel::MODEL_ANSWER),
+        usize::from(fault == Some(Fault::FailBefore)),
+        "{fault:?}: the receipt commits on its own only after a turn commit that wrote nothing:\n{trace}"
     );
+    assert_eq!(
+        deployment.committed(CommitLabel::TURN_COMMIT),
+        1,
+        "{fault:?}: the turn commits once:\n{trace}"
+    );
+    let transcript = deployment.transcript().await;
+    assert_eq!(
+        transcript
+            .iter()
+            .filter(|(role, _)| role == "Assistant")
+            .count(),
+        1,
+        "{fault:?}: one answer: {transcript:?}"
+    );
+    assert_eq!(
+        answered(&transcript),
+        ANSWERS[usize::from(bought_again)],
+        "{fault:?}: the turn answers the purchase its commit carried"
+    );
+    let (_, rows) = retained_model_rows(&deployment.durable).await;
+    assert_eq!(rows.len(), 1, "{fault:?}: one retained model-call record");
+    let usage = if bought_again {
+        USAGE.checked_add(&LlmUsage::unknown_call()).unwrap()
+    } else {
+        USAGE
+    };
+    assert_eq!(deployment.usage().await, usage, "{fault:?}: charged once");
     deployment.end();
+}
+
+#[tokio::test]
+async fn a_hook_free_answer_commits_its_receipt_with_its_turn() {
+    a_hook_free_answer_cut_at_its_turn_commit(None).await;
+}
+
+#[tokio::test]
+async fn a_hook_free_answer_cut_at_its_turn_commit_recovers_as_the_reference_protocol() {
+    for fault in [
+        Fault::FailBefore,
+        Fault::AckHidden,
+        Fault::CommitThenAbort,
+        Fault::Abort,
+        Fault::Zombie,
+    ] {
+        a_hook_free_answer_cut_at_its_turn_commit(Some(fault)).await;
+    }
 }
 
 /// RAW-RECEIPT-GATES-HOOKS: the receipt commits and its acknowledgement

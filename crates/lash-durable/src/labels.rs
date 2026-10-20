@@ -36,7 +36,9 @@ impl CommitLabel {
     /// recorded beside its model phase before anything derives from it, so
     /// every derivation and every restore reads it and the call is never
     /// sent again (FIG-6230). The receipt is its own root; the phase stays
-    /// as `model.start` committed it (FIG-6253).
+    /// as `model.start` committed it (FIG-6253). A final answer whose
+    /// receipt owes no callback, in a turn no checkpoint or after-turn
+    /// callback runs in, commits with `turn.commit` instead (FIG-6955).
     pub const MODEL_ANSWER: Self = Self::new("model.answer");
     /// `round.present+model.start`: A round's presentation and the next model start, fused (C6).
     pub const ROUND_PRESENT_MODEL_START: Self = Self::new("round.present+model.start");
@@ -53,7 +55,8 @@ impl CommitLabel {
     /// its seed and the execution-state reset, as the session's own head
     /// commit (FIG-5355).
     pub const PRESSURE_FRAME: Self = Self::new("pressure.frame");
-    /// `turn.commit`: The turn's commit: head compare-and-set, terminal, phase-row pruning (C7);
+    /// `turn.commit`: The turn's commit: head compare-and-set, terminal, phase-row pruning (C7),
+    /// and the sealed record of a final answer whose receipt it carries (FIG-6955);
     /// for a turn whose preparation was refused, its `Refused` terminal alone.
     pub const TURN_COMMIT: Self = Self::new("turn.commit");
     /// `turn.cancel`: A turn's cancel terminal.

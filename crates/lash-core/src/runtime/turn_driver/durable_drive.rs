@@ -798,6 +798,15 @@ impl TurnDrive for RuntimeDrive {
         self.stage_sealed_model_calls(tx)
     }
 
+    fn unstage_model_calls(&mut self) {
+        self.unstage_sealed_model_calls();
+    }
+
+    fn turn_end_callbacks(&self) -> bool {
+        let plugins = self.driver.session.plugins();
+        plugins.has_checkpoint_hooks() || plugins.has_after_turn_hooks()
+    }
+
     fn owed_answer(&mut self) -> &mut Option<ModelAnswer> {
         &mut self.owed
     }

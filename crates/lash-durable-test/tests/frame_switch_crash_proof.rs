@@ -405,7 +405,8 @@ fn zombie_laws(cut: &Cut, trace: &[lash_durable_test::Write]) -> Vec<String> {
 
 /// The owner commits of the uncut run, in order: the switching turn admits,
 /// runs its tool round and commits the switch with its follow-on; the
-/// follow-on admits, answers and commits; the actor releases.
+/// follow-on admits, answers and commits, its answer's receipt with its
+/// turn (FIG-6955); the actor releases.
 fn uncut_labels() -> Vec<CommitLabel> {
     vec![
         CommitLabel::TURN_ADMIT,
@@ -416,7 +417,6 @@ fn uncut_labels() -> Vec<CommitLabel> {
         CommitLabel::TURN_COMMIT,
         CommitLabel::TURN_ADMIT,
         CommitLabel::MODEL_START,
-        CommitLabel::MODEL_ANSWER,
         CommitLabel::TURN_COMMIT,
         CommitLabel::SESSION_RELEASE,
     ]

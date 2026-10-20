@@ -56,10 +56,11 @@ pub const COVERAGE: [(CommitLabel, Coverage); 48] = [
         CommitLabel::MODEL_DONE,
         Coverage::Cases(&[Case::Round, Case::Cancel, Case::CellKilled]),
     ),
+    // A toolless turn's hook-free answer commits with its `turn.commit`
+    // (FIG-6955): the cases with a round, a cell or a hook cut it.
     (
         CommitLabel::MODEL_ANSWER,
         Coverage::Cases(&[
-            Case::Turn,
             Case::Round,
             Case::Cancel,
             Case::Effects,

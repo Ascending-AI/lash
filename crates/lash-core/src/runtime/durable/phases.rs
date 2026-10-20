@@ -11,7 +11,11 @@
 //! last commit (the pending checkpoint-callback decisions among them; an
 //! unchanged namespace is never written) and its admission record
 //! (snapshot and template); a resend is the same call, prepares nothing and
-//! sends the stored template with its slots filled afresh. `model.done` commits the
+//! sends the stored template with its slots filled afresh. `model.answer`
+//! commits a call's receipt before anything derives from it, but a final
+//! answer's receipt that owes no callback, in a turn no checkpoint or
+//! after-turn callback runs in, which `turn.commit` carries (FIG-6955).
+//! `model.done` commits the
 //! phase that re-delivers a round or a cell
 //! before it starts, and `turn.commit` publishes the next revision of the
 //! head the owner cached with the turn's terminal in one fenced
@@ -142,28 +146,34 @@ pub(super) fn bind_delivered(
     })
 }
 
-/// `model.answer`: the receipt of the pinned call `drive` just answered,
-/// the provider's outcome, committed beside the call's model phase under
-/// the owner fence, before anything derives from it: the phase's call is
-/// answered. The receipt is one immutable placed text the turn's row names:
-/// the phase and its root stay as `model.start` committed them, for the
-/// machine waits on the same call at the same checkpoint, so the commit
-/// writes the receipt's own nodes and the row's reference, never a new
-/// phase root (FIG-6253). The receipt states the callbacks its derivation
-/// owes (S7). The drive then owes the receipt as it committed, which is
+/// The receipt of the pinned call `drive` just answered, staged from the
+/// provider's outcome: what `model.answer` commits.
+pub(super) struct StagedReceipt {
+    call_id: crate::LlmCallId,
+    /// The callbacks its derivation invokes (S7).
+    owed: Vec<crate::plugin::PluginCallbackIdentity>,
+    root: lash_core_store::checkpoint_graph::NodeId,
+    staging: lash_core_store::checkpoint_graph::GraphStaging,
+}
+
+impl StagedReceipt {
+    /// Whether the receipt may commit with the turn's commit instead of as
+    /// `model.answer` (FIG-6955): its derivation invokes no callback and no
+    /// checkpoint or after-turn callback runs before the turn's commit, so
+    /// nothing but the turn's own machine derives from it before that
+    /// commit. Until it commits it
+    /// is held: a crash leaves the call unanswered at `model.start`, as one
+    /// before `model.answer` does, and the call is sent again.
+    fn holds_for_turn_commit(&self, drive: &dyn TurnDrive) -> bool {
+        self.owed.is_empty() && !drive.turn_end_callbacks()
+    }
+}
+
+/// Stage the receipt of the pinned call `drive` just answered, the
+/// provider's outcome. The drive then owes the receipt as staged, which is
 /// what every derivation reads, on this worker or after a restore: nothing
-/// only the live outcome held reaches a hook. Its acknowledgement is
-/// awaited: a failed or unacknowledged commit fails the attempt, whose next
-/// pass reconciles from the rows (a committed receipt restores at
-/// `model.answer` and is derived, never sent again; an uncommitted one
-/// leaves the call unanswered at `model.start`), and never falls through to
-/// a derivation. What the commit read of the turn's cancel comes back.
-async fn record_answer(
-    cx: &ActorContext,
-    drive: &mut dyn TurnDrive,
-    session: &SessionId,
-    run: &TurnId,
-) -> Result<lash_durable::ActorCommit, TurnError> {
+/// only the live outcome held reaches a hook (FIG-6263).
+fn stage_receipt(drive: &mut dyn TurnDrive) -> Result<StagedReceipt, TurnError> {
     let answer = drive
         .owed_answer()
         .take()
@@ -182,6 +192,45 @@ async fn record_answer(
     .stage(&mut staging)
     .map_err(TurnError::Exec)?;
     *drive.owed_answer() = Some(receipt.answer);
+    Ok(StagedReceipt {
+        call_id,
+        owed,
+        root,
+        staging,
+    })
+}
+
+/// `model.answer`: `receipt`, the staged receipt of the pinned call `drive`
+/// answered, committed beside the call's model phase under the owner fence,
+/// before anything derives from it: the phase's call is answered. The
+/// receipt is one immutable placed text the turn's row names: the phase and
+/// its root stay as `model.start` committed them, for the machine waits on
+/// the same call at the same checkpoint, so the commit writes the receipt's
+/// own nodes and the row's reference, never a new phase root (FIG-6253).
+/// The receipt states the callbacks its derivation owes (S7). Its
+/// acknowledgement is awaited: a failed or unacknowledged commit fails the
+/// attempt, whose next pass reconciles from the rows (a committed receipt
+/// restores at `model.answer` and is derived, never sent again; an
+/// uncommitted one leaves the call unanswered at `model.start`), and never
+/// falls through to a derivation. What the commit read of the turn's cancel
+/// comes back.
+///
+/// A receipt held for the turn's commit commits here too, before any
+/// effect but its emissions and the turn's end, and when the turn leaves
+/// without that commit carrying it (FIG-6955).
+async fn record_answer(
+    cx: &ActorContext,
+    drive: &mut dyn TurnDrive,
+    session: &SessionId,
+    run: &TurnId,
+    receipt: StagedReceipt,
+) -> Result<lash_durable::ActorCommit, TurnError> {
+    let StagedReceipt {
+        call_id,
+        owed,
+        root,
+        staging,
+    } = receipt;
     let mut tx = cx.begin().await?;
     if let Some(pin) = cx
         .durable_reads()?
@@ -282,6 +331,8 @@ pub async fn run_phases(
     // An answered cell's tool calls, recorded with the turn's next commit.
     let mut answered_cell: Option<tool_round::AnsweredCell> = None;
     let mut boundary = OutputBoundary::default();
+    // A derived receipt held for the turn's commit (FIG-6955).
+    let mut held: Option<StagedReceipt> = None;
     loop {
         let effect = match pending.take() {
             Some(effect) => effect,
@@ -290,6 +341,23 @@ pub async fn run_phases(
                 None => return Err(TurnError::Exec("the turn machine stalled".to_owned())),
             },
         };
+        // Only the receipt's emissions, its progress boundary (the commit
+        // draft's, in memory), a checkpoint no callback runs at (it commits
+        // nothing; what it delivers binds in the next commit) and the turn's
+        // commit come between a held receipt and its commit: before any
+        // other effect it commits on its own, as `model.answer`, and the
+        // effect then reads its cancel as after any `model.answer`.
+        if !matches!(
+            &effect,
+            Effect::Done { .. }
+                | Effect::Emit(_)
+                | Effect::Log { .. }
+                | Effect::Progress { .. }
+                | Effect::Checkpoint { .. }
+        ) && let Some(receipt) = held.take()
+        {
+            record_answer(cx, drive.as_mut(), &session, &run, receipt).await?;
+        }
         // An output other than the next provider call, or a terminal whose
         // finish drains activity, consumes recorded outcomes first.
         if boundary.held()
@@ -554,8 +622,23 @@ pub async fn run_phases(
                     // call's receipt, acknowledged, before any stream hook
                     // is finished, any response hook runs, or anything is
                     // admitted, launched or published from it. Every call
-                    // takes this path, with or without hooks.
-                    let committed = record_answer(cx, drive.as_mut(), &session, &run).await?;
+                    // takes this path, with or without hooks, but one whose
+                    // receipt the turn's commit may carry: that one derives
+                    // now and is held, and commits on its own only if
+                    // anything but its emissions, its progress boundary, a
+                    // callback-free checkpoint and the turn's commit follows
+                    // (FIG-6955).
+                    let receipt = stage_receipt(drive.as_mut())?;
+                    if receipt.holds_for_turn_commit(drive.as_ref()) {
+                        if let Err(error) = drive.derive_answer(cx, id).await {
+                            record_answer(cx, drive.as_mut(), &session, &run, receipt).await?;
+                            return Err(error);
+                        }
+                        held = Some(receipt);
+                        continue;
+                    }
+                    let committed =
+                        record_answer(cx, drive.as_mut(), &session, &run, receipt).await?;
                     // An immediate cancel the turn accepted while the call
                     // answered wins over its derivation; the receipt stops
                     // with the turn.
@@ -847,184 +930,221 @@ pub async fn run_phases(
                 event_delta,
                 protocol_iteration,
             } => {
-                // An `Immediate` request the turn accepted after its last
-                // step still wins over the commit: the turn backtracks to its
-                // last checkpoint, which the next pass restores to commit
-                // its stop from (its machine here is finished).
-                let mut tx = cx.begin().await?;
-                if turn_cancel::immediate_in(&tx) {
-                    return Ok(PhaseExit::CancelRequested);
-                }
-                // The last cell's calls commit with the turn; its finish
-                // reports them beside the recorded ones, and drains the
-                // turn's activity before the commit (FIG-5507): what the
-                // turn held of the cell's emissions goes first.
-                // The spans of the turn's cells its commit ends close once
-                // it is acknowledged (§3.8): the last cell's, whose answer
-                // it consumes, and one that never answered (a cell whose
-                // failure ended the turn), which it discards.
-                let discarded = drive.discarded_cell(cx).await?;
-                let mut cell_closes = Vec::new();
-                if let Some(cell) = &mut answered_cell {
-                    drive.finishing_cell_calls(&cell.calls);
-                    let mut held = cell.take_emissions();
-                    cell_closes.extend(held.take_close());
-                    tool_round::release_cell_emissions(
+                let slot = &mut held;
+                let ended = Box::pin(async {
+                    // An `Immediate` request the turn accepted after its last
+                    // step still wins over the commit: the turn backtracks to its
+                    // last checkpoint, which the next pass restores to commit
+                    // its stop from (its machine here is finished).
+                    let mut tx = cx.begin().await?;
+                    if turn_cancel::immediate_in(&tx) {
+                        return Ok(PhaseExit::CancelRequested);
+                    }
+                    // The last cell's calls commit with the turn; its finish
+                    // reports them beside the recorded ones, and drains the
+                    // turn's activity before the commit (FIG-5507): what the
+                    // turn held of the cell's emissions goes first.
+                    // The spans of the turn's cells its commit ends close once
+                    // it is acknowledged (§3.8): the last cell's, whose answer
+                    // it consumes, and one that never answered (a cell whose
+                    // failure ended the turn), which it discards.
+                    let discarded = drive.discarded_cell(cx).await?;
+                    let mut cell_closes = Vec::new();
+                    if let Some(cell) = &mut answered_cell {
+                        drive.finishing_cell_calls(&cell.calls);
+                        let mut held = cell.take_emissions();
+                        cell_closes.extend(held.take_close());
+                        tool_round::release_cell_emissions(
+                            cx,
+                            drive.as_mut(),
+                            held,
+                            CommitLabel::TURN_COMMIT,
+                        )
+                        .await?;
+                    }
+                    // The turn commits, and its run answers, the outcome the
+                    // model produced.
+                    let done = TurnDone {
+                        messages,
+                        event_delta,
+                        protocol_iteration,
+                        outcome: outcome.take(),
+                        finish_value_schema: accepted_finish_value_schema(drive.machine()),
+                    };
+                    let cause = done.run_terminal_cause(&run)?;
+                    let kind = cause.kind();
+                    let traced = turn_trace::outcome(services.tracing(), &cause);
+                    let output = turn_trace::output(services.tracing(), &row, &cause);
+                    // A frame switch mails its follow-on with its commit.
+                    let follow_on = match &done.outcome {
+                        Some(outcome) => follow_on_mail(
+                            &session,
+                            outcome,
+                            switches,
+                            row.admission
+                                .trace()
+                                .and_then(lash_trace::DurableTraceScope::as_parent),
+                        )?,
+                        None => None,
+                    };
+                    let commit = drive
+                        .finish(cx, done, heads.head(cx, &session).await?)
+                        .await?;
+                    drive.stage_model_calls(&mut tx)?;
+                    if let Some(present) = carry.take() {
+                        present.write(&mut tx);
+                    }
+                    tool_round::consume_answered_cell(
                         cx,
                         drive.as_mut(),
-                        held,
-                        CommitLabel::TURN_COMMIT,
+                        &mut tx,
+                        &row,
+                        &mut answered_cell,
+                        false,
                     )
                     .await?;
-                }
-                // The turn commits, and its run answers, the outcome the
-                // model produced.
-                let done = TurnDone {
-                    messages,
-                    event_delta,
-                    protocol_iteration,
-                    outcome: outcome.take(),
-                    finish_value_schema: accepted_finish_value_schema(drive.machine()),
-                };
-                let cause = done.run_terminal_cause(&run)?;
-                let kind = cause.kind();
-                let traced = turn_trace::outcome(services.tracing(), &cause);
-                let output = turn_trace::output(services.tracing(), &row, &cause);
-                // A frame switch mails its follow-on with its commit.
-                let follow_on = match &done.outcome {
-                    Some(outcome) => follow_on_mail(
+                    // The commit settles what the turn's checkpoints delivered:
+                    // bound to the run first, as the settlement requires.
+                    if let Some(bind) = bind_delivered(drive.as_ref(), &session, &run) {
+                        tx.write(bind);
+                    }
+                    super::head_commit::write_session_commit(
+                        &mut tx,
                         &session,
-                        outcome,
-                        switches,
-                        row.admission
-                            .trace()
-                            .and_then(lash_trace::DurableTraceScope::as_parent),
-                    )?,
-                    None => None,
-                };
-                let commit = drive
-                    .finish(cx, done, heads.head(cx, &session).await?)
+                        commit.expected_head,
+                        commit.commit,
+                    );
+                    super::turn_terminal::write_terminal(
+                        cx,
+                        &mut tx,
+                        &session,
+                        &run,
+                        cause,
+                        Some(commit.expected_head.saturating_add(1)),
+                    )
                     .await?;
-                drive.stage_model_calls(&mut tx)?;
-                if let Some(present) = carry.take() {
-                    present.write(&mut tx);
-                }
-                tool_round::consume_answered_cell(
-                    cx,
-                    drive.as_mut(),
-                    &mut tx,
-                    &row,
-                    &mut answered_cell,
-                    false,
-                )
-                .await?;
-                // The commit settles what the turn's checkpoints delivered:
-                // bound to the run first, as the settlement requires.
-                if let Some(bind) = bind_delivered(drive.as_ref(), &session, &run) {
-                    tx.write(bind);
-                }
-                super::head_commit::write_session_commit(
-                    &mut tx,
-                    &session,
-                    commit.expected_head,
-                    commit.commit,
-                );
-                super::turn_terminal::write_terminal(
-                    cx,
-                    &mut tx,
-                    &session,
-                    &run,
-                    cause,
-                    Some(commit.expected_head.saturating_add(1)),
-                )
-                .await?;
-                if let Some(follow_on) = follow_on {
-                    tx.write(DomainWrite::Prompt(PromptWrite::ResetPrefix {
-                        session: session.clone(),
-                    }));
-                    tx.write(DomainWrite::SessionMail(follow_on));
-                }
-                // The turn's scope ends with its commit (L6b): its waits are
-                // revoked and its first batch of `Until` children marked; the
-                // next pass marks the rest.
-                end_turn_scope(cx, &mut tx, &session, &run).await?;
-                // A head commit whose content the session store refuses (a
-                // node id the session already holds) is refused again on
-                // every pass: it is the turn's runtime refusal, and a
-                // terminal one ends the run (FIG-5352). One the store refuses
-                // for the deployment or the state it holds is the pass's
-                // failure: the session parks at the activation-loop budget
-                // with the turn and its input kept (FIG-5398).
-                let input =
-                    turn_trace::input(cx, services.tracing(), &row, &drive.delivered_inputs())
-                        .await;
-                let released = cx.draining();
-                let release = released.then(|| {
-                    let more = tx.domain().iter().any(|write| {
-                        matches!(
-                            write,
-                            DomainWrite::Process(
-                                lash_durable::domain::ProcessWrite::CascadeBatch {
-                                    cursor: Some(_),
-                                    ..
-                                }
+                    if let Some(follow_on) = follow_on {
+                        tx.write(DomainWrite::Prompt(PromptWrite::ResetPrefix {
+                            session: session.clone(),
+                        }));
+                        tx.write(DomainWrite::SessionMail(follow_on));
+                    }
+                    // The turn's scope ends with its commit (L6b): its waits are
+                    // revoked and its first batch of `Until` children marked; the
+                    // next pass marks the rest.
+                    end_turn_scope(cx, &mut tx, &session, &run).await?;
+                    // A head commit whose content the session store refuses (a
+                    // node id the session already holds) is refused again on
+                    // every pass: it is the turn's runtime refusal, and a
+                    // terminal one ends the run (FIG-5352). One the store refuses
+                    // for the deployment or the state it holds is the pass's
+                    // failure: the session parks at the activation-loop budget
+                    // with the turn and its input kept (FIG-5398).
+                    let input =
+                        turn_trace::input(cx, services.tracing(), &row, &drive.delivered_inputs())
+                            .await;
+                    let released = cx.draining();
+                    let release = released.then(|| {
+                        let more = tx.domain().iter().any(|write| {
+                            matches!(
+                                write,
+                                DomainWrite::Process(
+                                    lash_durable::domain::ProcessWrite::CascadeBatch {
+                                        cursor: Some(_),
+                                        ..
+                                    }
+                                )
                             )
-                        )
+                        });
+                        if more { Release::Ready } else { Release::Idle }
                     });
-                    if more { Release::Ready } else { Release::Idle }
-                });
-                let committed = super::session_publication::commit(
-                    cx,
-                    drive.code_executor().as_ref(),
-                    &session,
-                    tx,
-                    CommitLabel::TURN_COMMIT,
-                    release,
-                )
-                .await;
-                committed.map_err(|error| {
-                    let refusal = match &error {
-                        DurableError::Domain(refusal) => refusal.session_commit_refusal(),
-                        _ => None,
-                    };
-                    refusal.map_or(TurnError::Durable(error), TurnError::Runtime)
-                })?;
-                for close in cell_closes {
-                    close.publish();
-                }
-                if let Some(discarded) = discarded {
-                    turn_trace::members_ended(
+                    // The turn's commit carries a held receipt: the call's
+                    // sealed record is in it, and nothing reads the receipt
+                    // once the turn has ended. A commit that surely wrote
+                    // nothing hands it back, to commit on its own.
+                    let carried = slot.take();
+                    let committed = super::session_publication::commit(
+                        cx,
+                        drive.code_executor().as_ref(),
+                        &session,
+                        tx,
+                        CommitLabel::TURN_COMMIT,
+                        release,
+                    )
+                    .await;
+                    if let Err(error) = &committed
+                        && !matches!(
+                            error,
+                            DurableError::AckLost { .. }
+                                | DurableError::OwnershipLost(_)
+                                | DurableError::NodeLeaseLost { .. }
+                        )
+                    {
+                        *slot = carried;
+                    }
+                    committed.map_err(|error| {
+                        let refusal = match &error {
+                            DurableError::Domain(refusal) => refusal.session_commit_refusal(),
+                            _ => None,
+                        };
+                        refusal.map_or(TurnError::Durable(error), TurnError::Runtime)
+                    })?;
+                    for close in cell_closes {
+                        close.publish();
+                    }
+                    if let Some(discarded) = discarded {
+                        turn_trace::members_ended(
+                            services.tracing(),
+                            &row,
+                            &discarded.open,
+                            turn_trace::MemberEnd::Discarded,
+                        );
+                        discarded.close.publish();
+                    }
+                    turn_trace::ended(
                         services.tracing(),
                         &row,
-                        &discarded.open,
-                        turn_trace::MemberEnd::Discarded,
-                    );
-                    discarded.close.publish();
-                }
-                turn_trace::ended(
-                    services.tracing(),
-                    &row,
-                    traced,
-                    &drive.delivered_inputs(),
-                    (input, output),
-                    (
-                        calls,
-                        Some(
-                            row.tool_calls.saturating_add(
-                                cx.tool_call_admissions()
-                                    .saturating_sub(tool_calls_at_start),
+                        traced,
+                        &drive.delivered_inputs(),
+                        (input, output),
+                        (
+                            calls,
+                            Some(
+                                row.tool_calls.saturating_add(
+                                    cx.tool_call_admissions()
+                                        .saturating_sub(tool_calls_at_start),
+                                ),
                             ),
                         ),
-                    ),
-                );
-                drive.committed().await;
-                // The commit moved the head: the next turn loads it again.
-                heads.evict();
-                return Ok(if released {
-                    PhaseExit::Released
-                } else {
-                    PhaseExit::Committed(kind)
-                });
+                    );
+                    drive.committed().await;
+                    // The commit moved the head: the next turn loads it again.
+                    heads.evict();
+                    Ok::<_, TurnError>(if released {
+                        PhaseExit::Released
+                    } else {
+                        PhaseExit::Committed(kind)
+                    })
+                })
+                .await;
+                // A receipt the turn's commit did not carry commits on its
+                // own, as `model.answer` would have before the commit: the
+                // next pass derives it and never sends the call again.
+                if let Some(receipt) = held.take() {
+                    drive.unstage_model_calls();
+                    let recorded = record_answer(cx, drive.as_mut(), &session, &run, receipt).await;
+                    match (&ended, recorded) {
+                        (Ok(_), recorded) => {
+                            recorded?;
+                        }
+                        (Err(_), Err(error)) => {
+                            tracing::debug!(session_id = %session, run_id = %run, %error,
+                                "the held receipt of a turn whose commit failed did not commit");
+                        }
+                        (Err(_), Ok(_)) => {}
+                    }
+                }
+                return ended;
             }
             local => {
                 if let Effect::Emit(SessionStreamEvent::TurnOutcome { outcome: ended }) = &local {

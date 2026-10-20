@@ -74,10 +74,18 @@ impl RuntimeDrive {
                 call_id: fact.call_id.clone(),
                 record,
             }));
-            self.driver.staged_model_calls.push(fact.call_id);
+            self.driver.staged_model_calls.push(fact);
         }
         tx.stage_all(staging);
         Ok(())
+    }
+
+    /// The transaction that staged the sealed calls failed: they await the
+    /// next commit that settles them again, ahead of any sealed since.
+    pub(super) fn unstage_sealed_model_calls(&mut self) {
+        let mut staged = std::mem::take(&mut self.driver.staged_model_calls);
+        staged.append(&mut self.driver.pending_model_calls);
+        self.driver.pending_model_calls = staged;
     }
 }
 

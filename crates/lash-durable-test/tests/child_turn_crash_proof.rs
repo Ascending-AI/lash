@@ -345,6 +345,7 @@ fn zombie_laws(cut: &Cut, trace: &[lash_durable_test::Write]) -> Vec<String> {
 /// The owner commits of the uncut run, in order: the process pins its wait,
 /// mails the turn and parks; the child's actor admits and runs it, and its
 /// commit wakes the process, which ends while the child's actor releases.
+/// The child's answer commits its receipt with its turn (FIG-6955).
 fn uncut_labels() -> Vec<CommitLabel> {
     vec![
         CommitLabel::PROCESS_ADVANCE,
@@ -352,7 +353,6 @@ fn uncut_labels() -> Vec<CommitLabel> {
         CommitLabel::PROCESS_ADVANCE,
         CommitLabel::TURN_ADMIT,
         CommitLabel::MODEL_START,
-        CommitLabel::MODEL_ANSWER,
         CommitLabel::TURN_COMMIT,
         CommitLabel::PROCESS_TERMINAL,
         CommitLabel::CASCADE_BATCH,

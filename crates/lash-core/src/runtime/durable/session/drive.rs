@@ -30,11 +30,12 @@ pub trait TurnDrive: Send {
 
     /// The receipt of the model call the machine waits on that no
     /// derivation has answered: the provider's outcome as
-    /// [`model_call`](Self::model_call) returned it, until `model.answer`
-    /// commits it and the phase runner replaces it with the receipt as it
-    /// committed, or the receipt a restore at `model.answer` found. Every
-    /// derivation reads the committed receipt, never what only the live
-    /// outcome held. `None` once a derivation or a cancel settled it.
+    /// [`model_call`](Self::model_call) returned it, until the phase runner
+    /// stages it as its receipt and replaces it with the receipt as staged,
+    /// or the receipt a restore at `model.answer` found. Every derivation
+    /// reads the receipt, committed or held for the turn's commit, never
+    /// what only the live outcome held. `None` once a derivation or a cancel
+    /// settled it.
     fn owed_answer(&mut self) -> &mut Option<ModelAnswer>;
 
     /// Stage sealed calls in the commit that settles them.
@@ -42,10 +43,25 @@ pub trait TurnDrive: Send {
         Ok(())
     }
 
+    /// The commit that staged sealed calls failed: the next commit that
+    /// settles them stages them again.
+    fn unstage_model_calls(&mut self) {}
+
+    /// Whether plugin code may run between a model answer and the turn's
+    /// commit: checkpoint callbacks at the checkpoint the answer reaches, or
+    /// after-turn callbacks, which read the finished turn from the store, as
+    /// it finishes. A receipt then commits as `model.answer` before they
+    /// run, never with the turn's commit.
+    fn turn_end_callbacks(&self) -> bool {
+        false
+    }
+
     /// Derive the machine's model call `id` from
-    /// [`owed_answer`](Self::owed_answer), a committed receipt: finish its
+    /// [`owed_answer`](Self::owed_answer), a staged receipt: finish its
     /// recorded stream, run its recorded response hooks and answer the
-    /// machine with the result. An abort leaves the receipt owed.
+    /// machine with the result. A receipt that owes a callback is committed
+    /// first; one that owes none may be held for the turn's commit. An
+    /// abort leaves the receipt owed.
     ///
     /// # Errors
     ///
