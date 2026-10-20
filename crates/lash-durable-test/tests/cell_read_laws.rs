@@ -748,6 +748,7 @@ async fn probe(
     database: &Arc<dyn DurableStore>,
     decodes: Vec<lash_durable::FormatSet>,
     serves: Vec<String>,
+    held: std::collections::BTreeSet<lash_durable::HeldArtifact>,
 ) -> Option<Vec<String>> {
     use lash_durable::{NodeId, NodeSpec, Release};
     let node = database
@@ -755,7 +756,7 @@ async fn probe(
             node: NodeId::new("cell-read-probe"),
             decodes,
             serves,
-            held: Default::default(),
+            held,
             ttl_millis: 15_000,
         })
         .await
@@ -834,6 +835,13 @@ async fn a_cell_that_reads_is_claimed_only_where_its_reader_is_served_on_sqlite_
     };
     nodes.kill("a");
     nodes.quiesce().await;
+    let backend = turn.backend();
+    let held = backend
+        .packages()
+        .expect("the executing nodes' installed packages")
+        .hold(&backend)
+        .await
+        .expect("the probe holds the executing nodes' packages");
     let deadline = u64::try_from(due.0).unwrap() - SimClock::timestamp_ms_at(0);
     clock.advance_to(deadline + 1_000).await;
     let without: Vec<String> = serves
@@ -842,11 +850,11 @@ async fn a_cell_that_reads_is_claimed_only_where_its_reader_is_served_on_sqlite_
         .cloned()
         .collect();
     assert_eq!(
-        probe(&database, decodes.clone(), without).await,
+        probe(&database, decodes.clone(), without, held.clone()).await,
         None,
         "a node that does not serve the reader does not claim the cell that plans reads"
     );
-    let requires = probe(&database, decodes, serves)
+    let requires = probe(&database, decodes, serves, held)
         .await
         .expect("a node that serves the reader claims the cell");
     assert!(

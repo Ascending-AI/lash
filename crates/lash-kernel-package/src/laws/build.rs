@@ -381,7 +381,7 @@ fn pkg_ops_a_body_performs_only_what_its_package_exports() {
     ] {
         let args = if slots.starts_with("()") { "" } else { "url" };
         let source = format!(
-            "{}\nfunction dataframe.fetch(url: Any) -> Any\nkernel 1\ncharge 1\neffect {effect}{slots}\nbody {{\n  let page = perform {effect}({args}) as Any\n  return page\n}}\n",
+            "{}\nfunction dataframe.fetch(url: Any) -> Any\nkernel 1\ncharge 1\neffect {effect}{slots} contract \"{effect}/1\"\nbody {{\n  let page = perform {effect}({args}) as Any\n  return page\n}}\n",
             DATAFRAME.kernel
         );
         let refused = with_kernel(DATAFRAME.surface, &source).unwrap_err();

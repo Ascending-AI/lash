@@ -349,9 +349,14 @@ async fn a_tool_and_finish_cell_crosses_the_worker_boundary_on_one_lease(tier: T
     world.shutdown().await;
 }
 
-/// A cell that computes until a limit stops it: no fuel or memory bound
-/// does, under [`unbounded_rlm`].
+/// A cell that computes without growing its live state.
 const HEAVY: &str = "let n = 0; while (n >= 0) { n = n + 1; } await control.finish(n);";
+
+/// Each failed match backtracks over fourteen units, below the matcher's
+/// work guard, with little charge and no growing allocation. Repeating it
+/// spends the worker's CPU or compute bound before the pool's 50M charge
+/// ceiling; an arithmetic loop can spend that charge in under a second.
+const BACKTRACK_COMPUTE: &str = "let n = 0; while (n >= 0) { /(a+)+b/.test(\"aaaaaaaaaaaaaa\"); n = n + 1; } await control.finish(n);";
 
 /// A cell whose regular expression backtracks over 8 million units: the
 /// matcher's stack, which no run bound meters, grows past a 1 GiB
@@ -395,7 +400,8 @@ impl Limit {
     fn cell(self) -> &'static str {
         match self {
             Self::Died => BACKTRACK,
-            Self::Cpu | Self::Deadline | Self::Wall => HEAVY,
+            Self::Cpu | Self::Deadline => BACKTRACK_COMPUTE,
+            Self::Wall => HEAVY,
         }
     }
 
@@ -434,8 +440,7 @@ impl Limit {
     }
 }
 
-/// [`served::rlm`] with no instruction bound, so only a worker limit ends
-/// [`HEAVY`].
+/// [`served::rlm`] using the pool's instruction ceiling.
 fn unbounded_rlm(workers: lash::vm::WorkerService) -> lash::rlm::RlmProtocolPluginFactory {
     lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
