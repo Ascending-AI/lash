@@ -230,7 +230,16 @@ impl Run<'_> {
     fn deployment(&self) -> Deployment {
         Deployment::new(
             self.database.clone(),
-            DurableSettings::default(),
+            DurableSettings {
+                owner_retention: Some(lash::durable::OwnerRetentionSettings {
+                    idle_evict: std::time::Duration::from_secs(60),
+                    max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+                    max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+                    max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+                    max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+                }),
+                ..DurableSettings::default()
+            },
             self.pool,
             self.worker.to_path_buf(),
         )
@@ -259,7 +268,11 @@ async fn bench_main() -> Result<()> {
             "samples": args.samples,
             "pool_max": args.pool_max,
             "pool_min": args.pool_min,
-            "settings": format!("{:?}", DurableSettings::default()),
+            "settings": format!("{:?}", DurableSettings { owner_retention: Some(lash::durable::OwnerRetentionSettings { idle_evict: std::time::Duration::from_secs(60),
+ max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+ max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+ max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+ max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() }, }), ..DurableSettings::default() }),
             "vm_worker": args.vm_worker,
             "debug_assertions": cfg!(debug_assertions),
         }),

@@ -15,7 +15,16 @@ fn parts() -> BackendParts {
     BackendParts {
         formats: Vec::new(),
         stores: crate::conformance::StoreLawBackend::stores(),
-        settings: DurableSettings::default(),
+        settings: DurableSettings {
+            owner_retention: Some(lash_core::durable_port::OwnerRetentionSettings {
+                idle_evict: std::time::Duration::from_secs(60),
+                max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+                max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+                max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+                max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+            }),
+            ..DurableSettings::default()
+        },
         engines: Vec::new(),
         providers: Arc::new(NoProjectionProviders),
     }
@@ -71,7 +80,16 @@ fn two_providers_of_one_projection_type_are_refused() {
 fn settings_that_break_a_rule_are_refused() {
     let settings = DurableSettings {
         claim_batch: 0,
-        ..DurableSettings::default()
+        ..DurableSettings {
+            owner_retention: Some(lash_core::durable_port::OwnerRetentionSettings {
+                idle_evict: std::time::Duration::from_secs(60),
+                max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+                max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+                max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+                max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+            }),
+            ..DurableSettings::default()
+        }
     };
     let refused = refusal(BackendParts {
         settings,

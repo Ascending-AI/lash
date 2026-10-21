@@ -249,7 +249,11 @@ async fn an_unknown_engine_park_is_shared_by_get_list_snapshot_and_gap() {
     use crate::durable::{ActorKey, CommitLabel, NodeId, NodeSpec};
 
     let stores = crate::tests::sqlite_memory_store_set().await;
-    let backend = crate::durable::DurableBackendBuilder::new(stores)
+    let backend = crate::durable::DurableBackendBuilder::new(stores).config(lash_durable::DurableSettings { owner_retention: Some(lash_durable::OwnerRetentionSettings { idle_evict: std::time::Duration::from_secs(60),
+ max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+ max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+ max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+ max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() }, }), ..lash_durable::DurableSettings::standard() })
         .build()
         .expect("durable backend with no host engines");
     let process_id = backend

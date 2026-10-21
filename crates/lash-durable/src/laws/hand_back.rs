@@ -51,7 +51,11 @@ pub async fn an_abandoned_activation_hands_back_only_its_original_grant(
             reap_every: quiet,
             ..LeaseSettings::default()
         },
-        ..DurableSettings::default()
+        ..DurableSettings { owner_retention: Some(crate::OwnerRetentionSettings { idle_evict: std::time::Duration::from_secs(60),
+ max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+ max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+ max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+ max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() }, }), ..DurableSettings::default() }
     }
     .validate()
     .map_err(|error| LawBroken(error.to_string()))?;

@@ -296,7 +296,13 @@ async fn pg_fence_retries_contended_with_a_fresh_read() {
     let seam = AfterFence::new();
     let storage = standing(
         crate::testing::connect_with(database.url(), &{
-            let mut config = crate::PostgresHostConfig::default();
+            let mut config = { let mut config = crate::PostgresHostConfig::default(); config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+ idle_evict: std::time::Duration::from_secs(60),
+ max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+ max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+ max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+ max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+}); config };
             config.guards.ordinary.lock =
                 crate::host::ServerTimeout::Limit(Duration::from_millis(100));
             config

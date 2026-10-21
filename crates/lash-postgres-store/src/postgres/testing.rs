@@ -32,7 +32,17 @@ pub const FIXTURE_SWEEP_SESSIONS: u32 = 4;
 /// [`FIXTURE_SERVED_NODES`] nodes and [`FIXTURE_SWEEP_SESSIONS`] sweeps: the
 /// configuration of laws that do not exercise it.
 pub fn fixture_config() -> crate::PostgresHostConfig {
-    let mut config = crate::PostgresHostConfig::default();
+    let mut config = {
+        let mut config = crate::PostgresHostConfig::default();
+        config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+            idle_evict: std::time::Duration::from_secs(60),
+            max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+            max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+            max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+            max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+        });
+        config
+    };
     config.roles.served_nodes = FIXTURE_SERVED_NODES;
     config.maintenance.max_sweep_sessions = FIXTURE_SWEEP_SESSIONS;
     config
@@ -151,7 +161,13 @@ pub async fn migrate(
     let endpoints = crate::PostgresEndpoints::from_url(database_url).map_err(|error| {
         crate::MigrateError::Store(crate::StoreError::Backend(error.to_string()))
     })?;
-    crate::PostgresStorage::migrate(&endpoints, &crate::PostgresHostConfig::default(), phase).await
+    crate::PostgresStorage::migrate(&endpoints, &{ let mut config = crate::PostgresHostConfig::default(); config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+ idle_evict: std::time::Duration::from_secs(60),
+ max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+ max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+ max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+ max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+}); config }, phase).await
 }
 
 /// [`PostgresStorage::plan_migrations`](crate::PostgresStorage::plan_migrations)
@@ -165,7 +181,13 @@ pub async fn plan_migrations(
     })?;
     crate::PostgresStorage::plan_migrations(
         &endpoints,
-        &crate::PostgresHostConfig::default(),
+        &{ let mut config = crate::PostgresHostConfig::default(); config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+ idle_evict: std::time::Duration::from_secs(60),
+ max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+ max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+ max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+ max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+}); config },
         phase,
     )
     .await

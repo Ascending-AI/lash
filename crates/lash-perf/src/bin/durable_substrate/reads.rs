@@ -169,12 +169,31 @@ async fn stores(run: &Run<'_>) -> Result<ReadStores> {
         )),
         Database::Postgres(url) => {
             let endpoints = lash_postgres_store::PostgresEndpoints::from_url(url)?;
-            let storage = lash_postgres_store::PostgresStorage::connect(
-                &endpoints,
-                &lash_postgres_store::PostgresHostConfig::default(),
-                Default::default(),
-            )
-            .await?;
+            let storage =
+                lash_postgres_store::PostgresStorage::connect(
+                    &endpoints,
+                    &{
+                        let mut config = lash_postgres_store::PostgresHostConfig::default();
+                        config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+                            idle_evict: std::time::Duration::from_secs(60),
+                            max_owner_bytes: const {
+                                std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap()
+                            },
+                            max_node_bytes: const {
+                                std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap()
+                            },
+                            max_owner_dirty_bytes: const {
+                                std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap()
+                            },
+                            max_node_dirty_bytes: const {
+                                std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap()
+                            },
+                        });
+                        config
+                    },
+                    Default::default(),
+                )
+                .await?;
             lash_perf::perf_support::require_durable_postgres(storage.pool()).await?;
             let stores = lash_postgres_store::PostgresStoreSet::new(
                 &storage,
@@ -382,7 +401,11 @@ async fn measure_with_stores(
         calls: Mutex::new(0),
         writes: Mutex::new(Vec::new()),
     });
-    let backend = lash::durable::DurableBackendBuilder::new(recorded).build()?;
+    let backend = lash::durable::DurableBackendBuilder::new(recorded).config(lash::durable::DurableSettings { owner_retention: Some(lash::durable::OwnerRetentionSettings { idle_evict: std::time::Duration::from_secs(60),
+ max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+ max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+ max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+ max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() }, }), ..lash::durable::DurableSettings::standard() }).build()?;
     let pool = workers.pool()?; // warm before measurement, reused by all samples
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()

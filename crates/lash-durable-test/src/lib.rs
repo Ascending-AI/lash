@@ -33,6 +33,7 @@ pub use life::Life;
 pub use matrix::{Cell, CutPoint, Matrix, MatrixReport, Scenario, Verdict};
 pub use nodes::{SimNodes, SimNodesConfig};
 pub use script::{
-    CandidateObserver, CommitObserver, Cut, Fault, Point, Script, Stored, Write, WriteKind,
+    CandidateObserver, CommitObserver, Cut, Fault, OwnerCutReceipt, OwnerFault, Point, Script,
+    Stored, Write, WriteKind,
 };
 pub use tripwire::{Tripwire, TripwireCounts};

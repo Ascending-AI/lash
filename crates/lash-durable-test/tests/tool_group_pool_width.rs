@@ -321,16 +321,34 @@ impl Scenario for Wide {
     async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
         let stores = small_pool(self.postgres_url.clone(), clock, &self.keep).await;
         let database = lash_execution_contracts::backend::StoreSet::durable_store(stores.as_ref());
-        *self.backend.lock_recover() = Some(
-            Backend::assemble(BackendParts {
-                stores,
-                settings: DurableSettings::default(),
-                engines: Vec::new(),
-                providers: Arc::new(NoProjectionProviders),
-                formats: lash::formats::actor_state_surfaces(),
-            })
-            .expect("the backend assembles"),
-        );
+        *self.backend.lock_recover() =
+            Some(
+                Backend::assemble(BackendParts {
+                    stores,
+                    settings: DurableSettings {
+                        owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                            idle_evict: std::time::Duration::from_secs(60),
+                            max_owner_bytes: const {
+                                std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap()
+                            },
+                            max_node_bytes: const {
+                                std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap()
+                            },
+                            max_owner_dirty_bytes: const {
+                                std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap()
+                            },
+                            max_node_dirty_bytes: const {
+                                std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap()
+                            },
+                        }),
+                        ..DurableSettings::default()
+                    },
+                    engines: Vec::new(),
+                    providers: Arc::new(NoProjectionProviders),
+                    formats: lash::formats::actor_state_surfaces(),
+                })
+                .expect("the backend assembles"),
+            );
         database
     }
 

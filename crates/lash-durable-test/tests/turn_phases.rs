@@ -1950,7 +1950,16 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
     let keep = Mutex::default();
     let (stores, database) =
         dialect::open(dialect, postgres_url.as_deref(), SimClock::new(), &keep).await;
-    let backend = Backend::for_testing(stores);
+    let backend = Backend::for_testing(
+        stores,
+        lash_durable::OwnerRetentionSettings {
+            idle_evict: std::time::Duration::from_secs(60),
+            max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+            max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+            max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+            max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+        },
+    );
     let catalog: Arc<dyn lash_core_store::store::RuntimeStore> = backend.session_store_factory();
     lash_core_store::testing::store_fixtures::admit_conformance_session(&catalog, &session()).await;
     let earlier = vec![
@@ -2225,7 +2234,16 @@ async fn input_to_a_running_turn_is_admitted(dialect: Dialect, postgres_url: Opt
     let keep = Mutex::default();
     let (stores, database) =
         dialect::open(dialect, postgres_url.as_deref(), SimClock::new(), &keep).await;
-    let backend = Backend::for_testing(stores);
+    let backend = Backend::for_testing(
+        stores,
+        lash_durable::OwnerRetentionSettings {
+            idle_evict: std::time::Duration::from_secs(60),
+            max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+            max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+            max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+            max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+        },
+    );
     admit_running_turn(&backend, database.as_ref(), &session(), &run()).await;
 
     let catalog: Arc<dyn lash_core_store::store::RuntimeStore> = backend.session_store_factory();
@@ -2274,7 +2292,16 @@ async fn each_turn_terminal_reads_back(dialect: Dialect, postgres_url: Option<St
     let keep = Mutex::default();
     let (stores, database) =
         dialect::open(dialect, postgres_url.as_deref(), SimClock::new(), &keep).await;
-    let backend = Backend::for_testing(stores);
+    let backend = Backend::for_testing(
+        stores,
+        lash_durable::OwnerRetentionSettings {
+            idle_evict: std::time::Duration::from_secs(60),
+            max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+            max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+            max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+            max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+        },
+    );
     let evidence = cancel_evidence(&TurnCancelRequest {
         session: session(),
         run: run(),

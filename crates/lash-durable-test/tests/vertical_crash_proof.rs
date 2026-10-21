@@ -1545,3 +1545,152 @@ mod session_capture;
 
 #[path = "vertical_crash_proof/refuse.rs"]
 mod refuse;
+
+/// LO-RECOVERY exercises the existing durable fault matrix and the two
+/// memory-only cuts on every reachable Tools transition. Missing hook
+/// occurrences fail rather than silently reducing the recovery matrix.
+async fn lo_recovery(dialect: Dialect, postgres_url: Option<String>) {
+    use lash_durable::OwnerCut;
+    use lash_durable_test::OwnerFault;
+    prove(Protocol::Tools, dialect, postgres_url.clone()).await;
+    let (expected, labels) = uncut_history(Protocol::Tools, dialect, postgres_url.clone()).await;
+    let same_history = |actual: &[lash_core::SessionHistoryRecord]| {
+        assert_eq!(actual.len(), expected.len());
+        let mut ids = BTreeMap::new();
+        let mut reverse = BTreeMap::new();
+        for (actual, expected) in actual.iter().zip(&expected) {
+            let mut actual = actual.clone();
+            if let (
+                lash_core::SessionHistoryRecord::Conversation(actual),
+                lash_core::SessionHistoryRecord::Conversation(expected),
+            ) = (&mut actual, expected)
+            {
+                if let Some(prior) = ids.insert(actual.id.clone(), expected.id.clone()) {
+                    assert_eq!(prior, expected.id);
+                }
+                if let Some(prior) = reverse.insert(expected.id.clone(), actual.id.clone()) {
+                    assert_eq!(prior, actual.id);
+                }
+                actual.id.clone_from(&expected.id);
+            }
+            assert!(
+                lash_protocol_types::session_model::same_history_record(&actual, expected),
+                "warm/cold history differs: {actual:?} vs {expected:?}"
+            );
+        }
+    };
+    let mut reachable = Vec::new();
+    for label in labels {
+        if !reachable.contains(&label) && label != CommitLabel::SESSION_RELEASE {
+            reachable.push(label);
+        }
+    }
+    assert!(reachable.contains(&CommitLabel::TURN_COMMIT));
+    for label in reachable {
+        for cut in [OwnerCut::Acknowledged, OwnerCut::Adopted] {
+            for cold in [false, true] {
+                let first = V0::new(Protocol::Tools, dialect, postgres_url.clone());
+                let clock = SimClock::new();
+                let database = first.database(Arc::clone(&clock)).await;
+                let script = Script::new();
+                script.cut_owner(label, 1, cut, OwnerFault::Fail);
+                first.tripwire.observe_owner_cuts(&script);
+                let nodes = SimNodes::new(
+                    Arc::clone(&database),
+                    Arc::clone(&clock),
+                    script,
+                    first.config(),
+                    first.activation(),
+                );
+                first.send().await.expect("accepted input");
+                nodes.start("a");
+                if cold {
+                    let horizon = clock.logical_ms() + 600_000;
+                    while !nodes
+                        .script()
+                        .owner_cuts()
+                        .iter()
+                        .any(|receipt| receipt.fault.is_some())
+                    {
+                        assert!(clock.logical_ms() < horizon, "unreached {label:?}/{cut:?}");
+                        assert!(nodes.step().await.is_some(), "unreached {label:?}/{cut:?}");
+                    }
+                    nodes.kill("a");
+                    nodes.quiesce().await;
+                    let next = first.cold(postgres_url.clone());
+                    let after = SimNodes::new(
+                        Arc::clone(&database),
+                        Arc::clone(&clock),
+                        Script::new(),
+                        next.config(),
+                        next.activation(),
+                    );
+                    next.tripwire.observe_owner_cuts(after.script());
+                    after.start("cold");
+                    next.run_until_done(&after, &clock, "cold owner cut").await;
+                    same_history(&next.committed_history().await);
+                } else {
+                    first.run_until_done(&nodes, &clock, "warm owner cut").await;
+                    let violations = first.laws(&nodes, None).await;
+                    assert!(violations.is_empty(), "{violations:?}");
+                    same_history(&first.committed_history().await);
+                }
+                let cuts = nodes.script().owner_cuts();
+                assert_eq!(
+                    cuts.iter()
+                        .filter(|receipt| receipt.fault.is_some())
+                        .count(),
+                    1,
+                    "{label:?}/{cut:?}: every selected hook must fire exactly once"
+                );
+                assert!(database.turn(&session()).await.unwrap().is_none());
+                assert!(
+                    database
+                        .session_mailbox(&session())
+                        .await
+                        .unwrap()
+                        .bound_run
+                        .is_none()
+                );
+                assert_eq!(
+                    database
+                        .turn_end(&session(), &run())
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .head_revision,
+                    Some(1)
+                );
+                assert_eq!(
+                    first.world.writes().values().map(Vec::len).sum::<usize>(),
+                    1
+                );
+                assert!(
+                    first
+                        .tripwire
+                        .counts()
+                        .bodies
+                        .values()
+                        .all(|count| *count == 1)
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn lo_recovery_on_sqlite_memory() {
+    lo_recovery(Dialect::SqliteMemory, None).await;
+}
+
+#[tokio::test]
+async fn lo_recovery_on_sqlite_file() {
+    lo_recovery(Dialect::SqliteFile, None).await;
+}
+
+#[tokio::test]
+#[ignore = "requires a private PostgreSQL service"]
+async fn lo_recovery_on_postgres_when_configured() {
+    let url = lash_postgres_store::testing::required_database_url();
+    lo_recovery(Dialect::Postgres, Some(url)).await;
+}

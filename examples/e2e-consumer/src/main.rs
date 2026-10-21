@@ -260,7 +260,17 @@ fn required(key: &str) -> Result<String> {
 /// The connection sizing of every PostgreSQL pool this host opens: a case
 /// boots several nodes over one server.
 fn postgres_config() -> lash::postgres::PostgresHostConfig {
-    let mut config = lash::postgres::PostgresHostConfig::default();
+    let mut config = {
+        let mut config = lash::postgres::PostgresHostConfig::default();
+        config.node.owner_retention = Some(lash::durable::OwnerRetentionSettings {
+            idle_evict: std::time::Duration::from_secs(60),
+            max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+            max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+            max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+            max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+        });
+        config
+    };
     config.roles.work.max_connections = 4;
     config.roles.max_store_operations = 4;
     config
@@ -343,7 +353,11 @@ async fn main() -> Result<()> {
         Some(ledger) => commit_ledger::ledger_stores(stores, ledger.clone()),
         None => stores,
     };
-    let backend = lash::durable::DurableBackendBuilder::new(stores.clone())
+    let backend = lash::durable::DurableBackendBuilder::new(stores.clone()).config(lash::durable::DurableSettings { owner_retention: Some(lash::durable::OwnerRetentionSettings { idle_evict: std::time::Duration::from_secs(60),
+ max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+ max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+ max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+ max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() }, }), ..lash::durable::DurableSettings::standard() })
         .build()
         .context("build the durable backend")?;
     let controls = Arc::new(fixture::Controls::default());

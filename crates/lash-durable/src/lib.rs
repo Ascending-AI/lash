@@ -46,6 +46,7 @@ mod error;
 mod formats;
 mod ids;
 mod labels;
+pub mod owner_memory;
 pub use labels::CommitCapacity;
 #[cfg(feature = "testing")]
 pub mod laws;
@@ -63,7 +64,8 @@ pub use dispatch::ActorDispatch;
 pub use domain::{DomainRefusal, DomainWrite, DurableReads, MailAnswer, MailDomainWrite};
 pub use dues::{DueSource, Dues};
 pub use durable_config::{
-    DurableConfig, DurableConfigError, DurableSettings, GroupCommit, Notifier, RetirementSettings,
+    DurableConfig, DurableConfigError, DurableSettings, GroupCommit, Notifier,
+    OwnerRetentionSettings, RetirementSettings,
 };
 pub use error::{DurableError, Fenced, MailRefusal, StoreFailure, StoreFailureKind};
 pub use formats::{FormatSet, FormatSurface, fleet_writable};

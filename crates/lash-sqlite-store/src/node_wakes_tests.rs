@@ -491,7 +491,20 @@ async fn run_child(role: &str, database: &Path) {
                     claim_poll: Duration::from_secs(10),
                     ..LeaseSettings::default()
                 },
-                ..DurableSettings::default()
+                ..DurableSettings {
+                    owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                        idle_evict: std::time::Duration::from_secs(60),
+                        max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+                        max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+                        max_owner_dirty_bytes: const {
+                            std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap()
+                        },
+                        max_node_dirty_bytes: const {
+                            std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap()
+                        },
+                    }),
+                    ..DurableSettings::default()
+                }
             },
         ),
         _ => {
@@ -509,7 +522,24 @@ async fn run_child(role: &str, database: &Path) {
                 DurableSettings {
                     max_active: CONTENTION_ACTIVE,
                     claim_batch: CONTENTION_ACTIVE,
-                    ..DurableSettings::default()
+                    ..DurableSettings {
+                        owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                            idle_evict: std::time::Duration::from_secs(60),
+                            max_owner_bytes: const {
+                                std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap()
+                            },
+                            max_node_bytes: const {
+                                std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap()
+                            },
+                            max_owner_dirty_bytes: const {
+                                std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap()
+                            },
+                            max_node_dirty_bytes: const {
+                                std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap()
+                            },
+                        }),
+                        ..DurableSettings::default()
+                    }
                 },
             )
         }
@@ -574,7 +604,16 @@ async fn a_wake_crosses_processes_and_a_killed_process_is_reaped_by_its_lock() {
             drop_owned: false,
         })),
         "parent",
-        DurableSettings::default(),
+        DurableSettings {
+            owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                idle_evict: std::time::Duration::from_secs(60),
+                max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+                max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+                max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+                max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+            }),
+            ..DurableSettings::default()
+        },
     );
     // This is the survivor's actual probe, not a separate observer's probe.
     // Once it has returned, the runner records the held boot before it can
@@ -1182,7 +1221,11 @@ async fn a_created_registration_reaches_the_serving_node_through_its_hint() {
             startup: WATCHDOG,
             ..LeaseSettings::default()
         },
-        ..DurableSettings::default()
+        ..DurableSettings { owner_retention: Some(lash_durable::OwnerRetentionSettings { idle_evict: std::time::Duration::from_secs(60),
+ max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+ max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+ max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+ max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() }, }), ..DurableSettings::default() }
     }
     .validate()
     .expect("the law's settings validate");

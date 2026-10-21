@@ -18,7 +18,16 @@ fn serving(
     stores: Arc<dyn lash_execution_contracts::backend::StoreSet>,
     claim_poll: std::time::Duration,
 ) -> LashCore {
-    let mut settings = lash::durable::DurableSettings::default();
+    let mut settings = lash::durable::DurableSettings {
+        owner_retention: Some(lash::durable::OwnerRetentionSettings {
+            idle_evict: std::time::Duration::from_secs(60),
+            max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+            max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+            max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+            max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+        }),
+        ..lash::durable::DurableSettings::default()
+    };
     settings.lease.claim_poll = claim_poll;
     let backend = lash::durable::DurableBackendBuilder::new(stores)
         .config(settings)

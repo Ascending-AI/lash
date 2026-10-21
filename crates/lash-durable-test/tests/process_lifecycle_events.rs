@@ -134,7 +134,11 @@ fn core_builder(
     world: &Arc<World>,
     refuse_at: Option<u64>,
 ) -> (lash::Backend, lash::LashCoreBuilder) {
-    let backend = lash::durable::DurableBackendBuilder::new(Arc::clone(stores))
+    let backend = lash::durable::DurableBackendBuilder::new(Arc::clone(stores)).config(lash_durable::DurableSettings { owner_retention: Some(lash_durable::OwnerRetentionSettings { idle_evict: std::time::Duration::from_secs(60),
+ max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+ max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+ max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+ max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() }, }), ..lash_durable::DurableSettings::standard() })
         .process_engine(Arc::new(ScriptEngine {
             advance: engine,
             refuse_at,
@@ -1131,19 +1135,39 @@ impl Fleet {
         let clock = lash_durable_test::SimClock::new();
         let stores = sim::memory(Arc::clone(&clock)).await;
         let database: Arc<dyn lash_durable::DurableStore> = Arc::new(stores.durable_store());
-        let backend = lash_execution_contracts::backend::Backend::assemble(
-            lash_execution_contracts::backend::BackendParts {
-                stores: Arc::new(stores),
-                settings: lash_core_execution::DurableSettings::default(),
-                engines: vec![Arc::new(ScriptEngine {
-                    advance,
-                    refuse_at: None,
-                })],
-                providers: Arc::new(lash_execution_contracts::projection::NoProjectionProviders),
-                formats: Vec::new(),
-            },
-        )
-        .expect("the fleet's backend assembles");
+        let backend =
+            lash_execution_contracts::backend::Backend::assemble(
+                lash_execution_contracts::backend::BackendParts {
+                    stores: Arc::new(stores),
+                    settings: lash_core_execution::DurableSettings {
+                        owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                            idle_evict: std::time::Duration::from_secs(60),
+                            max_owner_bytes: const {
+                                std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap()
+                            },
+                            max_node_bytes: const {
+                                std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap()
+                            },
+                            max_owner_dirty_bytes: const {
+                                std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap()
+                            },
+                            max_node_dirty_bytes: const {
+                                std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap()
+                            },
+                        }),
+                        ..lash_core_execution::DurableSettings::default()
+                    },
+                    engines: vec![Arc::new(ScriptEngine {
+                        advance,
+                        refuse_at: None,
+                    })],
+                    providers: Arc::new(
+                        lash_execution_contracts::projection::NoProjectionProviders,
+                    ),
+                    formats: Vec::new(),
+                },
+            )
+            .expect("the fleet's backend assembles");
         let nodes = lash_durable_test::SimNodes::new(
             database,
             Arc::clone(&clock),

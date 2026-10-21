@@ -50,7 +50,17 @@ fn with_data(schema: &str, adjust: impl FnOnce(&mut ReplayDataPolicy)) -> Postgr
     adjust(&mut policy.data);
     PostgresHostConfig {
         live_replay: Some(policy),
-        ..PostgresHostConfig::default()
+        ..{
+            let mut config = PostgresHostConfig::default();
+            config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+                idle_evict: std::time::Duration::from_secs(60),
+                max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+                max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+                max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+                max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+            });
+            config
+        }
     }
 }
 

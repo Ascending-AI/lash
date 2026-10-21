@@ -190,7 +190,11 @@ pub(super) async fn open_stores(
 
 /// The deployment's durable engine over `stores`.
 pub(super) fn durable_backend(stores: Arc<dyn lash::StoreSet>) -> Result<lash::Backend, CliError> {
-    lash::durable::DurableBackendBuilder::new(stores)
+    lash::durable::DurableBackendBuilder::new(stores).config(lash::durable::DurableSettings { owner_retention: Some(lash::durable::OwnerRetentionSettings { idle_evict: std::time::Duration::from_secs(60),
+ max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+ max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+ max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+ max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() }, }), ..lash::durable::DurableSettings::standard() })
         .build()
         .map_err(|error| CliError::new(Exit::Unexpected, error.to_string()))
 }

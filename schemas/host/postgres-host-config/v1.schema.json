@@ -140,11 +140,6 @@
         "group_commit": {
           "$ref": "#/$defs/GroupCommit"
         },
-        "idle_evict_ms": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
         "lease": {
           "$ref": "#/$defs/LeaseSettings"
         },
@@ -155,6 +150,9 @@
         },
         "notifier": {
           "$ref": "#/$defs/Notifier"
+        },
+        "owner_retention": {
+          "$ref": "#/$defs/OwnerRetentionWire"
         },
         "retirement": {
           "$ref": "#/$defs/RetirementSettings",
@@ -171,7 +169,7 @@
         "lease",
         "claim_batch",
         "max_active",
-        "idle_evict_ms",
+        "owner_retention",
         "activation_loop_budget",
         "group_commit",
         "snapshot_every_fuel",
@@ -577,6 +575,44 @@
         "after_commit"
       ],
       "type": "string"
+    },
+    "OwnerRetentionWire": {
+      "additionalProperties": false,
+      "properties": {
+        "idle_evict_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_node_bytes": {
+          "format": "uint64",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_node_dirty_bytes": {
+          "format": "uint64",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_owner_bytes": {
+          "format": "uint64",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_owner_dirty_bytes": {
+          "format": "uint64",
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "idle_evict_ms",
+        "max_owner_bytes",
+        "max_node_bytes",
+        "max_owner_dirty_bytes",
+        "max_node_dirty_bytes"
+      ],
+      "type": "object"
     },
     "PoolPolicy": {
       "additionalProperties": false,
@@ -1438,7 +1474,6 @@
           "max_members": 64,
           "window_ms": 5
         },
-        "idle_evict_ms": 60000,
         "lease": {
           "claim_backoff_ms": 25,
           "claim_poll_ms": 250,

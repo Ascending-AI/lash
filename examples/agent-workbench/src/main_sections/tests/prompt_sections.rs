@@ -178,7 +178,11 @@ async fn workbench_prompt_sections_shape_the_prompt_the_provider_receives() {
     let stores = lash::sqlite::SqliteStoreSet::memory()
         .await
         .expect("an in-memory store set opens");
-    let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores))
+    let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores)).config(lash::durable::DurableSettings { owner_retention: Some(lash::durable::OwnerRetentionSettings { idle_evict: std::time::Duration::from_secs(60),
+ max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+ max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+ max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+ max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() }, }), ..lash::durable::DurableSettings::standard() })
         .build()
         .expect("the durable backend builds");
     let received = Arc::new(std::sync::Mutex::new(Vec::<(String, String)>::new()));

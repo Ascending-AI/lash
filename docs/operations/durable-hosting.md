@@ -79,7 +79,10 @@ let stores: Arc<dyn lash::StoreSet> = Arc::new(lash::postgres::PostgresStoreSet:
     attachment_store,
 ));
 let backend = DurableBackendBuilder::new(stores)
-    .config(DurableSettings::standard())
+    .config(DurableSettings {
+        owner_retention: Some(owner_retention), // OwnerRetentionSettings chosen by the host
+        ..DurableSettings::standard()
+    })
     .process_engine(Arc::new(CiEngine))
     .projection_provider(Arc::new(TicketProvider::new(client)))
     .build()?;
@@ -974,7 +977,7 @@ rule.
 | `lease` | see [§1](#heartbeat-self-stop-and-reap) | Node-lease timings (`LeaseSettings`). |
 | `claim_batch` | 16 | The most actors one claim takes. Must not exceed `max_active`. |
 | `max_active` | 256 | The most actors a node runs at once. |
-| `idle_evict` | 60 s | How long an owner keeps an idle actor hot before releasing it. |
+| `owner_retention` | Unconfigured (`None`) | Required `OwnerRetentionSettings`: idle time and per-owner/per-node total and dirty byte caps. Backend assembly refuses omission with `MissingOwnerRetention`. |
 | `activation_loop_budget` | 8 | Claims in a row without progress before an actor parks with `ActivationLoop`. |
 | `group_commit` | 64 members, 5 ms | Finished round members commit in batches (`GroupCommit { max_members, window }`). The window must be shorter than `lease.claim_poll`. |
 | `snapshot_every_fuel` | 1 000 000 | VM fuel spent without an effect after which a quiet point snapshots anyway. |
@@ -985,10 +988,49 @@ rule.
 | `retirement.steps_per_sweep` | 16 (at most 256) | The most steps one sweep runs. |
 | `retirement.backlog_limit` | 10 000 holds and frontier nodes (at most 1 000 000) | Above it the node claims no new actors and sweeps without waiting, until the backlog falls back under. |
 
-Counts must be at least 1 (`Zero`), durations at least 1 ms
+Counts must be at least 1 (`Zero`), positive durations at least 1 ms
 (`BelowResolution`), retirement values at most their hard maxima
 (`AboveMaximum`), plus `ClaimBeyondCapacity`, `GroupWindowNotBeforePoll`
 and the lease rules (`Lease(LeaseConfigError)`).
+
+### Owner retention
+
+Hosts migrating from `DurableSettings.idle_evict` move that duration into
+`owner_retention: Some(OwnerRetentionSettings { ... })` and supply four
+`NonZeroU64` byte limits: `max_owner_bytes`, `max_node_bytes`,
+`max_owner_dirty_bytes`, `max_node_dirty_bytes`. Neither `standard` nor
+`development` chooses retention values. `None` is unconfigured; it grants
+no unlimited-memory mode. Zero idle time means immediate idle release.
+Positive idle durations must fit signed 64-bit milliseconds. Owner total
+must fit node total; each dirty limit must fit its respective total; owner
+dirty must fit node dirty.
+
+Bytes measure retained heap capacity and reserved admission/draft capacity,
+including allocation headers and indexes. Immutable allocations share a
+node charge and are attributed once to each retaining owner. An independent
+reader or detached admitted body carries its own allocation reservation;
+owner release does not erase that charge. This measures owned allocations,
+not the allocator or process RSS. Existing VM/request limits still apply.
+The ledger measures allocations carrying reservation handles; choosing a
+policy does not intercept allocations. Every retained object, private draft
+and admitted body must carry its reservation before the configured caps can
+bound its capacity. Reserve before allocation or admission. Acknowledgement
+transfers dirty bytes to retained bytes; cancellation drops reservations.
+On pressure, admission must stop while existing dirty work drains, and an
+owner may yield at a durable quiet point. A single necessary allocation over
+capacity must refuse with typed
+`OwnerCapacityExceeded { actor, requested, capacity }`; re-claiming cannot
+make it fit. Durable graph holds retain their existing transaction/expiry
+rules independently of Rust references.
+
+The node ledger exposes `MemoryUsage.retained` and `.dirty` and their total.
+Owner probes attribute reads by actor/epoch: `OwnHeadReload`,
+`OwnCommittedPhaseReload`, `ExternalFrontierReads`, `RecoveryLoads`,
+`HistoricalPinReads`, process record/driver/root reloads,
+`CompletedRunRowsReplayed`, `ContextBytes`, `ActiveRunRows`, and `VmPages`.
+Hydration, requested context and active facts are separate from warm own-state
+reloads. The crash harness records acknowledged/adopted cut occurrences and
+fails when a selected hook never fires.
 
 ### Page retirement
 
@@ -1663,7 +1705,8 @@ cap; the workbench's upload preset is 1 MiB.
 | H | Catalogue preview modules / call names | 100 / 50 | `CataloguePreviewOptions` | Addressable counts |
 | H/S | Charge-safety retry count | Host-declared policy | `ChargeSafetyPolicy`, session/core config | 5 unsafe retries; bounded provider billing exposure |
 | H | Durable lease TTL / heartbeat / self-stop / reap / poll / backoff / startup / shutdown | 15 s / 3 s / 10 s / 2 s / 250 ms / 25 ms / 2 s / 2 s | `DurableSettings.lease: LeaseSettings` | Representable durations with lease ordering validation |
-| H | Durable claim / active / idle eviction / activation loop / group commit / snapshot / cascade | 16 / 256 / 60 s / 8 / 64 members and 5 ms / 1M fuel / 256 | `DurableSettings` | Typed representable counts/durations |
+| H | Durable claim / active / activation loop / group commit / snapshot / cascade | 16 / 256 / 8 / 64 members and 5 ms / 1M fuel / 256 | `DurableSettings` | Typed representable counts/durations |
+| H | Owner idle retention and total/dirty byte caps | No default | `DurableSettings.owner_retention` | Nonzero bytes, nested owner/node/dirty limits; zero idle releases immediately |
 | H | SQLite busy / connection and WAL working policies | Busy 15 s; role-specific presets | `SqliteConnectionPolicy`, store/node working config | Platform/typed ranges, timeout checked |
 | H/S | PostgreSQL connection prefix / replay schema names | 32 / 48 bytes | `PostgresHostConfig.name_limits: PostgresNameLimits` | 32 / 48 reserve suffix space within PostgreSQL's 63-byte identifiers |
 | H/S | PostgreSQL roles / SQL deadlines / retries / replay / maintenance | Role presets in `docs/operations/postgres.md`; live replay 2048/120 s/8 MiB; process replay 2048/120 s/8 MiB/4096/256 MiB | `PostgresHostConfig.{roles,guards,retry,signals,live_replay,process_replay,maintenance,deployment}` | Server timeouts `i32::MAX` ms; replay events ≤1M, batch ≤65536, per-owner bytes ≤1 GiB, age ≤24 h, aggregate process replay ≤1 TiB; other validated role ranges documented there |

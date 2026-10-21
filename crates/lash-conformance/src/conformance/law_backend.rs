@@ -19,7 +19,16 @@ impl LawBackend {
     }
 
     pub(crate) fn over_stores(stores: Arc<dyn crate::StoreSet>) -> Self {
-        Self::over(&crate::Backend::for_testing(stores))
+        Self::over(&crate::Backend::for_testing(
+            stores,
+            lash_core::durable_port::OwnerRetentionSettings {
+                idle_evict: std::time::Duration::from_secs(60),
+                max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+                max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+                max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+                max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+            },
+        ))
     }
 
     pub(crate) fn into_backend(self) -> crate::Backend {
@@ -91,7 +100,16 @@ impl StoreLawBackend {
     }
 
     pub(crate) fn into_backend(self) -> crate::Backend {
-        crate::Backend::for_testing(self.stores)
+        crate::Backend::for_testing(
+            self.stores,
+            lash_core::durable_port::OwnerRetentionSettings {
+                idle_evict: std::time::Duration::from_secs(60),
+                max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+                max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+                max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+                max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+            },
+        )
     }
 
     /// A store set whose every port panics: what a law reaches only for

@@ -48,7 +48,11 @@ async fn two_round_turn() -> (lash::persistence::SessionReadView, TurnId) {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     let stores = lash::sqlite::SqliteStoreSet::memory().await.expect("store");
-    let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores))
+    let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores)).config(lash::durable::DurableSettings { owner_retention: Some(lash::durable::OwnerRetentionSettings { idle_evict: std::time::Duration::from_secs(60),
+ max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+ max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+ max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+ max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() }, }), ..lash::durable::DurableSettings::standard() })
         .build()
         .expect("backend");
     let next = AtomicUsize::new(0);

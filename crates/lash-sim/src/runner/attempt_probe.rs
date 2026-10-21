@@ -264,7 +264,11 @@ mod tests {
         let backend = lash_execution_contracts::Backend::assemble(BackendParts {
             stores: stores.clone(),
             settings: lash_core_execution::DurableSettings {
-                idle_evict: Duration::from_secs(1),
+                owner_retention: Some(lash_durable::OwnerRetentionSettings { idle_evict: Duration::from_secs(1),
+ max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+ max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+ max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+ max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() }, }),
                 ..Default::default()
             },
             engines: Vec::new(),

@@ -66,7 +66,11 @@ pub async fn record(args: &RecordArgs) -> Result<()> {
         lash::sqlite::SqliteStoreSet::open(&args.db, lash::sqlite::SqliteSynchronous::Normal)
             .await
             .map_err(|error| anyhow::anyhow!("open {}: {error}", args.db.display()))?;
-    let backend = lash::durable::DurableBackendBuilder::new(std::sync::Arc::new(stores))
+    let backend = lash::durable::DurableBackendBuilder::new(std::sync::Arc::new(stores)).config(lash::durable::DurableSettings { owner_retention: Some(lash::durable::OwnerRetentionSettings { idle_evict: std::time::Duration::from_secs(60),
+ max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+ max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+ max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+ max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() }, }), ..lash::durable::DurableSettings::standard() })
         .build()
         .map_err(|error| anyhow::anyhow!("build the reading backend: {error}"))?;
     let core = reading_builder(args.protocol, backend)

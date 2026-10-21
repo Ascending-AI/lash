@@ -620,7 +620,7 @@ impl Activation for SessionActivation {
         // An owner with nothing to do keeps the actor hot for `idle_evict`,
         // reading its mailbox at every hint or idle poll, then releases it;
         // it releases at once when a claim takes its slot (FIG-6890).
-        let idle_evict = self.backend.config().settings().idle_evict;
+        let idle_evict = self.backend.owner_memory().policy().idle_evict;
         // What ended the owner's last wait, until the pass after it.
         let mut woke = None;
         let mut idle_since = None;
@@ -636,6 +636,7 @@ impl Activation for SessionActivation {
         let mut failed_passes = 0_u32;
         loop {
             let release = woke == Some(lash_durable::runner::Wake::Yield)
+                || self.backend.owner_memory().under_pressure()
                 || idle_since.is_some_and(|since: std::time::Instant| {
                     owned.clock().now().saturating_duration_since(since) >= idle_evict
                 });

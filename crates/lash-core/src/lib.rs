@@ -1109,3 +1109,6 @@ pub use lash_core_execution::tool_live;
 pub use lash_kernel_doc::RanCounts;
 
 pub use lash_core_store::model_calls;
+
+/// Host-selected working-copy limits for durable owners.
+pub use lash_durable::OwnerRetentionSettings;

@@ -276,7 +276,7 @@ impl RoundRunner {
             None => load(&self.cx, &self.owner, self.run).await?,
         };
         let clock = Arc::clone(self.cx.clock());
-        let idle_evict = self.cx.backend().config().settings().idle_evict;
+        let idle_evict = self.cx.backend().owner_memory().policy().idle_evict;
         // Since when the round has run nothing and waited only on rows.
         let mut quiet_since: Option<std::time::Instant> = None;
         loop {
@@ -335,7 +335,7 @@ impl RoundRunner {
             let hot = if idle.suspendable() {
                 let since = *quiet_since.get_or_insert_with(|| clock.now());
                 let held = clock.now().saturating_duration_since(since);
-                if held >= idle_evict {
+                if held >= idle_evict || self.cx.backend().owner_memory().under_pressure() {
                     return Ok(PreparedRoundEnd::Recorded(RoundEnd::Suspended {
                         due: self.lifecycle.due(&idle).await?,
                     }));

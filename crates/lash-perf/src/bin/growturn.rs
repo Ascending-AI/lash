@@ -197,7 +197,11 @@ async fn boot(args: &Args, meter: Arc<measure::Meter>, owner: &str) -> Result<la
         lash_sqlite_store::SqliteSynchronous::Full,
     )
     .await?;
-    let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores)).build()?;
+    let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores)).config(lash::durable::DurableSettings { owner_retention: Some(lash::durable::OwnerRetentionSettings { idle_evict: std::time::Duration::from_secs(60),
+ max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+ max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+ max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+ max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() }, }), ..lash::durable::DurableSettings::standard() }).build()?;
     let mut config = lash_perf::cell_bounds::subprocess(&args.vm_worker)
         .config()
         .clone();

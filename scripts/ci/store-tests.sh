@@ -339,6 +339,7 @@ run_uniform_store_suite() {
 release_legs() {
   echo "store|shared|--skip isolated_cells_do_not_checkpoint_or_share_state|$(labels postgres default)|-p lash-internal-postgres-store"
   echo "durable-crash-proof|shared|on_postgres|//crates/lash-durable-test:vertical_crash_proof__test //crates/lash-durable-test:turn_phases__test|-p lash-internal-durable-test --test vertical_crash_proof --test turn_phases"
+  echo "durable-owner-recovery|shared|lo_recovery_on_postgres_when_configured --exact --include-ignored|//crates/lash-durable-test:vertical_crash_proof__test|-p lash-internal-durable-test --test vertical_crash_proof"
   echo "crash-matrix|shared|the_crash_matrix_holds_on_postgres --include-ignored|//crates/lash-sim:crash_matrix__test|-p lash-sim --test crash_matrix"
   echo "crash-matrix-sqlite-file|shared|the_crash_matrix_holds_on_a_sqlite_file --include-ignored|//crates/lash-sim:crash_matrix__test|-p lash-sim --test crash_matrix"
   echo "failover|owned||//crates/lash-postgres-workers:failover__test|-p lash-internal-postgres-workers --test failover"

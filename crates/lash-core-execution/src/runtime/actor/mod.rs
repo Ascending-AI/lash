@@ -12,6 +12,7 @@ mod core;
 pub mod ingress;
 pub mod journal;
 pub mod model_receipt;
+pub mod owner_memory;
 pub mod process;
 #[cfg(feature = "testing")]
 pub mod process_laws;

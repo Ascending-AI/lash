@@ -81,6 +81,7 @@ impl Scope {
 
 pub(super) struct Inner {
     backend: Option<Backend>,
+    memory: Option<super::owner_memory::OwnerMemory>,
     /// The node's store a claimed context commits through; the backend's
     /// own otherwise.
     durable: Option<Arc<dyn DurableStore>>,
@@ -126,6 +127,12 @@ impl std::fmt::Debug for ActorContext {
 }
 
 impl ActorContext {
+    /// Allocation admission for this claim; absent only for an unavailable
+    /// test context. Every clone shares the same attribution.
+    pub fn owner_memory(&self) -> Option<&super::owner_memory::OwnerMemory> {
+        self.inner.memory.as_ref()
+    }
+
     /// The context of `actor`, owned at `epoch` over `backend`'s durable
     /// store, executing under `admitted`. `cancel` is cancelled when the
     /// activation must stop: the node stops serving or the actor is lost.
@@ -144,6 +151,7 @@ impl ActorContext {
         Self {
             idle_poll: crate::runtime::PollPacing::standard(),
             inner: Arc::new(Inner {
+                memory: Some(backend.owner_memory().owner(&actor, epoch)),
                 backend: Some(backend),
                 durable: None,
                 actor,
@@ -181,6 +189,7 @@ impl ActorContext {
         Self {
             idle_poll: crate::runtime::PollPacing::standard(),
             inner: Arc::new(Inner {
+                memory: Some(backend.owner_memory().owner(owned.actor(), owned.epoch())),
                 backend: Some(backend),
                 durable: Some(Arc::clone(owned.store())),
                 actor: owned.actor().clone(),
@@ -225,6 +234,7 @@ impl ActorContext {
             idle_poll: crate::runtime::PollPacing::standard(),
             inner: Arc::new(Inner {
                 backend: None,
+                memory: None,
                 durable: None,
                 actor: ActorKey::session("unavailable").expect("a constant actor id"),
                 epoch: Epoch(0),

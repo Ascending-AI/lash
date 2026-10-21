@@ -111,7 +111,16 @@ impl NodeConfig {
 pub fn settings(notifier: Notifier) -> DurableSettings {
     DurableSettings {
         notifier,
-        ..DurableSettings::default()
+        ..DurableSettings {
+            owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                idle_evict: std::time::Duration::from_secs(60),
+                max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+                max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+                max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+                max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+            }),
+            ..DurableSettings::default()
+        }
     }
 }
 
@@ -121,7 +130,17 @@ pub fn settings(notifier: Notifier) -> DurableSettings {
 pub fn host_config(notifier: Notifier) -> lash_postgres_store::PostgresHostConfig {
     lash_postgres_store::PostgresHostConfig {
         node: settings(notifier),
-        ..lash_postgres_store::PostgresHostConfig::default()
+        ..{
+            let mut config = lash_postgres_store::PostgresHostConfig::default();
+            config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+                idle_evict: std::time::Duration::from_secs(60),
+                max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+                max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+                max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+                max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+            });
+            config
+        }
     }
 }
 

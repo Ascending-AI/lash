@@ -75,7 +75,13 @@ impl ScratchSchema {
             self.pool.clone(),
             &lash_postgres_store::PostgresHostConfig {
                 schema_check: check,
-                ..lash_postgres_store::PostgresHostConfig::default()
+                ..{ let mut config = lash_postgres_store::PostgresHostConfig::default(); config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+ idle_evict: std::time::Duration::from_secs(60),
+ max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+ max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+ max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+ max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+}); config }
             },
         )
         .await
