@@ -301,7 +301,37 @@ store argument. `HeldPackages::new` takes the set's artifacts and the set,
 and refuses an artifact the set does not name. A node holds exactly one
 set: its own build's.
 
-A node installs its set into the store when it starts. For each set, the
+Surface acquisition for a workflow or a new cell surveys the serving fleet.
+A serving node is a live node that decodes the current session format or a
+carried session format; a node serving only carried sessions still counts.
+With no such nodes, the gate durably installs the caller's complete own set
+and answers it. This applies before first registration, after lease expiry,
+and after a total shutdown. It never chooses a historical default, merges
+surfaces, or registers a synthetic serving node. Two publishers can choose
+different own sets while the fleet is empty. Read or install failures remain
+errors and never count as an empty fleet.
+
+With any serving nodes, the gate chooses the newest installed surface
+advertised by a live serving node whose native and kernel requirements the
+writer and every serving node meet. No compatible candidate, including a
+serving node advertising no candidate, remains typed `NoCompatibleSnapshot`.
+An unregistered publisher never promotes its own set into a nonempty fleet.
+A registration after the survey does not change that request's answer.
+
+Keep the acquired handle through workflow import and publication, with the
+host's exact declared package/operation selection. Neither operation
+reselects it. A cell executes under the surface its round's prompt showed;
+a fresh round surveys again. Published and parked work keeps its pinned
+digest, definitions, declarations and links through fleet changes.
+
+Acquisition, import, publication and durable start grant no execution lease
+and promise no immediate execution. Started work waits for a real node that
+meets its format and hard requirements. A later incompatible deployment can
+leave it unclaimed; deploy a capable node to make it runnable. The strand
+report diagnoses actor hard-capability deficits, not unpublished imports,
+all published definitions, or every source of nonprogress.
+
+A node also installs its set into the store when it starts. For each set, the
 store keeps its surface snapshot under the `PackageSetDigest`: every
 package's exports (errors, types, member conventions and operation
 declarations included), roots, origin, dependency closure and definition
@@ -381,14 +411,15 @@ it even when its source and release label are unchanged. The result is a new
 artifact digest. Selecting a newer dependency independently would let one
 cell execute two artifacts of the same package.
 
-`PackageSetDigest` identifies the complete set. The package gate promotes
-by capability: of the own sets of live serving nodes, it selects the newest by store install order whose
+`PackageSetDigest` identifies the complete set. With an empty serving fleet,
+the gate installs and answers the caller's own set as described above.
+With a nonempty fleet, it promotes by capability: of the own sets of live serving nodes, it selects the newest by store install order whose
 requirements the writer and every live serving node meet. A serving node
 is one that decodes this build's session set or one it carries forward. A
 body-only release is selected as soon as one of its nodes is live, and
 selected away again once its nodes stop. A release that adds a native-only
-function waits until no live serving node lacks the native. When no
-candidate is one every serving node can run, as in a mixed fleet of two
+function waits until no live serving node lacks the native. With a nonempty
+serving fleet, when no candidate is one every serving node can run, as in a mixed fleet of two
 releases that each add a native the other lacks, a new cell fails with the
 typed `no_compatible_snapshot` refusal (`RuntimeErrorCause::NoCompatibleSnapshot`),
 which names each candidate and what it lacks; the gate never answers a

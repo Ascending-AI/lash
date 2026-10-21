@@ -240,7 +240,9 @@ impl HostArtifacts {
     /// processes that run under `environment`: the effects their tool
     /// catalogue offers, in the kernel's type grammar, and the library
     /// functions the workers hold. `None` when no engine of this core
-    /// reads workflow documents.
+    /// reads workflow documents. The package surface follows [`Self::cell_packages`],
+    /// including durable installation before serving starts. Keep that handle
+    /// through import and publication to preserve the chosen snapshot.
     #[cfg(feature = "codemode")]
     pub async fn workflow_environment(
         &self,
@@ -298,6 +300,11 @@ impl HostArtifacts {
     }
 
     /// The single fleet-gate answer for authoring and publishing a workflow.
+    /// With no serving nodes, installs and answers this host's complete set
+    /// without granting a serving lease. Otherwise chooses a live surface
+    /// compatible with the writer and every serving node, or refuses typed.
+    /// Reuse this handle through import and publication; those operations
+    /// keep its snapshot and the host's exact declaration.
     #[cfg(feature = "codemode")]
     pub async fn cell_packages(&self) -> Result<lash_execution_contracts::CellPackages> {
         if let Some(hold) = self.core.backend.packages() {

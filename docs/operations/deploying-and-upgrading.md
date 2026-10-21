@@ -211,14 +211,37 @@ affected state while investigating the refusal.
 Build the new dependency-closed package set into the new build. Each node
 installs its set when it starts and advertises its capabilities: its
 natives, kernel versions, providers, codec versions and own set. The
-package gate writes each new cell under the newest live surface every live
-serving node can run. A body-only release is written as soon as one node of
+package gate writes each new cell under the newest live surface the writer
+and every live serving node can run. A serving node decodes the current
+session format or a carried session format, even if it serves only the latter.
+With a nonempty fleet, a body-only release is written as soon as one node of
 it is live, and the older surface again once its nodes stop. A release that
 adds a native-only function is written only once no live node lacks the
-native. When no live surface runs on every serving node (two releases each
-adding a native the other lacks), new cells fail typed
+native. When a nonempty fleet has no live surface every serving node can run
+(two releases each adding a native the other lacks), new cells fail typed
 `no_compatible_snapshot` until the fleet agrees: finish or roll back the
 deploy.
+
+When no serving nodes remain, including before first registration, after
+lease expiry or total shutdown, surface acquisition durably installs and
+answers the caller's complete own set. A publishing host needs no serving
+lease. The gate chooses neither the latest historical set nor a global
+default: different publishers may choose different sets while the fleet is
+empty. Survey or installation failures are errors, never evidence of absence.
+With a nonempty serving fleet, even one advertising no candidate, the usual
+compatibility rule and typed refusal apply. An unregistered publisher does
+not promote a surface into a running fleet.
+
+Use one acquired surface handle through import and publication, preserving
+the exact declared selection. A round's cell uses the surface its prompt
+showed; a fresh round surveys again. Selection is a point-in-time answer:
+a node registering afterwards does not change the chosen snapshot.
+Admission before serving grants no lease and promises no immediate execution.
+Started durable work waits until a real node meets its format and hard
+requirements. A later rollback lacking a required native, kernel, provider
+or codec can strand that work; deploying a capable node makes it runnable.
+`lashctl stranded list` diagnoses actors' hard-capability deficits; it does
+not list every published definition or certify general queue liveness.
 
 Parked runs and published workflows keep their exact function identities.
 Resume requires those definitions and any native-only implementations;

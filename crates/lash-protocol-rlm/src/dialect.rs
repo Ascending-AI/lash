@@ -363,11 +363,14 @@ pub(crate) struct SessionDialect {
 impl SessionDialect {
     /// The package set the session's next round is written under: the
     /// fleet gate's answer now, or lash's own for a host with no gate.
+    /// An empty serving fleet durably installs and answers the writer's
+    /// own set. This round's cell keeps the surface shown in its prompt;
+    /// a later round asks again.
     ///
     /// # Errors
     ///
-    /// The gate's typed refusal, a retryable one when no set is yet held
-    /// by every live serving node.
+    /// The gate's typed `NoCompatibleSnapshot` for a nonempty incompatible
+    /// fleet, or a retryable survey, installation or surface-load failure.
     pub(crate) async fn round_packages(&self) -> Result<crate::plugin::CellPackages, SessionError> {
         match &self.services.packages {
             Some(gate) => gate

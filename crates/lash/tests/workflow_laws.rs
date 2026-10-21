@@ -483,6 +483,10 @@ async fn a_host_captures_exactly_the_published_entrys_environment() {
             .effects
             .insert(effect.clone(), checked.checker().effects[&effect].clone());
     }
+    let packages = artifacts
+        .cell_packages()
+        .await
+        .expect("the package gate answers");
     let publication = published(
         artifacts
             .publish_workflow(
@@ -490,11 +494,7 @@ async fn a_host_captures_exactly_the_published_entrys_environment() {
                 &lash::workflow::document::DocumentBytes::from(document.clone()),
                 &Name::new("supervisor"),
                 &candidate,
-                artifacts
-                    .cell_packages()
-                    .await
-                    .expect("the package gate answers")
-                    .declare_all(),
+                packages.declare_all(),
                 None,
             )
             .await
@@ -523,11 +523,22 @@ async fn a_host_captures_exactly_the_published_entrys_environment() {
         panic!("the published workflow is readable");
     };
     // The definition's engine payload is available through its recorded document.
-    let payload = serde_json::json!({
-        "document": inspection.document.reference().document,
-        "entry": "supervisor",
-        "args": {},
-    });
+    let payload = serde_json::to_value(lash_vm_runtime::KernelProcessInput {
+        packages: packages.digest(),
+        declared_packages: packages.surface().selection(),
+        document: inspection.document.reference().document,
+        functions: inspection
+            .document
+            .document()
+            .manifest
+            .functions
+            .keys()
+            .copied()
+            .collect(),
+        entry: Name::new("supervisor"),
+        args: Default::default(),
+    })
+    .expect("the complete published-entry payload");
     core.processes()
         .check_link(
             lash::process::LASH_VM_ENGINE_KIND,

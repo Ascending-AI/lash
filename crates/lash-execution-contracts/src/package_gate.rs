@@ -131,9 +131,13 @@ impl std::fmt::Debug for CellPackages {
 /// The package surface a cell lowered now is written under.
 #[async_trait::async_trait]
 pub trait PackageGate: Send + Sync {
-    /// The surface a cell lowered now is written under. A typed retryable
-    /// error defers lowering when the fleet has none to answer, or when the
-    /// live survey or the stored surface is unavailable.
+    /// The surface a cell lowered now is written under. An empty serving
+    /// fleet installs and answers the writer's own set, without a lease.
+    /// A nonempty fleet with no compatible live candidate refuses with
+    /// typed `NoCompatibleSnapshot`. Survey, installation and surface-load
+    /// failures defer lowering through the retryable unavailable path.
+    /// The answer stays pinned through the round, import or publication;
+    /// each fresh request surveys again.
     async fn writable(&self) -> Result<CellPackages, crate::RuntimeEffectControllerError>;
 }
 

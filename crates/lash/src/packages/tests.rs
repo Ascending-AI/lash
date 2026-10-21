@@ -1,7 +1,7 @@
 //! The package gate (FIG-6993) over releases of a host package `q`:
 //! PROMOTE-BY-CAPABILITY as a selector and through the store, its typed
-//! refusal when no live surface is one every serving node runs, and the
-//! stored surface and code a node that did not build a set reads it from.
+//! refusal for a nonempty incompatible fleet, empty-fleet installation,
+//! and the stored surface and code a node that did not build a set reads it from.
 
 use futures_util::StreamExt;
 use std::collections::BTreeSet;
@@ -35,9 +35,21 @@ fn q(value: i64) -> Package {
 /// published definition and its runtime view, and the newer node runs it.
 #[tokio::test]
 async fn an_imported_definition_keeps_its_gate_set_and_runs_its_internal_body() {
+    Box::pin(imported_internal_body(false)).await;
+}
+
+/// EMPTY-FLEET-OWN / INSTALL-BEFORE-ANSWER / BOOTSTRAP-PIN-SURVIVES:
+/// authoring installs without a lease, ignores historical releases, and
+/// admitted work runs its original internal body on another build.
+#[tokio::test]
+async fn an_empty_fleet_answers_its_writers_durably_installed_surface() {
+    Box::pin(imported_internal_body(true)).await;
+}
+
+async fn imported_internal_body(bootstrap: bool) {
     let package = |release: &str| {
         Package::build("dataframe", release, &PackageSources {
-            kernel: &format!("effect dataframe.run(input?: Json) -> Text contract \"run/1\"\n\nfunction dataframe.execute() -> Text\nkernel 1\ncharge {}\nbody {{\n  let got = perform dataframe.run({{}}) as Text\n  return got\n}}\n", if release == "old" { 2 } else { 3 }),
+            kernel: &format!("effect dataframe.run(input?: Json) -> Text contract \"run/1\"\n\nfunction dataframe.execute() -> Text\nkernel 1\ncharge {}\nbody {{\n  let got = perform dataframe.run({{}}) as Text\n  return {}\n}}\n", if release == "old" { 2 } else { 3 }, if release == "old" { "got" } else { "\"new-body\"" }),
             surface: "internal operation run(input?: Json) -> Text contract \"run/1\"\nasync function execute() -> Text = dataframe.execute\n",
             labels: "execute\texecute\n",
         }, &[]).unwrap()
@@ -96,39 +108,29 @@ async fn an_imported_definition_keeps_its_gate_set_and_runs_its_internal_body() 
     .await;
     let backend = lash_conformance::backend_over(stores.clone());
     let durable = backend.durable();
-    // The newer build installs first; the older one installs after it, as
-    // a rollback does: its surface is the newest stored candidate.
-    lash_execution_contracts::backend::NodePackages::install(
-        &NodeInstall::new(held.clone()),
-        &backend,
-    )
-    .await
-    .unwrap();
-    let old_held = HeldPackages::install(
-        shipped
-            .in_order()
-            .into_iter()
-            .map(|p| (**p).clone())
-            .chain([(*old).clone(), (*legacy).clone()]),
-    )
-    .unwrap();
+    let old_held = Arc::new(
+        HeldPackages::install(
+            shipped
+                .in_order()
+                .into_iter()
+                .map(|p| (**p).clone())
+                .chain([(*old).clone(), (*legacy).clone()]),
+        )
+        .unwrap(),
+    );
     assert_eq!(old_held.digest(), pin);
-    let old_capabilities = lash_execution_contracts::backend::NodePackages::install(
-        &NodeInstall::new(Arc::new(old_held)),
-        &backend,
-    )
-    .await
-    .unwrap();
-    let older = durable
-        .register_node(&NodeSpec {
-            node: NodeId::new("old-import-serving-node"),
-            decodes: vec![backend.formats().session().clone()],
-            serves: vec![],
-            capabilities: old_capabilities,
-            ttl_millis: 60_000,
-        })
+    let older = if bootstrap {
+        None
+    } else {
+        // The newer build installs first; a rollback installs after it.
+        lash_execution_contracts::backend::NodePackages::install(
+            &NodeInstall::new(held.clone()),
+            &backend,
+        )
         .await
         .unwrap();
+        Some(serve(&backend, "old-import-serving-node", &old_held).await)
+    };
     let definition = lash_core::ToolDefinition::raw(
         "tool:dataframe",
         "dataframe.run",
@@ -201,10 +203,11 @@ async fn an_imported_definition_keeps_its_gate_set_and_runs_its_internal_body() 
             })
         }))
         .unwrap();
-    let make_core = |held: Arc<HeldPackages>| {
+    let make_core = |held: Arc<HeldPackages>, serves: bool| {
         let workers = lash_vm_client::service::Service::default();
         let bounds = workers.config().run_bounds;
         crate::LashCore::standard_builder(backend.clone())
+            .serve_sessions(serves)
             .plugin(Arc::new(
                 lash_vm_runtime::KernelProcessPluginFactory::new(workers, "typescript", bounds)
                     .with_packages(held),
@@ -233,27 +236,75 @@ async fn an_imported_definition_keeps_its_gate_set_and_runs_its_internal_body() 
             .build(lash_core::testing::runtime_lease_owner())
             .unwrap()
     };
-    let core = make_core(held.clone());
-    // Include this core's serving node in the fleet query: build starts it
-    // asynchronously, so querying sooner can hide a missing package hold.
-    tokio::time::timeout(std::time::Duration::from_secs(30), async {
-        while core.node.registration.snapshot().is_none() {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("the importing core's node registered");
-    // Both live surfaces run on both nodes, and the older one was installed
-    // last: the gate answers it, read from the store on the newer node.
-    let chosen = FleetPackages::new(backend.clone(), Arc::new(NodeInstall::new(held.clone())))
-        .writable()
-        .await
-        .unwrap();
-    assert_eq!(chosen.digest(), pin);
-    assert!(
-        chosen.stored_wire().is_some(),
-        "the newer node reads the older surface from the store"
+    let core = make_core(
+        if bootstrap {
+            old_held.clone()
+        } else {
+            held.clone()
+        },
+        !bootstrap,
     );
+    let chosen = if bootstrap {
+        assert!(durable.package_catalog().await.unwrap().sets.is_empty());
+        assert!(durable.live_nodes().await.unwrap().is_empty());
+        let chosen = core.host_artifacts().cell_packages().await.unwrap();
+        assert_eq!(chosen.digest(), pin);
+        assert!(
+            durable.live_nodes().await.unwrap().is_empty(),
+            "authoring grants no lease"
+        );
+        let stored = durable.package_surface(&pin).await.unwrap().unwrap();
+        assert_eq!(stored, chosen.surface().encode());
+        let reader = FleetPackages::new(backend.clone(), Arc::new(NodeInstall::new(held.clone())));
+        let read = reader.surface(pin).await.unwrap();
+        let definitions: BTreeSet<_> = old_held
+            .artifacts()
+            .values()
+            .flat_map(|package| package.code().ids().iter().copied())
+            .collect();
+        let paths = durable
+            .package_paths(&definitions.iter().copied().collect::<Vec<_>>())
+            .await
+            .unwrap();
+        assert_eq!(paths.keys().copied().collect::<BTreeSet<_>>(), definitions);
+        assert!(
+            definitions
+                .iter()
+                .all(|id| read.catalog().get(id).is_some()),
+            "every helper is stored"
+        );
+        let before = durable.package_catalog().await.unwrap();
+        assert_eq!(core.host_artifacts().cell_packages().await.unwrap(), chosen);
+        assert_eq!(
+            durable.package_catalog().await.unwrap(),
+            before,
+            "installation is idempotent"
+        );
+        let historical = serve(&backend, "newer-historical-release", &held).await;
+        durable.release_node(&historical).await.unwrap();
+        assert_eq!(
+            core.host_artifacts().cell_packages().await.unwrap(),
+            chosen,
+            "the caller wins even after a newer historical installation"
+        );
+        chosen
+    } else {
+        // Include the importing core in the nonempty survey.
+        tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            while core.node.registration.snapshot().is_none() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the importing core's node registered");
+        let chosen = core.host_artifacts().cell_packages().await.unwrap();
+        assert!(
+            chosen.stored_wire().is_some(),
+            "the newer node reads the older stored surface"
+        );
+        chosen
+    };
+    assert_eq!(chosen.digest(), pin);
     let env = lash_core::ProcessEnv::builder(lash_core::MaxToolCalls::new(4))
         .component(TOOLS, &())
         .link_tool(
@@ -352,6 +403,22 @@ async fn an_imported_definition_keeps_its_gate_set_and_runs_its_internal_body() 
         );
         started.push(receipt.process_id);
     }
+    drop(artifacts);
+    let core = if bootstrap {
+        assert!(durable.live_nodes().await.unwrap().is_empty());
+        for process in &started {
+            let observed = core.processes().get(process).await.unwrap().unwrap();
+            assert!(
+                observed.lifecycle.terminal().is_none(),
+                "admission does not execute work"
+            );
+        }
+        core.shutdown().await.unwrap();
+        drop(core);
+        make_core(held.clone(), true)
+    } else {
+        core
+    };
     let parked = started.last().unwrap();
     let due = tokio::time::timeout(std::time::Duration::from_secs(120), async {
         let observable = core.processes().observe(parked);
@@ -394,7 +461,7 @@ async fn an_imported_definition_keeps_its_gate_set_and_runs_its_internal_body() 
     }
     core.shutdown().await.unwrap();
     drop(core);
-    let core = make_core(held.clone());
+    let core = make_core(held.clone(), true);
     let current = held.view();
     assert!(!lash_kernel_dialect::ExportView::namespace_roots(&current).contains("legacy"));
     let record = backend
@@ -443,7 +510,9 @@ async fn an_imported_definition_keeps_its_gate_set_and_runs_its_internal_body() 
     );
     assert_eq!(resolver.0.load(std::sync::atomic::Ordering::SeqCst), 0);
     clock.set(u64::try_from(due).unwrap());
-    durable.release_node(&older).await.unwrap();
+    if let Some(older) = older {
+        durable.release_node(&older).await.unwrap();
+    }
     for process in started {
         let output = tokio::time::timeout(
             std::time::Duration::from_secs(120),
@@ -712,11 +781,15 @@ async fn the_gate_writes_the_newest_live_surface_every_serving_node_runs_or_refu
         Ok(c.digest()),
         "once every live node runs C, C is written"
     );
+    assert!(
+        answer(&backend, &a).await.is_err(),
+        "the writer must run the chosen surface too"
+    );
     durable.release_node(&c_node).await.expect("C stops");
     assert_eq!(
         answer(&backend, &c).await,
-        Err(Vec::new()),
-        "a stopped writer supplies no candidate"
+        Ok(c.digest()),
+        "an empty fleet installs and answers the writer's own set"
     );
 }
 
@@ -1001,4 +1074,611 @@ async fn a_rollback_build_serves_what_it_can_and_the_strand_report_names_the_res
         "the strand report names D's work and the native no live node has"
     );
     durable.release_node(&a_node).await.expect("A stops");
+}
+
+/// LIVE-FLEET-STILL-STRICT: serving formats, rather than candidate count,
+/// decide whether bootstrap is allowed. Carried sessions count as serving.
+#[tokio::test]
+async fn only_an_empty_serving_fleet_uses_the_writers_own_surface() {
+    use lash_core::durable_port::{FormatSet, NodeCapabilities};
+    let stores = crate::tests::sqlite_memory_store_set().await;
+    let backend = lash_conformance::backend_over(stores);
+    let held = Arc::new(HeldPackages::install([q(1)]).unwrap());
+    let formats = backend.formats();
+    for (name, decodes, qualifies) in [
+        ("unrelated", FormatSet::new("unrelated-format"), false),
+        ("current", formats.session().clone(), true),
+    ] {
+        let lease = backend
+            .durable()
+            .register_node(&NodeSpec {
+                node: NodeId::new(name),
+                decodes: vec![decodes],
+                serves: vec![],
+                capabilities: NodeCapabilities::default(),
+                ttl_millis: 60_000,
+            })
+            .await
+            .unwrap();
+        if qualifies {
+            assert_eq!(
+                answer(&backend, &held).await,
+                Err(vec![]),
+                "a serving node without a candidate still refuses"
+            );
+        } else {
+            assert_eq!(answer(&backend, &held).await, Ok(held.digest()));
+        }
+        backend.durable().release_node(&lease).await.unwrap();
+    }
+    let carried = FormatSet::new("carried-session-format");
+    let row = NodeCapability {
+        decodes: vec![carried.clone()],
+        capabilities: NodeCapabilities::default(),
+    };
+    assert!(super::serving(std::slice::from_ref(&row), formats.session(), &[]).is_empty());
+    assert_eq!(
+        super::serving(std::slice::from_ref(&row), formats.session(), &[carried]),
+        vec![&row]
+    );
+}
+
+/// HARD-CLAIM-REMAINS: a bootstrap publication's reached native is a real
+/// start requirement. A node missing it cannot claim; a capable build
+/// later executes the original pinned definition.
+#[tokio::test]
+async fn a_bootstrap_native_waits_for_a_capable_node() {
+    let stores = crate::tests::sqlite_memory_store_set().await;
+    let backend = lash_conformance::backend_over(stores);
+    let held = lash_vm_releases::lash_packages().unwrap();
+    let make_core = |serves| {
+        let workers = lash_vm_client::service::Service::default();
+        let bounds = workers.config().run_bounds;
+        crate::LashCore::standard_builder(backend.clone())
+            .serve_sessions(serves)
+            .plugin(Arc::new(
+                lash_vm_runtime::KernelProcessPluginFactory::new(workers, "typescript", bounds)
+                    .with_packages(held.clone()),
+            ))
+            .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+            .data_retention(crate::DataRetention::standard())
+            .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+            .execution_budgets(crate::ExecutionBudgets::recommended())
+            .delta_coalescing(crate::DeltaCoalescing::recommended())
+            .build(lash_core::testing::runtime_lease_owner())
+            .unwrap()
+    };
+    let publisher = make_core(false);
+    let native = held
+        .functions()
+        .iter()
+        .find(|(_, function)| function.name() == "regex.ecma.compile_check")
+        .map(|(id, _)| *id)
+        .unwrap();
+    let document = lash_kernel_doc::parse_document(&format!(
+        "kernel 1\nnumbers float\nuse regex.ecma.compile_check = @{native}\nentry flow() -> Text\nfn flow() {{ let checked = invoke regex.ecma.compile_check(\"a\", \"\") return \"native-ran\" }}\nmain {{ finish null }}\n"
+    )).unwrap();
+    let env = lash_core::ProcessEnv::builder(lash_core::MaxToolCalls::new(1))
+        .build()
+        .unwrap();
+    let artifacts = publisher.host_artifacts();
+    let packages = artifacts.cell_packages().await.unwrap();
+    let pin = crate::process::HostArtifactPin::mint();
+    let publication = artifacts
+        .publish_workflow(
+            &pin,
+            &document.into(),
+            &lash_kernel_doc::Name::new("flow"),
+            &env,
+            packages.declare_all(),
+            None,
+        )
+        .await
+        .unwrap();
+    let crate::workflow::WorkflowPublish::Published(publication) = publication else {
+        panic!("{publication:?}");
+    };
+    let env_ref = artifacts.publish_process_env(&pin, &env).await.unwrap();
+    let receipt = publisher
+        .processes()
+        .start(
+            lash_execution_contracts::process::ProcessStartRequest::definition(
+                publication.definition.id,
+                Some(publication.definition.signature),
+                Default::default(),
+                lash_execution_contracts::process::EngineLaunch::new(
+                    env_ref,
+                    publisher
+                        .processes()
+                        .engine_defaults(
+                            lash_vm_runtime::LASH_VM_ENGINE_KIND,
+                            &serde_json::Value::Null,
+                        )
+                        .unwrap(),
+                ),
+                lash_execution_contracts::process::ProcessOriginator::host(),
+                lash_execution_contracts::process::LifetimeDecision::Detached,
+            ),
+            publisher.effect_host(),
+        )
+        .await
+        .unwrap();
+    assert!(backend.durable().live_nodes().await.unwrap().is_empty());
+    let mut incapable = lash_kernel_package::node_capabilities(&held);
+    assert!(incapable.natives.remove(&native));
+    let lease = backend
+        .durable()
+        .register_node(&NodeSpec {
+            node: NodeId::new("missing-bootstrap-native"),
+            decodes: publisher.backend().formats().decodes(),
+            serves: vec![],
+            capabilities: incapable,
+            ttl_millis: 60_000,
+        })
+        .await
+        .unwrap();
+    assert!(
+        backend
+            .durable()
+            .claim(&lease, 16)
+            .await
+            .unwrap()
+            .is_empty(),
+        "a missing native prevents claiming an actual admitted start"
+    );
+    let stranded = crate::durable::strand_report(&backend, None, 16)
+        .await
+        .unwrap();
+    let actor = lash_core::durable_port::ActorKey::process(receipt.process_id.as_str()).unwrap();
+    let stranded = stranded
+        .stranded
+        .iter()
+        .find(|row| row.actor == actor.as_str())
+        .unwrap();
+    assert_eq!(stranded.lacks.natives, BTreeSet::from([native]));
+    assert!(stranded.lacks.kernels.is_empty());
+    assert!(stranded.lacks.providers.is_empty());
+    assert!(stranded.lacks.codecs.is_empty());
+    backend.durable().release_node(&lease).await.unwrap();
+    drop(artifacts);
+    publisher.shutdown().await.unwrap();
+    drop(publisher);
+    let core = make_core(true);
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(120),
+        core.processes().await_output(&receipt.process_id),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = output else {
+        panic!("{output:?}");
+    };
+    assert!(output.is_success(), "{output:?}");
+    assert_eq!(
+        output.value_for_projection(),
+        serde_json::json!("native-ran")
+    );
+    core.shutdown().await.unwrap();
+}
+
+mod gate_faults {
+    use lash_core::durable_port as lash_durable;
+    use lash_durable::domain::{
+        ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ProcessActorRow, RootOwner, RunFacts,
+        ScopeKey, SessionCloseRow, TurnRow, WaitId, WaitRow,
+    };
+    use lash_durable::{
+        ActorCommit, ActorKey, ActorSnapshot, ActorTx, Claimed, CommitLabel, DurableError,
+        DurableInstant, DurableReads, DurableStore, Epoch, HeartbeatOutcome, MailCommit, MailTx,
+        NodeLease, NodeSpec, Reaped,
+    };
+    use lash_protocol_types::{ProcessId, SessionId};
+    use std::result::Result;
+    use std::sync::{Arc, Mutex};
+
+    use super::*;
+
+    struct GateStore {
+        inner: Arc<dyn DurableStore>,
+        fail: Mutex<Option<&'static str>>,
+    }
+
+    impl GateStore {
+        fn check(&self, operation: &str) -> Result<(), DurableError> {
+            let mut fail = self.fail.lock().unwrap();
+            if *fail == Some(operation) {
+                *fail = None;
+                return Err(DurableError::Store(lash_durable::StoreFailure {
+                    kind: lash_durable::StoreFailureKind::Unavailable,
+                    message: format!("injected {operation} failure"),
+                }));
+            }
+            Ok(())
+        }
+    }
+
+    /// SURVEY-FAILURE-IS-NOT-EMPTY: neither an unreadable survey nor a
+    /// failed bootstrap install can yield an uninstalled surface.
+    #[tokio::test]
+    async fn a_failed_survey_or_install_never_answers_an_own_surface() {
+        for operation in ["package_catalog", "live_nodes", "install_packages"] {
+            let stores = crate::tests::sqlite_memory_store_set().await;
+            let probe = Arc::new(GateStore {
+                inner: Arc::new(stores.durable_store()),
+                fail: Mutex::new(Some(operation)),
+            });
+            let wrapped = probe.clone();
+            let stores = lash_core::testing::runtime_helpers::LayeredStores::over(stores)
+                .map_durable_store(move |_| wrapped)
+                .into_store_set();
+            let backend = lash_conformance::backend_over(stores);
+            let held = Arc::new(HeldPackages::install([q(1)]).unwrap());
+            let gate =
+                FleetPackages::new(backend.clone(), Arc::new(NodeInstall::new(held.clone())));
+            let refused = gate.writable().await.unwrap_err();
+            assert_eq!(
+                refused.code,
+                lash_core::RuntimeErrorCode::RunDefinitionUnavailable
+            );
+            assert!(
+                refused
+                    .message
+                    .contains(&format!("injected {operation} failure"))
+            );
+            assert!(
+                probe
+                    .inner
+                    .package_surface(&held.digest())
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(probe.inner.live_nodes().await.unwrap().is_empty());
+            assert_eq!(gate.writable().await.unwrap().digest(), held.digest());
+            assert!(
+                probe
+                    .inner
+                    .package_surface(&held.digest())
+                    .await
+                    .unwrap()
+                    .is_some()
+            );
+        }
+    }
+    #[async_trait::async_trait]
+    impl DurableReads for GateStore {
+        async fn model_call_pins(
+            &self,
+            session: &lash_protocol_types::SessionId,
+            owner: &str,
+        ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
+            self.inner.model_call_pins(session, owner).await
+        }
+
+        async fn model_calls(
+            &self,
+            session: &lash_protocol_types::SessionId,
+            owner: &str,
+        ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
+            self.inner.model_calls(session, owner).await
+        }
+
+        async fn turn(&self, session: &SessionId) -> Result<Option<TurnRow>, DurableError> {
+            self.inner.turn(session).await
+        }
+
+        async fn turn_namespaces(
+            &self,
+            session: &SessionId,
+            run: &lash_protocol_types::TurnId,
+        ) -> Result<Vec<lash_durable::domain::TurnNamespace>, DurableError> {
+            self.inner.turn_namespaces(session, run).await
+        }
+
+        async fn turn_end(
+            &self,
+            session: &SessionId,
+            run: &lash_protocol_types::TurnId,
+        ) -> Result<Option<lash_durable::domain::TurnEnd>, DurableError> {
+            self.inner.turn_end(session, run).await
+        }
+
+        async fn run_facts(&self, owner: &OwnerKey) -> Result<RunFacts, DurableError> {
+            self.inner.run_facts(owner).await
+        }
+
+        async fn run_facts_of(
+            &self,
+            owner: &OwnerKey,
+            run: lash_durable::domain::RunSeq,
+        ) -> Result<RunFacts, DurableError> {
+            self.inner.run_facts_of(owner, run).await
+        }
+        async fn run_facts_within(
+            &self,
+            owner: &lash_durable::domain::OwnerKey,
+            run: Option<lash_durable::domain::RunSeq>,
+            max_rows: usize,
+            limits: lash_durable::domain::checkpoint_graph::DecodeLimits,
+        ) -> Result<lash_durable::domain::RunFacts, DurableError> {
+            self.inner
+                .run_facts_within(owner, run, max_rows, limits)
+                .await
+        }
+
+        async fn exec_root(&self, exec: &ExecKey) -> Result<Option<ExecRootRow>, DurableError> {
+            self.inner.exec_root(exec).await
+        }
+
+        async fn cell_roots(
+            &self,
+            session: &lash_protocol_types::SessionId,
+            run: &lash_protocol_types::TurnId,
+        ) -> Result<Vec<ExecRootRow>, DurableError> {
+            self.inner.cell_roots(session, run).await
+        }
+        async fn cell_roots_within(
+            &self,
+            session: &lash_protocol_types::SessionId,
+            run: &lash_protocol_types::TurnId,
+            max_rows: usize,
+        ) -> Result<Vec<lash_durable::domain::ExecRootRow>, DurableError> {
+            self.inner.cell_roots_within(session, run, max_rows).await
+        }
+
+        async fn hydrate(
+            &self,
+            owner: RootOwner,
+            expected: Option<lash_durable::domain::checkpoint_graph::NodeId>,
+            limits: lash_durable::domain::checkpoint_graph::DecodeLimits,
+        ) -> Result<HydratedGraph, DurableError> {
+            self.inner.hydrate(owner, expected, limits).await
+        }
+
+        async fn pending_waits(&self, owner: &ActorKey) -> Result<Vec<WaitRow>, DurableError> {
+            self.inner.pending_waits(owner).await
+        }
+
+        async fn wait(&self, id: &WaitId) -> Result<Option<WaitRow>, DurableError> {
+            self.inner.wait(id).await
+        }
+
+        async fn process(
+            &self,
+            process: &ProcessId,
+        ) -> Result<Option<ProcessActorRow>, DurableError> {
+            self.inner.process(process).await
+        }
+
+        async fn live_until_descendants(
+            &self,
+            scope: &ScopeKey,
+            limit: usize,
+        ) -> Result<Vec<ProcessId>, DurableError> {
+            self.inner.live_until_descendants(scope, limit).await
+        }
+
+        async fn until_children(
+            &self,
+            scope: &ScopeKey,
+            after: Option<&ProcessId>,
+            limit: usize,
+        ) -> Result<Vec<ProcessId>, DurableError> {
+            self.inner.until_children(scope, after, limit).await
+        }
+
+        async fn session_close(
+            &self,
+            session: &SessionId,
+        ) -> Result<Option<SessionCloseRow>, DurableError> {
+            self.inner.session_close(session).await
+        }
+
+        async fn ending_scopes(&self, session: &SessionId) -> Result<Vec<ScopeKey>, DurableError> {
+            self.inner.ending_scopes(session).await
+        }
+
+        async fn session_mailbox(
+            &self,
+            session: &lash_protocol_types::SessionId,
+        ) -> Result<lash_durable::domain::SessionMailbox, DurableError> {
+            self.inner.session_mailbox(session).await
+        }
+
+        async fn prompt_snapshot(
+            &self,
+            call: &lash_durable::domain::PromptCallKey,
+        ) -> Result<Option<lash_durable::domain::PromptSnapshotRow>, DurableError> {
+            self.inner.prompt_snapshot(call).await
+        }
+
+        async fn prompt_texts(
+            &self,
+            hashes: &[String],
+        ) -> Result<Vec<lash_durable::domain::PromptText>, DurableError> {
+            self.inner.prompt_texts(hashes).await
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl DurableStore for GateStore {
+        async fn now(&self) -> Result<DurableInstant, DurableError> {
+            self.inner.now().await
+        }
+
+        fn pages(&self) -> Option<Arc<dyn lash_durable::domain::pages::PageStore>> {
+            self.inner.pages()
+        }
+
+        async fn register_node(&self, spec: &NodeSpec) -> Result<NodeLease, DurableError> {
+            self.inner.register_node(spec).await
+        }
+
+        async fn heartbeat(&self, node: &NodeLease) -> Result<HeartbeatOutcome, DurableError> {
+            self.inner.heartbeat(node).await
+        }
+
+        async fn reap(&self, reaper: &NodeLease) -> Result<Vec<Reaped>, DurableError> {
+            self.inner.reap(reaper).await
+        }
+
+        async fn release_node(&self, node: &NodeLease) -> Result<Vec<ActorKey>, DurableError> {
+            self.inner.release_node(node).await
+        }
+
+        async fn acquire_idle_for_testing(
+            &self,
+            node: &lash_durable::NodeLease,
+            actor: &lash_durable::ActorKey,
+            epoch: lash_durable::Epoch,
+        ) -> Result<lash_durable::Epoch, lash_durable::DurableError> {
+            self.inner
+                .acquire_idle_for_testing(node, actor, epoch)
+                .await
+        }
+
+        async fn readiness(&self) -> Result<lash_durable::Readiness, DurableError> {
+            self.inner.readiness().await
+        }
+
+        async fn claim(
+            &self,
+            node: &NodeLease,
+            limit: usize,
+        ) -> Result<Vec<Claimed>, DurableError> {
+            self.inner.claim(node, limit).await
+        }
+
+        async fn mark_draining(&self, node: &NodeLease) -> Result<(), DurableError> {
+            self.inner.mark_draining(node).await
+        }
+
+        async fn live_nodes(&self) -> Result<Vec<lash_durable::NodeCapability>, DurableError> {
+            self.check("live_nodes")?;
+            self.inner.live_nodes().await
+        }
+
+        async fn actor_requirements(
+            &self,
+            after: Option<&lash_durable::ActorKey>,
+            limit: usize,
+        ) -> Result<Vec<(lash_durable::ActorKey, Vec<String>)>, DurableError> {
+            self.inner.actor_requirements(after, limit).await
+        }
+
+        async fn install_packages(
+            &self,
+            artifacts: &[lash_durable::packages::ArtifactInstall],
+            sets: &[lash_durable::packages::SetInstall],
+        ) -> Result<(), DurableError> {
+            self.check("install_packages")?;
+            self.inner.install_packages(artifacts, sets).await
+        }
+
+        async fn package_catalog(&self) -> Result<lash_durable::PackageCatalog, DurableError> {
+            self.check("package_catalog")?;
+            self.inner.package_catalog().await
+        }
+
+        async fn package_surface(
+            &self,
+            digest: &lash_durable::PackageSetDigest,
+        ) -> Result<Option<Vec<u8>>, DurableError> {
+            self.inner.package_surface(digest).await
+        }
+
+        async fn package_paths(
+            &self,
+            functions: &[lash_durable::packages::FunctionId],
+        ) -> Result<
+            std::collections::BTreeMap<
+                lash_durable::packages::FunctionId,
+                std::collections::BTreeSet<String>,
+            >,
+            DurableError,
+        > {
+            self.inner.package_paths(functions).await
+        }
+
+        async fn internal_operations(
+            &self,
+            operations: &[lash_durable::packages::EffectName],
+        ) -> Result<
+            std::collections::BTreeMap<
+                lash_durable::packages::EffectName,
+                std::collections::BTreeSet<String>,
+            >,
+            DurableError,
+        > {
+            self.inner.internal_operations(operations).await
+        }
+
+        async fn package_labels(
+            &self,
+            artifacts: &[lash_durable::ArtifactDigest],
+        ) -> Result<
+            std::collections::BTreeMap<lash_durable::ArtifactDigest, Vec<String>>,
+            DurableError,
+        > {
+            self.inner.package_labels(artifacts).await
+        }
+
+        async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {
+            self.inner.owned(node).await
+        }
+
+        async fn begin(&self, actor: &ActorKey, epoch: Epoch) -> Result<ActorTx, DurableError> {
+            self.inner.begin(actor, epoch).await
+        }
+
+        async fn open_process(
+            &self,
+            actor: &ActorKey,
+            epoch: Epoch,
+        ) -> Result<(ActorTx, lash_durable::domain::ProcessView), DurableError> {
+            self.inner.open_process(actor, epoch).await
+        }
+
+        async fn commit(
+            &self,
+            tx: ActorTx,
+            label: CommitLabel,
+        ) -> Result<ActorCommit, DurableError> {
+            self.inner.commit(tx, label).await
+        }
+
+        async fn commit_mail(
+            &self,
+            tx: MailTx,
+            label: CommitLabel,
+        ) -> Result<MailCommit, DurableError> {
+            self.inner.commit_mail(tx, label).await
+        }
+
+        async fn claim_facts(
+            &self,
+            node: Option<&lash_durable::Owner>,
+            actor: &ActorKey,
+        ) -> Result<lash_durable::ClaimFacts, DurableError> {
+            self.inner.claim_facts(node, actor).await
+        }
+
+        async fn actor(&self, actor: &ActorKey) -> Result<Option<ActorSnapshot>, DurableError> {
+            self.inner.actor(actor).await
+        }
+
+        async fn await_owner_commit(&self, actor: &ActorKey) -> Result<(), DurableError> {
+            self.inner.await_owner_commit(actor).await
+        }
+
+        async fn actors_in(
+            &self,
+            formats: &lash_durable::FormatSet,
+            after: Option<&ActorKey>,
+            limit: usize,
+        ) -> Result<Vec<ActorKey>, DurableError> {
+            self.inner.actors_in(formats, after, limit).await
+        }
+    }
 }

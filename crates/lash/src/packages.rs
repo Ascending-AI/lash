@@ -17,7 +17,9 @@
 //! live serving nodes' own surfaces whose requirements every live serving
 //! node meets ([`promoted`]). A serving node is one that decodes this
 //! build's session set or a session set it carries forward, so a node
-//! serving only carried sessions counts. When no candidate is one every
+//! serving only carried sessions counts. With no serving nodes, the gate
+//! durably installs and answers the writer's own set without registering
+//! a node. With a nonempty fleet, when no candidate is one every
 //! serving node can run, a new cell fails with the typed
 //! `NoCompatibleSnapshot` refusal: the gate never answers a partial
 //! surface. The gate reads the chosen set's surface as any node reads a
@@ -203,7 +205,7 @@ pub(crate) fn serving<'a>(
 /// PROMOTE-BY-CAPABILITY (FIG-6993): of the stored sets that are the own
 /// set of some live node of `serving`, the newest by install sequence
 /// whose requirements `writer` and every node of `serving` meet; `None`
-/// when there is none.
+/// when there is none. The gate handles an empty serving fleet separately.
 pub(crate) fn promoted<'a>(
     stored: &'a [StoredSet],
     serving: &[&NodeCapability],
@@ -392,21 +394,33 @@ impl lash_execution_contracts::PackageGate for FleetPackages {
         let live = durable.live_nodes().await.map_err(unavailable)?;
         let formats = self.backend.formats();
         let serving = serving(&live, formats.session(), formats.carried_sessions());
-        let chosen = promoted(&catalog.sets, &serving, &self.capabilities);
+        let chosen = if serving.is_empty() {
+            self.node.install(&self.backend).await.map_err(|error| {
+                tracing::warn!(
+                    ?error,
+                    "package bootstrap installation unavailable; lowering deferred"
+                );
+                packages_unavailable(format!(
+                    "package bootstrap installation unavailable: {error}"
+                ))
+            })?;
+            self.node.packages().digest()
+        } else {
+            promoted(&catalog.sets, &serving, &self.capabilities)
+                .map(|set| set.digest)
+                .ok_or_else(|| {
+                    lash_core::RuntimeEffectControllerError::no_compatible_snapshot(candidates(
+                        &catalog.sets,
+                        &serving,
+                        &self.capabilities,
+                    ))
+                })?
+        };
         tracing::info!(
             serving = serving.len(),
-            chosen = ?chosen.map(|set| set.digest.short()),
+            chosen = %chosen.short(),
             "package gate"
         );
-        let Some(chosen) = chosen.map(|set| set.digest) else {
-            return Err(
-                lash_core::RuntimeEffectControllerError::no_compatible_snapshot(candidates(
-                    &catalog.sets,
-                    &serving,
-                    &self.capabilities,
-                )),
-            );
-        };
         self.surface(chosen).await.map_err(|message| {
             tracing::warn!(%message, "stored package surface unavailable; lowering deferred");
             packages_unavailable(format!(
