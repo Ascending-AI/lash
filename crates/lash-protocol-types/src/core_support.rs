@@ -327,11 +327,6 @@ pub fn fold_part_kind<T>(kind: crate::PartKind, variants: [T; 9]) -> T {
     }
 }
 
-/// Bridge logical identities to the store's retained turn-key vocabulary internally.
-pub trait RunIdCoreSupport {
-    fn from_turn_id(value: crate::TurnId) -> Self;
-}
-
 #[cfg(test)]
 mod retired_identity_tests {
     #[test]
@@ -416,3 +411,6 @@ mod encoded_length_laws {
         assert_eq!(counter.len(), usize::MAX);
     }
 }
+
+/// Bridge logical identities to the store's retained turn-key vocabulary internally.
+pub use lash_vocabulary::identity::RunIdCoreSupport;

@@ -15,7 +15,7 @@ pub use parser::{
     parse_definition, parse_definition_with_limits, parse_document, parse_document_with_limits,
     parse_signature,
 };
-pub(crate) use printer::requirement_text;
+
 pub use printer::{print_definition, print_document, print_document_with_ranges, print_type};
 
 /// A kernel text that is not a document or a definition, and where.
@@ -58,73 +58,4 @@ pub enum ParseErrorReason {
     Malformed { problem: String },
 }
 
-/// The words kernel text reserves. A name spelled like one is written
-/// between backticks.
-pub(crate) const KEYWORDS: &[&str] = &[
-    "absent",
-    "all",
-    "any",
-    "apply",
-    "as",
-    "await",
-    "body",
-    "break",
-    "by_spelling",
-    "call",
-    "cancel",
-    "catch",
-    "charge",
-    "clock",
-    "continue",
-    "do",
-    "effect",
-    "else",
-    "entry",
-    "errors",
-    "fail",
-    "false",
-    "finally",
-    "finish",
-    "float",
-    "fn",
-    "for",
-    "function",
-    "guard",
-    "metered",
-    "if",
-    "in",
-    "inf",
-    "invoke",
-    "join",
-    "kernel",
-    "let",
-    "main",
-    "map",
-    "nan",
-    "native",
-    "null",
-    "numbers",
-    "perform",
-    "print",
-    "private",
-    "race",
-    "random",
-    "read",
-    "remove",
-    "result",
-    "return",
-    "set",
-    "settled",
-    "sleep",
-    "spawn",
-    "throw",
-    "true",
-    "try",
-    "use",
-    "while",
-    "yield",
-];
-
-pub(crate) fn is_keyword(word: &str) -> bool {
-    KEYWORDS.binary_search(&word).is_ok()
-}
+pub(crate) use lash_vocabulary::type_text::is_keyword;

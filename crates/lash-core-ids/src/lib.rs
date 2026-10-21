@@ -23,46 +23,6 @@ pub mod test_watchdog;
 #[cfg(feature = "testing")]
 pub mod trace_capture;
 
-/// A plugin's declared, nonzero state and config format version.
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-)]
-#[serde(transparent)]
-pub struct FormatVersion(std::num::NonZeroU32);
-
-impl FormatVersion {
-    pub const ONE: Self = Self(std::num::NonZeroU32::MIN);
-
-    pub const fn new(value: u32) -> Option<Self> {
-        match std::num::NonZeroU32::new(value) {
-            Some(value) => Some(Self(value)),
-            None => None,
-        }
-    }
-
-    pub const fn get(self) -> u32 {
-        self.0.get()
-    }
-}
-
-impl std::fmt::Display for FormatVersion {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(formatter)
-    }
-}
-
-impl From<std::num::NonZeroU32> for FormatVersion {
-    fn from(value: std::num::NonZeroU32) -> Self {
-        Self(value)
-    }
-}
-
-impl From<FormatVersion> for std::num::NonZeroU32 {
-    fn from(value: FormatVersion) -> Self {
-        value.0
-    }
-}
-
 /// The id a plugin registers under: the name of its state and config
 /// namespaces and of its place in the plugin composition.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
@@ -84,3 +44,5 @@ impl std::fmt::Display for PluginId {
         formatter.write_str(self.0)
     }
 }
+
+pub use lash_vocabulary::providers::FormatVersion;

@@ -90,33 +90,7 @@ pub struct ToolCallRecord {
 
 /// Generates the canonical tool-intent kind set from the vocabulary in
 /// [`crate::tool_intents`].
-macro_rules! define_tool_intent_kind {
-    ($($variant:ident $wire:literal,)*) => {
-        /// Literal command kind of one recorded declaration.
-        ///
-        /// Generated from [`tool_intent_variants!`]; never hand-edited.
-        #[derive(
-            Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema,
-        )]
-        #[serde(rename_all = "snake_case")]
-        pub enum ToolIntentKind {
-            $($variant,)*
-        }
-
-        impl ToolIntentKind {
-            /// Every kind the generated variant set declares, in declaration order.
-            pub const ALL: &'static [Self] = &[$(Self::$variant,)*];
-
-            pub const fn as_str(self) -> &'static str {
-                match self {
-                    $(Self::$variant => $wire,)*
-                }
-            }
-        }
-    };
-}
-
-crate::tool_intent_variants!(define_tool_intent_kind);
+pub use lash_vocabulary::ToolIntentKind;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ToolIntentIdentity {

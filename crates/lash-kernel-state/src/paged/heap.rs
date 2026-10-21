@@ -214,3 +214,16 @@ pub trait SemanticHeap: PageReader {
     /// unchanged since.
     fn sealed_root(&self) -> Option<PageRef>;
 }
+
+/// Link-bearing heap closure; implementation belongs to pkg-vm.
+pub mod linked {
+    use super::{EntityId, NameRef};
+    use lash_kernel_doc::linked_site::LinkedSite;
+    use lash_vocabulary::names::CallableId;
+    #[derive(Clone)]
+    pub struct ClosureView {
+        pub callable: CallableId,
+        pub site: LinkedSite,
+        pub captures: super::super::tree::Tree<(NameRef, EntityId)>,
+    }
+}

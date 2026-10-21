@@ -289,3 +289,23 @@ impl<'de> Deserialize<'de> for SourceMap {
             .map_err(serde::de::Error::custom)
     }
 }
+
+impl lash_vocabulary::sites::SourceLocations for SourceMap {
+    fn source_start(&self, site: &Site) -> Option<usize> {
+        self.sites
+            .iter()
+            .filter(|located| {
+                located.site.unit == site.unit && site.path.starts_with(&located.site.path)
+            })
+            .filter_map(|located| {
+                let start = located
+                    .ranges
+                    .first()
+                    .map(|range| range.start)
+                    .or(located.implicit)?;
+                Some((located.site.path.len(), start))
+            })
+            .max_by_key(|(depth, _)| *depth)
+            .map(|(_, start)| start)
+    }
+}

@@ -131,3 +131,5 @@ pub use registry_delegate::RegisteredProcess;
 
 pub mod staged_registration;
 pub use staged_registration::StagedRegistration;
+
+pub mod linking;

@@ -24,19 +24,18 @@
 //! A decoder refuses every other spelling, and refuses nesting deeper than
 //! [`MAX_DECODE_DEPTH`] before it can exhaust the stack.
 
+#[cfg(test)]
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
 
 use num_bigint::{BigInt, Sign};
 use num_traits::ToPrimitive;
 
-use crate::graph_tokens::{
-    CodecVariant, TokenCodec, TokenError, TokenReader, TokenWriter, check_ascending,
-};
+#[cfg(test)]
+use crate::TaskIdentity;
+use crate::graph_tokens::{CodecVariant, TokenCodec, TokenError, TokenReader, TokenWriter};
 use crate::{
-    Bytes, Datum, DocumentId, EffectIdentity, ErrorDatum, Float, FunctionId, Handle, Integer,
-    JoinMode, LoopIteration, Name, NumberPolicy, NumberToken, PackageSetDigest, QualifiedName,
-    Site, SpawnIdentity, TaskId, TaskIdentity, Timestamp, Unit,
+    Bytes, Datum, ErrorDatum, Float, Handle, Integer, JoinMode, Name, NumberPolicy, NumberToken,
+    TaskId, Timestamp,
 };
 
 /// The deepest a decoded value, form or type may nest, in recursive
@@ -90,105 +89,6 @@ fn variant(
 }
 
 // Generic containers.
-
-impl<T: TokenCodec> TokenCodec for Box<T> {
-    fn encode(&self, out: &mut TokenWriter) {
-        (**self).encode(out);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        T::decode(input).map(Box::new)
-    }
-}
-
-impl<T: TokenCodec> TokenCodec for Arc<T> {
-    fn encode(&self, out: &mut TokenWriter) {
-        (**self).encode(out);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        T::decode(input).map(Arc::new)
-    }
-}
-
-impl<T: TokenCodec> TokenCodec for Arc<[T]> {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(self.len() as u64);
-        for item in self.iter() {
-            item.encode(out);
-        }
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        Vec::<T>::decode(input).map(Arc::from)
-    }
-}
-
-impl TokenCodec for Arc<str> {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.text(self);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.text().map(Arc::from)
-    }
-}
-
-impl<A: TokenCodec, B: TokenCodec> TokenCodec for (A, B) {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
-        self.0.encode(out);
-        self.1.encode(out);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
-        Ok((A::decode(input)?, B::decode(input)?))
-    }
-}
-
-/// A sorted map: the map token, keys strictly ascending in their order.
-impl<K: TokenCodec + Ord, V: TokenCodec> TokenCodec for BTreeMap<K, V> {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.map(self.len() as u64);
-        for (key, value) in self {
-            key.encode(out);
-            value.encode(out);
-        }
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        let count = input.map()?;
-        let mut map = BTreeMap::new();
-        for _ in 0..count {
-            let key = K::decode(input)?;
-            if map.last_key_value().is_some_and(|(last, _)| *last >= key) {
-                return Err(crate::graph_tokens::CanonicalFault::UnsortedOrDuplicateKey.into());
-            }
-            let value = V::decode(input)?;
-            map.insert(key, value);
-        }
-        Ok(map)
-    }
-}
-
-/// A sorted set: a sequence of strictly ascending members.
-impl<T: TokenCodec + Ord> TokenCodec for BTreeSet<T> {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(self.len() as u64);
-        for item in self {
-            item.encode(out);
-        }
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        let items = Vec::<T>::decode(input)?;
-        check_ascending(&items)?;
-        Ok(items.into_iter().collect())
-    }
-}
-
-// Scalars and names.
 
 impl TokenCodec for Integer {
     fn encode(&self, out: &mut TokenWriter) {
@@ -263,46 +163,6 @@ impl TokenCodec for Bytes {
     }
 }
 
-impl TokenCodec for Name {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.text(self.as_str());
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.text().map(Name::new)
-    }
-}
-
-impl TokenCodec for QualifiedName {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.text(self.as_str());
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        QualifiedName::new(input.text()?).map_err(invalid)
-    }
-}
-
-macro_rules! digest_codec {
-    ($($name:ident),*) => {$(
-        impl TokenCodec for $name {
-            fn encode(&self, out: &mut TokenWriter) {
-                out.bytes(self.as_bytes());
-            }
-
-            fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-                let bytes: [u8; 32] = input
-                    .bytes()?
-                    .try_into()
-                    .map_err(|_| invalid(concat!(stringify!($name), " is not 32 bytes")))?;
-                Ok(Self::from_bytes(bytes))
-            }
-        }
-    )*};
-}
-
-digest_codec!(FunctionId, DocumentId, PackageSetDigest);
-
 macro_rules! handle_codec {
     ($($name:ident),*) => {$(
         impl TokenCodec for $name {
@@ -342,127 +202,6 @@ unit_enum_codec! {
 }
 
 // Sites and identities.
-
-impl TokenCodec for Unit {
-    fn encode(&self, out: &mut TokenWriter) {
-        match self {
-            Self::Main => out.sum(self.codec_variant(), 0),
-            Self::Function(name) => {
-                out.sum(self.codec_variant(), 1);
-                name.encode(out);
-            }
-            Self::Library(id) => {
-                out.sum(self.codec_variant(), 1);
-                id.encode(out);
-            }
-        }
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        Ok(
-            match variant(input, |variant| match variant {
-                0 => Some(0),
-                1 | 2 => Some(1),
-                _ => None,
-            })? {
-                0 => Self::Main,
-                1 => Self::Function(Name::decode(input)?),
-                _ => Self::Library(FunctionId::decode(input)?),
-            },
-        )
-    }
-}
-
-impl TokenCodec for Site {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
-        self.unit.encode(out);
-        self.path.encode(out);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
-        Ok(Self {
-            unit: Unit::decode(input)?,
-            path: Vec::decode(input)?,
-        })
-    }
-}
-
-impl TokenCodec for TaskIdentity {
-    fn encode(&self, out: &mut TokenWriter) {
-        match self {
-            Self::Main => out.sum(self.codec_variant(), 0),
-            Self::Spawned(spawn) => {
-                out.sum(self.codec_variant(), 1);
-                out.seq(3);
-                spawn.parent.encode(out);
-                spawn.site.encode(out);
-                out.unsigned(spawn.occurrence);
-            }
-        }
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.nested(|input| {
-            Ok(
-                match variant(input, |variant| match variant {
-                    0 => Some(0),
-                    1 => Some(1),
-                    _ => None,
-                })? {
-                    0 => Self::Main,
-                    _ => {
-                        input.expect_struct(3)?;
-                        Self::Spawned(SpawnIdentity {
-                            parent: Arc::decode(input)?,
-                            site: Site::decode(input)?,
-                            occurrence: input.unsigned()?,
-                        })
-                    }
-                },
-            )
-        })
-    }
-}
-
-impl TokenCodec for LoopIteration {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
-        self.site.encode(out);
-        out.unsigned(self.iteration);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
-        Ok(Self {
-            site: Site::decode(input)?,
-            iteration: input.unsigned()?,
-        })
-    }
-}
-
-impl TokenCodec for EffectIdentity {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(4);
-        self.task.encode(out);
-        self.site.encode(out);
-        out.unsigned(self.occurrence);
-        self.loops.encode(out);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(4)?;
-        Ok(Self {
-            task: TaskIdentity::decode(input)?,
-            site: Site::decode(input)?,
-            occurrence: input.unsigned()?,
-            loops: Vec::decode(input)?,
-        })
-    }
-}
-
-// Values.
 
 impl TokenCodec for Handle {
     fn encode(&self, out: &mut TokenWriter) {

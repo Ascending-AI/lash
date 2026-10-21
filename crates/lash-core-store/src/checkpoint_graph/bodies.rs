@@ -300,22 +300,6 @@ impl TokenCodec for ExecRoot {
     }
 }
 
-impl TokenCodec for PluginCallbackIdentity {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
-        out.text(&self.owner);
-        out.text(&self.key);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
-        Ok(Self {
-            owner: input.text()?.to_owned(),
-            key: input.text()?.to_owned(),
-        })
-    }
-}
-
 impl ExecRoot {
     /// The kinds a state reference of this root may name.
     #[must_use]

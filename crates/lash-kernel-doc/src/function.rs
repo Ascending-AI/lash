@@ -309,3 +309,67 @@ impl FunctionDefinition {
         from_versioned_json_with_limits(text, limits)
     }
 }
+
+/// Import-bearing function bodies; implementation belongs to pkg-doc.
+pub mod linked {
+    use super::{Formula, Guard, first_native_version, is_first_native_version};
+    use lash_vocabulary::Signature;
+    use std::collections::BTreeSet;
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct FunctionDefinition {
+        /// The kernel version the definition is written for.
+        pub kernel: u32,
+        pub name: FunctionName,
+        pub signature: Signature,
+        /// The kinds of error a call may raise, beyond the kernel's own.
+        #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+        pub errors: BTreeSet<String>,
+        /// What a call is charged, whichever implementation runs.
+        pub charge: Formula,
+        /// The work bound of a native implementation that can run away.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub guard: Option<Guard>,
+        pub implementation: Implementation,
+        /// The version of the native implementation (`K-LIB-011`): its code is
+        /// not part of the definition, so a native that answers otherwise is
+        /// stated anew under the next version, which is a new function. Only a
+        /// definition that states a native implementation states one other
+        /// than the first.
+        #[serde(
+            default = "first_native_version",
+            skip_serializing_if = "is_first_native_version"
+        )]
+        pub native_version: u32,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(
+        tag = "kind",
+        content = "value",
+        rename_all = "snake_case",
+        deny_unknown_fields
+    )]
+    pub enum Implementation {
+        /// Only a native implementation, registered by the embedder.
+        Native,
+        /// Only a kernel-code body. A call to it is a statement of its own.
+        Body(FunctionBody),
+        /// A native implementation and a kernel-code body that behave the same;
+        /// an engine may run either.
+        Both(FunctionBody),
+    }
+
+    use crate::Block;
+    use lash_vocabulary::names::*;
+    use serde::{Deserialize, Serialize};
+    use std::collections::BTreeMap;
+    // function: replaces FunctionBody's old transitive effects/functions manifests.
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct FunctionBody {
+        pub functions: BTreeMap<FunctionId, FunctionName>,
+        pub imports: BTreeMap<ImportSlot, Import>,
+        pub block: Block,
+    }
+}

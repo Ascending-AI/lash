@@ -2360,6 +2360,7 @@ dependencies = [
  "lash-internal-sqlite-store",
  "lash-internal-trace",
  "lash-internal-transport-failure",
+ "lash-internal-vocabulary",
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "rmp-serde",
@@ -2385,6 +2386,7 @@ dependencies = [
  "lash-internal-checkpoint-encoder",
  "lash-internal-protocol-types",
  "lash-internal-trace",
+ "lash-internal-vocabulary",
  "rustix",
  "schemars",
  "serde",
@@ -2430,6 +2432,7 @@ dependencies = [
  "lash-internal-sqlite-store",
  "lash-internal-trace",
  "lash-internal-vm-protocol",
+ "lash-internal-vocabulary",
  "lash-kernel-doc",
  "rmp-serde",
  "schemars",
@@ -2528,6 +2531,7 @@ dependencies = [
  "lash-internal-durable",
  "lash-internal-protocol-types",
  "lash-internal-trace",
+ "lash-internal-vocabulary",
  "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",
@@ -2819,6 +2823,7 @@ version = "0.0.0-dev"
 dependencies = [
  "blake3",
  "jsonschema",
+ "lash-internal-vocabulary",
  "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",
@@ -3037,6 +3042,7 @@ dependencies = [
 name = "lash-internal-tool-shape"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-internal-vocabulary",
  "serde",
  "serde_json",
 ]
@@ -3251,10 +3257,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "lash-internal-vocabulary"
+version = "0.0.0-dev"
+dependencies = [
+ "blake3",
+ "jsonschema",
+ "proptest",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "lash-kernel-check"
 version = "0.0.0-dev"
 dependencies = [
  "lash-internal-tool-shape",
+ "lash-internal-vocabulary",
  "lash-kernel-doc",
  "schemars",
  "serde",
@@ -3295,6 +3315,7 @@ dependencies = [
 name = "lash-kernel-dialect"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-internal-vocabulary",
  "lash-kernel-doc",
  "lash-kernel-state",
  "schemars",
@@ -3308,6 +3329,7 @@ name = "lash-kernel-doc"
 version = "0.0.0-dev"
 dependencies = [
  "blake3",
+ "lash-internal-vocabulary",
  "libc",
  "num-bigint",
  "num-traits",
@@ -3390,6 +3412,7 @@ name = "lash-kernel-state"
 version = "0.0.0-dev"
 dependencies = [
  "foldhash 0.2.0",
+ "lash-internal-vocabulary",
  "lash-kernel-doc",
  "schemars",
  "serde",
@@ -3421,6 +3444,7 @@ dependencies = [
 name = "lash-kernel-vm"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-internal-vocabulary",
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-exec",

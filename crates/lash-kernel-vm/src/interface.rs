@@ -518,3 +518,32 @@ pub enum StartError {
 pub use crate::paged::{
     CellSave, CellStart, Finished, Machine, MachineError, OpenError, SaveCell, SavedCell, SealError,
 };
+
+/// Linked preparation; implementation belongs to pkg-vm.
+pub mod linked {
+    use lash_vocabulary::{names::*, package::*};
+    use std::collections::BTreeMap;
+    // lash-kernel-vm::interface
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    /// Resident linked dispatch/lookup data. Code/type/native dispatch never calls the host.
+    pub enum PreparedSlot {
+        Operation(OperationUse),
+        Function {
+            callable: CallableId,
+            export: ExportName,
+        },
+        Type {
+            link: LinkId,
+            export: ExportName,
+        },
+        Error(ErrorKind),
+    }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    /// One loaded Link's document and slot table; compiled function bytes may be shared across instances.
+    pub struct PreparedInstance {
+        pub link: LinkId,
+        pub document: DocumentId,
+        pub slots: BTreeMap<ImportSlot, PreparedSlot>,
+    }
+    pub type EffectModes = BTreeMap<OperationUse, OperationMode>;
+}

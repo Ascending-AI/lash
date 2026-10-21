@@ -111,67 +111,6 @@ impl ProcessLimits {
     }
 }
 
-/// The id a process component registers under. A `:` is refused: the fleet
-/// writer record keys a component's config format as `component:<id>`.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct ProcessComponentId(String);
-
-/// Why a process component id is refused.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum ProcessComponentIdError {
-    #[error("a process component id is empty")]
-    Empty,
-    #[error("process component id `{id}` contains `:`, which the fleet writer key reserves")]
-    Colon { id: String },
-}
-
-impl ProcessComponentId {
-    /// # Errors
-    ///
-    /// An empty id, or one containing `:`.
-    pub fn new(id: impl Into<String>) -> Result<Self, ProcessComponentIdError> {
-        let id = id.into();
-        if id.is_empty() {
-            return Err(ProcessComponentIdError::Empty);
-        }
-        if id.contains(':') {
-            return Err(ProcessComponentIdError::Colon { id });
-        }
-        Ok(Self(id))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    /// The fleet writer-record key this component's state/config format is
-    /// admitted under: `component:<id>`, never a session plugin's key.
-    pub fn writer_key(&self) -> String {
-        format!("component:{}", self.0)
-    }
-}
-
-impl TryFrom<String> for ProcessComponentId {
-    type Error = ProcessComponentIdError;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        Self::new(value)
-    }
-}
-
-impl From<ProcessComponentId> for String {
-    fn from(id: ProcessComponentId) -> Self {
-        id.0
-    }
-}
-
-impl fmt::Display for ProcessComponentId {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0)
-    }
-}
-
 /// The typed key a component crate exports for its config: the component it
 /// configures and the config format it writes.
 pub struct ProcessConfigKey<T> {
@@ -803,3 +742,34 @@ fn capture_missing(effect: &str, tool: &str) -> String {
 #[cfg(test)]
 #[path = "process_env_tests.rs"]
 mod tests;
+
+pub use lash_vocabulary::providers::{ProcessComponentId, ProcessComponentIdError};
+
+/// Linked execution environment; implementation belongs to pkg-exec.
+pub mod linked {
+    use super::{
+        AttachmentCapabilitySnapshot, CapabilityRef, ProcessComponentEntry, ProcessLimits,
+        ProcessModel, SlotId,
+    };
+    use crate::tool_surface::linked::ExecutionEnvironment;
+    use serde::{Deserialize, Serialize};
+    use std::{collections::BTreeMap, sync::Arc};
+    #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct ProcessEnv {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<ProcessModel>,
+        #[serde(
+            default,
+            skip_serializing_if = "crate::provider::AttachmentCapabilitySnapshot::is_empty_arc"
+        )]
+        attachments: Arc<AttachmentCapabilitySnapshot>,
+        limits: ProcessLimits,
+        /// Immutable accepted links, routes and known claim requirements.
+        execution: ExecutionEnvironment,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        components: Vec<ProcessComponentEntry>,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        capabilities: BTreeMap<SlotId, CapabilityRef>,
+    }
+}

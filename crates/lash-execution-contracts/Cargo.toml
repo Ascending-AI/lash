@@ -31,6 +31,7 @@ testing = ["lash-durable/testing", "lash-core-ids/testing", "lash-core-llm/testi
 workspace = true
 
 [dependencies]
+lash-vocabulary = { workspace = true }
 lash-kernel-dialect = { workspace = true }
 lash-core-ids = { workspace = true }
 lash-core-llm = { workspace = true }

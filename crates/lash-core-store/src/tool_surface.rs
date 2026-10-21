@@ -20,7 +20,6 @@
 
 use std::collections::BTreeMap;
 
-use lash_core_ids::FormatVersion;
 use serde::{Deserialize, Serialize};
 
 use crate::{ToolDefinition, ToolId};
@@ -214,33 +213,6 @@ impl RecordedSurface {
 
     pub fn is_empty(&self) -> bool {
         self.tools.is_empty() && self.deferred.is_none()
-    }
-}
-
-/// The host's execution and retry contract for a dispatch grant's
-/// discovery, recorded with the grant in the process environment before its
-/// first resolution. Resolution and the matched tool have independent
-/// bounds. As with ordinary tool bounds,
-/// there is no runtime-selected ceiling; enclosing deadlines still clip it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct DeferredResolutionPolicy {
-    pub execution: std::time::Duration,
-    pub execution_policy: lash_protocol_types::ExecutionPolicy,
-}
-
-impl Default for DeferredResolutionPolicy {
-    /// Sixty seconds, with three repeatable attempts and exponential backoff
-    /// from 100 ms up to 1,000 ms.
-    fn default() -> Self {
-        Self {
-            execution: std::time::Duration::from_secs(60),
-            execution_policy: lash_protocol_types::ExecutionPolicy::repeatable(
-                std::num::NonZeroU32::MIN.saturating_add(2),
-                100,
-                1_000,
-            ),
-        }
     }
 }
 
@@ -448,55 +420,6 @@ pub fn judge(
     }
 }
 
-/// A host-owned routing payload a resolved deferred match carries to its
-/// provider: the provider whose declared formats read it, the format it is
-/// written in and the payload. Readability is checked before the binding is
-/// installed or a call is prepared, never by the provider's reader first.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ExecutionBinding {
-    pub codec: ProviderKey,
-    pub format: FormatVersion,
-    pub payload: serde_json::Value,
-}
-
-impl ExecutionBinding {
-    /// Whether a codec that reads `readable` reads this binding: checked
-    /// before the binding is installed or a call prepared (S8), so an
-    /// unreadable binding never reaches the provider's reader.
-    ///
-    /// # Errors
-    ///
-    /// [`ExecutionBindingUnreadable`] naming the codec, the format and what
-    /// it reads.
-    pub fn check_readable(
-        &self,
-        readable: &[FormatVersion],
-    ) -> Result<(), ExecutionBindingUnreadable> {
-        if readable.contains(&self.format) {
-            Ok(())
-        } else {
-            Err(ExecutionBindingUnreadable {
-                codec: self.codec.clone(),
-                format: self.format,
-                readable: readable.to_vec(),
-            })
-        }
-    }
-}
-
-/// A recorded execution binding its codec cannot read on this node.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error, Serialize, Deserialize)]
-#[error(
-    "execution binding of provider `{codec}` is in format {format}, which this node's provider \
-     does not read (it reads {readable:?})"
-)]
-pub struct ExecutionBindingUnreadable {
-    pub codec: ProviderKey,
-    pub format: FormatVersion,
-    pub readable: Vec<FormatVersion>,
-}
-
 /// The one recorded resolution of a call path no surface or link offers.
 /// It is committed before any call it admits, and never resolved again.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -562,3 +485,74 @@ impl DeferredMatch {
 pub fn provider_key(provider: &ProviderKey) -> String {
     format!("{}/{}", provider.owner(), provider.key())
 }
+
+pub use lash_vocabulary::providers::{
+    DeferredResolutionPolicy, ExecutionBinding, ExecutionBindingUnreadable,
+};
+
+pub mod linked {
+    use crate::packages::linked::PublicationRecord;
+    use lash_vocabulary::{
+        ExecutionPolicy, ToolArgumentProjectionPolicy, ToolDefinition, ToolId, claims::*, names::*,
+        operations::*, package::*, providers::*,
+    };
+    use serde::{Deserialize, Serialize};
+    use std::collections::{BTreeMap, BTreeSet};
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(
+        tag = "kind",
+        content = "value",
+        rename_all = "snake_case",
+        deny_unknown_fields
+    )]
+    /// Advertised routes check current contracts; resolved routes retain their definition; Dispatch resolves per invocation.
+    pub enum RouteSource {
+        Advertised,
+        Resolved { definition: Box<ToolDefinition> },
+        Dispatch { definition: Box<ToolDefinition> },
+    }
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    /// Recorded runner identity, policy, projection and codec payload for one operation or model call.
+    pub struct OperationRoute {
+        pub tool: ToolId,
+        pub provider: ToolProviderHandle,
+        pub policy: ExecutionPolicy,
+        pub projection: ToolArgumentProjectionPolicy,
+        pub payload: Option<ExecutionBinding>,
+        pub source: RouteSource,
+    }
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    /// A fixed Link requirement, accepted offer metadata and selected serving route.
+    pub struct RoutedOperation {
+        pub requirement: OperationRequirement,
+        pub offer: OperationOffer,
+        pub route: OperationRoute,
+    }
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(
+        tag = "kind",
+        content = "value",
+        rename_all = "snake_case",
+        deny_unknown_fields
+    )]
+    /// A fixed route or unresolved scoped grant. Unresolved deferred uses are Waited in this baseline.
+    pub enum UseBinding {
+        Fixed(RoutedOperation),
+        Deferred(DeferredGrant),
+    }
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    /// Immutable accepted publications, roots, per-use routes and base claim debt. Resolution rows stay outside its hash.
+    pub struct ExecutionEnvironment {
+        pub publications: Vec<PublicationRecord>,
+        pub roots: BTreeSet<LinkId>,
+        #[serde(with = "lash_vocabulary::ordered_pairs")]
+        pub uses: BTreeMap<OperationUse, UseBinding>,
+        pub registry: RegistryKind,
+        pub requirements: ClaimRequirements,
+    }
+}
+
+pub use linked::{ExecutionEnvironment, OperationRoute, RouteSource, RoutedOperation, UseBinding};

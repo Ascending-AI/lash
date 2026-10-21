@@ -31,6 +31,7 @@ testing = ["lash-execution-contracts/testing", "lash-durable/testing", "dep:trac
 workspace = true
 
 [dependencies]
+lash-vocabulary = { workspace = true }
 lash-kernel-dialect = { workspace = true }
 lash-execution-contracts = { workspace = true }
 lash-transport-failure = { workspace = true }

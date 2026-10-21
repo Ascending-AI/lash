@@ -150,3 +150,60 @@ pub fn successor_is_current(request: &ProcessSuccessorRequest, record: &ProcessR
         ProcessInput::SessionTurn { .. } => false,
     }
 }
+
+/// Linked-use succession; implementation belongs to pkg-doc and pkg-exec.
+pub mod linked {
+    use super::SuccessionError;
+    use crate::process::engine_state::linked::EngineState;
+    use lash_core_store::artifact_referrer::ArtifactName;
+    use lash_core_store::{resolutions::*, tool_surface::linked::ExecutionEnvironment};
+    use lash_vocabulary::{claims::*, identity::ProcessId, names::*};
+    use serde::{Deserialize, Serialize};
+    use std::collections::BTreeMap;
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    /// Total mapping of live/held uses. Many-to-one requires equal requirements and pinned outcomes.
+    pub struct UseCorrespondence {
+        #[serde(with = "lash_vocabulary::ordered_pairs")]
+        pub uses: BTreeMap<OperationUse, OperationUse>,
+    }
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    /// Stable execution, predecessor/successor starts, accepted environment and retained outcomes; never re-resolved.
+    pub struct SuccessionContext {
+        pub execution: ExecutionId,
+        pub from: LinkedStart,
+        pub to: LinkedStart,
+        pub environment: ExecutionEnvironment,
+        #[serde(with = "lash_vocabulary::ordered_pairs")]
+        pub resolutions: BTreeMap<OperationUse, ResolutionEntry>,
+    }
+    #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+    #[serde(
+        tag = "kind",
+        content = "value",
+        rename_all = "snake_case",
+        deny_unknown_fields
+    )]
+    pub enum SuccessorCarry {
+        Carried {
+            state: Option<Box<EngineState>>,
+            own_formats: bool,
+            correspondence: UseCorrespondence,
+            resolutions: Vec<ResolutionRecord>,
+            requirements: Box<ClaimRequirements>,
+            artifacts: Vec<ArtifactName>,
+        },
+        InFlight,
+    }
+    #[async_trait::async_trait]
+    /// Runtime computes correspondence; Core atomically validates/holds/copies state, environment, outcomes and debt.
+    pub trait EngineSuccession: Send + Sync {
+        async fn carry(
+            &self,
+            process: &ProcessId,
+            context: &SuccessionContext,
+            state: Option<&EngineState>,
+        ) -> Result<SuccessorCarry, SuccessionError>;
+    }
+}

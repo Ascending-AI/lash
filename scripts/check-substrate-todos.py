@@ -19,6 +19,7 @@ from pathlib import Path
 
 # The lanes that own substrate stubs, with their tickets.
 LANES = {
+    "PkgHost": "FIG-7107",
     "V0": "FIG-5170",
     "L3": "FIG-5172",
     "L3s": "FIG-5196",

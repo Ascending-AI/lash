@@ -9,7 +9,7 @@
 //! inbound datum by a type, and the kernel text notation. A host that only
 //! reads documents needs no other crate.
 //!
-//! It depends on no other lash crate.
+//! Its neutral leaves live in lash-vocabulary; it depends on no runtime crate.
 
 mod ast;
 mod capabilities;
@@ -36,14 +36,14 @@ mod continuation;
 mod data_limits;
 mod decode;
 pub use decode::{DecodeMismatch, Decoder};
-mod document;
+pub mod document;
 pub use data_limits::KernelDataLimits;
 /// The arena: what a run's objects are while it executes (seams C, D).
 /// Its value and native ABI are the crate root's.
 pub mod arena;
 mod document_bytes;
-mod function;
-mod function_value;
+pub mod function;
+pub mod function_value;
 mod graph_codec;
 /// The canonical binary token grammar of checkpoint graph node bodies: a
 /// cross-crate seam for the kernel's and the store's binary codecs, not part
@@ -263,3 +263,5 @@ mod frame_array;
 pub use frame_array::FrameArray;
 
 pub use native::NativeCtor;
+
+pub mod linked_site;

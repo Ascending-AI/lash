@@ -386,3 +386,54 @@ pub fn carry_start_adapters(from: &Document, into: &mut Document) {
         });
     }
 }
+
+/// Linked callable transport; implementation belongs to pkg-vm.
+pub mod linked {
+    use crate::{Captions, Datum};
+    use lash_vocabulary::{names::*, types::*};
+    use serde::{Deserialize, Serialize};
+    use std::collections::BTreeMap;
+    // function_value: each helper is local to this Document or an explicit Import.
+    #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+    #[serde(
+        tag = "kind",
+        content = "value",
+        rename_all = "snake_case",
+        deny_unknown_fields
+    )]
+    /// A convention helper local to this document or named by an explicit Import slot.
+    pub enum FunctionTarget {
+        Local(FunctionId),
+        Import(ImportSlot),
+    }
+    #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+    #[serde(
+        tag = "kind",
+        content = "value",
+        rename_all = "snake_case",
+        deny_unknown_fields
+    )]
+    pub enum StartConvention {
+        Direct,
+        TsDirect {
+            await_fn: FunctionTarget,
+        },
+        TsArgsList {
+            await_fn: FunctionTarget,
+            same_fn: FunctionTarget,
+        },
+        PyDirect {
+            cleanup: FunctionTarget,
+        },
+    }
+
+    #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct FunctionValue {
+        pub callable: CallableId,
+        pub captures: BTreeMap<Name, Datum>,
+        pub signature: Signature,
+        pub convention: StartConvention,
+        pub captions: Captions,
+    }
+}

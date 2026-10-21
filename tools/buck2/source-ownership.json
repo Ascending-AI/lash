@@ -1002,7 +1002,6 @@
     },
     "test_includes": {},
     "test_input_fallbacks": {},
-    "unit_test_includes": [],
     "unit_test_sources": [
       "src/append_vec.rs",
       "src/append_vec_tests.rs",
@@ -1058,12 +1057,6 @@
       "src/retained_output.rs",
       "src/run_aggregate.rs",
       "src/schema_contract.rs",
-      "src/schema_contract/omission_null.rs",
-      "src/schema_contract/omission_null_tests.rs",
-      "src/schema_contract/ref_inline.rs",
-      "src/schema_contract/ref_inline_tests.rs",
-      "src/schema_contract/tests.rs",
-      "src/schema_contract/typed_output.rs",
       "src/session.rs",
       "src/session_model/failure.rs",
       "src/session_model/message.rs",
@@ -1078,7 +1071,6 @@
       "src/tool_call_id.rs",
       "src/tool_catalog.rs",
       "src/tool_contract.rs",
-      "src/tool_contract/schema_validation.rs",
       "src/tool_declaration.rs",
       "src/tool_intents.rs",
       "src/tool_output.rs",
@@ -1091,7 +1083,8 @@
       "src/value_shape.rs",
       "src/worker_limit.rs",
       "src/workflow_site.rs"
-    ]
+    ],
+    "unit_test_includes": []
   },
   "crates/lash-execution-contracts": {
     "library_test_sources": [

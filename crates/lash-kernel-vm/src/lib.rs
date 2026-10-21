@@ -32,7 +32,7 @@ mod costs;
 mod crossing;
 mod data;
 mod functions;
-mod interface;
+pub mod interface;
 mod machine;
 mod observe;
 /// The machine's face after the persistent-heap cutover (FIG-6195):

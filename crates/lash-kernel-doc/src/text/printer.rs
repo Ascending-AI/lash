@@ -77,22 +77,7 @@ pub fn print_document_with_ranges(
     (printer.out, ranges)
 }
 
-/// A requirement as an `effect` line writes it after the effect's name:
-/// its signature, then its contract.
-pub(crate) fn requirement_text(requirement: &OperationRequirement) -> String {
-    let no_functions = BTreeMap::new();
-    let mut printer = Printer::new(&no_functions);
-    printer.requirement(requirement);
-    printer.out
-}
-
-/// Writes a type in kernel text, as a signature writes it.
-pub fn print_type(ty: &Type) -> String {
-    let no_functions = BTreeMap::new();
-    let mut printer = Printer::new(&no_functions);
-    printer.ty(ty);
-    printer.out
-}
+pub use lash_vocabulary::print_type;
 
 /// Writes a library-function definition as kernel text.
 /// [`super::parse_definition`] reads the text back to an equal definition.
@@ -770,87 +755,8 @@ impl<'a> Printer<'a> {
         self.ty(&signature.result);
     }
 
-    fn types(&mut self, name: &str, types: &[Type]) {
-        self.out.push_str(name);
-        self.out.push('(');
-        for (index, ty) in types.iter().enumerate() {
-            if index > 0 {
-                self.out.push_str(", ");
-            }
-            self.ty(ty);
-        }
-        self.out.push(')');
-    }
-
     fn ty(&mut self, ty: &Type) {
-        match ty {
-            Type::Any => self.out.push_str("Any"),
-            Type::Json => self.out.push_str("Json"),
-            Type::Null => self.out.push_str("Null"),
-            Type::Absent => self.out.push_str("Absent"),
-            Type::Bool => self.out.push_str("Bool"),
-            Type::Int => self.out.push_str("Int"),
-            Type::Float => self.out.push_str("Float"),
-            Type::Number => self.out.push_str("Number"),
-            Type::Text => self.out.push_str("Text"),
-            Type::Bytes => self.out.push_str("Bytes"),
-            Type::Timestamp => self.out.push_str("Timestamp"),
-            Type::Error => self.out.push_str("Error"),
-            Type::Tuple(members) => self.types("Tuple", members),
-            Type::Union(members) => self.types("Union", members),
-            Type::List(item) => self.types("List", std::slice::from_ref(item)),
-            Type::Set(item) => self.types("Set", std::slice::from_ref(item)),
-            Type::Task(item) => self.types("Task", std::slice::from_ref(item)),
-            Type::Map(map) => {
-                self.out.push_str("Map(");
-                self.ty(&map.key);
-                self.out.push_str(", ");
-                self.ty(&map.value);
-                self.out.push(')');
-            }
-            Type::Handle(kind) => {
-                self.out.push_str("Handle(");
-                write_quoted(kind, '"', &mut self.out);
-                self.out.push(')');
-            }
-            Type::Enum(members) => {
-                self.out.push_str("Enum(");
-                for (index, member) in members.iter().enumerate() {
-                    if index > 0 {
-                        self.out.push_str(", ");
-                    }
-                    write_quoted(member, '"', &mut self.out);
-                }
-                self.out.push(')');
-            }
-            Type::Function(signature) => {
-                self.out.push_str("Fn");
-                self.signature(signature);
-            }
-            Type::Record(record) => {
-                self.out.push_str("Record{");
-                let mut first = true;
-                for field in &record.fields {
-                    if !std::mem::take(&mut first) {
-                        self.out.push_str(", ");
-                    }
-                    self.field_name(&field.name);
-                    if field.optional {
-                        self.out.push('?');
-                    }
-                    self.out.push_str(": ");
-                    self.ty(&field.ty);
-                }
-                if let Some(rest) = &record.rest {
-                    if !first {
-                        self.out.push_str(", ");
-                    }
-                    self.out.push_str("..");
-                    self.ty(rest);
-                }
-                self.out.push('}');
-            }
-        }
+        self.out.push_str(&lash_vocabulary::print_type(ty));
     }
 
     fn formula(&mut self, formula: &Formula) {

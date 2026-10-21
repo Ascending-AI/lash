@@ -30,6 +30,7 @@ synthetic-next = ["lash-protocol-types/synthetic-next"]
 workspace = true
 
 [dependencies]
+lash-vocabulary = { workspace = true }
 lash-checkpoint-encoder = { workspace = true }
 lash-core-ids = { workspace = true }
 lash-core-llm = { workspace = true }

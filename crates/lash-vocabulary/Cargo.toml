@@ -1,0 +1,29 @@
+[package]
+name = "lash-internal-vocabulary"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "Neutral package, operation, identity and encoding vocabulary."
+[lib]
+name = "lash_vocabulary"
+doctest = false
+[lints]
+workspace = true
+[features]
+default = []
+testing = []
+schema-validation = []
+[dependencies]
+blake3 = { workspace = true }
+serde = { workspace = true, features = ["derive", "rc"] }
+serde_json = { workspace = true }
+schemars = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+jsonschema = { workspace = true, default-features = false }
+[dev-dependencies]
+proptest = "1"

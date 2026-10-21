@@ -4,18 +4,18 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{invalid, unsupported, variant};
+use super::{unsupported, variant};
 use crate::graph_tokens::{
     CanonicalFault, CodecVariant, TokenCodec, TokenError, TokenReader, TokenWriter,
 };
 use crate::{
     ActExpr, ActKind, Action, AssignOrder, Atom, Block, Bytes, Callee, Catch, Closure, Document,
     Expr, Float, Formula, Function, FunctionBody, FunctionDefinition, FunctionId, Guard,
-    Implementation, Integer, JoinMode, Literal, Manifest, MapEntry, MapType, Member, Name,
-    NumberPolicy, Operand, Param, Place, ProjectionRead, Protocol, QualifiedName, RecordEntry,
-    RecordType, RecordTypeField, Rhs, Signature, Stmt, TryStmt, Type,
+    Implementation, Integer, JoinMode, Literal, Manifest, MapEntry, Member, Name, NumberPolicy,
+    Operand, Place, ProjectionRead, Protocol, QualifiedName, RecordEntry, Rhs, Signature, Stmt,
+    TryStmt, Type,
 };
-use crate::{ContractId, OperationRequirement};
+
 use crate::{FunctionRepresentation, FunctionValue, StartAdapter, StartConvention};
 
 impl TokenCodec for crate::Entry {
@@ -30,174 +30,6 @@ impl TokenCodec for crate::Entry {
         Ok(Self {
             signature: Signature::decode(input)?,
             convention: StartConvention::decode(input)?,
-        })
-    }
-}
-
-// Types and signatures.
-
-impl TokenCodec for Type {
-    fn encode(&self, out: &mut TokenWriter) {
-        let number = self.codec_variant();
-        match self {
-            Self::Any
-            | Self::Null
-            | Self::Absent
-            | Self::Bool
-            | Self::Int
-            | Self::Float
-            | Self::Number
-            | Self::Text
-            | Self::Bytes
-            | Self::Timestamp
-            | Self::Error
-            | Self::Json => out.sum(number, 0),
-            Self::Tuple(types) | Self::Union(types) => {
-                out.sum(number, 1);
-                types.encode(out);
-            }
-            Self::List(inner) | Self::Set(inner) | Self::Task(inner) => {
-                out.sum(number, 1);
-                inner.encode(out);
-            }
-            Self::Map(map) => {
-                out.sum(number, 1);
-                map.encode(out);
-            }
-            Self::Record(record) => {
-                out.sum(number, 1);
-                record.encode(out);
-            }
-            Self::Enum(texts) => {
-                out.sum(number, 1);
-                texts.encode(out);
-            }
-            Self::Function(signature) => {
-                out.sum(number, 1);
-                signature.encode(out);
-            }
-            Self::Handle(kind) => {
-                out.sum(number, 1);
-                out.text(kind);
-            }
-        }
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.nested(|input| {
-            let number = variant(input, |variant| match variant {
-                0..=9 | 18 | 21 => Some(0),
-                10..=17 | 19 | 20 => Some(1),
-                _ => None,
-            })?;
-            Ok(match number {
-                0 => Self::Any,
-                1 => Self::Null,
-                2 => Self::Absent,
-                3 => Self::Bool,
-                4 => Self::Int,
-                5 => Self::Float,
-                6 => Self::Number,
-                7 => Self::Text,
-                8 => Self::Bytes,
-                9 => Self::Timestamp,
-                10 => Self::Tuple(Vec::decode(input)?),
-                11 => Self::List(Box::decode(input)?),
-                12 => Self::Map(Box::decode(input)?),
-                13 => Self::Set(Box::decode(input)?),
-                14 => Self::Record(RecordType::decode(input)?),
-                15 => Self::Enum(Vec::decode(input)?),
-                16 => Self::Function(Box::decode(input)?),
-                17 => Self::Task(Box::decode(input)?),
-                18 => Self::Error,
-                19 => Self::Handle(String::decode(input)?),
-                20 => Self::Union(Vec::decode(input)?),
-                _ => Self::Json,
-            })
-        })
-    }
-}
-
-impl TokenCodec for MapType {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
-        self.key.encode(out);
-        self.value.encode(out);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
-        Ok(Self {
-            key: Type::decode(input)?,
-            value: Type::decode(input)?,
-        })
-    }
-}
-
-impl TokenCodec for RecordType {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
-        self.fields.encode(out);
-        self.rest.encode(out);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
-        Ok(Self {
-            fields: Vec::decode(input)?,
-            rest: Option::decode(input)?,
-        })
-    }
-}
-
-impl TokenCodec for RecordTypeField {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(3);
-        out.text(&self.name);
-        self.ty.encode(out);
-        out.bool(self.optional);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(3)?;
-        Ok(Self {
-            name: String::decode(input)?,
-            ty: Type::decode(input)?,
-            optional: input.bool()?,
-        })
-    }
-}
-
-impl TokenCodec for Param {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(3);
-        self.name.encode(out);
-        self.ty.encode(out);
-        out.bool(self.optional);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(3)?;
-        Ok(Self {
-            name: Name::decode(input)?,
-            ty: Type::decode(input)?,
-            optional: input.bool()?,
-        })
-    }
-}
-
-impl TokenCodec for Signature {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
-        self.params.encode(out);
-        self.result.encode(out);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
-        Ok(Self {
-            params: Vec::decode(input)?,
-            result: Type::decode(input)?,
         })
     }
 }
@@ -1125,32 +957,6 @@ impl TokenCodec for Function {
 
 // Documents.
 
-impl TokenCodec for ContractId {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.text(self.as_str());
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        Ok(Self::new(String::decode(input)?))
-    }
-}
-
-impl TokenCodec for OperationRequirement {
-    fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
-        self.signature.encode(out);
-        self.contract.encode(out);
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
-        Ok(Self {
-            signature: Signature::decode(input)?,
-            contract: ContractId::decode(input)?,
-        })
-    }
-}
-
 impl TokenCodec for Manifest {
     fn encode(&self, out: &mut TokenWriter) {
         out.seq(4);
@@ -1201,106 +1007,6 @@ impl TokenCodec for Document {
 /// (1), number (2), string (3), array (4) and object (5). A number is a sum
 /// of non-negative integer (0), negative integer (1) and finite float (2),
 /// each in exactly one spelling. An object's keys ascend by raw bytes.
-impl TokenCodec for serde_json::Value {
-    fn encode(&self, out: &mut TokenWriter) {
-        match self {
-            Self::Null => out.sum(0, 0),
-            Self::Bool(value) => {
-                out.sum(1, 1);
-                out.bool(*value);
-            }
-            Self::Number(number) => {
-                out.sum(2, 1);
-                if let Some(unsigned) = number.as_u64() {
-                    out.sum(0, 1);
-                    out.unsigned(unsigned);
-                } else if let Some(signed) = number.as_i64() {
-                    out.sum(1, 1);
-                    out.signed(signed);
-                } else {
-                    out.sum(2, 1);
-                    out.float(number.as_f64().unwrap_or(f64::NAN));
-                }
-            }
-            Self::String(text) => {
-                out.sum(3, 1);
-                out.text(text);
-            }
-            Self::Array(items) => {
-                out.sum(4, 1);
-                items.encode(out);
-            }
-            Self::Object(entries) => {
-                out.sum(5, 1);
-                let mut sorted: Vec<(&String, &serde_json::Value)> = entries.iter().collect();
-                sorted.sort_by(|left, right| left.0.as_bytes().cmp(right.0.as_bytes()));
-                out.map(sorted.len() as u64);
-                for (key, value) in sorted {
-                    out.text(key);
-                    value.encode(out);
-                }
-            }
-        }
-    }
-
-    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.nested(|input| {
-            let number = variant(input, |variant| match variant {
-                0 => Some(0),
-                1..=5 => Some(1),
-                _ => None,
-            })?;
-            Ok(match number {
-                0 => Self::Null,
-                1 => Self::Bool(input.bool()?),
-                2 => Self::Number(
-                    match variant(input, |variant| (variant <= 2).then_some(1))? {
-                        0 => serde_json::Number::from(input.unsigned()?),
-                        1 => {
-                            let signed = input.signed()?;
-                            if signed >= 0 {
-                                return Err(invalid("a negative JSON integer is not negative"));
-                            }
-                            serde_json::Number::from(signed)
-                        }
-                        _ => {
-                            let float = input.float()?;
-                            let number = serde_json::Number::from_f64(float)
-                                .ok_or_else(|| invalid("a JSON number is not finite"))?;
-                            if number.as_u64().is_some() || number.as_i64().is_some() {
-                                return Err(invalid("a JSON float spells an integer"));
-                            }
-                            number
-                        }
-                    },
-                ),
-                3 => Self::String(String::decode(input)?),
-                4 => Self::Array(Vec::decode(input)?),
-                _ => {
-                    let count = input.map()?;
-                    let mut entries = serde_json::Map::new();
-                    let mut last: Option<String> = None;
-                    for _ in 0..count {
-                        let key = String::decode(input)?;
-                        if last
-                            .as_ref()
-                            .is_some_and(|last| last.as_bytes() >= key.as_bytes())
-                        {
-                            return Err(CanonicalFault::UnsortedOrDuplicateKey.into());
-                        }
-                        let value = serde_json::Value::decode(input)?;
-                        last = Some(key.clone());
-                        entries.insert(key, value);
-                    }
-                    Self::Object(entries)
-                }
-            })
-        })
-    }
-}
-
-// Library-function definitions.
-
 impl TokenCodec for Operand {
     fn encode(&self, out: &mut TokenWriter) {
         match self {

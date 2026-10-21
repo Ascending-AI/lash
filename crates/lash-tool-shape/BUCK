@@ -75,3 +75,65 @@ export_file(
     src = "Cargo.toml",
     visibility = ["PUBLIC"],
 )
+
+# Feature-lane variants. One target per distinct `(package, resolved features,
+# Cargo target kind)` unit of scripts/feature-coverage.toml; see
+# tools/buck2/feature_variants.py.
+load(
+    "//tools/buck2:lash_rust.bzl",
+    "lash_rust_feature_library",
+)
+
+lash_rust_feature_library(
+    name = "lash-tool-shape__fv_9c5addb8",
+    build_script = None,
+    crate_features = [],
+    crate_name = "lash_tool_shape",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-internal-tool-shape", "lash_tool_shape"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-tool-shape",
+    package_name = "lash-internal-tool-shape",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-kernel-check:lash-kernel-check": "//crates/lash-kernel-check:lash-kernel-check__fv_275fc1b0", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_d93fd728", "//crates/lash-kernel-doc:lash-kernel-doc": "//crates/lash-kernel-doc:lash-kernel-doc__fv_4c44e589", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_86c3b6b3", "//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_b04bf5f8", "//crates/lash-trace:lash-trace": "//crates/lash-trace:lash-trace__fv_16390ee0", "//crates/lash-vocabulary:lash-vocabulary": "//crates/lash-vocabulary:lash-vocabulary__fv_283e75c4"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-tool-shape__fv_af996fe8",
+    build_script = None,
+    crate_features = [],
+    crate_name = "lash_tool_shape",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-internal-tool-shape", "lash_tool_shape"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-tool-shape",
+    package_name = "lash-internal-tool-shape",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-kernel-check:lash-kernel-check": "//crates/lash-kernel-check:lash-kernel-check__fv_f6c31f4a", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_0d14db62", "//crates/lash-kernel-doc:lash-kernel-doc": "//crates/lash-kernel-doc:lash-kernel-doc__fv_dab7c91c", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_668c808a", "//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_57a153b2", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_3112e7f3", "//crates/lash-vocabulary:lash-vocabulary": "//crates/lash-vocabulary:lash-vocabulary__fv_79452c6e"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lash-tool-shape__fv_eaf3aec9",
+    build_script = None,
+    crate_features = [],
+    crate_name = "lash_tool_shape",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-internal-tool-shape", "lash_tool_shape"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lash-tool-shape",
+    package_name = "lash-internal-tool-shape",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-kernel-check:lash-kernel-check": "//crates/lash-kernel-check:lash-kernel-check__fv_6cd155f1", "//crates/lash-kernel-dialect:lash-kernel-dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect__fv_f9195756", "//crates/lash-kernel-doc:lash-kernel-doc": "//crates/lash-kernel-doc:lash-kernel-doc__fv_605b49d9", "//crates/lash-kernel-state:lash-kernel-state": "//crates/lash-kernel-state:lash-kernel-state__fv_c14e533e", "//crates/lash-protocol-types:lash-protocol-types": "//crates/lash-protocol-types:lash-protocol-types__fv_0a180b9e", "//crates/lash-sansio:lash-sansio": "//crates/lash-sansio:lash-sansio__fv_d26f2533", "//crates/lash-vocabulary:lash-vocabulary": "//crates/lash-vocabulary:lash-vocabulary__fv_3b7b0a55"},
+    version = "0.0.0-dev",
+)

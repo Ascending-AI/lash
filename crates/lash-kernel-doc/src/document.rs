@@ -370,3 +370,68 @@ pub(crate) fn from_versioned_json_with_limits<T: DeserializeOwned>(
     }
     from_json_with_limits(text, limits)
 }
+
+/// Linked document model; implementation belongs to pkg-doc.
+pub mod linked {
+    use crate::function::linked::FunctionDefinition;
+    use crate::function_value::linked::StartConvention;
+    use crate::{Block, NumberPolicy};
+    use lash_vocabulary::{claims::NodeRequirements, names::*, types::*};
+    use serde::{Deserialize, Serialize};
+    use std::collections::{BTreeMap, BTreeSet};
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct Document {
+        pub imports: BTreeMap<ImportSlot, Import>,
+        pub exports: BTreeMap<Name, Export>,
+        pub main: Option<Block>,
+        pub functions: BTreeMap<FunctionId, FunctionDefinition>,
+        pub requires: NodeRequirements,
+        pub numbers: NumberPolicy,
+        pub private_bindings: BTreeSet<Name>,
+    }
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(
+        tag = "kind",
+        content = "value",
+        rename_all = "snake_case",
+        deny_unknown_fields
+    )]
+    pub enum Export {
+        Function(FunctionExport),
+        Type(TypeDef),
+        Error { kind: ErrorKind },
+    }
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    /// Public call signature, settled result and defining convention. Startability is exactly function kind plus data_only.
+    pub struct FunctionExport {
+        pub function: FunctionId,
+        pub signature: Signature,
+        pub convention: StartConvention,
+        pub asynchronous: bool,
+        pub rest: bool,
+    }
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    /// A Brand paired with representation, executable checker and named members; validated together at admission.
+    pub struct TypeDef {
+        pub brand: Brand,
+        pub representation: Type,
+        pub checker: FunctionId,
+        pub members: BTreeMap<Segment, TypeMember>,
+    }
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(
+        tag = "kind",
+        content = "value",
+        rename_all = "snake_case",
+        deny_unknown_fields
+    )]
+    /// A static function, explicit-receiver method, or property in its owning TypeDef.
+    pub enum TypeMember {
+        Static(FunctionExport),
+        Method(FunctionExport),
+        Property(FunctionExport),
+    }
+}

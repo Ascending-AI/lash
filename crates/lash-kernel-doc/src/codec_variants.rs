@@ -11,8 +11,7 @@
 use crate::graph_tokens::CodecVariant;
 use crate::{
     ActKind, Action, AssignOrder, Atom, Callee, Datum, Expr, Formula, Identity, Implementation,
-    JoinMode, Literal, Measure, Member, NumberPolicy, Operand, Place, Rhs, Stmt, TaskIdentity,
-    Type, Unit,
+    JoinMode, Literal, Measure, Member, NumberPolicy, Operand, Place, Rhs, Stmt,
 };
 
 #[doc(hidden)]
@@ -272,46 +271,7 @@ impl CodecVariant for Place {
 }
 
 #[doc(hidden)]
-impl CodecVariant for Unit {
-    fn codec_variant(&self) -> u32 {
-        match self {
-            Self::Main => 0,
-            Self::Function(..) => 1,
-            Self::Library(..) => 2,
-        }
-    }
-}
-
 #[doc(hidden)]
-impl CodecVariant for Type {
-    fn codec_variant(&self) -> u32 {
-        match self {
-            Self::Any => 0,
-            Self::Null => 1,
-            Self::Absent => 2,
-            Self::Bool => 3,
-            Self::Int => 4,
-            Self::Float => 5,
-            Self::Number => 6,
-            Self::Text => 7,
-            Self::Bytes => 8,
-            Self::Timestamp => 9,
-            Self::Tuple(..) => 10,
-            Self::List(..) => 11,
-            Self::Map(..) => 12,
-            Self::Set(..) => 13,
-            Self::Record(..) => 14,
-            Self::Enum(..) => 15,
-            Self::Function(..) => 16,
-            Self::Task(..) => 17,
-            Self::Error => 18,
-            Self::Handle(..) => 19,
-            Self::Union(..) => 20,
-            Self::Json => 21,
-        }
-    }
-}
-
 #[doc(hidden)]
 impl CodecVariant for Implementation {
     fn codec_variant(&self) -> u32 {
@@ -364,15 +324,6 @@ impl CodecVariant for Measure {
 }
 
 #[doc(hidden)]
-impl CodecVariant for TaskIdentity {
-    fn codec_variant(&self) -> u32 {
-        match self {
-            Self::Main => 0,
-            Self::Spawned(..) => 1,
-        }
-    }
-}
-
 #[doc(hidden)]
 impl CodecVariant for NumberPolicy {
     fn codec_variant(&self) -> u32 {

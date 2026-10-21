@@ -755,3 +755,181 @@ pub enum EngineEvent {
         grace_until: DurableInstant,
     },
 }
+
+/// Per-use execution and migration; implementation belongs to pkg-seams.
+pub mod linked {
+    use super::{EngineWake, KeyName};
+    use crate::ProcessOutcome;
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct EngineState {
+        /// Private nodes a carry transfers to the owner transaction with this state.
+        #[serde(skip)]
+        pub staged: Vec<lash_core_store::checkpoint_graph::EncodedNode>,
+        /// The encoding of `bytes`.
+        pub format: EngineStateFormat,
+        /// The engine's own encoding of its state.
+        pub bytes: Vec<u8>,
+        /// The persistent-heap root the state stands on: the CheckpointRoot
+        /// page a step's outcome published ([`EngineStepAnswer::Paged`]), which
+        /// the process's execution root owns from the advance that names it
+        /// (FIG-6193). None for an engine that keeps no heap.
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            with = "super::page_hex"
+        )]
+        pub pages: Option<lash_core_store::checkpoint_graph::NodeId>,
+        /// What running the process requires of a node while it stands on
+        /// this state (FIG-6985): the natives and kernel versions its parked
+        /// run's code reaches and the providers and codecs of its env's
+        /// links. Its execution root records it; empty when no run is parked.
+        pub requirements: ClaimRequirements,
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    pub enum EngineAction {
+        /// Run these steps; non-empty. Each completion is one
+        /// [`EngineEvent::StepSettled`]. With a `wake`, the process also sleeps
+        /// until that instant while they run, as [`Sleep`](Self::Sleep) does:
+        /// [`EngineEvent::Woke`] arrives once it passes, unless a transition
+        /// before then answered another action.
+        Steps {
+            /// The steps to run.
+            steps: Vec<StepRequest>,
+            /// When the process wakes while they run, if it sleeps at all.
+            wake: Option<EngineWake>,
+        },
+        /// Pin a host-resolvable key, minted before any step submits it.
+        PinKey {
+            /// The wait's name.
+            name: KeyName,
+            /// How long the wait may stay open: the engine's own bound, with no
+            /// lash default or ceiling.
+            bound: crate::ParkBound,
+        },
+        /// Wait for a pinned key's resolution.
+        AwaitExternal {
+            /// The wait's name.
+            name: KeyName,
+            /// The node that waits, when the engine's workflow document names one.
+            site: Option<lash_protocol_types::EffectId>,
+        },
+        /// Wait for another process's terminal.
+        AwaitProcess {
+            /// The awaited process.
+            process: ProcessId,
+            /// How long the wait may stay open: the engine's own bound, with no
+            /// lash default or ceiling.
+            bound: crate::ParkBound,
+            /// The node that waits, when the engine's workflow document names one.
+            site: Option<lash_protocol_types::EffectId>,
+        },
+        /// Sleep until a durable instant.
+        Sleep {
+            /// When the process wakes.
+            until: DurableInstant,
+            /// The node that sleeps, when the engine's workflow document names one.
+            site: Option<lash_protocol_types::EffectId>,
+        },
+        /// Nothing to do and no deadline: the process waits until the next
+        /// mailbox event (`Cancelled`, a resolved wait or a settled step)
+        /// reaches `advance`.
+        Idle,
+        /// End the process.
+        Terminal(ProcessOutcome),
+    }
+
+    use super::{EngineStateFormat, EngineStepAnswer, EngineStepKind, StepName, StepPages};
+    use crate::ProjectionProviders;
+    use crate::process::EngineSettings;
+    use lash_core_ids::clock::Clock;
+    use lash_core_store::{resolutions::*, tool_surface::linked::ExecutionEnvironment};
+    use lash_durable::DurableInstant;
+    use lash_vocabulary::sites::EffectId;
+    use lash_vocabulary::{ExecutionPolicy, claims::*, identity::ProcessId, names::*};
+    use serde::{Deserialize, Serialize};
+    use std::collections::BTreeMap;
+    #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+    #[serde(
+        tag = "kind",
+        content = "value",
+        rename_all = "snake_case",
+        deny_unknown_fields
+    )]
+    pub enum StepRequest {
+        Tool {
+            step: StepName,
+            use_: OperationUse,
+            input: serde_json::Value,
+            site: Option<Box<EffectId>>,
+        },
+        Engine {
+            step: StepName,
+            kind: EngineStepKind,
+            input: serde_json::Value,
+        },
+    }
+    #[derive(Clone)]
+    pub struct EngineStepRun {
+        pub process: ProcessId,
+        pub execution: ExecutionId,
+        pub engine_settings: Option<EngineSettings>,
+        pub environment: std::sync::Arc<ExecutionEnvironment>,
+        pub resolutions: std::sync::Arc<BTreeMap<OperationUse, ResolutionEntry>>,
+        pub now: DurableInstant,
+        pub clock: std::sync::Arc<dyn Clock>,
+        pub projection_providers: Option<std::sync::Arc<dyn ProjectionProviders>>,
+        pub kind: EngineStepKind,
+        pub input: serde_json::Value,
+        pub pages: Option<StepPages>,
+    }
+    #[async_trait::async_trait]
+    /// Neutral admitted engine bodies, per-use environment and committed resolutions. Core derives route/contract itself.
+    pub trait EngineSteps: Send + Sync {
+        fn kinds(&self) -> Vec<EngineStepKind>;
+        fn execution(&self, kind: &EngineStepKind) -> std::time::Duration;
+        fn retry(&self, kind: &EngineStepKind) -> ExecutionPolicy;
+        async fn run(
+            &self,
+            run: EngineStepRun,
+            cancel: tokio_util::sync::CancellationToken,
+        ) -> EngineStepAnswer;
+    }
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct EngineStateRefusal {
+        pub code: String,
+        pub detail: serde_json::Value,
+        pub message: String,
+    }
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(
+        tag = "kind",
+        content = "value",
+        rename_all = "snake_case",
+        deny_unknown_fields
+    )]
+    /// Deterministic state refusal or retryable infrastructure failure; neither clears execution resolutions.
+    pub enum MigrationError {
+        Refused(EngineStateRefusal),
+        Unavailable { message: String },
+    }
+    #[async_trait::async_trait]
+    /// Carries opaque state under general durable-format rules without changing execution identity or pins.
+    pub trait EngineStateMigration: Send + Sync {
+        fn carries(&self) -> Vec<EngineStateFormat>;
+        async fn migrate(
+            &self,
+            process: &ProcessId,
+            state: &EngineState,
+        ) -> Result<Option<EngineState>, MigrationError>;
+    }
+
+    impl std::fmt::Display for MigrationError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{self:?}")
+        }
+    }
+    impl std::error::Error for MigrationError {}
+}

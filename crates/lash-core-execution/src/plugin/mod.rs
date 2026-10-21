@@ -960,3 +960,5 @@ Ok(move |ctx: crate::plugin::PluginTaskContext, args: <EchoTaskOp as crate::plug
 
 mod inventory_reader;
 pub use inventory_reader::{MaterializedInventoryReader, WeakMaterializedInventoryReader};
+
+pub mod packages;

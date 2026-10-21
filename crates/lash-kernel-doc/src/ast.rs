@@ -488,68 +488,6 @@ pub struct Function {
     pub start: Option<StartAdapter>,
 }
 
-/// The code a node belongs to.
-#[derive(
-    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum Unit {
-    /// The document's `main`.
-    Main,
-    /// A declared function of the document.
-    Function(Name),
-    /// The kernel-code body of a library function.
-    Library(FunctionId),
-}
-
-/// A node's address: the code it belongs to and the chain of
-/// [`Node::children`] indexes that reaches it from that code's body.
-///
-/// A site is derived from the document and is never written by a host
-/// (`K-ID-004`). An empty chain addresses the body itself.
-#[derive(
-    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
-)]
-#[serde(deny_unknown_fields)]
-pub struct Site {
-    pub unit: Unit,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub path: Vec<u32>,
-}
-
-impl Site {
-    pub fn new(unit: Unit, path: impl Into<Vec<u32>>) -> Self {
-        Self {
-            unit,
-            path: path.into(),
-        }
-    }
-
-    /// The site of this node's `index`-th child.
-    pub fn child(&self, index: u32) -> Self {
-        let mut path = self.path.clone();
-        path.push(index);
-        Self {
-            unit: self.unit.clone(),
-            path,
-        }
-    }
-}
-
-impl std::fmt::Display for Site {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self.unit {
-            Unit::Main => f.write_str("main")?,
-            Unit::Function(name) => write!(f, "fn {name}")?,
-            Unit::Library(id) => write!(f, "function {id}")?,
-        }
-        for step in &self.path {
-            write!(f, "/{step}")?;
-        }
-        Ok(())
-    }
-}
-
 /// Any node of the tree, for a walk that does not care which.
 #[derive(Clone, Copy, Debug)]
 pub enum Node<'a> {
@@ -1018,3 +956,5 @@ impl From<Action> for Expr {
 fn is_zero(units: &u64) -> bool {
     *units == 0
 }
+
+pub use lash_vocabulary::sites::{Site, Unit};
