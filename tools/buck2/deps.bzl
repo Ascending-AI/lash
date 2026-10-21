@@ -536,6 +536,8 @@ PACKAGE_DEPS = {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_protocol_types": "//crates/lash-protocol-types:lash-protocol-types",
             "lash_trace": "//crates/lash-trace:lash-trace",
+            "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
+            "serde": "//third-party/rust:p0317",
             "serde_json": "//third-party/rust:p0322",
             "thiserror": "//third-party/rust:p0375",
             "tokio": "//third-party/rust:p0381"

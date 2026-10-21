@@ -57,7 +57,7 @@ mod claim_facts;
 mod graph;
 mod model_calls;
 mod node_wake_sql;
-mod packages;
+pub(crate) mod packages;
 mod pages;
 mod park;
 mod process_view;
@@ -223,62 +223,8 @@ CREATE TABLE IF NOT EXISTS nodes (
     registered_at_ms INTEGER NOT NULL,
     heartbeat_expires_at_ms INTEGER NOT NULL,
     draining INTEGER NOT NULL DEFAULT 0 CONSTRAINT ck_nodes_draining CHECK (draining IN (0, 1)),
-    -- What the node offers running code, its own package set among it
-    -- (FIG-6991), as JSON: gone with the row.
+    -- What the node offers running code, as JSON: gone with the row.
     capabilities_json TEXT NOT NULL
-);
-
--- An installed package artifact (FIG-6918), keyed by its digest, with the
--- ordinal the store assigned it on its package line and its header.
-CREATE TABLE IF NOT EXISTS package_artifacts (
-    artifact TEXT PRIMARY KEY,
-    path TEXT NOT NULL,
-    ordinal INTEGER NOT NULL,
-    header TEXT NOT NULL,
-    CONSTRAINT uq_package_artifacts_line UNIQUE (path, ordinal)
-);
-
--- An installed package set, keyed by its digest, at the store's install
--- sequence: the only key behind newest first. Its surface snapshot and the
--- JSON of what running its code requires are written once (FIG-6991).
-CREATE TABLE IF NOT EXISTS package_sets (
-    digest TEXT PRIMARY KEY,
-    sequence INTEGER NOT NULL CONSTRAINT uq_package_sets_sequence UNIQUE,
-    surface BLOB NOT NULL,
-    requirements_json TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS package_set_members (
-    set_digest TEXT NOT NULL REFERENCES package_sets (digest),
-    artifact TEXT NOT NULL REFERENCES package_artifacts (artifact),
-    PRIMARY KEY (set_digest, artifact)
-);
-
--- Every definition of a stored package, helpers included, by identity and
--- path (FIG-6991): written only by an install, never deleted. Membership is
--- the authority to perform the package's internal operations.
-CREATE TABLE IF NOT EXISTS package_definitions (
-    function TEXT NOT NULL,
-    path TEXT NOT NULL,
-    PRIMARY KEY (function, path)
-);
-
--- Each distinct labels an install wrote for an artifact, in install order:
--- append-only, so releases of identical content keep their labels.
-CREATE TABLE IF NOT EXISTS package_labels (
-    artifact TEXT NOT NULL,
-    labels TEXT NOT NULL,
-    labels_digest BLOB NOT NULL CHECK (length(labels_digest) = 32),
-    sequence INTEGER NOT NULL CONSTRAINT uq_package_labels_sequence UNIQUE,
-    PRIMARY KEY (artifact, labels_digest)
-);
-
--- Every operation a stored package declares internal, by effect name and
--- the package's path: written only by an install, never deleted.
-CREATE TABLE IF NOT EXISTS package_internal_operations (
-    operation TEXT NOT NULL,
-    path TEXT NOT NULL,
-    PRIMARY KEY (operation, path)
 );
 
 CREATE TABLE IF NOT EXISTS actors (
@@ -315,6 +261,32 @@ CREATE INDEX IF NOT EXISTS ix_actors_due ON actors (next_due_ms)
     WHERE state = 'waiting' AND next_due_ms IS NOT NULL;
 CREATE INDEX IF NOT EXISTS ix_actors_owner ON actors (owner_node, owner_boot)
     WHERE state = 'owned';
+
+-- JSON sidecars belong to Package content, outside its structural identity.
+CREATE TABLE IF NOT EXISTS package_labels (
+    namespace TEXT NOT NULL CHECK (namespace = 'kernel_document'),
+    package_ref TEXT NOT NULL CHECK (package_ref LIKE 'package:v1:%'),
+    label_digest BLOB NOT NULL CHECK (length(label_digest) = 32),
+    labels_json TEXT NOT NULL,
+    PRIMARY KEY (namespace, package_ref, label_digest),
+    FOREIGN KEY (namespace, package_ref) REFERENCES artifact_refs(namespace, artifact_ref) ON DELETE CASCADE
+);
+
+-- Immutable execution membership and terminal deferred-use outcomes.
+CREATE TABLE IF NOT EXISTS package_executions (
+    execution TEXT PRIMARY KEY,
+    actor_key TEXT NOT NULL REFERENCES actors(actor_key) ON DELETE CASCADE,
+    registration_json TEXT NOT NULL,
+    ended INTEGER NOT NULL DEFAULT 0 CHECK (ended IN (0, 1))
+);
+CREATE INDEX IF NOT EXISTS idx_package_executions_actor ON package_executions(actor_key);
+CREATE TABLE IF NOT EXISTS execution_resolutions (
+    execution TEXT NOT NULL REFERENCES package_executions(execution) ON DELETE CASCADE,
+    link TEXT NOT NULL,
+    slot INTEGER NOT NULL CHECK (slot >= 0 AND slot <= 4294967295),
+    record_json TEXT NOT NULL,
+    PRIMARY KEY (execution, link, slot)
+);
 
 CREATE TABLE IF NOT EXISTS actor_mail (
     actor_key TEXT NOT NULL REFERENCES actors (actor_key),
@@ -783,6 +755,12 @@ pub(crate) fn wake_session_tx(
 /// Apply one owner-commit domain write by its domain's module.
 fn apply_domain(tx: &FencedTx<'_>, committing: &Committing<'_>, write: &DomainWrite) -> Answer<()> {
     match write {
+        DomainWrite::AdoptExecution(record) => packages::adopt(tx, committing.actor, record),
+        DomainWrite::SeedResolution(record) => packages::seed(tx, committing.actor, record),
+        DomainWrite::EndExecution(execution) => {
+            packages::end_execution(tx, committing.actor, execution)
+        }
+        DomainWrite::RegisterExecution(write) => packages::register(tx, committing.actor, write),
         DomainWrite::Turn(write) => turns::apply(tx, committing, write),
         DomainWrite::SessionCommit(write) => turns::apply_session_commit(tx, committing, write),
         DomainWrite::RunFact(write) => run_records::apply(tx, committing, write),
@@ -1175,78 +1153,6 @@ impl DurableStore for SqliteDurableStore {
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
         self.read(move |tx| packages::actor_requirements(tx, after.as_deref(), limit))
             .await
-    }
-
-    async fn install_packages(
-        &self,
-        artifacts: &[lash_durable::packages::ArtifactInstall],
-        sets: &[lash_durable::packages::SetInstall],
-    ) -> Result<(), DurableError> {
-        let artifacts = artifacts.to_vec();
-        let sets = sets.to_vec();
-        self.write(
-            CommitLabel::PACKAGES_INSTALL,
-            move |tx, _now| match packages::install(tx, &artifacts, &sets)? {
-                Ok(()) => commit(()),
-                Err(error) => refuse(error),
-            },
-        )
-        .await
-    }
-
-    async fn package_catalog(&self) -> Result<lash_durable::PackageCatalog, DurableError> {
-        self.read(packages::catalog).await
-    }
-
-    async fn package_surface(
-        &self,
-        digest: &lash_durable::PackageSetDigest,
-    ) -> Result<Option<Vec<u8>>, DurableError> {
-        let digest = digest.to_string();
-        self.read(move |tx| packages::surface(tx, &digest).map(Ok))
-            .await
-    }
-
-    async fn package_paths(
-        &self,
-        functions: &[lash_durable::packages::FunctionId],
-    ) -> Result<
-        std::collections::BTreeMap<
-            lash_durable::packages::FunctionId,
-            std::collections::BTreeSet<String>,
-        >,
-        DurableError,
-    > {
-        let functions = functions.to_vec();
-        self.read(move |tx| packages::paths(tx, packages::Index::Definitions, functions).map(Ok))
-            .await
-    }
-
-    async fn package_labels(
-        &self,
-        artifacts: &[lash_durable::ArtifactDigest],
-    ) -> Result<std::collections::BTreeMap<lash_durable::ArtifactDigest, Vec<String>>, DurableError>
-    {
-        let artifacts = artifacts.to_vec();
-        self.read(move |tx| packages::labels(tx, &artifacts).map(Ok))
-            .await
-    }
-
-    async fn internal_operations(
-        &self,
-        operations: &[lash_durable::packages::EffectName],
-    ) -> Result<
-        std::collections::BTreeMap<
-            lash_durable::packages::EffectName,
-            std::collections::BTreeSet<String>,
-        >,
-        DurableError,
-    > {
-        let operations = operations.to_vec();
-        self.read(move |tx| {
-            packages::paths(tx, packages::Index::InternalOperations, operations).map(Ok)
-        })
-        .await
     }
 
     async fn begin(&self, actor: &ActorKey, epoch: Epoch) -> Result<ActorTx, DurableError> {

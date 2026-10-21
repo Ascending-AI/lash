@@ -98403,7 +98403,9 @@
         "lash-internal-core-store",
         "lash-internal-protocol-types",
         "lash-internal-trace",
+        "lash-internal-vocabulary",
         "lash-kernel-doc",
+        "serde",
         "serde_json",
         "thiserror",
         "tokio"

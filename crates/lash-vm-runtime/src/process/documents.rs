@@ -916,7 +916,7 @@ mod tests {
             artifacts: &[ModuleArtifactHold<'_>],
         ) -> Result<(), ArtifactStoreError> {
             if let Some(last) = artifacts.last() {
-                *self.0.lock().expect("store") = Some(last.body().bytes().to_vec());
+                *self.0.lock().expect("store") = last.body().map(|body| body.bytes().to_vec());
             }
             Ok(())
         }
@@ -976,11 +976,19 @@ mod tests {
         ) -> Result<(), ArtifactStoreError> {
             let mut stored = self.stored.lock().expect("store");
             for artifact in artifacts {
-                let bytes = artifact.body().bytes();
+                let Some(body) = artifact.body() else {
+                    if !stored.contains_key(artifact.module_ref()) {
+                        return Err(ArtifactStoreError::ArtifactMissing {
+                            artifact_ref: artifact.module_ref().to_owned(),
+                        });
+                    }
+                    continue;
+                };
+                let bytes = body.bytes();
                 stored
                     .entry(artifact.module_ref().to_owned())
                     .or_insert_with(|| bytes.to_vec());
-                if let Some(kind) = artifact.body().node_kind() {
+                if let Some(kind) = body.node_kind() {
                     self.nodes
                         .lock()
                         .expect("nodes")

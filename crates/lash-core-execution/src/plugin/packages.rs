@@ -5,13 +5,14 @@ use super::{OwnerConfigView, PluginRegistrar};
 use crate::deferred_provider::DeferredResolveContext;
 use lash_core_store::artifact_referrer::ReferrerClaim;
 use lash_core_store::{
-    packages::linked::PublicationRecord, process_env::linked::ProcessEnv,
-    resolutions::ResolutionEntry, tool_surface::linked::OperationRoute,
+    process_env::linked::ProcessEnv, resolutions::ResolutionEntry,
+    tool_surface::linked::OperationRoute,
 };
 use lash_execution_contracts::{
     PluginError,
     process::{EngineSettings, linking::*},
 };
+use lash_vocabulary::package::PublicationRecord;
 use lash_vocabulary::{
     ToolDefinition, identity::ProcessId, names::*, package::*, providers::ToolProviderKey,
 };

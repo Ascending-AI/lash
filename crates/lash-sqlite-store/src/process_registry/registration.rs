@@ -39,20 +39,38 @@ impl lash_execution_contracts::process::ProcessRegistrar for SqliteProcessRegist
         lash_execution_contracts::process::ProcessRegistrationReceipt,
         lash_execution_contracts::plugin_error::PluginError,
     > {
+        let execution = prepared.execution.clone();
+        let initial_resolutions = prepared.initial_resolutions.clone();
         let (registration, observers, process_id, retained, now) = prepared.into_commit();
         let receipt = self
             .conn
             .write_flow(move |tx| {
                 let fleet_format = tx.fleet();
-                Ok(tx_outcome(Self::apply_registration_conn(
-                    tx,
-                    registration,
-                    observers,
-                    process_id,
-                    retained,
-                    now,
-                    fleet_format,
-                )))
+                Ok(tx_outcome((|| {
+                    let receipt = Self::apply_registration_conn(
+                        tx,
+                        registration,
+                        observers,
+                        process_id,
+                        retained,
+                        now,
+                        fleet_format,
+                    )?;
+                    if matches!(
+                        receipt.outcome,
+                        lash_execution_contracts::process::ProcessRegistrationOutcome::Created
+                    ) {
+                        crate::durable::packages::register_process_execution(
+                            tx,
+                            &receipt.record.id,
+                            execution.as_ref(),
+                            &initial_resolutions,
+                        )
+                        .map_err(process_sqlite_error)?
+                        .map_err(lash_execution_contracts::plugin_error::registry_error)?;
+                    }
+                    Ok(receipt)
+                })()))
             })
             .await
             .map_err(process_sqlite_error)??;

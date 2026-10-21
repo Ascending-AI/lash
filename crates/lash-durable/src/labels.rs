@@ -153,9 +153,8 @@ impl CommitLabel {
     pub const DRAIN_RELEASE: Self = Self::new("drain.release");
 
     // Packages (FIG-6918).
-    /// `packages.install`: A node's package artifacts and sets, installed
-    /// before it registers ([`DurableStore::install_packages`](crate::DurableStore::install_packages)).
-    pub const PACKAGES_INSTALL: Self = Self::new("packages.install");
+    /// An owner-fenced first resolution and its claim debt.
+    pub const RESOLUTION_COMMIT: Self = Self::new("resolution.commit");
 
     /// The connection capacity a store serves this commit from (FIG-5240).
     ///
@@ -230,7 +229,7 @@ impl CommitLabel {
         Self::MAIL_SESSION,
         Self::MAIL_PROCESS,
         Self::DRAIN_RELEASE,
-        Self::PACKAGES_INSTALL,
+        Self::RESOLUTION_COMMIT,
     ];
 }
 

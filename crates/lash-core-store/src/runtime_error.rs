@@ -1135,6 +1135,7 @@ impl RuntimeError {
             | RuntimeErrorCause::NoCompatibleSnapshot { .. }
             | RuntimeErrorCause::ConfigRefused { .. }
             | RuntimeErrorCause::MissingRecordedProcessConfig { .. }
+            | RuntimeErrorCause::PackageStoreRefused { .. }
             | RuntimeErrorCause::StoreRefusal { .. }
             | RuntimeErrorCause::PluginStateUnrecorded { .. }
             | RuntimeErrorCause::PluginStateEffectOwnerMismatch

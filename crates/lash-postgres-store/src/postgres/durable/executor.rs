@@ -281,6 +281,10 @@ pub(super) fn program(
     held: &HeldTexts,
 ) -> Result<Option<Vec<Step>>, DurableError> {
     match write {
+        DomainWrite::RegisterExecution(_)
+        | DomainWrite::EndExecution(_)
+        | DomainWrite::AdoptExecution(_)
+        | DomainWrite::SeedResolution(_) => Ok(None),
         DomainWrite::Turn(write) => turns::steps(epoch, write),
         DomainWrite::RunFact(write) => run_records::steps(epoch, write),
         DomainWrite::ExecRoot(write) => snapshots::steps(epoch, write),
@@ -410,7 +414,10 @@ impl Call {
     ) -> Option<Self> {
         // Root-lease work uses the explicit transaction, which returns the
         // acquired leases and applies releases under the owner fence.
-        if !tx.root_leases().is_empty() || !tx.released_root_leases().is_empty() {
+        if tx.requires().is_some()
+            || !tx.root_leases().is_empty()
+            || !tx.released_root_leases().is_empty()
+        {
             return None;
         }
         let mut call = Self {

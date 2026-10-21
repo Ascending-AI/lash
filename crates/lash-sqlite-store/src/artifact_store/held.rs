@@ -105,7 +105,7 @@ fn json_set(values: &impl serde::Serialize) -> rusqlite::Result<String> {
 /// whether stored bytes must equal them.
 pub(super) struct HeldArtifact {
     pub(super) artifact_ref: String,
-    pub(super) bytes: Vec<u8>,
+    pub(super) bytes: Option<Vec<u8>>,
     /// The graph node kind the body is stored as; none for bytes.
     pub(super) node: Option<lash_core_store::checkpoint_graph::NodeKind>,
     pub(super) verified: bool,
@@ -164,7 +164,7 @@ impl SqliteStore {
                 };
                 let artifacts: Vec<&HeldArtifact> = artifacts
                     .iter()
-                    .filter(|artifact| artifact.verified || unheld.contains(&artifact.artifact_ref))
+                    .filter(|artifact| artifact.verified || artifact.bytes.is_none() || unheld.contains(&artifact.artifact_ref))
                     .collect();
                 if artifacts.is_empty() {
                     return Ok(());
@@ -185,12 +185,18 @@ impl SqliteStore {
                 let mut blobs = Vec::new();
                 let mut nodes = BTreeMap::new();
                 for artifact in artifacts.iter().copied() {
+                    let Some(bytes) = artifact.bytes.as_deref() else {
+                        if !stored.contains_key(&artifact.artifact_ref) {
+                            return Err(artifact_failure(ArtifactStoreError::ArtifactMissing { artifact_ref: artifact.artifact_ref.clone() }));
+                        }
+                        continue;
+                    };
                     match (stored.get(&artifact.artifact_ref), artifact.node) {
                         (Some(_), _) if !artifact.verified => {}
                         (Some(blob_ref), node) => {
                             let expected = match node {
-                                None => BlobRef::for_content(&artifact.bytes).0,
-                                Some(kind) => stage_module_node(kind, &artifact.bytes)
+                                None => BlobRef::for_content(bytes).0,
+                                Some(kind) => stage_module_node(kind, bytes)
                                     .map_err(artifact_failure)?
                                     .root
                                     .to_hex(),
@@ -204,7 +210,7 @@ impl SqliteStore {
                         // A node body is stored once, as its graph node,
                         // which the artifact's pointer roots.
                         (None, Some(kind)) => {
-                            let staged = stage_module_node(kind, &artifact.bytes)
+                            let staged = stage_module_node(kind, bytes)
                                 .map_err(artifact_failure)?;
                             let root = staged.root.to_hex();
                             stored.insert(artifact.artifact_ref.clone(), root.clone());
@@ -212,10 +218,10 @@ impl SqliteStore {
                             nodes.extend(staged.nodes);
                         }
                         (None, None) => {
-                            let content = BlobRef::for_content(&artifact.bytes);
+                            let content = BlobRef::for_content(bytes);
                             let envelope = Self::module_envelope(
                                 &content,
-                                &artifact.bytes,
+                                bytes,
                                 blob_profile,
                                 tx.fleet(),
                                 &images,

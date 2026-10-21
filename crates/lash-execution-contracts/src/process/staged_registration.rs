@@ -37,6 +37,8 @@ impl StagedRegistration {
     pub fn rows(&self) -> Result<lash_durable::domain::ProcessStartRows, crate::PluginError> {
         Ok(lash_durable::domain::ProcessStartRows {
             process: self.process_id.clone(),
+            execution: self.execution.clone(),
+            initial_resolutions: self.initial_resolutions.clone(),
             registration_json: serde_json::to_string(self).map_err(|error| {
                 crate::PluginError::Session(format!("failed to encode a process start: {error}"))
             })?,

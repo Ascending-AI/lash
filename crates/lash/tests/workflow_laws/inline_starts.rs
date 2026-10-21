@@ -152,7 +152,7 @@ impl ModuleArtifactStore for CutModules {
             .iter()
             .filter_map(|artifact| match artifact {
                 ModuleArtifactHold::Publish { module_ref, .. } => Some((*module_ref).to_owned()),
-                ModuleArtifactHold::Acquire { .. } => None,
+                ModuleArtifactHold::Acquire { .. } | ModuleArtifactHold::Retain { .. } => None,
             })
             .collect();
         for document in &documents {

@@ -69,7 +69,7 @@ pub(crate) use generator::peel_loop;
 mod claim_facts;
 mod graph;
 mod head_commit;
-mod packages;
+pub(crate) mod packages;
 pub(crate) use graph::{
     AUDIT_PAGE, GraphClosure, audit_page, graph_closure, graph_counts, install_staged, peel,
 };
@@ -776,6 +776,14 @@ async fn apply_domain(
     write: &DomainWrite,
 ) -> Result<(), DurableError> {
     match write {
+        DomainWrite::AdoptExecution(record) => packages::adopt(tx, committing.actor, record).await,
+        DomainWrite::SeedResolution(record) => packages::seed(tx, committing.actor, record).await,
+        DomainWrite::EndExecution(execution) => {
+            packages::end_execution(tx, committing.actor, execution).await
+        }
+        DomainWrite::RegisterExecution(write) => {
+            packages::register(tx, committing.actor, write).await
+        }
         DomainWrite::Turn(write) => turns::apply(tx, committing, write).await,
         DomainWrite::SessionCommit(write) => {
             turns::apply_session_commit(tx, committing, write).await
@@ -1230,92 +1238,6 @@ impl DurableStore for PostgresDurableStore {
         self.within(CommitCapacity::Work, async {
             let mut connection = self.pools.work.acquire().await.map_err(sqlx_failure)?;
             packages::actor_requirements(&mut connection, after, limit).await
-        })
-        .await
-    }
-
-    async fn install_packages(
-        &self,
-        artifacts: &[lash_durable::packages::ArtifactInstall],
-        sets: &[lash_durable::packages::SetInstall],
-    ) -> Result<(), DurableError> {
-        self.within(CommitCapacity::Work, async {
-            crate::observed_sql::measure(&self.observer, CommitLabel::PACKAGES_INSTALL, 0, async {
-                let (mut tx, _now) = self.open(CommitLabel::PACKAGES_INSTALL).await?;
-                let outcome = packages::install(&mut tx, artifacts, sets).await;
-                finish(tx, outcome).await
-            })
-            .await
-        })
-        .await
-    }
-
-    async fn package_catalog(&self) -> Result<lash_durable::PackageCatalog, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            let mut connection = self.pools.work.acquire().await.map_err(sqlx_failure)?;
-            packages::catalog(&mut connection).await
-        })
-        .await
-    }
-
-    async fn package_surface(
-        &self,
-        digest: &lash_durable::PackageSetDigest,
-    ) -> Result<Option<Vec<u8>>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            let mut connection = self.pools.work.acquire().await.map_err(sqlx_failure)?;
-            packages::surface(&mut connection, &digest.to_string()).await
-        })
-        .await
-    }
-
-    async fn package_paths(
-        &self,
-        functions: &[lash_durable::packages::FunctionId],
-    ) -> Result<
-        std::collections::BTreeMap<
-            lash_durable::packages::FunctionId,
-            std::collections::BTreeSet<String>,
-        >,
-        DurableError,
-    > {
-        self.within(CommitCapacity::Work, async {
-            let mut connection = self.pools.work.acquire().await.map_err(sqlx_failure)?;
-            packages::paths(&mut connection, packages::Index::Definitions, functions).await
-        })
-        .await
-    }
-
-    async fn package_labels(
-        &self,
-        artifacts: &[lash_durable::ArtifactDigest],
-    ) -> Result<std::collections::BTreeMap<lash_durable::ArtifactDigest, Vec<String>>, DurableError>
-    {
-        self.within(CommitCapacity::Work, async {
-            let mut connection = self.pools.work.acquire().await.map_err(sqlx_failure)?;
-            packages::labels(&mut connection, artifacts).await
-        })
-        .await
-    }
-
-    async fn internal_operations(
-        &self,
-        operations: &[lash_durable::packages::EffectName],
-    ) -> Result<
-        std::collections::BTreeMap<
-            lash_durable::packages::EffectName,
-            std::collections::BTreeSet<String>,
-        >,
-        DurableError,
-    > {
-        self.within(CommitCapacity::Work, async {
-            let mut connection = self.pools.work.acquire().await.map_err(sqlx_failure)?;
-            packages::paths(
-                &mut connection,
-                packages::Index::InternalOperations,
-                operations,
-            )
-            .await
         })
         .await
     }

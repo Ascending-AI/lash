@@ -382,6 +382,13 @@ impl SqliteStoreSet {
 }
 
 impl lash_execution_contracts::backend::StoreSet for SqliteStoreSet {
+    fn package_store(&self) -> Arc<dyn lash_durable::packages::PackageStore> {
+        self.inner.process_env_store.clone()
+    }
+    fn execution_resolutions(&self) -> Arc<dyn lash_durable::resolutions::ExecutionResolutions> {
+        Arc::new(SqliteStoreSet::durable_store(self))
+    }
+
     fn durable_store(&self) -> Arc<dyn lash_durable::DurableStore> {
         Arc::new(SqliteStoreSet::durable_store(self))
     }

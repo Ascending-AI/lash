@@ -19,6 +19,22 @@ pub(super) fn apply_owner(
     let Some(revision) = fence else {
         return refuse(fenced(tx, write.actor(), write.epoch())?);
     };
+    if write.domain().iter().any(|domain| {
+        matches!(
+            domain,
+            DomainWrite::RegisterExecution(_)
+                | DomainWrite::EndExecution(_)
+                | DomainWrite::AdoptExecution(_)
+                | DomainWrite::SeedResolution(_)
+        )
+    }) && revision - 1 != write.revision().0
+    {
+        return refuse(DurableError::ResolutionRevisionConflict {
+            actor: write.actor().clone(),
+            expected: write.revision(),
+            current: StateRevision(revision - 1),
+        });
+    }
     // A session's unfinished turn's accepted cancel, read under the fence
     // before the commit writes: the receipt reports a cancel that arrived
     // after the owner's open.
@@ -102,8 +118,22 @@ pub(super) fn apply_owner(
             rusqlite::params![actor, formats.as_str()],
         )?;
     }
-    if let Some(requires) = write.requires() {
-        processes::stamp_requires(tx, &actor, requires)?;
+    if write.requires().is_some()
+        || write.domain().iter().any(|write| {
+            matches!(
+                write,
+                DomainWrite::RegisterExecution(_)
+                    | DomainWrite::EndExecution(_)
+                    | DomainWrite::AdoptExecution(_)
+                    | DomainWrite::SeedResolution(_)
+            )
+        })
+    {
+        let requires = match packages::owner_requires(tx, write.actor(), write.requires())? {
+            Ok(requires) => requires,
+            Err(error) => return refuse(error),
+        };
+        processes::stamp_requires(tx, &actor, &requires)?;
     }
     if let Some(through) = write.ack() {
         cached_execute(tx, SQL.actor.ack.sql(), rusqlite::params![actor, through.0])?;

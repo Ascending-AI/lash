@@ -30,7 +30,8 @@ impl RuntimeErrorCause {
             | Self::PluginStatePublicationFenced { .. } => false,
             Self::AttachmentRetention { failure } => !failure.is_retryable(),
             Self::StoreRefusal { refusal } => refusal.is_terminal(),
-            Self::ControlPhaseExpired { .. }
+            Self::PackageStoreRefused { .. }
+            | Self::ControlPhaseExpired { .. }
             | Self::ToolRunCutRefused { .. }
             | Self::ToolRunIsolationRefused { .. }
             | Self::ToolRunControl { .. }

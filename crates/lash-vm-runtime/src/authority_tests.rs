@@ -22,36 +22,7 @@ struct Snapshots {
 }
 
 #[async_trait::async_trait]
-impl InternalAuthority for Snapshots {
-    async fn internal_operations(
-        &self,
-        operations: &[EffectName],
-    ) -> Result<BTreeMap<EffectName, BTreeSet<String>>, AuthorityUnread> {
-        Ok(operations
-            .iter()
-            .filter_map(|operation| {
-                Some((operation.clone(), self.internal.get(operation)?.clone()))
-            })
-            .collect())
-    }
-
-    async fn package_paths(
-        &self,
-        functions: &[FunctionId],
-    ) -> Result<BTreeMap<FunctionId, BTreeSet<String>>, AuthorityUnread> {
-        Ok(functions
-            .iter()
-            .filter_map(|function| Some((*function, self.members.get(function)?.clone())))
-            .collect())
-    }
-
-    async fn package_surface(
-        &self,
-        packages: &lash_kernel_doc::PackageSetDigest,
-    ) -> Result<Option<Vec<u8>>, AuthorityUnread> {
-        Ok(self.surfaces.get(packages).cloned())
-    }
-}
+impl InternalAuthority for Snapshots {}
 
 /// `name`, performing `dataframe.run` itself, read back from the bytes the
 /// store keeps for it.

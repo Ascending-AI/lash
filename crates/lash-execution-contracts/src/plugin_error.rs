@@ -502,6 +502,15 @@ define_plugin_errors! {
         => Self::Format(_)
         => crate::RuntimeErrorCode::Plugin.as_str()
         => crate::ToolFailureClass::InvalidRequest;
+/// A typed linked-content or execution-use refusal from the store.
+    #[error(transparent)]
+    PackageStoreRefused (#[from] lash_durable::packages::PackageRefusal)
+        => PluginError::PackageStoreRefused(source)
+        => (#[from] lash_durable::packages::PackageRefusal)
+        => Self::PackageStoreRefused(source.clone())
+        => Self::PackageStoreRefused(_)
+        => "package_store_refused"
+        => crate::ToolFailureClass::InvalidRequest;
 /// A store compatibility refusal, preserved through plugin-facing ports.
     #[error(transparent)]
     StoreRefusal (#[from] crate::store::StoreRefusal)
@@ -1014,6 +1023,7 @@ impl PluginError {
                     Redrivable
                 }
             }
+            Self::PackageStoreRefused(_) => Terminal,
             Self::StoreRefusal(refusal) => {
                 if refusal.is_terminal() {
                     Terminal
@@ -1535,6 +1545,12 @@ mod classification_tests {
 pub fn registry_error(error: lash_durable::DurableError) -> crate::PluginError {
     use lash_durable::{StoreFailure, StoreFailureKind};
     match error {
+        lash_durable::DurableError::Package(refusal) => {
+            crate::PluginError::PackageStoreRefused(refusal)
+        }
+        lash_durable::DurableError::StoreRefused(refusal) => {
+            crate::PluginError::StoreRefusal(refusal)
+        }
         lash_durable::DurableError::Store(StoreFailure {
             kind: StoreFailureKind::Contended,
             ..

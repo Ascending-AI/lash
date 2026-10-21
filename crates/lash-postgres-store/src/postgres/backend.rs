@@ -121,6 +121,20 @@ impl PostgresStoreSet {
 }
 
 impl lash_execution_contracts::backend::StoreSet for PostgresStoreSet {
+    fn package_store(&self) -> Arc<dyn lash_durable::packages::PackageStore> {
+        Arc::new(self.inner.storage.lash_vm_artifact_store())
+    }
+    fn execution_resolutions(&self) -> Arc<dyn lash_durable::resolutions::ExecutionResolutions> {
+        {
+            let store = self.inner.storage.durable_store();
+            #[cfg(any(test, feature = "testing"))]
+            if let Some(clock) = &self.inner.durable_clock {
+                return Arc::new(store.with_clock_for_testing(Arc::clone(clock)));
+            }
+            Arc::new(store)
+        }
+    }
+
     fn durable_store(&self) -> Arc<dyn lash_durable::DurableStore> {
         let store = self.inner.storage.durable_store();
         #[cfg(any(test, feature = "testing"))]

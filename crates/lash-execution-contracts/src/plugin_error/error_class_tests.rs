@@ -162,6 +162,7 @@ plugin_error_samples! {
         stored: crate::FormatVersion::new(2).unwrap(),
         readable: crate::FormatVersion::ONE,
     }),
+    PackageStoreRefused(_) => PluginError::PackageStoreRefused(lash_core_store::packages::PackageRefusal::ExecutionUse),
     StoreRefusal(_) => PluginError::StoreRefusal(crate::store::StoreRefusal::WriterFenced {
         recorded: 2,
         writable: crate::compat::VersionRange::exactly(1),

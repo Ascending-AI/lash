@@ -37,6 +37,8 @@ pub(super) struct SurfaceScratch {
 /// One fallible store-trait method, executed as a compared differential step.
 #[derive(Clone, Copy, Debug)]
 pub(super) enum SurfaceMethod {
+    LinkedPackageStore,
+    ExecutionResolutions,
     ProcessAuthority,
     EnvironmentBytes,
     LoadSession,
@@ -198,6 +200,8 @@ pub(super) enum SurfaceMethod {
 impl SurfaceMethod {
     pub(super) fn label(self) -> &'static str {
         match self {
+            Self::LinkedPackageStore => "surface:linked_package_store",
+            Self::ExecutionResolutions => "surface:execution_resolutions",
             Self::ProcessAuthority => "surface:process_authority",
             Self::EnvironmentBytes => "surface:environment_bytes",
             Self::LoadSession => "surface:load_session",
@@ -371,6 +375,8 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
     GeneratedCase {
         name: CaseName::StoreSurfaceSweep,
         operations: vec![
+            surface(SurfaceMethod::LinkedPackageStore),
+            surface(SurfaceMethod::ExecutionResolutions),
             // The seed commit stamps a turn so the inventory can work
             // `committed_turn_exists` over a turn that is actually committed.
             StoreOperation::Commit {
@@ -670,6 +676,159 @@ impl BackendRunner {
         let store = self.store();
         let session_id = self.session_id.clone();
         let answer = match method {
+            SurfaceMethod::ExecutionResolutions => {
+                let stores = self.lifecycle_backend.stores();
+                lash_durable::laws::a_resolution_winner_and_its_claim_debt_commit_atomically(
+                    stores.durable_store().as_ref(),
+                    stores.execution_resolutions().as_ref(),
+                )
+                .await
+                .map_err(|error| StoreError::Backend(error.to_string()))?;
+                let resolutions = stores.execution_resolutions();
+                assert_eq!(
+                    resolutions
+                        .requirements(
+                            &lash_core::durable_port::ActorKey::process("resolution-owner")
+                                .map_err(|error| StoreError::Backend(error.to_string()))?
+                        )
+                        .await
+                        .map_err(|error| StoreError::Backend(error.to_string()))?,
+                    lash_durable::packages::vocabulary::claims::ClaimRequirements::default()
+                );
+                "one immutable winner and atomic claim debt".to_owned()
+            }
+            SurfaceMethod::LinkedPackageStore => {
+                use lash_core_store::artifact_referrer::{
+                    ArtifactReferrer, HostArtifactPin, ReferrerClaim, ResolvedArtifactCleanup,
+                };
+                use lash_core_store::packages::{LinkRecord, PackageRecord};
+                use lash_durable::packages::vocabulary::{names::*, package::*};
+                let stores = self.lifecycle_backend.stores();
+                let packages = stores.package_store();
+                let referrer = ArtifactReferrer::HostPin(HostArtifactPin::mint());
+                let claim = ReferrerClaim::unguarded(referrer.clone())
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                let modules = stores.module_artifacts();
+                let document = DocumentId::from_bytes([73; 32]);
+                modules
+                    .publish_module_artifact(
+                        &claim,
+                        &document.to_string(),
+                        b"package surface document",
+                    )
+                    .await
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                let link = Link {
+                    document,
+                    fills: Default::default(),
+                };
+                let link = LinkRecord {
+                    id: link.identity(),
+                    link,
+                };
+                let package = Package {
+                    path: "surface"
+                        .parse()
+                        .map_err(|error| StoreError::Backend(format!("{error}")))?,
+                    members: [(
+                        "run"
+                            .parse()
+                            .map_err(|error| StoreError::Backend(format!("{error}")))?,
+                        Member {
+                            visibility: Visibility::Public,
+                            kind: MemberKind::Export {
+                                link: link.id,
+                                export: ExportName {
+                                    name: Name::new("run"),
+                                    member: None,
+                                },
+                            },
+                        },
+                    )]
+                    .into(),
+                };
+                let package = PackageRecord {
+                    id: package.identity(),
+                    package,
+                };
+                let publication = PublicationRecord {
+                    context: PublicationContext {
+                        domain: PublicationDomain("surface".into()),
+                        scope: PublicationScope::Host,
+                        publisher: PublisherInstance("surface".into()),
+                        root: "surface"
+                            .parse()
+                            .map_err(|error| StoreError::Backend(format!("{error}")))?,
+                    },
+                    path: package.package.path.clone(),
+                    content: PublishedContent::Package(package.id),
+                    code_links: [link.id].into(),
+                    imported_publications: Vec::new(),
+                };
+                packages
+                    .put_link(&claim, &link, &[])
+                    .await
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                packages
+                    .put_package(&claim, &package)
+                    .await
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                packages
+                    .put_labels(&claim, &package.id, "{}")
+                    .await
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                assert_eq!(
+                    packages
+                        .labels(&package.id)
+                        .await
+                        .map_err(|error| StoreError::Backend(error.to_string()))?,
+                    vec!["{}".to_owned()]
+                );
+                let key = packages
+                    .publish(&claim, &publication)
+                    .await
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                packages
+                    .acquire_publication(&claim, &key)
+                    .await
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                assert_eq!(
+                    packages
+                        .link(&link.id)
+                        .await
+                        .map_err(|error| StoreError::Backend(error.to_string()))?,
+                    Some(link.clone())
+                );
+                assert_eq!(
+                    packages
+                        .package(&package.id)
+                        .await
+                        .map_err(|error| StoreError::Backend(error.to_string()))?,
+                    Some(package)
+                );
+                assert_eq!(
+                    packages
+                        .publication(&key)
+                        .await
+                        .map_err(|error| StoreError::Backend(error.to_string()))?,
+                    Some(publication)
+                );
+                packages
+                    .end_package_referrer(&ResolvedArtifactCleanup {
+                        referrer,
+                        carries: Vec::new(),
+                    })
+                    .await
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                assert!(
+                    packages
+                        .link(&link.id)
+                        .await
+                        .map_err(|error| StoreError::Backend(error.to_string()))?
+                        .is_none()
+                );
+                "publication acquired and reclaimed with its closure".to_owned()
+            }
             SurfaceMethod::ProcessAuthority => {
                 let record = self
                     .lifecycle_backend

@@ -627,7 +627,11 @@ impl DomainWrite {
             | Self::ActorPark { .. }
             | Self::SessionMail(_)
             | Self::Prompt(_)
-            | Self::ModelCallPin(_) => Vec::new(),
+            | Self::ModelCallPin(_)
+            | Self::RegisterExecution(_)
+            | Self::EndExecution(_)
+            | Self::AdoptExecution(_)
+            | Self::SeedResolution(_) => Vec::new(),
         }
     }
 }

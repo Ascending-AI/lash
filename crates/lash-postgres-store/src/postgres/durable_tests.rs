@@ -172,16 +172,7 @@ law!(
     a_node_claims_only_actors_whose_hard_requirements_it_meets,
     |store, _advance| { laws::a_node_claims_only_actors_whose_hard_requirements_it_meets(store) }
 );
-law!(
-    a_store_keeps_each_sets_first_surface_and_indexes_its_definitions,
-    |store, _advance| {
-        laws::a_store_keeps_each_sets_first_surface_and_indexes_its_definitions(store)
-    }
-);
-law!(
-    a_store_keeps_artifacts_and_sets_by_digest,
-    |store, _advance| { laws::a_store_keeps_artifacts_and_sets_by_digest(store) }
-);
+
 law!(
     a_newer_format_is_not_written_while_an_older_node_is_live,
     |store, _advance| { laws::a_newer_format_is_not_written_while_an_older_node_is_live(store) }
@@ -225,3 +216,39 @@ law!(
     a_turn_counts_its_tool_admissions_atomically,
     |store, _advance| { laws::a_turn_counts_its_tool_admissions_atomically(store) }
 );
+
+law!(
+    a_resolution_winner_and_its_claim_debt_commit_atomically,
+    |store, _advance| {
+        laws::a_resolution_winner_and_its_claim_debt_commit_atomically(store, store)
+    }
+);
+
+/// L-PIN exercises the PostgreSQL module-artifact retention adapter.
+#[tokio::test]
+async fn a_publication_retains_its_complete_content_dag_when_configured() {
+    use lash_core_store::artifact_referrer::{ArtifactReferrer, HostArtifactPin, ReferrerClaim};
+    use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
+    let Some(url) = crate::postgres_test_support::database_url() else {
+        return;
+    };
+    let database = IsolatedDatabase::create(&url).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("store");
+    let store = storage.lash_vm_artifact_store();
+    let document = lash_kernel_doc::DocumentId::from_bytes([72; 32]);
+    let claim = ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint()))
+        .expect("configured root");
+    store
+        .publish_module_artifact(
+            &claim,
+            &document.to_string(),
+            b"document with embedded function bodies",
+        )
+        .await
+        .expect("document");
+    laws::a_publication_retains_its_complete_content_dag(&store, &store, document, claim)
+        .await
+        .expect("L-PIN");
+}

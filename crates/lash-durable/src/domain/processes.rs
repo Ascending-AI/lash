@@ -82,6 +82,10 @@ pub struct ProcessStartRows {
     /// The prepared registration (its observers, the minted process id and
     /// the instant it was prepared at), encoded by its owner.
     pub registration_json: String,
+    /// Validated linked execution membership for this new process.
+    pub execution: Option<crate::resolutions::ExecutionRegistration>,
+    /// Validated inherited pins, committed before the process is claimable.
+    pub initial_resolutions: Vec<crate::resolutions::ResolutionRecord>,
 }
 
 /// A process write inside an owner commit.

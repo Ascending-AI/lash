@@ -373,16 +373,7 @@ law!(
     a_node_claims_only_actors_whose_hard_requirements_it_meets,
     |store, _advance| { laws::a_node_claims_only_actors_whose_hard_requirements_it_meets(store) }
 );
-law!(
-    a_store_keeps_each_sets_first_surface_and_indexes_its_definitions,
-    |store, _advance| {
-        laws::a_store_keeps_each_sets_first_surface_and_indexes_its_definitions(store)
-    }
-);
-law!(
-    a_store_keeps_artifacts_and_sets_by_digest,
-    |store, _advance| { laws::a_store_keeps_artifacts_and_sets_by_digest(store) }
-);
+
 law!(
     a_newer_format_is_not_written_while_an_older_node_is_live,
     |store, _advance| { laws::a_newer_format_is_not_written_while_an_older_node_is_live(store) }
@@ -1219,3 +1210,38 @@ law!(
     a_turn_counts_its_tool_admissions_atomically,
     |store, _advance| { laws::a_turn_counts_its_tool_admissions_atomically(store) }
 );
+
+law!(
+    a_resolution_winner_and_its_claim_debt_commit_atomically,
+    |store, _advance| {
+        laws::a_resolution_winner_and_its_claim_debt_commit_atomically(store, store)
+    }
+);
+
+/// L-PIN exercises the production module-artifact retention adapter on SQLite.
+#[tokio::test]
+async fn a_publication_retains_its_complete_content_dag() {
+    use lash_core_store::artifact_referrer::{ArtifactReferrer, HostArtifactPin, ReferrerClaim};
+    use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
+    let set = SqliteStoreSet::memory().await.expect("memory store");
+    let store = set.open_store().await.expect("module store");
+    let document = lash_kernel_doc::DocumentId::from_bytes([72; 32]);
+    let claim = ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint()))
+        .expect("configured root");
+    store
+        .publish_module_artifact(
+            &claim,
+            &document.to_string(),
+            b"document with embedded function bodies",
+        )
+        .await
+        .expect("document");
+    laws::a_publication_retains_its_complete_content_dag(
+        store.as_ref(),
+        store.as_ref(),
+        document,
+        claim,
+    )
+    .await
+    .expect("L-PIN");
+}

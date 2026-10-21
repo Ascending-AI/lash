@@ -205,59 +205,6 @@ impl DurableStore for RecordedStore {
         self.inner.actor_requirements(after, limit).await
     }
 
-    async fn install_packages(
-        &self,
-        artifacts: &[lash_durable::packages::ArtifactInstall],
-        sets: &[lash_durable::packages::SetInstall],
-    ) -> Result<(), DurableError> {
-        self.inner.install_packages(artifacts, sets).await
-    }
-
-    async fn package_catalog(&self) -> Result<lash_durable::PackageCatalog, DurableError> {
-        self.inner.package_catalog().await
-    }
-
-    async fn package_surface(
-        &self,
-        digest: &lash_durable::PackageSetDigest,
-    ) -> Result<Option<Vec<u8>>, DurableError> {
-        self.inner.package_surface(digest).await
-    }
-
-    async fn package_paths(
-        &self,
-        functions: &[lash_durable::packages::FunctionId],
-    ) -> Result<
-        std::collections::BTreeMap<
-            lash_durable::packages::FunctionId,
-            std::collections::BTreeSet<String>,
-        >,
-        DurableError,
-    > {
-        self.inner.package_paths(functions).await
-    }
-
-    async fn internal_operations(
-        &self,
-        operations: &[lash_durable::packages::EffectName],
-    ) -> Result<
-        std::collections::BTreeMap<
-            lash_durable::packages::EffectName,
-            std::collections::BTreeSet<String>,
-        >,
-        DurableError,
-    > {
-        self.inner.internal_operations(operations).await
-    }
-
-    async fn package_labels(
-        &self,
-        artifacts: &[lash_durable::ArtifactDigest],
-    ) -> Result<std::collections::BTreeMap<lash_durable::ArtifactDigest, Vec<String>>, DurableError>
-    {
-        self.inner.package_labels(artifacts).await
-    }
-
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {
         let owned = self.inner.owned(node).await;
         if let Ok(owned) = &owned {
@@ -621,6 +568,13 @@ impl RecordedStores {
 }
 
 impl StoreSet for RecordedStores {
+    fn package_store(&self) -> Arc<dyn lash_durable::packages::PackageStore> {
+        self.inner.package_store()
+    }
+    fn execution_resolutions(&self) -> Arc<dyn lash_durable::resolutions::ExecutionResolutions> {
+        self.inner.execution_resolutions()
+    }
+
     fn durable_store(&self) -> Arc<dyn DurableStore> {
         Arc::clone(&self.store) as _
     }

@@ -95,6 +95,14 @@ use lash_protocol_types::{BatchId, ProcessId, SessionId, ToolCallId, TurnId};
 /// already stored.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DomainWrite {
+    /// Immutable execution membership, written by its admitting owner.
+    RegisterExecution(crate::resolutions::ExecutionRegistration),
+    /// Retire execution claim debt while preserving immutable history.
+    EndExecution(crate::resolutions::ExecutionId),
+    /// Extend use membership during validated adoption; prior uses stay pinned.
+    AdoptExecution(crate::resolutions::ExecutionRegistration),
+    /// Inherited or adopted pin recorded in the same admitting owner commit.
+    SeedResolution(crate::resolutions::ResolutionRecord),
     /// V0, then L3: the turn's phase row, its PhaseRoot, working
     /// SessionExecution, model pin, run namespaces and terminal.
     Turn(TurnWrite),

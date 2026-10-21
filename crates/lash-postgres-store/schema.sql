@@ -790,6 +790,16 @@ CREATE TABLE IF NOT EXISTS lash_lash_vm_artifacts (
 );
 CREATE INDEX IF NOT EXISTS idx_lash_lash_vm_artifacts_graph_ref
     ON lash_lash_vm_artifacts (graph_ref) WHERE graph_ref IS NOT NULL;
+-- JSON sidecars belong to Package content, outside its structural identity.
+CREATE TABLE IF NOT EXISTS lash_package_labels (
+    namespace TEXT NOT NULL CHECK (namespace = 'kernel_document'),
+    package_ref TEXT NOT NULL CHECK (package_ref LIKE 'package:v1:%'),
+    label_digest BYTEA NOT NULL CHECK (octet_length(label_digest) = 32),
+    labels_json TEXT NOT NULL,
+    PRIMARY KEY (namespace, package_ref, label_digest),
+    FOREIGN KEY (namespace, package_ref) REFERENCES lash_lash_vm_artifacts(namespace, artifact_ref) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS lash_artifact_referrer_edges (
     namespace TEXT NOT NULL,
     artifact_ref TEXT NOT NULL,
@@ -893,68 +903,10 @@ CREATE TABLE IF NOT EXISTS lash_nodes (
     registered_at_ms BIGINT NOT NULL,
     heartbeat_expires_at_ms BIGINT NOT NULL,
     draining BOOLEAN NOT NULL DEFAULT FALSE,
-    -- What the node offers running code, its own package set among it
-    -- (FIG-6991), as JSON: gone with the row.
+    -- What the node offers running code, as JSON: gone with the row.
     capabilities_json TEXT NOT NULL
 );
 
--- An installed package artifact (FIG-6918), keyed by its digest, with the
--- ordinal the store assigned it on its package line and its header.
-CREATE TABLE IF NOT EXISTS lash_package_artifacts (
-    artifact TEXT PRIMARY KEY,
-    path TEXT NOT NULL,
-    ordinal BIGINT NOT NULL,
-    header TEXT NOT NULL,
-    CONSTRAINT uq_lash_package_artifacts_line UNIQUE (path, ordinal)
-);
-
--- An installed package set, keyed by its digest, at the store's install
--- sequence: the only key behind "newest first". Its surface snapshot and the
--- JSON of what running its code requires are written once (FIG-6991).
-CREATE TABLE IF NOT EXISTS lash_package_sets (
-    digest TEXT PRIMARY KEY,
-    sequence BIGINT NOT NULL CONSTRAINT uq_lash_package_sets_sequence UNIQUE,
-    surface BYTEA NOT NULL,
-    requirements_json TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS lash_package_set_members (
-    set_digest TEXT NOT NULL REFERENCES lash_package_sets (digest),
-    artifact TEXT NOT NULL REFERENCES lash_package_artifacts (artifact),
-    PRIMARY KEY (set_digest, artifact)
-);
-
--- Every definition of a stored package, helpers included, by identity and
--- path (FIG-6991): written only by an install, never deleted. Membership is
--- the authority to perform the package's internal operations.
-CREATE TABLE IF NOT EXISTS lash_package_definitions (
-    function TEXT NOT NULL,
-    path TEXT NOT NULL,
-    PRIMARY KEY (function, path)
-);
-
--- Each distinct labels an install wrote for an artifact, in install order:
--- append-only, so releases of identical content keep their labels.
-CREATE TABLE IF NOT EXISTS lash_package_labels (
-    artifact TEXT NOT NULL,
-    labels TEXT NOT NULL,
-    labels_digest BYTEA NOT NULL CONSTRAINT ck_lash_package_labels_labels_digest CHECK (octet_length(labels_digest) = 32),
-    sequence BIGINT NOT NULL CONSTRAINT uq_lash_package_labels_sequence UNIQUE,
-    PRIMARY KEY (artifact, labels_digest)
-);
-
--- Every operation a stored package declares internal, by effect name and
--- the package's path: written only by an install, never deleted.
-CREATE TABLE IF NOT EXISTS lash_package_internal_operations (
-    operation TEXT NOT NULL,
-    path TEXT NOT NULL,
-    PRIMARY KEY (operation, path)
-);
-
--- One scheduling row per session and per process: the only row a claim, a
--- wake or a fence touches. `epoch` changes only by claim, reap and release,
--- and every owner write is fenced on it; an actor has mail exactly when
--- `mail_seq > acked_seq`.
 CREATE TABLE IF NOT EXISTS lash_actors (
     actor_key TEXT COLLATE "C" PRIMARY KEY,
     kind TEXT NOT NULL CONSTRAINT ck_lash_actors_kind CHECK (kind IN ('session', 'process')),
@@ -989,6 +941,22 @@ CREATE INDEX IF NOT EXISTS ix_lash_actors_due ON lash_actors (next_due_ms)
     WHERE state = 'waiting' AND next_due_ms IS NOT NULL;
 CREATE INDEX IF NOT EXISTS ix_lash_actors_owner ON lash_actors (owner_node, owner_boot)
     WHERE state = 'owned';
+
+-- Immutable execution membership and terminal deferred-use outcomes.
+CREATE TABLE IF NOT EXISTS lash_package_executions (
+    execution TEXT PRIMARY KEY,
+    actor_key TEXT NOT NULL REFERENCES lash_actors(actor_key) ON DELETE CASCADE,
+    registration_json TEXT NOT NULL,
+    ended INTEGER NOT NULL DEFAULT 0 CHECK (ended IN (0, 1))
+);
+CREATE INDEX IF NOT EXISTS idx_lash_package_executions_actor ON lash_package_executions(actor_key);
+CREATE TABLE IF NOT EXISTS lash_execution_resolutions (
+    execution TEXT NOT NULL REFERENCES lash_package_executions(execution) ON DELETE CASCADE,
+    link TEXT NOT NULL,
+    slot BIGINT NOT NULL CHECK (slot >= 0 AND slot <= 4294967295),
+    record_json TEXT NOT NULL,
+    PRIMARY KEY (execution, link, slot)
+);
 
 -- An actor's mailbox: rows only non-owners append and only the owner
 -- acknowledges, each at the position the append took from `mail_seq`.

@@ -296,7 +296,22 @@ fn register_within(
         staged.prepared_at_ms,
         commit.fleet,
     ) {
-        Ok(receipt) if receipt.record.id == rows.process => Ok(()),
+        Ok(receipt) if receipt.record.id == rows.process => {
+            if matches!(
+                receipt.outcome,
+                lash_execution_contracts::process::ProcessRegistrationOutcome::Created
+            ) {
+                super::packages::register_process_execution(
+                    tx,
+                    &rows.process,
+                    rows.execution.as_ref(),
+                    &rows.initial_resolutions,
+                )
+                .map_err(super::store_failure)?
+            } else {
+                Ok(())
+            }
+        }
         Ok(receipt) => Err(refused(format!(
             "process `{}` already holds its start key",
             receipt.record.id

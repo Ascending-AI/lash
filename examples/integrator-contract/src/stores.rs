@@ -30,6 +30,13 @@ impl IntegratorStores {
 }
 
 impl StoreSet for IntegratorStores {
+    fn package_store(&self) -> Arc<dyn lash::durable::packages::PackageStore> {
+        self.substrate.package_store()
+    }
+    fn execution_resolutions(&self) -> Arc<dyn lash::durable::resolutions::ExecutionResolutions> {
+        self.substrate.execution_resolutions()
+    }
+
     fn durable_store(&self) -> Arc<dyn DurableStore> {
         self.substrate.durable_store()
     }

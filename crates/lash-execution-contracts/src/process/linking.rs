@@ -192,6 +192,7 @@ pub enum AdmissionRefusal {
 )]
 /// Typed refusal, artifact, fence, unsupported or infrastructure error. Infrastructure is never a guest terminal.
 pub enum EnginePortError {
+    PackageRefused(lash_core_store::packages::PackageRefusal),
     Refused(AdmissionRefusal),
     Missing {
         artifact: ArtifactName,

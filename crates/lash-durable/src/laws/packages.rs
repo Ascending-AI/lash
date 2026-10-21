@@ -1,185 +1,24 @@
-//! The package laws (FIG-6918, S1-F2, FIG-6991, FIG-6993): what a store
-//! keeps of package artifacts and sets and their surfaces, what a node
-//! advertises it offers, and CLAIM-BY-REQUIREMENTS.
-
-use std::collections::BTreeSet;
-
+//! Claim requirements are independent of package content.
 use super::{LawBroken, LawOutcome};
 use crate::domain::CANCEL_MAIL;
-use crate::packages::{ArtifactInstall, PackageArtifact, SetInstall};
-use crate::packages::{EffectName, FunctionId};
 use crate::{
-    ActorKey, ArtifactDigest, ClaimPurpose, CommitLabel, DurableError, DurableStore,
-    ExecutionRequirements, FormatSet, MailKind, MailTx, NodeCapabilities, NodeId, NodeLease,
-    NodeSpec, PackageSetDigest, Release,
+    ActorKey, ClaimPurpose, ClaimRequirements, CommitLabel, DurableError, DurableStore, FormatSet,
+    MailKind, MailTx, NodeCapabilities, NodeId, NodeLease, NodeSpec, Release,
 };
-
-fn artifact(path: &str, byte: u8) -> PackageArtifact {
-    PackageArtifact {
-        digest: ArtifactDigest::from_bytes([byte; 32]),
-        path: path.to_owned(),
+use lash_vocabulary::claims::NodeRequirements;
+use lash_vocabulary::package::ProviderName;
+use lash_vocabulary::providers::FormatVersion;
+fn provider() -> ProviderName {
+    ProviderName {
+        owner: "host".into(),
+        key: "inbox".into(),
     }
 }
-
-fn install(artifact: &PackageArtifact) -> ArtifactInstall {
-    ArtifactInstall {
-        artifact: artifact.clone(),
-        header: format!("{{\"path\":\"{}\"}}", artifact.path),
-        definitions: BTreeSet::new(),
-        internal: BTreeSet::new(),
-        labels: format!("{{\"release\":\"{}\"}}", artifact.path),
-    }
+fn format_two() -> FormatVersion {
+    FormatVersion::new(2).unwrap_or_else(|| unreachable!("nonzero literal"))
 }
-
-fn set(byte: u8, members: &[&PackageArtifact]) -> SetInstall {
-    SetInstall {
-        digest: PackageSetDigest::from_bytes([byte; 32]),
-        members: members.iter().map(|member| (*member).clone()).collect(),
-        surface: vec![byte],
-        requirements: ExecutionRequirements::default(),
-    }
-}
-
-fn function(byte: u8) -> FunctionId {
-    FunctionId::from_bytes([byte; 32])
-}
-
-/// PROMOTE-BY-CAPABILITY's store facts (FIG-6991): a set's surface and
-/// requirements are what its first install wrote, and a later install of
-/// the set, with other bytes, changes neither. The definition index answers
-/// every package path a stored definition is one of, helpers included, and
-/// the internal index every path that declares an operation internal;
-/// neither answers what no install wrote. An artifact keeps the labels of
-/// every install, in install order and each once, though its content and
-/// so its set are one. A live node's capabilities, its own set among them,
-/// are what it registered, and are gone with its lease.
-///
-/// # Errors
-///
-/// The first rule broken.
-pub async fn a_store_keeps_each_sets_first_surface_and_indexes_its_definitions(
-    store: &dyn DurableStore,
-) -> LawOutcome {
-    let lib = artifact("lib", 41);
-    let mut first = ArtifactInstall {
-        definitions: [function(1), function(2)].into_iter().collect(),
-        internal: [EffectName::new("lib.explain").map_err(|error| LawBroken(error.to_string()))?]
-            .into_iter()
-            .collect(),
-        ..install(&lib)
-    };
-    let requirements = ExecutionRequirements {
-        natives: [function(2)].into_iter().collect(),
-        kernels: [1].into_iter().collect(),
-        ..ExecutionRequirements::default()
-    };
-    let mut stored = set(42, &[&lib]);
-    stored.surface = b"the first surface".to_vec();
-    stored.requirements = requirements.clone();
-    store
-        .install_packages(std::slice::from_ref(&first), std::slice::from_ref(&stored))
-        .await?;
-    let mut again = stored.clone();
-    again.surface = b"another surface".to_vec();
-    again.requirements = ExecutionRequirements::default();
-    let first_labels = first.labels.clone();
-    first.definitions.insert(function(3));
-    first.labels = "{\"release\":\"1.0.1\"}".to_owned();
-    store
-        .install_packages(std::slice::from_ref(&first), &[again])
-        .await?;
-    store
-        .install_packages(std::slice::from_ref(&first), &[])
-        .await?;
-    let labels = store
-        .package_labels(&[lib.digest, artifact("none", 45).digest])
-        .await?;
-    let expected: std::collections::BTreeMap<ArtifactDigest, Vec<String>> =
-        [(lib.digest, vec![first_labels, first.labels.clone()])].into();
-    super::ensure!(labels == expected, "the stored labels are {labels:?}");
-    let surface = store.package_surface(&stored.digest).await?;
-    super::ensure!(
-        surface.as_deref() == Some(&b"the first surface"[..]),
-        "the stored surface is {surface:?}"
-    );
-    let absent = store
-        .package_surface(&PackageSetDigest::from_bytes([43; 32]))
-        .await?;
-    super::ensure!(
-        absent.is_none(),
-        "an uninstalled set's surface is {absent:?}"
-    );
-    let catalog = store.package_catalog().await?;
-    let kept: Vec<&ExecutionRequirements> = catalog
-        .sets
-        .iter()
-        .filter(|set| set.digest == stored.digest)
-        .map(|set| &set.requirements)
-        .collect();
-    super::ensure!(
-        kept == vec![&requirements],
-        "the stored requirements are {kept:?}"
-    );
-    let other = ArtifactInstall {
-        definitions: [function(1)].into_iter().collect(),
-        ..install(&artifact("other", 44))
-    };
-    store.install_packages(&[other], &[]).await?;
-    let paths = store
-        .package_paths(&[function(1), function(3), function(9)])
-        .await?;
-    let expected: std::collections::BTreeMap<FunctionId, BTreeSet<String>> = [
-        (function(1), ["lib".to_owned(), "other".to_owned()].into()),
-        (function(3), ["lib".to_owned()].into()),
-    ]
-    .into();
-    super::ensure!(paths == expected, "the definition index answered {paths:?}");
-    let explain = EffectName::new("lib.explain").map_err(|error| LawBroken(error.to_string()))?;
-    let run = EffectName::new("lib.run").map_err(|error| LawBroken(error.to_string()))?;
-    let internal = store.internal_operations(&[explain.clone(), run]).await?;
-    let expected: std::collections::BTreeMap<EffectName, BTreeSet<String>> =
-        [(explain, ["lib".to_owned()].into())].into();
-    super::ensure!(
-        internal == expected,
-        "the internal index answered {internal:?}"
-    );
-
-    let capabilities = NodeCapabilities {
-        natives: [function(2)].into_iter().collect(),
-        kernels: [1].into_iter().collect(),
-        providers: ["tools.law".to_owned()].into_iter().collect(),
-        codecs: [("tools.law".to_owned(), 2)].into_iter().collect(),
-        surface: Some(stored.digest),
-    };
-    let lease = store
-        .register_node(&NodeSpec {
-            node: NodeId::new("offers"),
-            decodes: vec![FormatSet::new("law:packages")],
-            serves: Vec::new(),
-            capabilities: capabilities.clone(),
-            ttl_millis: 15_000,
-        })
-        .await?;
-    let live = store.live_nodes().await?;
-    let advertised: Vec<&NodeCapabilities> = live.iter().map(|node| &node.capabilities).collect();
-    super::ensure!(
-        advertised == vec![&capabilities],
-        "the live node advertises {advertised:?}"
-    );
-    super::ensure!(
-        requirements.met_by(&live[0].capabilities),
-        "the node does not meet the requirements it offers"
-    );
-    store.release_node(&lease).await?;
-    let live = store.live_nodes().await?;
-    super::ensure!(
-        live.is_empty(),
-        "a released node still advertises {:?}",
-        live.iter()
-            .map(|node| &node.capabilities)
-            .collect::<Vec<_>>()
-    );
-    Ok(())
+fn function(n: u8) -> lash_kernel_doc::FunctionId {
+    lash_kernel_doc::FunctionId::from_bytes([n; 32])
 }
 
 async fn node(
@@ -196,78 +35,6 @@ async fn node(
             ttl_millis: 15_000,
         })
         .await?)
-}
-
-/// A store keeps each artifact and set once, by digest: an artifact takes
-/// the next ordinal on its package line, a set the next install sequence,
-/// and installing either again changes nothing. A set naming an artifact
-/// the store does not hold is refused, whole.
-///
-/// # Errors
-///
-/// The first rule broken.
-pub async fn a_store_keeps_artifacts_and_sets_by_digest(store: &dyn DurableStore) -> LawOutcome {
-    let p1 = artifact("p", 1);
-    let q1 = artifact("q", 2);
-    let q2 = artifact("q", 3);
-    let p2 = artifact("p", 4);
-    let old = set(10, &[&p1, &q1]);
-    let new = set(11, &[&p2, &q2]);
-    store
-        .install_packages(&[install(&p1), install(&q1)], std::slice::from_ref(&old))
-        .await?;
-    store
-        .install_packages(
-            &[install(&q2), install(&p2), install(&p1)],
-            &[new.clone(), old.clone()],
-        )
-        .await?;
-    let unknown = set(12, &[&p1, &artifact("r", 5)]);
-    let refused = store
-        .install_packages(
-            &[install(&artifact("s", 6))],
-            std::slice::from_ref(&unknown),
-        )
-        .await;
-    super::ensure!(
-        matches!(refused, Err(DurableError::UnknownArtifact { .. })),
-        "a set naming an uninstalled artifact answered {refused:?}"
-    );
-    let catalog = store.package_catalog().await?;
-    let ordinals: Vec<(String, u8, u32)> = catalog
-        .artifacts
-        .iter()
-        .map(|stored| {
-            (
-                stored.artifact.path.clone(),
-                stored.artifact.digest.as_bytes()[0],
-                stored.ordinal,
-            )
-        })
-        .collect();
-    super::ensure!(
-        ordinals
-            == vec![
-                ("p".to_owned(), 1, 1),
-                ("p".to_owned(), 4, 2),
-                ("q".to_owned(), 2, 1),
-                ("q".to_owned(), 3, 2),
-            ],
-        "the stored artifacts and their ordinals are {ordinals:?}"
-    );
-    let sets: Vec<(PackageSetDigest, u64, BTreeSet<PackageArtifact>)> = catalog
-        .sets
-        .iter()
-        .map(|stored| (stored.digest, stored.sequence, stored.members.clone()))
-        .collect();
-    super::ensure!(
-        sets == vec![
-            (old.digest, 1, old.members.clone()),
-            (new.digest, 2, new.members.clone())
-        ],
-        "the stored sets are {sets:?}"
-    );
-    Ok(())
 }
 
 /// CLAIM-BY-REQUIREMENTS (FIG-6993): a node claims an actor to run it only
@@ -288,11 +55,14 @@ pub async fn a_node_claims_only_actors_whose_hard_requirements_it_meets(
 ) -> LawOutcome {
     use lash_core_store::obligations::ObligationToken;
     let reached = function(41);
-    let record = ExecutionRequirements {
-        natives: [reached].into_iter().collect(),
-        kernels: [1].into_iter().collect(),
-        providers: ["host/inbox".to_owned()].into_iter().collect(),
-        codecs: [("host/inbox".to_owned(), 2)].into_iter().collect(),
+    let record = ClaimRequirements {
+        machine: NodeRequirements {
+            natives: [reached].into(),
+            kernels: [1].into(),
+        },
+        providers: [provider()].into(),
+        codecs: [(provider(), format_two())].into(),
+        ..ClaimRequirements::default()
     };
     let mut requires: Vec<String> = ObligationToken::for_requirements(&record)
         .map(String::from)
@@ -300,15 +70,20 @@ pub async fn a_node_claims_only_actors_whose_hard_requirements_it_meets(
     // The store answers a record's tokens in their order.
     requires.sort();
     let lacking = NodeCapabilities {
-        natives: BTreeSet::new(),
-        kernels: [1].into_iter().collect(),
-        providers: ["host/inbox".to_owned()].into_iter().collect(),
-        codecs: [("host/inbox".to_owned(), 1)].into_iter().collect(),
-        surface: None,
+        machine: NodeRequirements {
+            kernels: [1].into(),
+            ..NodeRequirements::default()
+        },
+        providers: [provider()].into(),
+        codecs: [(provider(), FormatVersion::ONE)].into(),
+        ..NodeCapabilities::default()
     };
     let capable = NodeCapabilities {
-        natives: [reached, function(42)].into_iter().collect(),
-        codecs: [("host/inbox".to_owned(), 1), ("host/inbox".to_owned(), 2)]
+        machine: NodeRequirements {
+            natives: [reached, function(42)].into(),
+            ..lacking.machine.clone()
+        },
+        codecs: [(provider(), FormatVersion::ONE), (provider(), format_two())]
             .into_iter()
             .collect(),
         ..lacking.clone()
@@ -346,10 +121,13 @@ pub async fn a_node_claims_only_actors_whose_hard_requirements_it_meets(
                 .map(|unmet| (actor.clone(), unmet))
         })
         .collect();
-    let expected = ExecutionRequirements {
-        natives: [reached].into_iter().collect(),
-        codecs: [("host/inbox".to_owned(), 2)].into_iter().collect(),
-        ..ExecutionRequirements::default()
+    let expected = ClaimRequirements {
+        machine: NodeRequirements {
+            natives: [reached].into(),
+            ..NodeRequirements::default()
+        },
+        codecs: [(provider(), format_two())].into(),
+        ..ClaimRequirements::default()
     };
     super::ensure!(
         unmet == vec![(process.clone(), expected)],
@@ -392,9 +170,12 @@ pub async fn a_node_claims_only_actors_whose_hard_requirements_it_meets(
     let mut settle = store.begin(&process, claimed[0].epoch).await?;
     settle
         .set_requires(
-            ObligationToken::for_requirements(&ExecutionRequirements {
-                kernels: [1].into_iter().collect(),
-                ..ExecutionRequirements::default()
+            ObligationToken::for_requirements(&ClaimRequirements {
+                machine: NodeRequirements {
+                    kernels: [1].into(),
+                    ..NodeRequirements::default()
+                },
+                ..ClaimRequirements::default()
             })
             .map(String::from)
             .collect(),
@@ -434,26 +215,35 @@ pub async fn a_hard_record_lands_with_its_owner_commit_or_not_at_all(
     use crate::domain::snapshots::SnapshotRev;
     use crate::domain::{DomainRefusal, DomainWrite, ExecKey};
     use lash_core_store::obligations::ObligationToken;
-    let tokens = |record: &ExecutionRequirements| -> Vec<String> {
+    let tokens = |record: &ClaimRequirements| -> Vec<String> {
         let mut tokens: Vec<String> = ObligationToken::for_requirements(record)
             .map(String::from)
             .collect();
         tokens.sort();
         tokens
     };
-    let kernel_only = ExecutionRequirements {
-        kernels: [1].into_iter().collect(),
-        ..ExecutionRequirements::default()
+    let kernel_only = ClaimRequirements {
+        machine: NodeRequirements {
+            kernels: [1].into(),
+            ..NodeRequirements::default()
+        },
+        ..ClaimRequirements::default()
     };
-    let with_native = ExecutionRequirements {
-        natives: [function(51)].into_iter().collect(),
+    let with_native = ClaimRequirements {
+        machine: NodeRequirements {
+            natives: [function(51)].into(),
+            ..kernel_only.machine.clone()
+        },
         ..kernel_only.clone()
     };
     let writer = node(
         store,
         "kernel-only-writer",
         NodeCapabilities {
-            kernels: [1].into_iter().collect(),
+            machine: NodeRequirements {
+                kernels: [1].into(),
+                ..NodeRequirements::default()
+            },
             ..NodeCapabilities::default()
         },
     )
@@ -543,6 +333,537 @@ pub async fn a_hard_record_lands_with_its_owner_commit_or_not_at_all(
     super::ensure!(
         store.claim(&writer, 8).await?.is_empty(),
         "a node lacking the landed record's native claimed it"
+    );
+    Ok(())
+}
+
+/// L-DEFERRED-PIN: first resolution and target debt land once under the
+/// actor revision. Conflicts, foreign uses and stale owners write nothing;
+/// distinct executions have independent immutable negative outcomes.
+pub async fn a_resolution_winner_and_its_claim_debt_commit_atomically(
+    store: &dyn DurableStore,
+    resolutions: &dyn crate::resolutions::ExecutionResolutions,
+) -> LawOutcome {
+    use crate::resolutions::*;
+    use lash_core_store::artifact_referrer::{ArtifactReferrer, HostArtifactPin};
+    use lash_core_store::tool_surface::linked::{OperationRoute, RouteSource};
+    use lash_vocabulary::{
+        ToolDefinition,
+        claims::{ClaimRequirements, RegistryKind},
+        names::{ImportSlot, OperationUse, QualifiedName},
+        package::{LinkId, OperationMode, ProviderName},
+        providers::{ToolProviderHandle, ToolProviderKey},
+    };
+    let writer = node(store, "resolution-owner", NodeCapabilities::default()).await?;
+    let actor =
+        ActorKey::process("resolution-owner").map_err(|error| LawBroken(error.to_string()))?;
+    let mut mail = MailTx::new();
+    mail.create_actor(actor.clone(), FormatSet::new("law:packages"));
+    store
+        .commit_mail(mail, CommitLabel::new("law.resolution.create"))
+        .await?;
+    let claimed = store.claim(&writer, 1).await?;
+    let epoch = claimed[0].epoch;
+    let use_ = OperationUse {
+        link: LinkId::from_bytes([71; 32]),
+        slot: ImportSlot(3),
+    };
+    let requested = QualifiedName {
+        package: "wip"
+            .parse()
+            .map_err(|error| LawBroken(format!("{error}")))?,
+        member: "lookup"
+            .parse()
+            .map_err(|error| LawBroken(format!("{error}")))?,
+        type_member: None,
+    };
+    let execution = ExecutionId("process:resolution-owner".to_owned());
+    let registration = ExecutionRegistration {
+        execution: execution.clone(),
+        uses: [(use_, requested.clone())].into(),
+        referrer: ArtifactReferrer::HostPin(HostArtifactPin::mint()),
+        requirements: ClaimRequirements::default(),
+    };
+    let mut tx = store.begin(&actor, epoch).await?;
+    tx.register_execution(registration.clone());
+    store
+        .commit(tx, CommitLabel::new("law.resolution.register"))
+        .await?;
+    let revision = store.begin(&actor, epoch).await?.revision();
+    let definition = ToolDefinition::raw(
+        "tool:resolved",
+        "wip.lookup",
+        "lookup",
+        serde_json::json!({}),
+        serde_json::json!({}),
+    )
+    .map_err(|error| LawBroken(error.to_string()))?
+    .with_execution(std::time::Duration::from_secs(1));
+    let target = ClaimRequirements {
+        providers: [ProviderName {
+            owner: "target".to_owned(),
+            key: "tools".to_owned(),
+        }]
+        .into(),
+        ..ClaimRequirements::default()
+    };
+    let route = OperationRoute {
+        tool: definition.manifest.id.clone(),
+        provider: ToolProviderHandle::new(
+            RegistryKind::Process,
+            "target",
+            ToolProviderKey::new("tools").map_err(|error| LawBroken(format!("{error:?}")))?,
+        ),
+        policy: definition.manifest.execution_policy.clone(),
+        projection: definition.manifest.argument_projection.clone(),
+        payload: None,
+        source: RouteSource::Resolved {
+            definition: Box::new(definition.clone()),
+        },
+    };
+    let candidate = ResolutionRecord {
+        key: ResolutionKey { execution, use_ },
+        requested,
+        entry: ResolutionEntry::Resolved {
+            contract: definition.contract_id(),
+            definition: Box::new(definition),
+            route: Box::new(route),
+            mode: OperationMode::Waited,
+            requirements: target.clone(),
+        },
+    };
+    let stale_revision = ResolutionOwner {
+        actor: actor.clone(),
+        epoch,
+        expected_revision: crate::StateRevision(revision.0 - 1),
+    };
+    let refused = resolutions.commit(&stale_revision, candidate.clone()).await;
+    super::ensure!(
+        matches!(
+            refused,
+            Err(DurableError::ResolutionRevisionConflict { .. })
+        ),
+        "stale revision answered {refused:?}"
+    );
+    super::ensure!(
+        resolutions.load(&candidate.key).await?.is_none(),
+        "revision refusal stored an outcome"
+    );
+    let owner = ResolutionOwner {
+        actor: actor.clone(),
+        epoch,
+        expected_revision: revision,
+    };
+    let mut foreign = candidate.clone();
+    foreign.key.use_.slot = ImportSlot(4);
+    let refused = resolutions.commit(&owner, foreign).await;
+    super::ensure!(
+        matches!(
+            refused,
+            Err(DurableError::Package(
+                crate::packages::PackageRefusal::ExecutionUse
+            ))
+        ),
+        "foreign use answered {refused:?}"
+    );
+    let first = resolutions.commit(&owner, candidate.clone());
+    let second = resolutions.commit(&owner, candidate.clone());
+    let (first, second) = tokio::join!(first, second);
+    let first = first?;
+    let second = second?;
+    let (winner, loser) = match (first, second) {
+        (CommitResolution::Inserted(winner), CommitResolution::Existing(loser))
+        | (CommitResolution::Existing(loser), CommitResolution::Inserted(winner)) => {
+            (winner, loser)
+        }
+        other => {
+            return Err(LawBroken(format!(
+                "racing first resolutions answered {other:?}"
+            )));
+        }
+    };
+    super::ensure!(
+        winner == loser && resolutions.load(&candidate.key).await? == Some(winner.clone()),
+        "callers did not share one winner"
+    );
+    let debt = store.actor_requirements(None, 8).await?;
+    let expected: Vec<_> = if matches!(winner.entry, ResolutionEntry::Resolved { .. }) {
+        target.tokens().collect()
+    } else {
+        Vec::new()
+    };
+    let actual = debt
+        .into_iter()
+        .find(|(key, _)| key == &actor)
+        .map(|(_, debt)| debt)
+        .unwrap_or_default();
+    super::ensure!(
+        actual == expected,
+        "winning target debt differs: {actual:?} != {expected:?}"
+    );
+    let after = store.begin(&actor, epoch).await?.revision();
+    super::ensure!(
+        after.0 == revision.0 + 1,
+        "more than one resolution committed: {after:?}"
+    );
+    // Normal owner record replacement cannot erase a live resolved target.
+    let mut replace = store.begin(&actor, epoch).await?;
+    replace.set_requires(Vec::new());
+    store
+        .commit(replace, CommitLabel::new("law.resolution.protected"))
+        .await?;
+    super::ensure!(
+        resolutions.requirements(&actor).await? == target,
+        "the live source debt differs"
+    );
+    let stored = store.actor_requirements(None, 8).await?;
+    super::ensure!(
+        stored
+            .iter()
+            .any(|(key, debt)| key == &actor && *debt == expected),
+        "an ordinary owner commit erased live target debt"
+    );
+    let mut successor = registration.clone();
+    let successor_use = OperationUse {
+        slot: ImportSlot(5),
+        ..use_
+    };
+    successor
+        .uses
+        .insert(successor_use, candidate.requested.clone());
+    let mut carried = candidate.clone();
+    carried.key.use_ = successor_use;
+    let mut adoption = store.begin(&actor, epoch).await?;
+    adoption
+        .adopt_execution(successor)
+        .seed_resolution(carried.clone());
+    store
+        .commit(adoption, CommitLabel::new("law.resolution.adopt"))
+        .await?;
+    super::ensure!(
+        resolutions.load(&carried.key).await? == Some(carried.clone()),
+        "adoption lost the inherited outcome"
+    );
+    let mut conflicting = carried.clone();
+    conflicting.entry = ResolutionEntry::Refused {
+        note: "replacement".into(),
+    };
+    let mut refused_seed = store.begin(&actor, epoch).await?;
+    let before_seed = refused_seed.revision();
+    refused_seed
+        .seed_resolution(conflicting)
+        .set_requires(Vec::new());
+    let refused = store
+        .commit(
+            refused_seed,
+            CommitLabel::new("law.resolution.conflicting_seed"),
+        )
+        .await;
+    super::ensure!(
+        matches!(
+            refused,
+            Err(DurableError::Package(
+                crate::packages::PackageRefusal::Immutable(_)
+            ))
+        ),
+        "conflicting inherited pin answered {refused:?}"
+    );
+    super::ensure!(
+        store.begin(&actor, epoch).await?.revision() == before_seed
+            && resolutions.load(&carried.key).await? == Some(carried),
+        "refused seed changed the actor or winner"
+    );
+    let mut ended = store.begin(&actor, epoch).await?;
+    ended
+        .end_execution(registration.execution.clone())
+        .set_requires(Vec::new());
+    store
+        .commit(ended, CommitLabel::new("law.resolution.end"))
+        .await?;
+    super::ensure!(
+        resolutions.requirements(&actor).await? == ClaimRequirements::default(),
+        "ended execution still owes debt"
+    );
+    super::ensure!(
+        resolutions.load(&winner.key).await? == Some(winner),
+        "ending debt removed resolution history"
+    );
+    let mut fresh = registration.clone();
+    fresh.execution = ExecutionId("process:resolution-owner:fresh".into());
+    let mut admit = store.begin(&actor, epoch).await?;
+    admit.register_execution(fresh.clone());
+    store
+        .commit(admit, CommitLabel::new("law.resolution.fresh"))
+        .await?;
+    let fresh_owner = ResolutionOwner {
+        actor: actor.clone(),
+        epoch,
+        expected_revision: store.begin(&actor, epoch).await?.revision(),
+    };
+    let mut unavailable = candidate.clone();
+    unavailable.key.execution = fresh.execution;
+    unavailable.entry = ResolutionEntry::Unavailable {
+        note: Some("missing".into()),
+    };
+    super::ensure!(
+        matches!(
+            resolutions
+                .commit(&fresh_owner, unavailable.clone())
+                .await?,
+            CommitResolution::Inserted(_)
+        ),
+        "fresh execution inherited old resolution"
+    );
+    let mut changed = unavailable.clone();
+    changed.entry = ResolutionEntry::Refused {
+        note: "later answer".into(),
+    };
+    super::ensure!(
+        matches!(resolutions.commit(&fresh_owner, changed).await?, CommitResolution::Existing(record) if record == unavailable),
+        "a negative outcome was not pinned"
+    );
+    let mut release = store.begin(&actor, epoch).await?;
+    release.give_up(Release::Ready);
+    store
+        .commit(release, CommitLabel::new("law.resolution.release"))
+        .await?;
+    let refused = resolutions.commit(&owner, candidate).await;
+    super::ensure!(
+        matches!(refused, Err(DurableError::OwnershipLost(_))),
+        "stale owner used a stored winner: {refused:?}"
+    );
+    Ok(())
+}
+
+/// L-PIN: a publication acquired by a workflow/process keeps the complete
+/// Package/Link/Document DAG after its configured root ends. Carries preserve
+/// that same closure; the final end reclaims it and fences late resurrection.
+pub async fn a_publication_retains_its_complete_content_dag(
+    packages: &dyn crate::packages::PackageStore,
+    storage: &dyn crate::packages::PackageStorage,
+    document: lash_vocabulary::names::DocumentId,
+    configured: lash_core_store::artifact_referrer::ReferrerClaim,
+) -> LawOutcome {
+    use lash_core_store::artifact_referrer::{
+        ArtifactCarry, ArtifactName, ArtifactReferrer, ArtifactStoreId, HostArtifactPin,
+        ReferrerClaim, ResolvedArtifactCleanup,
+    };
+    use lash_core_store::packages::*;
+    use lash_vocabulary::{names::*, package::*};
+    let link = Link {
+        document,
+        fills: Default::default(),
+    };
+    let link = LinkRecord {
+        id: link.identity(),
+        link,
+    };
+    packages.put_link(&configured, &link, &[]).await?;
+    let path: PackagePath = "law"
+        .parse()
+        .map_err(|error| LawBroken(format!("{error}")))?;
+    let name: Segment = "run"
+        .parse()
+        .map_err(|error| LawBroken(format!("{error}")))?;
+    let inner_package = Package {
+        path: "law.inner"
+            .parse()
+            .map_err(|error| LawBroken(format!("{error}")))?,
+        members: [(
+            name.clone(),
+            Member {
+                visibility: Visibility::Public,
+                kind: MemberKind::Export {
+                    link: link.id,
+                    export: ExportName {
+                        name: Name::new("run"),
+                        member: None,
+                    },
+                },
+            },
+        )]
+        .into(),
+    };
+    let inner_package = PackageRecord {
+        id: inner_package.identity(),
+        package: inner_package,
+    };
+    packages.put_package(&configured, &inner_package).await?;
+    let inner_publication = PublicationRecord {
+        context: PublicationContext {
+            domain: PublicationDomain("law".into()),
+            scope: PublicationScope::Host,
+            publisher: PublisherInstance("configured".into()),
+            root: "law"
+                .parse()
+                .map_err(|error| LawBroken(format!("{error}")))?,
+        },
+        path: inner_package.package.path.clone(),
+        content: PublishedContent::Package(inner_package.id),
+        code_links: [link.id].into(),
+        imported_publications: Vec::new(),
+    };
+    let inner_key = packages.publish(&configured, &inner_publication).await?;
+    let outer = Link {
+        document,
+        fills: [(
+            ImportSlot(0),
+            Fill::Export {
+                link: link.id,
+                export: ExportName {
+                    name: Name::new("run"),
+                    member: None,
+                },
+            },
+        )]
+        .into(),
+    };
+    let outer = LinkRecord {
+        id: outer.identity(),
+        link: outer,
+    };
+    packages.put_link(&configured, &outer, &[]).await?;
+    let package = Package {
+        path: path.clone(),
+        members: [(
+            name,
+            Member {
+                visibility: Visibility::Public,
+                kind: MemberKind::Export {
+                    link: outer.id,
+                    export: ExportName {
+                        name: Name::new("run"),
+                        member: None,
+                    },
+                },
+            },
+        )]
+        .into(),
+    };
+    let package = PackageRecord {
+        id: package.identity(),
+        package,
+    };
+    packages.put_package(&configured, &package).await?;
+    // L-LABEL-SIDECAR: labels do not enter Package identity, deduplicate
+    // literal payloads, and survive exactly as long as their Package.
+    let labels = [r#"{"description":"first"}"#, r#"{"description":"second"}"#];
+    for json in [labels[0], labels[1], labels[0]] {
+        packages.put_labels(&configured, &package.id, json).await?;
+    }
+    let mut expected_labels: Vec<_> = labels.into_iter().map(str::to_owned).collect();
+    expected_labels.sort_by_key(|json| *blake3::hash(json.as_bytes()).as_bytes());
+    super::ensure!(
+        packages.labels(&package.id).await? == expected_labels,
+        "label history duplicated or lost a sidecar"
+    );
+    super::ensure!(
+        packages.package(&package.id).await? == Some(package.clone()),
+        "labels changed Package content"
+    );
+    let publication = PublicationRecord {
+        context: PublicationContext {
+            domain: PublicationDomain("law".into()),
+            scope: PublicationScope::Host,
+            publisher: PublisherInstance("configured".into()),
+            root: "law"
+                .parse()
+                .map_err(|error| LawBroken(format!("{error}")))?,
+        },
+        path,
+        content: PublishedContent::Package(package.id),
+        code_links: [outer.id].into(),
+        imported_publications: vec![inner_key.clone()],
+    };
+    let key = packages.publish(&configured, &publication).await?;
+    let process = ArtifactReferrer::HostPin(HostArtifactPin::mint());
+    let process_claim =
+        ReferrerClaim::unguarded(process.clone()).map_err(|error| LawBroken(error.to_string()))?;
+    packages.acquire_publication(&process_claim, &key).await?;
+    packages
+        .end_package_referrer(&ResolvedArtifactCleanup {
+            referrer: configured.referrer(),
+            carries: Vec::new(),
+        })
+        .await?;
+    super::ensure!(
+        packages.publication(&key).await? == Some(publication),
+        "configured-root end lost the recorded publication"
+    );
+    super::ensure!(
+        packages.link(&link.id).await? == Some(link.clone())
+            && packages.package(&package.id).await? == Some(package.clone()),
+        "publication lost its reached content"
+    );
+    super::ensure!(
+        packages.link(&outer.id).await?.is_some()
+            && packages.publication(&inner_key).await?.is_some()
+            && packages.package(&inner_package.id).await?.is_some(),
+        "transitive Link or publication edge was not retained"
+    );
+    super::ensure!(
+        packages.labels(&package.id).await? == expected_labels,
+        "ending configured root lost live Package labels"
+    );
+    let refused = packages
+        .put_labels(&configured, &package.id, labels[0])
+        .await;
+    super::ensure!(refused.is_err(), "ended label writer bypassed the fence");
+    let successor = ArtifactReferrer::HostPin(HostArtifactPin::mint());
+    let cleanup = ResolvedArtifactCleanup {
+        referrer: process,
+        carries: vec![ArtifactCarry {
+            artifact: ArtifactName {
+                store: ArtifactStoreId::KernelDocument,
+                artifact_ref: crate::packages::publication_reference(&key),
+            },
+            to: successor.clone(),
+        }],
+    };
+    packages.end_package_referrer(&cleanup).await?;
+    packages.end_package_referrer(&cleanup).await?;
+    super::ensure!(
+        packages.link(&link.id).await?.is_some()
+            && storage
+                .load_package_record(&document.to_string())
+                .await?
+                .is_some(),
+        "a publication carry lost its Link/Document closure"
+    );
+    packages
+        .end_package_referrer(&ResolvedArtifactCleanup {
+            referrer: successor,
+            carries: Vec::new(),
+        })
+        .await?;
+    super::ensure!(
+        packages.link(&link.id).await?.is_none()
+            && packages.link(&outer.id).await?.is_none()
+            && packages.publication(&inner_key).await?.is_none()
+            && packages.package(&inner_package.id).await?.is_none()
+            && packages.package(&package.id).await?.is_none()
+            && packages.publication(&key).await?.is_none()
+            && storage
+                .load_package_record(&document.to_string())
+                .await?
+                .is_none(),
+        "last-referrer end failed to reclaim content"
+    );
+    super::ensure!(
+        packages.labels(&package.id).await?.is_empty(),
+        "reclaimed Package retained label sidecars"
+    );
+    let refused = packages.put_package(&process_claim, &package).await;
+    super::ensure!(
+        matches!(
+            refused,
+            Err(DurableError::Package(
+                crate::packages::PackageRefusal::Missing(_)
+            )) | Err(DurableError::Package(
+                crate::packages::PackageRefusal::ReferrerEnded(_)
+            ))
+        ),
+        "ended referrer resurrected content: {refused:?}"
     );
     Ok(())
 }

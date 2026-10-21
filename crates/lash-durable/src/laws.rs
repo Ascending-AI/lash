@@ -67,8 +67,8 @@ pub use model_calls::{
 pub use packages::{
     a_hard_record_lands_with_its_owner_commit_or_not_at_all,
     a_node_claims_only_actors_whose_hard_requirements_it_meets,
-    a_store_keeps_artifacts_and_sets_by_digest,
-    a_store_keeps_each_sets_first_surface_and_indexes_its_definitions,
+    a_publication_retains_its_complete_content_dag,
+    a_resolution_winner_and_its_claim_debt_commit_atomically,
 };
 pub use parks::a_boot_redrives_only_the_session_parks_it_names;
 pub use prompts::{

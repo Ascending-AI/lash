@@ -246,6 +246,13 @@ impl lash::StoreSet for LedgerStores {
         self.inner.attachment_referrers()
     }
 
+    fn package_store(&self) -> Arc<dyn lash::durable::packages::PackageStore> {
+        self.inner.package_store()
+    }
+    fn execution_resolutions(&self) -> Arc<dyn lash::durable::resolutions::ExecutionResolutions> {
+        self.inner.execution_resolutions()
+    }
+
     fn durable_store(&self) -> Arc<dyn DurableStore> {
         Arc::clone(&self.durable)
     }
@@ -555,59 +562,6 @@ impl DurableStore for LedgerStore {
         limit: usize,
     ) -> Result<Vec<(lash::durable::ActorKey, Vec<String>)>, DurableError> {
         self.inner.actor_requirements(after, limit).await
-    }
-
-    async fn install_packages(
-        &self,
-        artifacts: &[lash::durable::packages::ArtifactInstall],
-        sets: &[lash::durable::packages::SetInstall],
-    ) -> Result<(), DurableError> {
-        self.inner.install_packages(artifacts, sets).await
-    }
-
-    async fn package_catalog(&self) -> Result<lash::durable::PackageCatalog, DurableError> {
-        self.inner.package_catalog().await
-    }
-
-    async fn package_surface(
-        &self,
-        digest: &lash::durable::PackageSetDigest,
-    ) -> Result<Option<Vec<u8>>, DurableError> {
-        self.inner.package_surface(digest).await
-    }
-
-    async fn package_paths(
-        &self,
-        functions: &[lash::durable::packages::FunctionId],
-    ) -> Result<
-        std::collections::BTreeMap<
-            lash::durable::packages::FunctionId,
-            std::collections::BTreeSet<String>,
-        >,
-        DurableError,
-    > {
-        self.inner.package_paths(functions).await
-    }
-
-    async fn internal_operations(
-        &self,
-        operations: &[lash::durable::packages::EffectName],
-    ) -> Result<
-        std::collections::BTreeMap<
-            lash::durable::packages::EffectName,
-            std::collections::BTreeSet<String>,
-        >,
-        DurableError,
-    > {
-        self.inner.internal_operations(operations).await
-    }
-
-    async fn package_labels(
-        &self,
-        artifacts: &[lash::durable::ArtifactDigest],
-    ) -> Result<std::collections::BTreeMap<lash::durable::ArtifactDigest, Vec<String>>, DurableError>
-    {
-        self.inner.package_labels(artifacts).await
     }
 
     async fn owned(&self, node: &NodeLease) -> Result<Vec<Claimed>, DurableError> {

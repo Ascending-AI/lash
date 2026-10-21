@@ -14,6 +14,10 @@ use crate::SessionId;
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum RuntimeErrorCause {
+    /// Typed linked-content or execution-membership refusal.
+    PackageStoreRefused {
+        refusal: Box<crate::packages::PackageRefusal>,
+    },
     /// The deployment retired a registry entry a session still needs.
     PluginRetired {
         refusal: Box<crate::obligations::RetirementRefusal>,

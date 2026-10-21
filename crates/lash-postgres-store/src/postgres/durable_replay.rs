@@ -17,7 +17,7 @@ use lash_durable::domain::pages::CandidatePublication;
 
 use super::{
     Committing, PostgresDurableStore, Retired, SQL, Tx, actor_state, apply_domain, apply_mail,
-    executor, fenced, get, graph, group_members, pages, sqlx_failure, store_failure,
+    executor, fenced, get, graph, group_members, packages, pages, sqlx_failure, store_failure,
 };
 use crate::guarded_tx::begin_durable;
 use crate::replayable::{Attempt, Settle, Uncommitted, XactId};
@@ -307,6 +307,22 @@ pub(super) async fn apply_owner(
     let Some(fence) = fence else {
         return Err(fenced(tx, write.actor(), write.epoch()).await?);
     };
+    if write.domain().iter().any(|domain| {
+        matches!(
+            domain,
+            DomainWrite::RegisterExecution(_)
+                | DomainWrite::EndExecution(_)
+                | DomainWrite::AdoptExecution(_)
+                | DomainWrite::SeedResolution(_)
+        )
+    }) && fence.revision.0 - 1 != write.revision().0
+    {
+        return Err(DurableError::ResolutionRevisionConflict {
+            actor: write.actor().clone(),
+            expected: write.revision(),
+            current: lash_durable::StateRevision(fence.revision.0 - 1),
+        });
+    }
     let publications: Vec<_> = write
         .domain()
         .iter()
@@ -373,10 +389,21 @@ pub(super) async fn apply_owner(
             .await
             .map_err(sqlx_failure)?;
     }
-    if let Some(requires) = write.requires() {
+    if write.requires().is_some()
+        || write.domain().iter().any(|write| {
+            matches!(
+                write,
+                DomainWrite::RegisterExecution(_)
+                    | DomainWrite::EndExecution(_)
+                    | DomainWrite::AdoptExecution(_)
+                    | DomainWrite::SeedResolution(_)
+            )
+        })
+    {
+        let requires = packages::owner_requires(tx, write.actor(), write.requires()).await?;
         crate::observed_sql::query(SQL.actor.stamp_requires.sql())
             .bind(actor)
-            .bind(lash_durable::encode_requires(requires))
+            .bind(lash_durable::encode_requires(&requires))
             .execute(crate::observed_sql::executor(&mut ***tx))
             .await
             .map_err(sqlx_failure)?;

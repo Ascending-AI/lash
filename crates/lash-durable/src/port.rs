@@ -6,9 +6,7 @@ use crate::formats::FormatSet;
 use crate::ids::{
     ActorKey, BootId, CommitLabel, DurableInstant, Epoch, MailSeq, NodeId, StateRevision,
 };
-use crate::packages::{
-    ArtifactInstall, NodeCapability, PackageCatalog, PackageSetDigest, SetInstall,
-};
+use crate::packages::NodeCapability;
 use crate::tx::{ActorTx, MailTx};
 
 /// An actor's scheduling state.
@@ -458,61 +456,6 @@ pub trait DurableStore: DurableReads {
         after: Option<&ActorKey>,
         limit: usize,
     ) -> Result<Vec<(ActorKey, Vec<String>)>, DurableError>;
-
-    /// Install `artifacts` and `sets` in one transaction. An artifact or set
-    /// already stored is kept as it is, its surface and requirements
-    /// included; a new artifact takes the next ordinal on its package line,
-    /// and a new set the next install sequence. A set naming an artifact
-    /// neither stored nor installed here is refused, and nothing is
-    /// written.
-    async fn install_packages(
-        &self,
-        artifacts: &[ArtifactInstall],
-        sets: &[SetInstall],
-    ) -> Result<(), DurableError>;
-
-    /// Every stored artifact, by line and ordinal, and every stored set, by
-    /// install sequence, oldest first.
-    async fn package_catalog(&self) -> Result<PackageCatalog, DurableError>;
-
-    /// The surface snapshot bytes stored for the set `digest`, as its first
-    /// install wrote them; `None` for a set the store does not hold.
-    async fn package_surface(
-        &self,
-        digest: &PackageSetDigest,
-    ) -> Result<Option<Vec<u8>>, DurableError>;
-
-    /// The paths of the stored packages among whose definitions each of
-    /// `functions` is, helpers included: the membership index installs
-    /// write and nothing else does (FIG-6991). A function no stored package
-    /// defines is absent.
-    async fn package_paths(
-        &self,
-        functions: &[lash_kernel_doc::FunctionId],
-    ) -> Result<
-        std::collections::BTreeMap<lash_kernel_doc::FunctionId, std::collections::BTreeSet<String>>,
-        DurableError,
-    >;
-
-    /// The labels each install of each of `artifacts` wrote, as JSON, in
-    /// install order and each once: an artifact two releases of identical
-    /// content installed has both. An artifact no install wrote is absent.
-    async fn package_labels(
-        &self,
-        artifacts: &[crate::ArtifactDigest],
-    ) -> Result<std::collections::BTreeMap<crate::ArtifactDigest, Vec<String>>, DurableError>;
-
-    /// The paths of the stored packages that declare each of `operations`
-    /// internal: what, with [`Self::package_paths`], says whether a stored
-    /// definition may perform it. An operation no stored package declares
-    /// internal is absent.
-    async fn internal_operations(
-        &self,
-        operations: &[lash_kernel_doc::EffectName],
-    ) -> Result<
-        std::collections::BTreeMap<lash_kernel_doc::EffectName, std::collections::BTreeSet<String>>,
-        DurableError,
-    >;
 
     /// The actors `node`'s boot owns now, with their current epochs, read
     /// unfenced. Each answers [`ClaimCause::Adopted`].

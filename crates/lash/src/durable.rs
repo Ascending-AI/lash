@@ -312,7 +312,7 @@ pub struct StrandedWork {
     /// The actor's stored key.
     pub actor: String,
     /// What it requires and no live node offers it all of.
-    pub lacks: ExecutionRequirements,
+    pub lacks: lash_core::durable_port::ClaimRequirements,
 }
 
 /// One page of the strand report: the stranded work among the unfinished

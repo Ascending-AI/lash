@@ -260,8 +260,34 @@ impl ActorTx {
         &self.domain
     }
 
-    /// Write `write` when this transaction commits, after the fence and the
-    /// writes recorded before it.
+    /// Record a validated inherited resolution with execution admission.
+    pub fn seed_resolution(&mut self, record: crate::resolutions::ResolutionRecord) -> &mut Self {
+        self.write(DomainWrite::SeedResolution(record))
+    }
+
+    /// Extend use membership during an explicitly validated adoption.
+    pub fn adopt_execution(
+        &mut self,
+        record: crate::resolutions::ExecutionRegistration,
+    ) -> &mut Self {
+        self.write(DomainWrite::AdoptExecution(record))
+    }
+
+    /// Retire source debt; set_requires supplies remaining non-execution debt.
+    pub fn end_execution(&mut self, execution: crate::resolutions::ExecutionId) -> &mut Self {
+        // Force the source reducer to refresh debt, preserving other tokens.
+        self.write(DomainWrite::EndExecution(execution))
+    }
+
+    /// Register the committing actor's execution before its first resolution.
+    pub fn register_execution(
+        &mut self,
+        registration: crate::resolutions::ExecutionRegistration,
+    ) -> &mut Self {
+        self.write(DomainWrite::RegisterExecution(registration))
+    }
+
+    /// Apply a domain write after the ownership fence, in recorded order.
     pub fn write(&mut self, write: DomainWrite) -> &mut Self {
         self.domain.push(write);
         self

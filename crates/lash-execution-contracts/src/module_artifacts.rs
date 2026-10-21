@@ -32,6 +32,8 @@ pub enum DurabilityTier {
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum ArtifactStoreError {
+    #[error(transparent)]
+    PackageRefused(#[from] lash_durable::packages::PackageRefusal),
     #[error("referrer kind `{kind}` cannot hold artifact bytes")]
     ReferrerKindRefused { kind: crate::ArtifactReferrerKind },
     #[error("unusable payload schema: {source}")]
@@ -123,6 +125,9 @@ impl From<ModuleArtifactRefusal> for ArtifactStoreError {
 impl From<ArtifactStoreError> for crate::PluginError {
     fn from(error: ArtifactStoreError) -> Self {
         match error {
+            ArtifactStoreError::PackageRefused(refusal) => {
+                crate::PluginError::PackageStoreRefused(refusal)
+            }
             ArtifactStoreError::ReferrerKindRefused { kind } => {
                 crate::PluginError::StoreRefusal(crate::store::StoreRefusal::ReferrerKindRefused {
                     kind,
@@ -233,6 +238,8 @@ impl<'a> ModuleArtifactBody<'a> {
 /// One artifact a [`ModuleArtifactStore::hold_module_artifacts`] batch holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ModuleArtifactHold<'a> {
+    /// Acquire only existing bytes; a raced reclamation is Missing, never resurrection.
+    Retain { module_ref: &'a str },
     /// Stored when absent and verified against what is stored, as
     /// [`ModuleArtifactStore::publish_module_artifact`] holds it.
     Publish {
@@ -251,13 +258,16 @@ pub enum ModuleArtifactHold<'a> {
 impl<'a> ModuleArtifactHold<'a> {
     pub fn module_ref(&self) -> &'a str {
         match self {
-            Self::Publish { module_ref, .. } | Self::Acquire { module_ref, .. } => module_ref,
+            Self::Publish { module_ref, .. }
+            | Self::Acquire { module_ref, .. }
+            | Self::Retain { module_ref } => module_ref,
         }
     }
 
-    pub fn body(&self) -> ModuleArtifactBody<'a> {
+    pub fn body(&self) -> Option<ModuleArtifactBody<'a>> {
         match self {
-            Self::Publish { body, .. } | Self::Acquire { body, .. } => *body,
+            Self::Publish { body, .. } | Self::Acquire { body, .. } => Some(*body),
+            Self::Retain { .. } => None,
         }
     }
 }
@@ -323,4 +333,88 @@ pub trait ModuleArtifactStore: Send + Sync {
         &self,
         module_ref: &str,
     ) -> Result<Option<Vec<u8>>, ArtifactStoreError>;
+}
+
+impl From<ArtifactStoreError> for lash_durable::DurableError {
+    fn from(error: ArtifactStoreError) -> Self {
+        use lash_durable::packages::PackageRefusal;
+        use lash_durable::{DurableError, StoreFailure, StoreFailureKind};
+        match error {
+            ArtifactStoreError::PackageRefused(refusal) => DurableError::Package(refusal),
+            ArtifactStoreError::ReferrerEnded { referrer } => {
+                PackageRefusal::ReferrerEnded(referrer).into()
+            }
+            ArtifactStoreError::ArtifactMissing { artifact_ref } => {
+                PackageRefusal::Missing(artifact_ref).into()
+            }
+            ArtifactStoreError::Immutable { artifact_ref } => {
+                PackageRefusal::Immutable(artifact_ref).into()
+            }
+            ArtifactStoreError::CarryArtifactMissing { artifact_ref, to } => {
+                PackageRefusal::CarryMissing { artifact_ref, to }.into()
+            }
+            ArtifactStoreError::ReferrerKindRefused { kind } => {
+                DurableError::StoreRefused(crate::store::StoreRefusal::ReferrerKindRefused {
+                    kind,
+                    store: crate::ReferrerStore::Artifact,
+                })
+            }
+            ArtifactStoreError::Incompatible { refusal } => {
+                DurableError::StoreRefused(crate::store::StoreRefusal::Incompatible { refusal })
+            }
+            ArtifactStoreError::StoreRefusal(refusal) => DurableError::StoreRefused(refusal),
+            ArtifactStoreError::StoreFault(fault) => DurableError::Store(StoreFailure {
+                kind: if matches!(fault, crate::store::StoreFault::Contended) {
+                    StoreFailureKind::Contended
+                } else {
+                    StoreFailureKind::Unavailable
+                },
+                message: fault.to_string(),
+            }),
+            error => DurableError::Store(StoreFailure {
+                kind: match &error {
+                    ArtifactStoreError::Backend(_) | ArtifactStoreError::WorkerCheckoutTimedOut => {
+                        StoreFailureKind::Unavailable
+                    }
+                    _ => StoreFailureKind::Corrupt,
+                },
+                message: error.to_string(),
+            }),
+        }
+    }
+}
+
+impl From<lash_durable::DurableError> for ArtifactStoreError {
+    fn from(error: lash_durable::DurableError) -> Self {
+        use lash_durable::packages::PackageRefusal;
+        use lash_durable::{DurableError, StoreFailureKind};
+        match error {
+            DurableError::Package(PackageRefusal::ReferrerEnded(referrer)) => {
+                Self::ReferrerEnded { referrer }
+            }
+            DurableError::Package(PackageRefusal::Missing(artifact_ref)) => {
+                Self::ArtifactMissing { artifact_ref }
+            }
+            DurableError::Package(PackageRefusal::Immutable(artifact_ref)) => {
+                Self::Immutable { artifact_ref }
+            }
+            DurableError::Package(PackageRefusal::CarryMissing { artifact_ref, to }) => {
+                Self::CarryArtifactMissing { artifact_ref, to }
+            }
+            DurableError::Package(refusal) => Self::PackageRefused(refusal),
+            DurableError::StoreRefused(refusal) => Self::StoreRefusal(refusal),
+            DurableError::Store(failure) if failure.kind == StoreFailureKind::Contended => {
+                Self::StoreFault(crate::store::StoreFault::Contended)
+            }
+            DurableError::Store(failure) if failure.kind == StoreFailureKind::Unavailable => {
+                Self::Backend(failure.message)
+            }
+            error => Self::StoredDataCorrupt {
+                source: ModuleArtifactCorruption::Storage {
+                    record_kind: "package artifact".into(),
+                    message: error.to_string(),
+                },
+            },
+        }
+    }
 }

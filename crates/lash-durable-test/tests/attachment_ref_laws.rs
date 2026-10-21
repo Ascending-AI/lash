@@ -116,6 +116,13 @@ struct LawStores {
     attachments: Arc<DeliveringStore>,
 }
 impl StoreSet for LawStores {
+    fn package_store(&self) -> Arc<dyn lash_durable::packages::PackageStore> {
+        self.inner.package_store()
+    }
+    fn execution_resolutions(&self) -> Arc<dyn lash_durable::resolutions::ExecutionResolutions> {
+        self.inner.execution_resolutions()
+    }
+
     fn durable_store(&self) -> Arc<dyn lash_durable::DurableStore> {
         self.inner.durable_store()
     }

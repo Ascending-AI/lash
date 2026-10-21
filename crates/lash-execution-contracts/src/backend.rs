@@ -683,6 +683,10 @@ pub trait StoreSet: Send + Sync {
     /// The durable store over this store set's database: actors, nodes,
     /// mail and the domain rows of ADR 0132.
     fn durable_store(&self) -> Arc<dyn DurableStore>;
+    /// Immutable linked package content over this same storage and referrer ledger.
+    fn package_store(&self) -> Arc<dyn lash_durable::packages::PackageStore>;
+    /// Fenced execution-owned resolution outcomes over this same durable core.
+    fn execution_resolutions(&self) -> Arc<dyn lash_durable::resolutions::ExecutionResolutions>;
 
     /// The node wakes over this store set's database: wake hints after
     /// commit and node liveness locks (L8, FIG-5178), shared by every node

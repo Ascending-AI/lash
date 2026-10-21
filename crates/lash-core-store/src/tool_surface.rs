@@ -491,7 +491,7 @@ pub use lash_vocabulary::providers::{
 };
 
 pub mod linked {
-    use crate::packages::linked::PublicationRecord;
+    use lash_vocabulary::package::PublicationRecord;
     use lash_vocabulary::{
         ExecutionPolicy, ToolArgumentProjectionPolicy, ToolDefinition, ToolId, claims::*, names::*,
         operations::*, package::*, providers::*,

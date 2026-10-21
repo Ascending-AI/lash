@@ -206,7 +206,15 @@ async fn register_within(
     )
     .await
     {
-        Ok(AppliedRegistration::Created(_)) => Ok(()),
+        Ok(AppliedRegistration::Created(_)) => {
+            super::packages::register_process_execution(
+                tx,
+                &rows.process,
+                rows.execution.as_ref(),
+                &rows.initial_resolutions,
+            )
+            .await
+        }
         Ok(AppliedRegistration::Retained { record, .. }) if record.id == rows.process => Ok(()),
         Ok(
             AppliedRegistration::Retained { record, .. }

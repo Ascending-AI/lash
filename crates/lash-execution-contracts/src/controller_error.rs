@@ -106,6 +106,13 @@ impl From<PluginError> for RuntimeEffectControllerError {
                 record_kind,
                 message,
             } => Self::stored_data_corrupt(record_kind, message),
+            PluginError::PackageStoreRefused(refusal) => {
+                RuntimeError::new(RuntimeErrorCode::Plugin, refusal.to_string())
+                    .with_cause(crate::RuntimeErrorCause::PackageStoreRefused {
+                        refusal: Box::new(refusal),
+                    })
+                    .into()
+            }
             PluginError::StoreRefusal(err) => err.into_store_error().into(),
             PluginError::StoreUnavailable { fault } => Self::new(fault.code(), fault.to_string()),
             PluginError::Runtime(err) => err.into(),
