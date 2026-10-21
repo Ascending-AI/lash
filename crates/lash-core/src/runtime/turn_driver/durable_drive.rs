@@ -3,6 +3,7 @@
 //! runner hands it. The phase runner owns every commit; the drive runs what
 //! a phase does in memory and builds the turn's head commit.
 
+use lash_protocol_types::llm::types::RetainedLlmRequest;
 use std::sync::Arc;
 
 use lash_core_execution::core_internal::RuntimeExecutionContextRuntimeOps as _;
@@ -641,6 +642,7 @@ fn fresh_machine(
     driver.protocol_reply.mark_run_start(&messages);
     let refused = driver.validate_recorded_selection().err();
     let mut machine = driver.turn_machine(window, messages);
+    machine.set_allocation_budget(driver.allocation_budget.clone());
     if let Some(event) = refused {
         machine.fail_turn(*event);
     }
@@ -737,7 +739,7 @@ impl TurnDrive for RuntimeDrive {
         &mut self,
         cx: &ActorContext,
         id: crate::EffectId,
-        request: Arc<LlmRequest>,
+        request: Arc<RetainedLlmRequest>,
         admitted: &lash_protocol_types::llm::types::AdmittedSend,
         attempt: ModelCallAttempt,
     ) -> Result<(), TurnError> {
@@ -886,7 +888,7 @@ impl TurnDrive for RuntimeDrive {
         _cx: &ActorContext,
         id: crate::EffectId,
         call: u32,
-        request: Arc<LlmRequest>,
+        request: Arc<RetainedLlmRequest>,
     ) -> Result<PreparedCall, TurnError> {
         self.driver.model_call_ordinal = call;
         // Tails that already drained commit with this call's admission; the

@@ -66,6 +66,7 @@ pub(super) fn config_with_dialect(
             writer_formats: lash_core::build_newest_writer_formats(),
         });
     TurnMachineConfig {
+        allocation_budget: lash_protocol_types::allocation::AllocationBudget::unowned(),
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         protocol_driver: preamble.config.protocol,
         projector: preamble.config.projector,
@@ -1338,7 +1339,7 @@ fn configured_prompt_is_instructions_on_both_channels() {
             );
             // The call's admission lowers its composed prompt onto the
             // projected request.
-            let mut request = (**projected).clone();
+            let mut request = projected.materialize();
             lash_core::sansio::place_prompt(
                 &mut request,
                 (!prompt.is_empty()).then(|| Arc::from(prompt)),

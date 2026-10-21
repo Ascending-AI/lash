@@ -389,6 +389,9 @@ table lash_prompt_prefixes
   column session_id text not-null
   primary-key (session_id)
   foreign-key (hash) references lash_prompt_texts (hash) on delete no action
+table lash_prompt_retirement_frontier
+  column hash bytea not-null
+  primary-key (hash)
 table lash_prompt_snapshot_texts
   column call text not-null
   column hash bytea not-null
@@ -678,3 +681,4 @@ function lash_node_renew (p_node text, p_boot text, p_ttl bigint, p_fleet_low in
 function lash_owner_commit (p_registry text, p_actor text, p_epoch bigint, p_session text, p_fleet_low integer, p_fleet_high integer, p_token text, p_lock_timeout text, p_statement_ms bigint, p_body_hashes bytea[], p_bodies bytea[], p_named bytea[], p_roots bytea[], p_digests bytea[], p_contents bytea[], p_parents bytea[], p_children bytea[], p_steps jsonb, p_formats text, p_ack bigint, p_release text, p_due bigint, p_now bigint, p_requires text) -> TABLE(o_revision bigint, o_now bigint, o_fleet integer, o_state text, o_installed bigint, o_cancel_turn text, o_cancel_request text, o_cancel_origin text, o_cancel_reason text, o_cancel_disposition text, o_cancel_mode text)
 function lash_prompt_held_texts (p_keys bytea[], p_seed bigint) -> SETOF bytea
 function lash_prompt_record (p_session text, p_owner text, p_call text, p_snapshot text, p_request text, p_epoch bigint, p_hashes bytea[], p_bodies text[], p_parents bytea[], p_children bytea[], p_roots bytea[], p_parts text[], p_edges bytea[], p_prefix bytea, p_turn boolean) -> TABLE(accepted boolean, missing bytea)
+function lash_prompt_retire (p_roots bytea[], p_protect bytea[], p_limit bigint) -> TABLE(examined bigint, deleted bigint, bytes bigint)

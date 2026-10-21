@@ -50,13 +50,14 @@ pub enum SegmentKind {
 /// assert!(RequestSegment::same(&item, &shared));
 /// ```
 #[derive(Clone)]
-pub struct RequestSegment(Arc<SegmentInner>);
+pub struct RequestSegment(Arc<SegmentInner>, Option<std::ops::Range<usize>>);
 
 struct SegmentInner {
     kind: SegmentKind,
     parts: Box<[SegmentPart]>,
     literal_bytes: usize,
     derived: DerivedMemo,
+    _hold: crate::allocation::AllocationHold,
 }
 
 impl RequestSegment {
@@ -69,12 +70,38 @@ impl RequestSegment {
                 SegmentPart::Slot(_) => 0,
             })
             .sum();
-        Self(Arc::new(SegmentInner {
-            kind,
-            parts: parts.into_boxed_slice(),
-            literal_bytes,
-            derived: DerivedMemo::default(),
-        }))
+        Self(
+            Arc::new(SegmentInner {
+                kind,
+                parts: parts.into_boxed_slice(),
+                literal_bytes,
+                derived: DerivedMemo::default(),
+                _hold: Default::default(),
+            }),
+            None,
+        )
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "the lowerer transfers a token before sharing the newly built segment"
+    )]
+    pub fn with_allocation(mut self, hold: crate::allocation::AllocationHold) -> Self {
+        // New lowerings are still private. The token moves into the same
+        // allocation that every template/cache reader subsequently shares.
+        Arc::get_mut(&mut self.0)
+            .expect("a newly lowered segment is private")
+            ._hold = hold;
+        self
+    }
+
+    /// Original source messages for this lowered item; never serialized.
+    pub fn with_source_range(mut self, range: std::ops::Range<usize>) -> Self {
+        self.1 = Some(range);
+        self
+    }
+    pub fn source_range(&self) -> Option<std::ops::Range<usize>> {
+        self.1.clone()
     }
 
     /// A text segment of `text`.

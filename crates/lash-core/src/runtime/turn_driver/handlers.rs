@@ -1,6 +1,7 @@
 use super::*;
 use crate::runtime::durable::session::CellExit;
 use lash_core_llm::stream_assembly::ReasoningPublicationState;
+use lash_protocol_types::llm::types::RetainedLlmRequest;
 
 impl RuntimeTurnDriver<'_> {
     fn handle_machine_response(
@@ -89,7 +90,7 @@ impl RuntimeTurnDriver<'_> {
         &mut self,
         machine: &mut TurnMachine,
         id: crate::sansio::EffectId,
-        request: &LlmRequest,
+        request: &RetainedLlmRequest,
         event_tx: &TurnObserver,
     ) -> Result<bool, RuntimeError> {
         let invocation = self
@@ -164,7 +165,7 @@ impl RuntimeTurnDriver<'_> {
         &mut self,
         machine: &mut TurnMachine,
         id: crate::sansio::EffectId,
-        request: Arc<LlmRequest>,
+        request: Arc<RetainedLlmRequest>,
         admitted: &lash_protocol_types::llm::types::AdmittedSend,
         attempt: u32,
         event_tx: &TurnObserver,

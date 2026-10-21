@@ -211,9 +211,7 @@ impl RlmRuntimeState {
         // the cell to finish instead of being told the state is busy, and a
         // cell cancelled mid-flight leaves the state where it was.
         let mut guard = self.execution.lock().await;
-        guard
-            .execute(ctx, request, session_projected_bindings)
-            .await
+        Box::pin(guard.execute(ctx, request, session_projected_bindings)).await
     }
 
     pub(crate) fn execution_state_dirty(&self) -> bool {

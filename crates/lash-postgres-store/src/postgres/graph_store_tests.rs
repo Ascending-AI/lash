@@ -822,3 +822,14 @@ async fn turn_and_owned_model_calls_survive_an_idempotent_outcome_commit() {
 }
 
 page_law!(checkpoint_lease_handoffs_are_atomic);
+
+#[tokio::test]
+async fn lo_root_when_configured() {
+    let _database_url = crate::testing::required_database_url();
+    let tier = tier()
+        .await
+        .expect("the hermetic PostgreSQL target supplies its database");
+    pages::lo_root_retained_delta_preserves_reachability(&tier)
+        .await
+        .unwrap_or_else(|broken| panic!("{broken}"));
+}

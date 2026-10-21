@@ -567,6 +567,7 @@ pub(super) fn standard_contract_turn_machine_config() -> lash_core::TurnMachineC
         dyn lash_core::sansio::ProtocolDriverHandle<lash_core::HostTurnProtocol>,
     > = Arc::new(lash_protocol_standard::StandardDriver::default());
     lash_core::TurnMachineConfig {
+        allocation_budget: lash_protocol_types::allocation::AllocationBudget::unowned(),
         protocol_driver,
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         projector: Arc::new(lash_core::sansio::ChatContextProjector::default()),

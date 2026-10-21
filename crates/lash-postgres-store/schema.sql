@@ -1128,6 +1128,7 @@ CREATE TABLE IF NOT EXISTS lash_prompt_text_edges (
     PRIMARY KEY (parent, child)
 );
 CREATE INDEX IF NOT EXISTS idx_lash_prompt_text_edges_child ON lash_prompt_text_edges(child);
+CREATE TABLE IF NOT EXISTS lash_prompt_retirement_frontier (hash BYTEA PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS lash_prompt_prefixes (
     session_id TEXT PRIMARY KEY,
     hash BYTEA NOT NULL REFERENCES lash_prompt_texts(hash)
@@ -1417,9 +1418,9 @@ DECLARE
     v_answer JSONB;
     v_frame TEXT;
 BEGIN
-    -- Generated from this build's statements (registry d8edea84fe4bf6d1); a call
+    -- Generated from this build's statements (registry bb10092bcf405b8f); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM 'd8edea84fe4bf6d1'
+    IF p_registry IS DISTINCT FROM 'bb10092bcf405b8f'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -2136,42 +2137,7 @@ BEGIN
                 IF v_row."hash" IS NOT NULL THEN v_texts := v_texts || v_row."hash"::BYTEA; END IF;
             END LOOP;
         WHEN 'durable_prompt_postgres.reclaim_texts' THEN
-            v_tfront := ARRAY(SELECT DISTINCT hash FROM unnest(v_texts) AS released(hash) ORDER BY hash);
-            IF cardinality(v_tfront) > 0 THEN
-                v_closure := ARRAY(WITH RECURSIVE closure AS (
-                 SELECT unnest((v_tfront)::BYTEA[]) AS hash
-                 UNION
-                 SELECT edge.child FROM closure
-                   JOIN lash_prompt_text_edges AS edge ON edge.parent = closure.hash
-                  WHERE NOT (closure.hash = ANY((v_protect)::BYTEA[]))
-             ) SELECT hash FROM closure WHERE NOT (hash = ANY((v_protect)::BYTEA[])) ORDER BY hash);
-                PERFORM pg_advisory_xact_lock(hashtextextended(encode(ordered.key, 'hex'), (2)))
-             FROM (SELECT DISTINCT key FROM unnest((v_closure)::BYTEA[]) AS target(key) ORDER BY key) AS ordered;
-                v_tfront := ARRAY(SELECT hash FROM unnest(v_tfront) AS released(hash)
-                    WHERE NOT (hash = ANY(v_protect)) ORDER BY hash);
-                WHILE cardinality(v_tfront) > 0 LOOP
-                    SELECT COALESCE(array_agg(level.hash), '{}'), COALESCE(array_agg(edge.child), '{}')
-                    INTO v_tparents, v_tchildren
-                    FROM unnest(v_tfront) AS level(hash), LATERAL (SELECT child FROM lash_prompt_text_edges WHERE parent = (level.hash) ORDER BY child) AS edge;
-                    WITH gone AS (DELETE FROM lash_prompt_texts AS stored
-             WHERE stored.hash = ANY((v_tfront)::BYTEA[])
-               AND NOT EXISTS (
-                   SELECT 1 FROM lash_prompt_snapshot_texts AS edge WHERE edge.hash = stored.hash
-               ) AND NOT EXISTS (
-                   SELECT 1 FROM lash_prompt_prefixes AS prefix WHERE prefix.hash = stored.hash
-               ) AND NOT EXISTS (
-                   SELECT 1 FROM lash_prompt_text_edges AS edge WHERE edge.child = stored.hash
-               ) RETURNING hash)
-                    SELECT COALESCE(array_agg(hash), '{}') INTO v_closure FROM gone;
-                    v_tfront := ARRAY(SELECT DISTINCT edge.child
-                        FROM unnest(v_tparents, v_tchildren) AS edge(parent, child)
-                        WHERE edge.parent = ANY(v_closure) AND NOT (edge.child = ANY(v_protect))
-                        ORDER BY edge.child);
-                END LOOP;
-            END IF;
-            v_texts := '{}';
-            v_protect := '{}';
-            v_rows := 0;
+            PERFORM * FROM (SELECT * FROM lash_prompt_retire((v_texts), (v_protect), (4096))) AS retired; v_texts := '{}'; v_protect := '{}'; v_rows := 0;
         WHEN 'durable_head_commit.plugin_writers_held' THEN
             v_rows := 0;
             FOR v_row IN SELECT plugin_id FROM lash_fleet_plugin_writers
@@ -2952,6 +2918,43 @@ BEGIN
     RETURN QUERY SELECT hash FROM lash_prompt_texts WHERE hash = ANY((p_keys)::BYTEA[]);
 END
 $lash_prompt_held_texts$;
+CREATE OR REPLACE FUNCTION lash_prompt_retire(p_roots BYTEA[], p_protect BYTEA[], p_limit BIGINT)
+RETURNS TABLE(examined BIGINT, deleted BIGINT, bytes BIGINT)
+LANGUAGE plpgsql VOLATILE AS $lash_prompt_retire$
+DECLARE v_seeds BYTEA[]; v_candidates BYTEA[]; v_gone BYTEA[]; v_next BYTEA[];
+        v_count BIGINT := 0; v_bytes BIGINT := 0;
+BEGIN
+    INSERT INTO lash_prompt_retirement_frontier(hash) SELECT unnest((p_roots)::BYTEA[]) ON CONFLICT DO NOTHING;
+    v_seeds := ARRAY(SELECT hash FROM lash_prompt_retirement_frontier ORDER BY hash LIMIT (p_limit) FOR UPDATE SKIP LOCKED);
+    IF cardinality(v_seeds) = 0 THEN RETURN QUERY SELECT 0::BIGINT, 0::BIGINT, 0::BIGINT; RETURN; END IF;
+    v_candidates := ARRAY(WITH RECURSIVE candidates AS (
+             SELECT unnest((v_seeds)::BYTEA[]) AS hash
+             UNION
+             SELECT edge.child AS hash FROM candidates JOIN lash_prompt_text_edges AS edge ON edge.parent = candidates.hash
+              WHERE NOT (candidates.hash = ANY((p_protect)::BYTEA[]))
+                AND NOT EXISTS (SELECT 1 FROM lash_prompt_snapshot_texts WHERE hash = candidates.hash)
+                AND NOT EXISTS (SELECT 1 FROM lash_prompt_prefixes WHERE hash = candidates.hash)
+                AND (SELECT count(*) FROM (SELECT 1 FROM lash_prompt_text_edges WHERE child = candidates.hash LIMIT 2) AS incoming) <= 1
+         ) SELECT hash FROM candidates LIMIT (p_limit));
+    v_candidates := ARRAY(WITH ordered AS MATERIALIZED (SELECT DISTINCT key FROM unnest((v_candidates)::BYTEA[]) AS target(key) ORDER BY key)
+             SELECT key FROM ordered WHERE pg_try_advisory_xact_lock(hashtextextended(encode(key, 'hex'), 2)));
+    IF cardinality(v_candidates) = 0 THEN RETURN QUERY SELECT 0::BIGINT, 0::BIGINT, 0::BIGINT; RETURN; END IF;
+    v_gone := ARRAY(WITH RECURSIVE candidates AS (SELECT unnest((v_candidates)::BYTEA[]) AS hash), protected AS (
+             SELECT hash FROM candidates
+              WHERE hash = ANY((p_protect)::BYTEA[])
+                 OR EXISTS (SELECT 1 FROM lash_prompt_snapshot_texts WHERE hash = candidates.hash)
+                 OR EXISTS (SELECT 1 FROM lash_prompt_prefixes WHERE hash = candidates.hash)
+                 OR EXISTS (SELECT 1 FROM lash_prompt_text_edges AS edge WHERE edge.child = candidates.hash AND NOT (edge.parent = ANY((v_candidates)::BYTEA[])))
+             UNION
+             SELECT edge.child AS hash FROM protected JOIN lash_prompt_text_edges AS edge ON edge.parent = protected.hash WHERE edge.child = ANY((v_candidates)::BYTEA[])
+         ) SELECT hash FROM candidates WHERE hash NOT IN (SELECT hash FROM protected));
+    DELETE FROM lash_prompt_retirement_frontier WHERE hash = ANY((v_candidates)::BYTEA[]);
+    WITH removed AS (DELETE FROM lash_prompt_text_edges WHERE parent = ANY((v_gone)::BYTEA[]) RETURNING child) SELECT COALESCE(array_agg(DISTINCT child), '{}') INTO v_next FROM removed WHERE NOT (child = ANY(v_candidates));
+    WITH removed AS (DELETE FROM lash_prompt_texts WHERE hash = ANY((v_gone)::BYTEA[]) RETURNING octet_length(text) AS bytes) SELECT count(*), COALESCE(sum(removed.bytes),0) INTO v_count,v_bytes FROM removed;
+    INSERT INTO lash_prompt_retirement_frontier(hash) SELECT unnest((v_next)::BYTEA[]) ON CONFLICT DO NOTHING;
+    RETURN QUERY SELECT cardinality(v_candidates)::BIGINT,v_count,v_bytes;
+END
+$lash_prompt_retire$;
 CREATE OR REPLACE FUNCTION lash_prompt_record(
     p_session TEXT, p_owner TEXT, p_call TEXT, p_snapshot TEXT, p_request TEXT, p_epoch BIGINT,
     p_hashes BYTEA[], p_bodies TEXT[], p_parents BYTEA[], p_children BYTEA[], p_roots BYTEA[],
@@ -3028,42 +3031,7 @@ BEGIN
         SELECT COALESCE(array_agg(hash), '{}') INTO v_texts FROM released;
         IF p_prefix IS NOT NULL THEN INSERT INTO lash_prompt_prefixes (session_id, hash) VALUES ((p_session), (p_prefix))
              ON CONFLICT (session_id) DO UPDATE SET hash = excluded.hash; END IF;
-        v_tfront := ARRAY(SELECT DISTINCT hash FROM unnest(v_texts) AS released(hash) ORDER BY hash);
-            IF cardinality(v_tfront) > 0 THEN
-                v_closure := ARRAY(WITH RECURSIVE closure AS (
-                 SELECT unnest((v_tfront)::BYTEA[]) AS hash
-                 UNION
-                 SELECT edge.child FROM closure
-                   JOIN lash_prompt_text_edges AS edge ON edge.parent = closure.hash
-                  WHERE NOT (closure.hash = ANY((v_protect)::BYTEA[]))
-             ) SELECT hash FROM closure WHERE NOT (hash = ANY((v_protect)::BYTEA[])) ORDER BY hash);
-                PERFORM pg_advisory_xact_lock(hashtextextended(encode(ordered.key, 'hex'), (2)))
-             FROM (SELECT DISTINCT key FROM unnest((v_closure)::BYTEA[]) AS target(key) ORDER BY key) AS ordered;
-                v_tfront := ARRAY(SELECT hash FROM unnest(v_tfront) AS released(hash)
-                    WHERE NOT (hash = ANY(v_protect)) ORDER BY hash);
-                WHILE cardinality(v_tfront) > 0 LOOP
-                    SELECT COALESCE(array_agg(level.hash), '{}'), COALESCE(array_agg(edge.child), '{}')
-                    INTO v_tparents, v_tchildren
-                    FROM unnest(v_tfront) AS level(hash), LATERAL (SELECT child FROM lash_prompt_text_edges WHERE parent = (level.hash) ORDER BY child) AS edge;
-                    WITH gone AS (DELETE FROM lash_prompt_texts AS stored
-             WHERE stored.hash = ANY((v_tfront)::BYTEA[])
-               AND NOT EXISTS (
-                   SELECT 1 FROM lash_prompt_snapshot_texts AS edge WHERE edge.hash = stored.hash
-               ) AND NOT EXISTS (
-                   SELECT 1 FROM lash_prompt_prefixes AS prefix WHERE prefix.hash = stored.hash
-               ) AND NOT EXISTS (
-                   SELECT 1 FROM lash_prompt_text_edges AS edge WHERE edge.child = stored.hash
-               ) RETURNING hash)
-                    SELECT COALESCE(array_agg(hash), '{}') INTO v_closure FROM gone;
-                    v_tfront := ARRAY(SELECT DISTINCT edge.child
-                        FROM unnest(v_tparents, v_tchildren) AS edge(parent, child)
-                        WHERE edge.parent = ANY(v_closure) AND NOT (edge.child = ANY(v_protect))
-                        ORDER BY edge.child);
-                END LOOP;
-            END IF;
-            v_texts := '{}';
-            v_protect := '{}';
-            v_rows := 0;
+        PERFORM * FROM (SELECT * FROM lash_prompt_retire((v_texts), (v_protect), (4096))) AS retired; v_texts := '{}'; v_protect := '{}'; v_rows := 0;
     END IF;
     RETURN QUERY SELECT TRUE, NULL::BYTEA;
 END

@@ -90,6 +90,7 @@ pub struct ActorTx {
     mail: Vec<Mail>,
     opened_at: DurableInstant,
     turn_cancel: Option<TurnCancelRequest>,
+    prompt_postimage: Option<lash_core_store::prompt_sections::OwnerPromptState>,
     domain: Vec<DomainWrite>,
     root_leases: Vec<RootLeaseRequest>,
     release_root_leases: BTreeSet<RootLeaseId>,
@@ -141,6 +142,7 @@ impl ActorTx {
             mail: read.mail,
             opened_at: read.at,
             turn_cancel: read.turn_cancel,
+            prompt_postimage: None,
             domain: Vec::new(),
             root_leases: Vec::new(),
             release_root_leases: BTreeSet::new(),
@@ -219,6 +221,20 @@ impl ActorTx {
             })
         };
         immediate(fenced) && !immediate(self.turn_cancel())
+    }
+
+    /// The private prompt draft, transferred only through a committed owner
+    /// acknowledgement. It is never encoded or treated as a durable root.
+    pub fn stage_prompt_postimage(
+        &mut self,
+        prompt: lash_core_store::prompt_sections::OwnerPromptState,
+    ) {
+        self.prompt_postimage = Some(prompt);
+    }
+    pub fn take_prompt_postimage(
+        &mut self,
+    ) -> Option<lash_core_store::prompt_sections::OwnerPromptState> {
+        self.prompt_postimage.take()
     }
 
     /// Lease the exact root after this transaction's domain writes, under

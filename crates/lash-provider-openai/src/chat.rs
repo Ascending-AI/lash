@@ -102,7 +102,9 @@ impl OpenAiCompatibleProvider {
                 }
                 _ => None,
             };
-            messages.extend(units.unit(
+            messages.extend(units.unit_at(
+                &req.messages,
+                group.clone(),
                 |key| {
                     let key = req.messages[group.clone()]
                         .iter()

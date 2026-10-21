@@ -63,7 +63,7 @@ use super::session_mail::{agent_frame_switches, follow_on_mail};
 use super::tool_round::{self, RoundExit};
 use super::turn_scope::end_turn_scope;
 use super::{model_call, turn_cancel, turn_trace};
-use crate::plugin::prompt::{admission_record, load_admitted_call};
+use crate::plugin::prompt::load_admitted_call;
 use crate::{
     ActorContext, Effect, HeldResponse, HostTurnProtocol, SessionStreamEvent, TurnMachine,
 };
@@ -430,7 +430,20 @@ async fn phase_loop(
     loop {
         let effect = match pending.take() {
             Some(effect) => effect,
-            None => match drive.machine().poll_effect() {
+            None => match drive.machine().try_poll_effect().map_err(|error| {
+                TurnError::Runtime(match error {
+                    lash_protocol_types::allocation::ProjectionError::Allocation(error) => {
+                        crate::RuntimeError::allocation(error)
+                    }
+                    lash_protocol_types::allocation::ProjectionError::Stored(error) => {
+                        crate::RuntimeEffectControllerError::stored_data_corrupt(
+                            error.record_kind,
+                            error.message,
+                        )
+                        .into_runtime_error()
+                    }
+                })
+            })? {
                 Some(effect) => effect,
                 None => return Err(TurnError::Exec("the turn machine stalled".to_owned())),
             },
@@ -551,6 +564,8 @@ async fn phase_loop(
                                     request,
                                     prompt,
                                     template,
+                                    mut prompt_state,
+                                    allocation_budget,
                                 } = *composed;
                                 // The turn's execution holds them, as it holds
                                 // the turn's own puts.
@@ -575,18 +590,20 @@ async fn phase_loop(
                                 }
                                 let admitted =
                                     AdmittedSend::of_request(&request, Arc::new(template));
-                                let record = admission_record(
+                                let record = lash_core_execution::plugin::prompt::admission_record_retained(
                                     call_key(&session, &run, call),
                                     prompt.as_ref(),
                                     &admitted.template,
                                     &admitted.response,
                                     None,
+                                    &mut prompt_state,
+                                    &allocation_budget,
                                 )
-                                .map_err(|error| {
-                                    TurnError::Exec(format!(
-                                        "the model call's admission does not encode: {error}"
-                                    ))
+                                .map_err(|error| match error {
+                                    lash_core_execution::plugin::prompt::AdmissionRecordError::Encoding(error)=>TurnError::Exec(format!("the model call's admission does not encode: {error}")),
+                                    lash_core_execution::plugin::prompt::AdmissionRecordError::Allocation(error)=>TurnError::Runtime(crate::RuntimeError::allocation(error)),
                                 })?;
+                                tx.stage_prompt_postimage(prompt_state);
                                 (None, request, admitted, Some(record))
                             }
                             PreparedCall::Unsent(refused) => {

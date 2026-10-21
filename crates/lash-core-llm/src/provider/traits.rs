@@ -152,6 +152,30 @@ pub trait Provider: Send + Sync + std::fmt::Debug {
         )
         .map_err(super::attachment_wire::template_error)
     }
+    /// Persistent owner input. A third-party lowerer retains its exact custom
+    /// behavior through this explicit flat adapter.
+    async fn lower_retained(
+        &mut self,
+        request: &lash_protocol_types::llm::types::RetainedLlmRequest,
+        cache: &SegmentCache,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<RecordedRequestTemplate, LlmTransportError> {
+        // The flat callback owns its output while it runs. Reserve the input
+        // adapter before materializing and charge the returned body before retention.
+        let _input = budget
+            .reserve(lash_protocol_types::allocation::payload_capacity(
+                request, 1024,
+            ))
+            .map_err(super::attachment_wire::allocation_error)?;
+        let template = self.lower(&request.materialize(), cache).await?;
+        let hold = budget
+            .reserve(lash_protocol_types::allocation::payload_capacity(
+                &template, 1024,
+            ))
+            .map_err(super::attachment_wire::allocation_error)?;
+        Ok(template.with_allocation(hold))
+    }
+
     fn encode_slot(
         &self,
         slot: &AttachmentSlot,

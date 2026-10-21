@@ -19,6 +19,7 @@ fn machine_config(max_turns: Option<usize>) -> TurnMachineConfig {
     let protocol_driver: Arc<dyn ProtocolDriverHandle<lash_core::HostTurnProtocol>> =
         Arc::new(StandardDriver::default());
     TurnMachineConfig {
+        allocation_budget: lash_protocol_types::allocation::AllocationBudget::unowned(),
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         protocol_driver,
         projector: Arc::new(ChatContextProjector::default()),

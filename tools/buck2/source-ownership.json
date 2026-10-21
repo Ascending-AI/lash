@@ -1004,6 +1004,7 @@
     "test_input_fallbacks": {},
     "unit_test_includes": [],
     "unit_test_sources": [
+      "src/allocation.rs",
       "src/append_vec.rs",
       "src/append_vec_tests.rs",
       "src/attachment.rs",
@@ -1044,6 +1045,7 @@
       "src/llm/types/call_error.rs",
       "src/llm/types/non_negative_finite_f64.rs",
       "src/llm/types/response.rs",
+      "src/llm/types/retained_request.rs",
       "src/llm/types/retry.rs",
       "src/llm/types/stream_block.rs",
       "src/llm/types/types_contract_tests.rs",
@@ -1051,6 +1053,7 @@
       "src/llm/wire_corpus.rs",
       "src/llm_profile.rs",
       "src/module_artifact_refusal.rs",
+      "src/persistent_sequence.rs",
       "src/plugin.rs",
       "src/profile.rs",
       "src/redacted.rs",

@@ -86,6 +86,9 @@ impl RlmProtocolSession {
 
 #[async_trait::async_trait]
 impl ProtocolSessionPlugin for RlmProtocolSession {
+    fn has_before_llm_call(&self) -> bool {
+        false
+    }
     async fn initialize_session(
         &self,
         _ctx: ProtocolSessionContext<'_>,

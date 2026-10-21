@@ -298,6 +298,26 @@ impl SegmentCache {
         }
         Ok(value)
     }
+    /// An asynchronous provider's carried history; no cache lock spans I/O.
+    pub async fn carried_async<
+        T: LoweredUnit,
+        E,
+        F: std::future::Future<Output = Result<Arc<T>, E>>,
+    >(
+        &self,
+        key: SegmentKey<'_>,
+        update: impl FnOnce(Option<Arc<T>>) -> F,
+    ) -> Result<Arc<T>, E> {
+        let Some(shared) = &self.0 else {
+            return update(None).await;
+        };
+        let SegmentKey { hasher, messages } = key;
+        let digest = hasher.finalize().into();
+        let prior = shared.get(&digest, &messages);
+        let value = update(prior).await?;
+        shared.insert(digest, messages, &value);
+        Ok(value)
+    }
 }
 
 impl Shared {

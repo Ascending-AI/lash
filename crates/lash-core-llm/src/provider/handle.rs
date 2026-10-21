@@ -309,6 +309,49 @@ impl ProviderHandle {
         Ok(template)
     }
 
+    pub async fn lower_retained(
+        &mut self,
+        request: &lash_protocol_types::llm::types::RetainedLlmRequest,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<RecordedRequestTemplate, LlmTransportError> {
+        let route = self.route_identity(request.model.wire_model());
+        route.validate_endpoint().map_err(|error| {
+            LlmTransportError::new(error.to_string())
+                .with_kind(ProviderFailureKind::Validation)
+                .with_lash_code(TurnFailureCode::InvalidProviderEndpoint)
+                .with_retry_verdict(TransportRetryVerdict::Forbidden)
+        })?;
+        let lowered = std::panic::AssertUnwindSafe(async {
+            let ProviderComponents {
+                provider,
+                segment_cache,
+                ..
+            } = &mut self.components;
+            provider
+                .lower_retained(request, segment_cache, budget)
+                .await
+        })
+        .catch_unwind()
+        .await;
+        let template = match lowered {
+            Ok(lowered) => {
+                lowered.map_err(|failure| self.components.failure_classifier.classify(failure))?
+            }
+            Err(payload) => {
+                return Err(
+                    LlmTransportError::new(crate::panic_containment::payload_message(
+                        payload.as_ref(),
+                    ))
+                    .with_kind(ProviderFailureKind::Unknown)
+                    .with_lash_code(TurnFailureCode::ProviderPanicked)
+                    .with_retry_verdict(TransportRetryVerdict::NotRetryable),
+                );
+            }
+        };
+        check_body_route(&template, &route)?;
+        Ok(template)
+    }
+
     pub(crate) fn prepare_completion(
         &self,
         request: &mut LlmRequest,

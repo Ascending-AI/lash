@@ -1098,7 +1098,13 @@ fn tool_result_visible_text(content: &[ModelToolReturnPart]) -> Cow<'_, str> {
 /// (FIG-4059).
 #[derive(Debug, Default)]
 pub struct BaseRenderCache {
-    rendered: std::sync::Mutex<Vec<(HistoryPresentation, AppendVec<LlmMessage>)>>,
+    rendered: std::sync::Mutex<
+        Option<(
+            HistoryPresentation,
+            usize,
+            crate::llm::types::RequestMessages,
+        )>,
+    >,
     /// The cache of the base this one's base extends, with that base's
     /// length. Taken by the first render, so a chain of caches never
     /// outlives it.
@@ -1116,7 +1122,7 @@ impl BaseRenderCache {
     #[must_use]
     pub fn extending(previous: Arc<BaseRenderCache>, prefix_len: usize) -> Self {
         Self {
-            rendered: std::sync::Mutex::new(Vec::new()),
+            rendered: std::sync::Mutex::new(None),
             extends: std::sync::Mutex::new(Some((previous, prefix_len))),
         }
     }
@@ -1128,7 +1134,7 @@ impl BaseRenderCache {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .iter()
-            .map(|(_, cached)| {
+            .map(|(_, _, cached)| {
                 cached
                     .iter()
                     .zip(rendered)
@@ -1138,35 +1144,91 @@ impl BaseRenderCache {
             .max()
     }
 
+    pub fn shared_retained_prefix(
+        &self,
+        rendered: &crate::llm::types::RequestMessages,
+    ) -> Option<usize> {
+        self.rendered
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .iter()
+            .map(|(_, _, cached)| {
+                let shared = cached.shared_prefix(rendered);
+                // A reconstructed window may have equal values in different
+                // allocations. Reconcile only the suffix whose identity is
+                // not already witnessed by the persistent representation.
+                shared
+                    + cached
+                        .iter_from(shared)
+                        .zip(rendered.iter_from(shared))
+                        .take_while(|(before, now)| before == now)
+                        .count()
+            })
+            .max()
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "the public flat adapter uses an unowned budget which cannot refuse"
+    )]
     pub fn rendered(
         &self,
         base: &[Message],
         policy: &HistoryPresentation,
     ) -> AppendVec<LlmMessage> {
-        let mut cached = self.rendered.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some((_, rendered)) = cached
+        AppendVec::from(
+            self.rendered_retained(
+                base,
+                policy,
+                &crate::allocation::AllocationBudget::unowned(),
+            )
+            .expect("independent flat render")
             .iter()
-            .find(|(previous_policy, _)| Arc::ptr_eq(&previous_policy.0, &policy.0))
-        {
-            return rendered.clone();
+            .cloned()
+            .collect::<Vec<_>>(),
+        )
+    }
+
+    pub fn rendered_retained(
+        &self,
+        base: &[Message],
+        policy: &HistoryPresentation,
+        budget: &crate::allocation::AllocationBudget,
+    ) -> Result<crate::llm::types::RequestMessages, crate::allocation::AllocationError> {
+        let mut cached = self.rendered.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some((_, _, rendered)) = cached.iter().find(|(previous, owner, _)| {
+            Arc::ptr_eq(&previous.0, &policy.0) && *owner == budget.identity()
+        }) {
+            return Ok(rendered.clone());
         }
         let prefix = self
             .extends
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .take()
+            .clone()
             .and_then(|(previous, prefix_len)| {
                 let cached = previous.rendered.lock().unwrap_or_else(|p| p.into_inner());
-                let (previous_policy, rendered) = cached
-                    .iter()
-                    .find(|(previous_policy, _)| Arc::ptr_eq(&previous_policy.0, &policy.0))?;
-                (prefix_len <= base.len() && Arc::ptr_eq(&previous_policy.0, &policy.0))
-                    .then(|| (rendered.clone(), prefix_len))
+                let (_, _, rendered) = cached.iter().find(|(previous, owner, _)| {
+                    Arc::ptr_eq(&previous.0, &policy.0) && *owner == budget.identity()
+                })?;
+                (prefix_len <= base.len()).then(|| (rendered.clone(), prefix_len))
             });
-        let (mut rendered, start) = prefix.unwrap_or_else(|| (AppendVec::new(), 0));
-        append_structured_prompt_after(&mut rendered, base, start, policy);
-        cached.push((policy.clone(), rendered.clone()));
-        rendered
+        let (rendered, start) = prefix.unwrap_or_default();
+        let mut tail = Vec::new();
+        append_structured_prompt_tail_owned(
+            &base[start..],
+            &base[..start],
+            policy,
+            budget,
+            |message| tail.push(message),
+        )?;
+        let rendered = rendered.append_rendered(&tail, budget)?;
+        *cached = Some((policy.clone(), budget.identity(), rendered.clone()));
+        self.extends
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take();
+        Ok(rendered)
     }
 }
 
@@ -1259,24 +1321,6 @@ fn render_structured_prompt(msgs: &[Message]) -> RenderedPrompt {
 fn append_structured_prompt(rendered: &mut RenderedPrompt, msgs: &[Message]) {
     append_structured_prompt_tail(msgs, &[], &HistoryPresentation::verbatim(), |message| {
         rendered.messages.push(message)
-    });
-}
-
-/// Renders `msgs[start..]` onto `rendered`, the render of `msgs[..start]`.
-///
-/// The same render [`render_prompt`] gives `msgs`, because a message renders
-/// on its own except for a tool result's provider correlation, and a call
-/// precedes its result: a result finds its call among the rendered
-/// messages first, and only then in the prefix, walking back.
-fn append_structured_prompt_after(
-    rendered: &mut AppendVec<LlmMessage>,
-    msgs: &[Message],
-    start: usize,
-    policy: &HistoryPresentation,
-) {
-    let appended = &msgs[start..];
-    append_structured_prompt_tail(appended, &msgs[..start], policy, |message| {
-        rendered.push(message)
     });
 }
 
@@ -1395,6 +1439,143 @@ fn render_structured_message(
         (MessageRole::User, Some(MessageOrigin::TurnInput { .. }))
     );
     Some(projected)
+}
+
+fn append_structured_prompt_tail_owned(
+    appended: &[Message],
+    prefix: &[Message],
+    policy: &HistoryPresentation,
+    budget: &crate::allocation::AllocationBudget,
+    mut push: impl FnMut(crate::llm::types::AdmittedMessage),
+) -> Result<(), crate::allocation::AllocationError> {
+    let provider_call_ids = appended
+        .iter()
+        .flat_map(|msg| msg.parts.iter())
+        .filter_map(|part| Some((part.call_id()?, part.provider_call_id()?)))
+        .collect::<std::collections::HashMap<_, _>>();
+    for msg in appended {
+        if let Some(projected) = render_structured_message_owned(msg, policy, budget, |call_id| {
+            provider_call_ids
+                .get(call_id)
+                .copied()
+                .or_else(|| {
+                    prefix.iter().rev().find_map(|earlier| {
+                        earlier.parts.iter().rev().find_map(|part| {
+                            (part.call_id() == Some(call_id))
+                                .then(|| part.provider_call_id())
+                                .flatten()
+                        })
+                    })
+                })
+                .map(str::to_string)
+        })? {
+            push(projected);
+        }
+    }
+    Ok(())
+}
+
+/// One message's render, `None` when it has no block to send.
+/// `provider_call_id` answers the provider correlation of the call a tool
+/// result pairs with.
+fn render_structured_message_owned(
+    msg: &Message,
+    policy: &HistoryPresentation,
+    budget: &crate::allocation::AllocationBudget,
+    provider_call_id: impl Fn(&ToolCallId) -> Option<String>,
+) -> Result<Option<crate::llm::types::AdmittedMessage>, crate::allocation::AllocationError> {
+    let hold = budget.reserve(crate::allocation::payload_capacity(
+        msg,
+        msg.parts.len()
+            * (std::mem::size_of::<LlmContentBlock>()
+                + std::mem::size_of::<crate::allocation::AllocationHold>()),
+    ))?;
+    let mut holds = Vec::with_capacity(msg.parts.len() + 1);
+    holds.push(hold);
+    let mut blocks: Vec<LlmContentBlock> = Vec::with_capacity(msg.parts.len());
+    for part in msg.parts.iter() {
+        match part.kind() {
+            PartKind::Reasoning => {
+                let Some(meta) = part.reasoning_meta() else {
+                    continue;
+                };
+                if meta.is_empty() {
+                    continue;
+                }
+                blocks.push(LlmContentBlock::Reasoning {
+                    text: part.content().to_string(),
+                    replay: Some(meta.clone()),
+                });
+            }
+            PartKind::ToolCall => {
+                let call_id = part.provider_call_id().unwrap_or_default().to_string();
+                let tool_name = part.tool_name().unwrap_or_default().to_string();
+                blocks.push(LlmContentBlock::ToolCall {
+                    call_id,
+                    tool_name,
+                    input_json: part.content().to_string(),
+                    replay: part.tool_replay().cloned(),
+                });
+            }
+            PartKind::ToolResult => {
+                // A result whose call the window no longer holds has no
+                // provider correlation to answer with; it is not
+                // resume-safe (`messages_are_prompt_resume_safe`) and is
+                // left out rather than answered under an invented id.
+                let Some(call_id) = part.call_id().and_then(&provider_call_id) else {
+                    continue;
+                };
+                let Part::ToolResult { status, .. } = part else {
+                    continue;
+                };
+                blocks.push(LlmContentBlock::ToolResult {
+                    status: *status,
+                    call_id,
+                    content: part.tool_result_content().unwrap_or_default().to_vec(),
+                    tool_name: part.tool_name().map(str::to_string),
+                });
+            }
+            _ => {
+                if let Some(attachment) = attachment_from_part(part)
+                    && matches!(msg.role, MessageRole::User)
+                {
+                    blocks.push(LlmContentBlock::Attachment {
+                        reference: Box::new(attachment),
+                    });
+                    continue;
+                }
+
+                // Host callbacks own their temporary output. Reserve its
+                // returned capacity before this owner retains the string.
+                let text = (policy.0)(msg.role, part);
+                holds
+                    .push(budget.reserve(
+                        (text.capacity() + std::mem::size_of::<Arc<str>>() + 16) as u64,
+                    )?);
+                if text.trim().is_empty() {
+                    continue;
+                }
+
+                blocks.push(LlmContentBlock::Text {
+                    text: text.into(),
+                    response_meta: part.response_meta().cloned(),
+                    cache_breakpoint: false,
+                });
+            }
+        }
+    }
+    if blocks.is_empty() {
+        return Ok(None);
+    }
+    let mut projected = LlmMessage::new(llm_role_for_message(msg.role), blocks);
+    projected.starts_user_segment = matches!(
+        (msg.role, msg.origin.as_ref()),
+        (MessageRole::User, Some(MessageOrigin::TurnInput { .. }))
+    );
+    Ok(Some(crate::llm::types::AdmittedMessage {
+        message: projected,
+        _holds: holds.into(),
+    }))
 }
 
 fn llm_role_for_message(role: MessageRole) -> LlmRole {

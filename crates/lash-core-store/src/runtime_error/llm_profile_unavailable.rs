@@ -28,6 +28,9 @@ impl RuntimeErrorCause {
             | Self::RecordedCallbackUnavailable { .. }
             | Self::StreamStateFormatUnreadable { .. }
             | Self::PluginStatePublicationFenced { .. } => false,
+            Self::OwnerAllocation { refusal } => {
+                refusal.kind == lash_protocol_types::allocation::ReserveError::TooLarge
+            }
             Self::AttachmentRetention { failure } => !failure.is_retryable(),
             Self::StoreRefusal { refusal } => refusal.is_terminal(),
             Self::ControlPhaseExpired { .. }

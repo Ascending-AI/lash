@@ -109,7 +109,7 @@ pub trait TurnDrive: Send {
         &mut self,
         cx: &ActorContext,
         id: EffectId,
-        request: Arc<LlmRequest>,
+        request: Arc<lash_protocol_types::llm::types::RetainedLlmRequest>,
         admitted: &lash_protocol_types::llm::types::AdmittedSend,
         attempt: ModelCallAttempt,
     ) -> Result<(), TurnError>;
@@ -131,7 +131,7 @@ pub trait TurnDrive: Send {
         cx: &ActorContext,
         id: EffectId,
         call: u32,
-        request: Arc<LlmRequest>,
+        request: Arc<lash_protocol_types::llm::types::RetainedLlmRequest>,
     ) -> Result<PreparedCall, TurnError>;
 
     /// The steering input the turn's checkpoints delivered, with its

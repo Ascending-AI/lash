@@ -1211,9 +1211,9 @@ pub use snapshot::{PromptCatalogSnapshot, read_prompt_plan};
 mod composer;
 
 pub use composer::{
-    AdmittedCallLoadError, ComposedPrompt, LoadedAdmittedCall, LoadedPromptSnapshot,
-    PROMPT_SECTION_SEPARATOR, PromptRenderPool, PromptRenderPoolConfig, admission_record,
-    load_admitted_call, load_prompt_snapshot,
+    AdmissionRecordError, AdmittedCallLoadError, ComposedPrompt, LoadedAdmittedCall,
+    LoadedPromptSnapshot, PROMPT_SECTION_SEPARATOR, PromptRenderPool, PromptRenderPoolConfig,
+    admission_record, admission_record_retained, load_admitted_call, load_prompt_snapshot,
 };
 
 #[cfg(test)]

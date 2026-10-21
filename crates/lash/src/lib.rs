@@ -799,11 +799,12 @@ pub mod prompt {
         AdmittedCallLoadError, LoadedPromptSnapshot, PromptCompositionError, PromptRenderSite,
     };
     pub use lash_core::prompt_sections::{
-        AppliedPromptWrap, PROMPT_KEY_MAX_BYTES, PlacementSource, PromptKeyError, PromptLimits,
-        PromptPlacement, PromptPlan, PromptPlanError, PromptPurpose, PromptSectionId,
-        PromptSectionKey, PromptSectionPlacement, PromptSnapshot, PromptSnapshotVersion,
-        PromptTextRef, PromptWrapId, PromptWrapKey, ProviderBodyError, RecordedSectionText,
-        RenderedPromptSection, ResolvedPromptPlan, ResolvedPromptSection, ResolvedPromptWrap,
+        AppliedPromptWrap, ChunkedRequestTemplate, OwnerPromptState, PROMPT_KEY_MAX_BYTES,
+        PlacementSource, PromptKeyError, PromptLimits, PromptPlacement, PromptPlan,
+        PromptPlanError, PromptPurpose, PromptSectionId, PromptSectionKey, PromptSectionPlacement,
+        PromptSnapshot, PromptSnapshotVersion, PromptTextRef, PromptWrapId, PromptWrapKey,
+        ProviderBodyError, RecordedSectionText, RenderedPromptSection, ResolvedPromptPlan,
+        ResolvedPromptSection, ResolvedPromptWrap,
     };
 }
 
@@ -1162,6 +1163,14 @@ pub mod http_transport {
     pub use lash_http_transport::*;
 }
 
+/// Admission obligations carried by immutable request and prompt allocations.
+pub mod allocation {
+    pub use lash_protocol_types::allocation::{
+        AllocationBudget, AllocationError, AllocationHold, AllocationLedger, AllocationReservation,
+        ProjectionError, ReserveError,
+    };
+}
+
 /// Model-provider configuration and request types.
 pub mod provider {
     /// The host-owned credential seam: lash asks a host's [`TokenSource`]
@@ -1187,10 +1196,10 @@ pub mod provider {
     /// (ADR 0133 §6). Only literals, refs, acceptance and codecs are recorded.
     pub use lash_protocol_types::{
         llm::types::AttachmentSlot, llm::types::BodyPart, llm::types::LiveRequestBody,
-        llm::types::LoweredItem, llm::types::RecordedRequestTemplate, llm::types::RequestSegment,
-        llm::types::RequestTemplateBuilder, llm::types::SegmentKind, llm::types::SegmentPart,
-        llm::types::SlotCodec, llm::types::TemplateError, llm::types::TemplateJson,
-        llm::types::TransientJson, llm::types::WireChunk,
+        llm::types::LoweredItem, llm::types::RecordedRequestTemplate, llm::types::RequestItems,
+        llm::types::RequestSegment, llm::types::RequestTemplateBuilder, llm::types::SegmentKind,
+        llm::types::SegmentPart, llm::types::SlotCodec, llm::types::TemplateError,
+        llm::types::TemplateJson, llm::types::TransientJson, llm::types::WireChunk,
     };
     pub use lash_protocol_types::{
         llm::types::LlmProviderTraceDirection, llm::types::LlmProviderTraceEvent,
@@ -1261,6 +1270,7 @@ pub mod provider {
     /// [`FailureCode::foreign`] remain for namespaces only known at runtime
     /// or decoded off the wire.
     pub use lash_core::{FailureCode, HostNamespace, InvalidNamespace, Namespace};
+    pub use lash_protocol_types::llm::types::{RequestMessages, RetainedLlmRequest};
 }
 
 pub use crate::core::ForkRequest;

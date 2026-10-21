@@ -32,6 +32,7 @@
 //!   `SessionCloseExit::Waiting` (the close's `tombstone` commit itself
 //!   releases the actor as terminal).
 
+use lash_protocol_types::llm::types::RetainedLlmRequest;
 use std::sync::Arc;
 
 use lash_durable::domain::{MailAnswer, MailDomainWrite, TurnWrite};
@@ -51,7 +52,6 @@ use crate::AdmittedScope;
 use crate::Effect;
 use crate::EffectId;
 use crate::HostTurnProtocol;
-use crate::LlmRequest;
 use crate::SessionId;
 use crate::TurnId;
 use crate::TurnMachine;
@@ -789,8 +789,10 @@ pub enum PreparedCall {
 /// A new model call, ready to admit: the request, its composed prompt and
 /// its request template, all of which `model.start` commits.
 pub struct ComposedCall {
+    pub allocation_budget: lash_protocol_types::allocation::AllocationBudget,
+    pub prompt_state: lash_core_store::prompt_sections::OwnerPromptState,
     /// The request the machine waits on, with the call's sections in it.
-    pub request: Arc<LlmRequest>,
+    pub request: Arc<RetainedLlmRequest>,
     /// The call's composition; `None` when the session has no sections.
     pub prompt: Option<crate::plugin::prompt::ComposedPrompt>,
     /// The template every send of the call fills and sends.

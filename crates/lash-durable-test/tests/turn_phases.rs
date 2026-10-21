@@ -258,12 +258,12 @@ fn response_text(response: &LlmResponse) -> String {
 
 impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for ScriptedProtocol {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
-        match ctx.project_llm_request(false) {
+        match ctx.project_llm_request_retained(false) {
             Ok(request) => vec![DriverAction::Start(PendingWork::Llm {
                 request,
                 driver_state: None,
             })],
-            Err(error) => lash_sansio::sansio::stored_history_refusal_actions(error),
+            Err(error) => vec![lash_sansio::DriverAction::ProjectionRefused(error)],
         }
     }
 
@@ -439,6 +439,7 @@ fn route() -> ProviderRouteIdentity {
 
 fn machine_config(session: &SessionId, run: &TurnId, mode: Mode) -> TurnMachineConfig {
     TurnMachineConfig {
+        allocation_budget: lash_protocol_types::allocation::AllocationBudget::unowned(),
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         protocol_driver: Arc::new(ScriptedProtocol {
             checkpointed_finish: mode == Mode::CheckpointFault,
@@ -660,7 +661,7 @@ impl TurnDrive for L3Drive {
         _cx: &ActorContext,
         _id: EffectId,
         call: u32,
-        request: Arc<LlmRequest>,
+        request: Arc<lash_protocol_types::llm::types::RetainedLlmRequest>,
     ) -> Result<PreparedCall, TurnError> {
         let composition = {
             let mut seen = self.services.seen.lock_recover();
@@ -671,7 +672,7 @@ impl TurnDrive for L3Drive {
             seen.compositions.push(composition);
             composition
         };
-        let mut request = LlmRequest::clone(&request);
+        let mut request = request.materialize();
         request.instructions = Some(Arc::from(composition.instructions()));
         let generation = {
             let mut seen = self.services.seen.lock_recover();
@@ -690,8 +691,12 @@ impl TurnDrive for L3Drive {
                 .expect("the literal is JSON"),
         };
         Ok(PreparedCall::Admit(Box::new(ComposedCall {
-            request: Arc::new(request),
+            request: Arc::new(
+                lash_protocol_types::llm::types::RetainedLlmRequest::from_request(request),
+            ),
             prompt: None,
+            allocation_budget: lash_protocol_types::allocation::AllocationBudget::unowned(),
+            prompt_state: Default::default(),
             template,
         })))
     }
@@ -700,7 +705,7 @@ impl TurnDrive for L3Drive {
         &mut self,
         cx: &ActorContext,
         _id: EffectId,
-        request: Arc<LlmRequest>,
+        request: Arc<lash_protocol_types::llm::types::RetainedLlmRequest>,
         send: &lash_protocol_types::llm::types::AdmittedSend,
         attempt: ModelCallAttempt,
     ) -> Result<(), TurnError> {

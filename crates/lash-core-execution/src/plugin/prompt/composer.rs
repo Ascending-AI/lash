@@ -41,8 +41,7 @@ use super::{
     ResolvedPromptComposition,
 };
 use crate::prompt_sections::{
-    AdmittedRequest, ChunkedRequestTemplate, ProviderBodyError, RecordedResponseContext,
-    RequestFragment,
+    AdmittedRequest, ProviderBodyError, RecordedResponseContext, RequestFragment,
 };
 use crate::store::BlobRef;
 
@@ -229,7 +228,50 @@ pub fn admission_record(
     response: &ResponseContext,
     deadline: Option<DurableInstant>,
 ) -> Result<DomainWrite, serde_json::Error> {
-    let (recorded_body, request_texts) = ChunkedRequestTemplate::chunk(template);
+    admission_record_retained(
+        call,
+        prompt,
+        template,
+        response,
+        deadline,
+        &mut Default::default(),
+        &lash_protocol_types::allocation::AllocationBudget::unowned(),
+    )
+    .map_err(|error| match error {
+        AdmissionRecordError::Encoding(error) => error,
+        AdmissionRecordError::Allocation(_) => unreachable!("independent flat admission"),
+    })
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum AdmissionRecordError {
+    #[error(transparent)]
+    Encoding(#[from] serde_json::Error),
+    #[error(transparent)]
+    Allocation(#[from] lash_protocol_types::allocation::AllocationError),
+}
+pub fn admission_record_retained(
+    call: PromptCallKey,
+    prompt: Option<&ComposedPrompt>,
+    template: &RecordedRequestTemplate,
+    response: &ResponseContext,
+    deadline: Option<DurableInstant>,
+    state: &mut lash_core_store::prompt_sections::OwnerPromptState,
+    budget: &lash_protocol_types::allocation::AllocationBudget,
+) -> Result<DomainWrite, AdmissionRecordError> {
+    let admission_bound =
+        lash_protocol_types::allocation::payload_capacity(response.contract.as_ref(), 2048)
+            .saturating_add(prompt.map_or(0, |prompt| {
+                lash_protocol_types::allocation::payload_capacity(&prompt.snapshot, 1024)
+                    + prompt
+                        .texts
+                        .iter()
+                        .map(|(hash, text)| (hash.as_str().len() + text.capacity() + 128) as u64)
+                        .sum::<u64>()
+            }));
+    let hold = budget.reserve(admission_bound)?;
+    let (recorded_body, mut request_texts) = state.chunk(template, budget)?;
+    request_texts.retain_allocation(hold);
     let recorded_response = RecordedResponseContext::record(
         LlmRequestScope {
             // The attempt, and the trace's id of the call, are each send's

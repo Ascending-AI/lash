@@ -28,7 +28,7 @@ impl ProtocolDriverHandle for MidCallNoteDriver {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
         vec![DriverAction::Start(PendingWork::Llm {
             request: ctx
-                .project_llm_request(true)
+                .project_llm_request_retained(true)
                 .expect("fixture history projects"),
             driver_state: None,
         })]

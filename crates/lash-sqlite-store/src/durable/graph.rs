@@ -189,6 +189,32 @@ lash_store_sql::statements! {
         insert_edges = "INSERT INTO blob_edges (parent_hash, child_hash)
              SELECT unhex(value ->> 0), unhex(value ->> 1) FROM json_each(?1)";
 
+        /// Discover one bounded changed-path set, stopping at live/shared
+        /// boundaries. Outside edges and catalog roots seed protection.
+        retirement_candidates = "WITH RECURSIVE candidates AS (
+             SELECT unhex(value) AS hash FROM json_each(?1)
+             UNION
+             SELECT edge.child_hash AS hash FROM candidates
+               JOIN blob_edges AS edge ON edge.parent_hash = candidates.hash
+              WHERE NOT EXISTS (SELECT 1 FROM graph_root_catalog WHERE root_ref = candidates.hash)
+                AND (SELECT count(*) FROM (SELECT 1 FROM blob_edges WHERE child_hash = candidates.hash LIMIT 2)) <= 1
+             LIMIT ?2
+         ), protected AS (
+             SELECT hash FROM candidates
+              WHERE EXISTS (SELECT 1 FROM graph_root_catalog WHERE root_ref = candidates.hash)
+                 OR EXISTS (SELECT 1 FROM blob_edges AS edge WHERE edge.child_hash = candidates.hash
+                     AND edge.parent_hash NOT IN (SELECT hash FROM candidates))
+             UNION
+             SELECT edge.child_hash AS hash FROM protected JOIN blob_edges AS edge ON edge.parent_hash = protected.hash
+              WHERE edge.child_hash IN (SELECT hash FROM candidates)
+         ) SELECT candidates.hash, candidates.hash NOT IN (SELECT hash FROM protected) FROM candidates";
+
+        /// Outgoing edges of the proven unprotected set, removed together.
+        retire_edges = "DELETE FROM blob_edges WHERE parent_hash IN (SELECT unhex(value) FROM json_each(?1)) RETURNING child_hash";
+
+        /// Delete exactly the set proved under the same writer transaction.
+        retire_nodes = "DELETE FROM blobs WHERE hash IN (SELECT unhex(value) FROM json_each(?1)) RETURNING hash";
+
         /// One level of a peel: delete every blob in JSON `?1` no root names
         /// and no edge reaches, and return each one deleted with its bytes
         /// and encoding, which name the children its edges reach.
@@ -220,14 +246,6 @@ lash_store_sql::statements! {
 /// measurements select 32 rows to amortize statement entry without making
 /// small graphs allocate a full graph-sized parameter list.
 pub(super) const BLOB_BATCH_ROWS: usize = 32;
-
-/// SQLite's multi-row VALUES program yields through a coroutine for each
-/// body. Keep small installs on the one-row shape; only a large install
-/// amortizes that work. Measured (FIG-7047): 32-row batches for small
-/// installs cost more VM steps (a 60-row install 4,391 to 5,073) though
-/// they saved 0.17% of a no-tool replay's user instructions, so the
-/// one-row shape stays until both agree.
-const SMALL_INSTALL_ROWS: usize = 64;
 
 struct Sql {
     blob_batches: [String; BLOB_BATCH_ROWS],
@@ -773,7 +791,7 @@ pub(crate) fn peel(tx: &Connection, frontier: BTreeSet<String>) -> rusqlite::Res
     let mut frontier = frontier;
     let mut deleted = 0;
     while !frontier.is_empty() {
-        let (gone, children) = peel_level(tx, &frontier)?;
+        let (_, gone, children) = peel_batch(tx, &frontier, 4096)?;
         deleted += gone;
         frontier = children;
     }
@@ -784,6 +802,49 @@ pub(crate) fn peel(tx: &Connection, frontier: BTreeSet<String>) -> rusqlite::Res
 pub(super) fn json_array(values: &impl serde::Serialize) -> String {
     #[expect(clippy::expect_used, reason = "strings always encode as JSON")]
     serde_json::to_string(values).expect("a list of digests encodes")
+}
+
+/// Set-based closure retirement. Candidate hints never authorize deletion:
+/// live roots and all outside incoming edges are checked under this writer.
+pub(super) fn peel_batch(
+    tx: &Connection,
+    frontier: &BTreeSet<String>,
+    limit: usize,
+) -> rusqlite::Result<(usize, usize, BTreeSet<String>)> {
+    let candidates = tx
+        .prepare_cached(SQL.sqlite.retirement_candidates.sql())?
+        .query_map(
+            rusqlite::params![
+                json_array(frontier),
+                i64::try_from(limit.max(1)).unwrap_or(i64::MAX)
+            ],
+            |row| Ok((crate::codec::hash_column(row, 0)?, row.get::<_, bool>(1)?)),
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let examined: BTreeSet<_> = candidates.iter().map(|(hash, _)| hash.clone()).collect();
+    let gone: BTreeSet<_> = candidates
+        .iter()
+        .filter(|(_, unprotected)| *unprotected)
+        .map(|(hash, _)| hash.clone())
+        .collect();
+    let mut next: BTreeSet<_> = frontier.difference(&examined).cloned().collect();
+    if gone.is_empty() {
+        return Ok((examined.len(), 0, next));
+    }
+    let batch = json_array(&gone);
+    next.extend(
+        tx.prepare_cached(SQL.sqlite.retire_edges.sql())?
+            .query_map([&batch], |row| crate::codec::hash_column(row, 0))?
+            .collect::<rusqlite::Result<BTreeSet<_>>>()?
+            .difference(&examined)
+            .cloned(),
+    );
+    let deleted = tx
+        .prepare_cached(SQL.sqlite.retire_nodes.sql())?
+        .query_map([&batch], |_| Ok(()))?
+        .collect::<rusqlite::Result<Vec<_>>>()?
+        .len();
+    Ok((examined.len(), deleted, next))
 }
 
 /// One level of [`peel`]: deletes every node of `frontier` nothing names or
@@ -1106,11 +1167,7 @@ pub(super) fn install(
     if absent == 0 {
         return Ok(Ok(installed));
     }
-    let chunk_rows = if absent <= SMALL_INSTALL_ROWS {
-        1
-    } else {
-        BLOB_BATCH_ROWS
-    };
+    let chunk_rows = absent.min(BLOB_BATCH_ROWS);
     let mut fresh = staged
         .iter()
         .zip(present)

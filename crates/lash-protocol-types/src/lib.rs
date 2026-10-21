@@ -18,11 +18,13 @@ mod run_aggregate;
 pub use json_schema::{
     InvalidSchemaKind, JsonSchema, SchemaAdmissionError, ValueMismatch, tool_signature,
 };
+pub mod allocation;
 pub mod durable_serde;
 mod execution_budgets;
 pub mod llm;
 pub mod llm_profile;
 pub mod module_artifact_refusal;
+pub mod persistent_sequence;
 pub mod plugin;
 pub mod profile;
 mod redacted;

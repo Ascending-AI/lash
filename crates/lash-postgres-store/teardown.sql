@@ -148,6 +148,8 @@ DROP TABLE IF EXISTS lash_prompt_snapshot_texts CASCADE;
 
 DROP TABLE IF EXISTS lash_prompt_text_edges CASCADE;
 
+DROP TABLE IF EXISTS lash_prompt_retirement_frontier CASCADE;
+
 DROP TABLE IF EXISTS lash_prompt_prefixes CASCADE;
 
 DROP TABLE IF EXISTS lash_turn_phases CASCADE;
@@ -177,5 +179,7 @@ DROP FUNCTION IF EXISTS lash_artifact_end_local CASCADE;
 DROP FUNCTION IF EXISTS lash_node_renew CASCADE;
 
 DROP FUNCTION IF EXISTS lash_prompt_held_texts CASCADE;
+
+DROP FUNCTION IF EXISTS lash_prompt_retire CASCADE;
 
 DROP FUNCTION IF EXISTS lash_prompt_record CASCADE;

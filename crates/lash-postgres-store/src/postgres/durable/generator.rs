@@ -123,36 +123,18 @@ fn gather(collect: Collect) -> String {
 /// then each level deletes what no root references any more, and the
 /// children of what it deleted are the next level.
 fn text_reclaim() -> String {
-    let closure = inline(prompts::closure().sql(), &["v_tfront", "v_protect"]);
-    let lock = perform(&inline(
-        connection_sql().lock_xact_by_keys_seeded.sql(),
-        &["v_closure", &prompts::TEXT_LOCK_SEED.to_string()],
-    ));
-    let children = inline(prompts::read_children().sql(), &["level.hash"]);
-    let reclaim = inline(prompts::RECLAIM.statement().sql(), &["v_tfront"]);
+    let reclaim = inline(
+        prompts::RECLAIM.statement().sql(),
+        &["v_texts", "v_protect", "4096"],
+    );
     format!(
-        "v_tfront := ARRAY(SELECT DISTINCT hash FROM unnest(v_texts) AS released(hash) ORDER BY hash);
-            IF cardinality(v_tfront) > 0 THEN
-                v_closure := ARRAY({closure});
-                {lock};
-                v_tfront := ARRAY(SELECT hash FROM unnest(v_tfront) AS released(hash)
-                    WHERE NOT (hash = ANY(v_protect)) ORDER BY hash);
-                WHILE cardinality(v_tfront) > 0 LOOP
-                    SELECT COALESCE(array_agg(level.hash), '{{}}'), COALESCE(array_agg(edge.child), '{{}}')
-                    INTO v_tparents, v_tchildren
-                    FROM unnest(v_tfront) AS level(hash), LATERAL ({children}) AS edge;
-                    WITH gone AS ({reclaim})
-                    SELECT COALESCE(array_agg(hash), '{{}}') INTO v_closure FROM gone;
-                    v_tfront := ARRAY(SELECT DISTINCT edge.child
-                        FROM unnest(v_tparents, v_tchildren) AS edge(parent, child)
-                        WHERE edge.parent = ANY(v_closure) AND NOT (edge.child = ANY(v_protect))
-                        ORDER BY edge.child);
-                END LOOP;
-            END IF;
-            v_texts := '{{}}';
-            v_protect := '{{}}';
-            v_rows := 0;"
+        "PERFORM * FROM ({reclaim}) AS retired; v_texts := '{{}}'; v_protect := '{{}}'; v_rows := 0;"
     )
+}
+
+/// Shared SQL inlining for domain-owned generated functions.
+pub(super) fn inline_statement(sql: &str, values: &[&str]) -> String {
+    inline(sql, values)
 }
 
 /// The artifact local end with the function's vouching for its answer
@@ -577,6 +559,7 @@ $lash_owner_commit$;
     ) + &crate::artifact_store::local_end_function_ddl()
         + &renewal_ddl()
         + &held_texts_ddl()
+        + &prompts::retirement_function_ddl()
         + &prompt_record_ddl()
 }
 

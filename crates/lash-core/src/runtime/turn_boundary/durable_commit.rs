@@ -239,15 +239,7 @@ fn committed_attachment_ids(
     graph: &crate::store::GraphAppend,
 ) -> Result<Vec<crate::AttachmentId>, crate::SessionError> {
     let mut ids = std::collections::BTreeSet::new();
-    for message in &state.read_model().messages {
-        for part in message.parts.iter() {
-            ids.extend(part.attachments().map(|reference| reference.id.clone()));
-            ids.extend(
-                part.retained_outputs()
-                    .map(|retained| retained.reference.id.clone()),
-            );
-        }
-    }
+    ids.extend(state.session_graph.active_attachment_ids());
     if let Some(executor) = executor {
         for node in graph.nodes() {
             if let crate::SessionNodePayload::Event {

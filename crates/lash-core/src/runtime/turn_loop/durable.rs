@@ -393,6 +393,8 @@ impl LashRuntime {
             .take()
             .expect("lash runtime session must be available");
         let driver = Box::new(RuntimeTurnDriver {
+            allocation_budget: lash_protocol_types::allocation::AllocationBudget::unowned(),
+            prompt_state: Default::default(),
             run: std::marker::PhantomData,
             session,
             policy: resolved_turn_policy,
