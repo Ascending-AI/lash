@@ -57,7 +57,7 @@ async fn stored(
 }
 
 pub(super) async fn apply(
-    tx: &mut PgConnection,
+    tx: &mut super::Tx,
     commit: &Committing<'_>,
     write: &SessionCloseWrite,
 ) -> Result<(), DurableError> {
@@ -67,7 +67,7 @@ pub(super) async fn apply(
                 .bind(session.as_str())
                 .bind(commit.now.0)
                 .bind(commit.epoch.0)
-                .execute(crate::observed_sql::executor(tx))
+                .execute(crate::observed_sql::executor(&mut ***tx))
                 .await
                 .map_err(sqlx_failure)?;
             Ok(())
@@ -88,11 +88,33 @@ pub(super) async fn apply(
                     },
                 ));
             }
+            if *step == SessionCloseStep::Artifacts {
+                let own = lash_durable::ActorKey::session(session.as_str())
+                    .map_err(|error| corrupt("session actor key", &error.to_string()))?;
+                if commit.actor != &own {
+                    return Err(corrupt(
+                        "session close authority",
+                        "Artifacts requires the session actor",
+                    ));
+                }
+                let terminal = crate::session_factory::delete_session_tx(
+                    tx,
+                    session,
+                    &mut Default::default(),
+                    commit.fleet,
+                    u64::try_from(commit.now.0).unwrap_or(0),
+                )
+                .await
+                .map_err(super::store_failure)?;
+                if let Some(terminal) = terminal {
+                    tx.stage_turn_change(terminal).await.map_err(sqlx_failure)?;
+                }
+            }
             crate::observed_sql::query(SQL.record_step.sql())
                 .bind(session.as_str())
                 .bind(step.as_str())
                 .bind(commit.epoch.0)
-                .execute(crate::observed_sql::executor(tx))
+                .execute(crate::observed_sql::executor(&mut ***tx))
                 .await
                 .map_err(sqlx_failure)?;
             Ok(())
@@ -101,7 +123,7 @@ pub(super) async fn apply(
             crate::observed_sql::query(SQL.scope_ended.sql())
                 .bind(session.as_str())
                 .bind(scope.stored())
-                .execute(crate::observed_sql::executor(tx))
+                .execute(crate::observed_sql::executor(&mut ***tx))
                 .await
                 .map_err(sqlx_failure)?;
             Ok(())

@@ -5,7 +5,7 @@ use lash_durable::{ActorKey, ActorState, DurableError, DurableInstant, Woken};
 use sqlx::PgConnection;
 
 use super::steps::{Entry, Shape, Step, Ty, Value};
-use super::{SQL, actor_key, sqlx_failure, wake_within};
+use super::{SQL, actor_key, sqlx_failure};
 
 /// The park's statement an owner commit runs as a step.
 pub(super) static SET_PARK: Entry =
@@ -33,9 +33,8 @@ pub(super) async fn set(
     Ok(())
 }
 
-/// Redrive a parked actor: control-wake it, then clear its park and its
-/// failed activations. A ready actor needs no park,
-/// so the wake goes first.
+/// Redrive only the observed actual park, advancing revision and mailbox
+/// together with readiness and diagnostic cleanup. A claimed actor refuses.
 pub(super) async fn redrive(
     tx: &mut PgConnection,
     request: &RedriveRequest,
@@ -47,16 +46,27 @@ pub(super) async fn redrive(
         .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
-    if park.and_then(|(park, _)| park).is_none() {
+    let Some(park) = park.and_then(|(park, _)| park) else {
         return Ok((RedriveAnswer::NotParked, None));
-    }
-    let (woken, _) = wake_within(tx, &request.actor, true, now).await?;
-    crate::observed_sql::query(SQL.park.clear_park.sql())
+    };
+    let changed = crate::observed_sql::query(SQL.park.redrive_parked.sql())
         .bind(actor)
-        .fetch_one(crate::observed_sql::executor(&mut *tx))
+        .bind(now.0)
+        .bind(park)
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(sqlx_failure)?;
-    Ok((RedriveAnswer::Redriven, Some(woken)))
+    if changed.is_none() {
+        return Ok((RedriveAnswer::NotParked, None));
+    }
+    Ok((
+        RedriveAnswer::Redriven,
+        Some(Woken {
+            actor: request.actor.clone(),
+            state: ActorState::Ready,
+            owner: None,
+        }),
+    ))
 }
 
 /// Redrive, for a boot, every session parked with a reason `redrive` names

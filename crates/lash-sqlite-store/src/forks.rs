@@ -274,6 +274,7 @@ pub(super) async fn fork_at_in_catalog(
                 leaf_node_id.clone().map(TryInto::try_into).transpose()?,
                 current_frame_node_id,
             )?;
+            crate::durable::bump_unclaimed_session(tx, &request.session_id, created_at_ms)?;
             let head_json = encode_json(&meta.payload())?;
             // The fork's own head is its first retained revision.
             crate::revisions::record_revision_conn(

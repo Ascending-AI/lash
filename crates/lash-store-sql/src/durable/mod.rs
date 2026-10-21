@@ -101,6 +101,21 @@ crate::statements! {
              ON CONFLICT (actor_key) DO NOTHING
              RETURNING actor_key";
 
+        /// Create a session actor without making runnable work.
+        create_idle = "INSERT INTO actors
+                 (actor_key, kind, state, epoch, ready_at_ms, next_due_ms, formats,
+                  state_revision, mail_seq, acked_seq, created_at_ms)
+             VALUES (?1, 'session', 'idle', 0, NULL, NULL, ?2, 0, 0, 0, ?3)
+             ON CONFLICT (actor_key) DO NOTHING";
+
+        /// The actor authority fact, read under the mutation lock.
+        claimed_epoch = "SELECT epoch FROM actors WHERE actor_key = ?1 AND state = 'owned'";
+
+        /// Advance a direct writer only while the actor is unclaimed and live.
+        bump_unclaimed = "UPDATE actors SET state_revision = state_revision + 1
+             WHERE actor_key = ?1 AND state <> 'owned' AND state <> 'terminal'
+             RETURNING state_revision";
+
         /// The owner fence: bump owned actor `?1`'s state revision only at
         /// epoch `?2`. No row means the caller is not the owner.
         fence = "UPDATE actors SET state_revision = state_revision + 1

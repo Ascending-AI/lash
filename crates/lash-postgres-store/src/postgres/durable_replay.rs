@@ -307,6 +307,7 @@ pub(super) async fn apply_owner(
     let Some(fence) = fence else {
         return Err(fenced(tx, write.actor(), write.epoch()).await?);
     };
+    PostgresDurableStore::lock_cross_target_heads(tx, write).await?;
     let publications: Vec<_> = write
         .domain()
         .iter()

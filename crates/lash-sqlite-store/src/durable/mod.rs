@@ -328,9 +328,9 @@ CREATE TABLE IF NOT EXISTS actor_mail (
 
 use access::SqliteDurableStatements;
 
-struct Sql {
+pub(crate) struct Sql {
     node: NodeStatements,
-    actor: ActorStatements,
+    pub(crate) actor: ActorStatements,
     mail: MailStatements,
     park: ActorParkStatements,
     process: ProcessActorStatements,
@@ -338,7 +338,7 @@ struct Sql {
     sqlite: SqliteDurableStatements,
 }
 
-static SQL: LazyLock<Sql> = LazyLock::new(|| {
+pub(crate) static SQL: LazyLock<Sql> = LazyLock::new(|| {
     let dialect = crate::schema_layout::MAIN;
     Sql {
         node: NodeStatements::render(dialect),
@@ -718,6 +718,52 @@ pub(crate) fn wake_within(
             MailSeq(seq),
         )
     }))
+}
+
+/// Guard and advance a fresh direct session mutation in its writer transaction.
+pub(crate) fn bump_unclaimed_session(
+    tx: &Connection,
+    session: &lash_protocol_types::SessionId,
+    at_ms: u64,
+) -> Result<(), lash_core_store::store::StoreError> {
+    use lash_core_store::store::{HeadOwnershipFacts, StoreError, require_unclaimed_actor};
+    let actor = ActorKey::session(session.as_str())
+        .map_err(|error| StoreError::Backend(error.to_string()))?;
+    cached_execute(
+        tx,
+        SQL.actor.create_idle.sql(),
+        rusqlite::params![
+            actor.as_str(),
+            lash_durable::domain::SESSION_ACTOR_FORMATS,
+            crate::clamp_epoch_ms(at_ms),
+        ],
+    )
+    .map_err(crate::sqlite_error)?;
+    let claimed_epoch = tx
+        .query_row(SQL.actor.claimed_epoch.sql(), [actor.as_str()], |row| {
+            row.get(0)
+        })
+        .optional()
+        .map_err(crate::sqlite_error)?;
+    require_unclaimed_actor(
+        session,
+        &HeadOwnershipFacts {
+            claimed_epoch,
+            ..Default::default()
+        },
+    )?;
+    let bumped = tx
+        .query_row(SQL.actor.bump_unclaimed.sql(), [actor.as_str()], |row| {
+            row.get::<_, i64>(0)
+        })
+        .optional()
+        .map_err(crate::sqlite_error)?;
+    if bumped.is_none() {
+        return Err(StoreError::SessionDeleted {
+            session_id: session.clone(),
+        });
+    }
+    Ok(())
 }
 
 /// Wake session `session`'s actor inside the caller's transaction, creating

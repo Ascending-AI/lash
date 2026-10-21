@@ -1439,6 +1439,7 @@ mod classification_tests {
                 run: crate::TurnId::from("bound-run"),
             },
             crate::store::SessionHeadOwner::CommandLane { enqueue_seq: 7 },
+            crate::store::SessionHeadOwner::Actor { epoch: 3 },
         ] {
             let plugin = PluginError::from(crate::StoreError::SessionHeadOwned {
                 session_id: session_id.clone(),

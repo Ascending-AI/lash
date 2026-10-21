@@ -126,12 +126,6 @@ crate::statements! {
                  park_json = ?2
              WHERE actor_key = ?1";
 
-        /// Clear actor `?1`'s park and failed activations. No row when it
-        /// had no park.
-        clear_park = "UPDATE actors SET park_json = NULL, failed_activations = 0
-             WHERE actor_key = ?1 AND park_json IS NOT NULL
-             RETURNING actor_key";
-
         /// Actor `?1`'s park and failed activations.
         park_of = "SELECT park_json, failed_activations FROM actors WHERE actor_key = ?1";
 
@@ -146,7 +140,7 @@ crate::statements! {
         /// mailbox position, make it ready, and clear its park and failed
         /// activations. No row when that park no longer stands.
         redrive_parked = "UPDATE actors
-             SET mail_seq = mail_seq + 1, state = 'ready', ready_at_ms = ?2,
+             SET state_revision = state_revision + 1, mail_seq = mail_seq + 1, state = 'ready', ready_at_ms = ?2,
                  park_json = NULL, failed_activations = 0
              WHERE actor_key = ?1 AND state = 'parked' AND park_json = ?3
              RETURNING actor_key";
