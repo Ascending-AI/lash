@@ -8,11 +8,11 @@
 use std::collections::BTreeMap;
 use std::ops::ControlFlow;
 
-use lash_kernel_doc::graph_tokens::{TokenCodec, encode_body};
 use lash_kernel_doc::heap::*;
 use lash_kernel_state::kernel_internals::PagedHeap;
 use lash_kernel_state::kernel_internals::tree::{Cell, Tree};
 use lash_kernel_state::paged::*;
+use lash_vocabulary::tokens::{TokenCodec, encode_body};
 
 /// A semantic checkpoint, independent of its storage layout.
 #[derive(Clone, Debug, Eq)]
@@ -119,7 +119,6 @@ pub fn checkpoint(
                     r.put(&4u64);
                     r.frozen(v)?;
                 }
-                CommittedOutcomeRecord::Elapsed => r.put(&5u64),
             },
         }
         Ok(())
@@ -351,24 +350,21 @@ impl Reader {
             | PageValue::Ref(Identity::Object(id)) => {
                 self.entity(*id)?;
             }
+            PageValue::Function(callable) => self.put(callable.as_ref()),
             PageValue::Int(IntRef::Inline(integer)) => {
                 self.put(&integer.is_negative());
                 self.graph
                     .push(lash_kernel_doc::heap_values::integer_digits(integer));
             }
-            PageValue::Text(_)
-            | PageValue::Function(_)
-            | PageValue::Bytes(_)
-            | PageValue::Int(IntRef::Paged { .. }) => {
+            PageValue::Text(_) | PageValue::Bytes(_) | PageValue::Int(IntRef::Paged { .. }) => {
                 let mut bytes = Vec::new();
                 let len = match value {
-                    PageValue::Text(t) | PageValue::Function(t) => t.summary.utf8_bytes,
+                    PageValue::Text(t) => t.summary.utf8_bytes,
                     PageValue::Bytes(b) => b.len,
                     PageValue::Int(IntRef::Paged { summary, .. }) => summary.bits.div_ceil(8),
                     _ => unreachable!(),
                 };
                 let payload = match value {
-                    PageValue::Function(t) => PageValue::Text(t.clone()),
                     _ => value.clone(),
                 };
                 self.heap.payload_visit(&payload, 0..len, &mut |chunk| {

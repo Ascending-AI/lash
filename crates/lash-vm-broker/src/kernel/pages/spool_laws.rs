@@ -23,8 +23,9 @@ use lash_durable::domain::pages::{LeaseFence, RootLease, RootLeaseId, StoredPage
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch};
 use lash_kernel_doc::heap::{HeapFault, HostResource, PageGrant, PageId, PageRef};
 use lash_kernel_state::paged::{PageBody, PageKind, PageSource};
+use lash_protocol_types::engine_fault::InfrastructureOutcome;
+use lash_vm_protocol::ProtocolBounds;
 use lash_vm_protocol::page::{PageCapability, PageEnvelope, PageRefusal, PageReply, PageRequest};
-use lash_vm_protocol::{InfrastructureOutcome, ProtocolBounds};
 
 use lash_core_execution::runtime::SystemClock;
 

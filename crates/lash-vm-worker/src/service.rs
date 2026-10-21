@@ -4,9 +4,10 @@
 use lash_kernel_dialect::workflow::WorkflowSourceLimits;
 use lash_kernel_dialect::{Diagnostic, DiagnosticKind, Mode};
 use lash_kernel_doc::{Document, SourceLanguage};
+use lash_protocol_types::engine_fault::{Detail, PayloadKind, RunInput, RunRefusal};
 use lash_vm_client::PoolError;
 use lash_vm_client::service::{DialectRefusal, Request, Response};
-use lash_vm_protocol::{Detail, EncodedPayload, PayloadKind, RunInput, RunRefusal};
+use lash_vm_protocol::EncodedPayload;
 
 use crate::embedding::Embedding;
 
@@ -22,59 +23,35 @@ pub(crate) fn perform(
             source,
             bindings,
             functions,
-            operations,
-            packages,
-        } => {
-            let surface = surface_of(embedding, &packages)?;
-            let namespaces = match embedding.namespaces(operations, &surface) {
-                Ok(namespaces) => namespaces,
-                Err(refused) => return respond(&namespace_refused(refused)),
-            };
-            match embedding.dialects.get(&dialect) {
-                None => Response::UnknownDialect { dialect },
-                Some(package) => match package.front_end.tool_calls(
-                    &source,
-                    &lash_kernel_dialect::Environment::new(surface.library(), &namespaces),
-                    lash_kernel_dialect::CellEnvironment {
-                        bindings: &bindings,
-                        functions: &functions
-                            .into_iter()
-                            .map(|(name, function)| (name, function.into_saved()))
-                            .collect(),
-                    },
-                ) {
-                    Ok(calls) => {
-                        let view = surface.view(embedding.packages().functions());
-                        Response::ToolCalls(
-                            calls
-                                .into_iter()
-                                .filter(|path| {
-                                    !lash_kernel_dialect::ExportView::owns_namespace(&view, path)
-                                })
-                                .collect(),
-                        )
-                    }
-                    Err(diagnostic) => Response::DialectRefused(refusal(diagnostic)),
+            namespaces,
+        } => match embedding.dialects.get(&dialect) {
+            None => Response::UnknownDialect { dialect },
+            Some(package) => match package.front_end.tool_calls(
+                &source,
+                &lash_kernel_dialect::Environment::new(embedding.library(), &namespaces),
+                lash_kernel_dialect::CellEnvironment {
+                    bindings: &bindings,
+                    functions: &functions
+                        .into_iter()
+                        .map(|(name, function)| (name, function.into_saved()))
+                        .collect(),
                 },
-            }
-        }
+            ) {
+                Ok(calls) => Response::ToolCalls(calls),
+                Err(diagnostic) => Response::DialectRefused(refusal(diagnostic)),
+            },
+        },
         Request::Lower {
             dialect,
             source,
-            operations,
+            namespaces,
             bindings,
             functions,
-            packages,
         } => {
-            let surface = surface_of(embedding, &packages)?;
-            let namespaces = match embedding.namespaces(operations, &surface) {
-                Ok(namespaces) => namespaces,
-                Err(refused) => return respond(&namespace_refused(refused)),
-            };
             match embedding.lower(
                 &dialect,
                 &source,
-                &lash_kernel_dialect::Environment::new(surface.library(), &namespaces),
+                &lash_kernel_dialect::Environment::new(embedding.library(), &namespaces),
                 Mode::Cell(lash_kernel_dialect::CellEnvironment {
                     bindings: &bindings,
                     functions: &functions
@@ -85,19 +62,6 @@ pub(crate) fn perform(
             ) {
                 None => Response::UnknownDialect { dialect },
                 Some(Ok(lowered)) => Response::Lowered {
-                    reads: {
-                        // A dialect that validated while lowering spares the
-                        // run's admission the same check (FIG-6931).
-                        if lowered.validated
-                            && let Ok(prepared) = embedding.prepared_library()
-                        {
-                            prepared.note_validated(
-                                lowered.document.id(),
-                                lash_kernel_doc::KernelDataLimits::standard(),
-                            );
-                        }
-                        reached(&lowered.document, surface.library(), &namespaces)
-                    },
                     document: lowered.document.body().to_vec(),
                     source_map: lowered.source_map,
                     written: lowered.written,
@@ -114,19 +78,25 @@ pub(crate) fn perform(
         Request::ImportWorkflow {
             language,
             source,
-            operations,
-            packages,
-            declared_packages,
+            namespaces,
             limits,
-        } => import_selected(
-            embedding,
-            language,
-            &source,
-            operations,
-            &packages,
-            &declared_packages,
-            limits,
-        )?,
+        } => {
+            let environment =
+                lash_kernel_dialect::Environment::new(embedding.library(), &namespaces);
+            match import_module(embedding, language, &source, &environment, limits) {
+                None => Response::UnknownDialect {
+                    dialect: dialect_name(language).into(),
+                },
+                Some(Err(diagnostic)) => Response::DialectRefused(refusal(diagnostic)),
+                Some(Ok(lowered)) => Response::Lowered {
+                    document: lowered.document.body().to_vec(),
+                    source_map: lowered.source_map,
+                    written: lowered.written,
+                    captions: Some(lowered.captions),
+                    function_values: None,
+                },
+            }
+        }
 
         Request::Print {
             format,
@@ -185,37 +155,6 @@ fn respond(response: &Response) -> Result<EncodedPayload, PoolError> {
         .map_err(|error| PoolError::payload(PayloadKind::ServiceResponse, error))
 }
 
-/// A namespace tree the offered operations could not compose, as the
-/// dialect refusal of the source lowered against it.
-fn namespace_refused(refused: crate::embedding::Namespaces) -> Response {
-    let crate::embedding::Namespaces::Refused(refused) = refused;
-    Response::DialectRefused(DialectRefusal {
-        code: "NAMESPACE_REFUSED".to_owned(),
-        message: refused.to_string(),
-        span: None,
-        unsupported: false,
-        repairs: vec!["offer the operation under another package path".to_owned()],
-    })
-}
-
-/// The names and surface of `packages`: the worker's own set, or a stored
-/// surface sent with what the worker lacks of it (FIG-6991, FIG-6993).
-///
-/// # Errors
-///
-/// A set neither the worker's nor sent, a surface whose names do not
-/// assemble, or a stored one that does not read as what it claims to be:
-/// each a defect of the parent.
-fn surface_of<'a>(
-    embedding: &'a Embedding,
-    packages: &lash_vm_client::service::SurfaceRef,
-) -> Result<crate::embedding::Surface<'a>, PoolError> {
-    embedding
-        .surface(packages)
-        .map_err(|error| PoolError::payload(PayloadKind::ServiceRequest, error))
-}
-
-/// The installed dialect's name for source in `language`.
 fn dialect_name(language: SourceLanguage) -> &'static str {
     match language {
         SourceLanguage::TypeScript => lash_vm_releases::TYPESCRIPT,
@@ -302,38 +241,8 @@ fn python_module(
     None
 }
 
-/// The operations offered as reads that the cell `document`'s `main` calls
-/// or spawns; none when its linked effects cannot be certified, so every
-/// effect it performs stays recorded.
-fn reached(
-    document: &Document,
-    library: &dyn lash_kernel_doc::FunctionCatalog,
-    namespaces: &lash_kernel_dialect::Namespaces,
-) -> std::collections::BTreeSet<lash_kernel_doc::EffectName> {
-    let mut reads = namespaces
-        .operations()
-        .iter()
-        .filter(|(_, offered)| offered.read)
-        .map(|(operation, _)| operation.effect_name())
-        .collect::<std::collections::BTreeSet<_>>();
-    if reads.is_empty() {
-        return reads;
-    }
-    let linked = lash_kernel_check::derive_view(document, library)
-        .ok()
-        .and_then(|graph| lash_kernel_check::main_effects(document, &graph, library).ok());
-    match linked {
-        Some(linked) => {
-            reads.retain(|effect| linked.contains_key(effect));
-            reads
-        }
-        None => std::collections::BTreeSet::new(),
-    }
-}
-
-/// A document a request carries as its token body.
 fn decoded_document(body: Vec<u8>) -> Result<Document, PoolError> {
-    lash_kernel_doc::graph_tokens::decode_body(&body).map_err(|error| {
+    lash_vocabulary::tokens::decode_body(&body).map_err(|error| {
         PoolError::refused(RunRefusal::Undecodable {
             input: RunInput::Document,
             detail: Detail::new(error),
@@ -367,10 +276,9 @@ mod tests {
         let lower = |functions| Request::Lower {
             dialect: "typescript".to_owned(),
             source: "function advance(value) { return value + 2; }".to_owned(),
-            operations: Default::default(),
+            namespaces: Default::default(),
             bindings: Default::default(),
             functions,
-            packages: lash_vm_client::service::SurfaceRef::held(embedding.packages().digest()),
         };
         let encoded =
             EncodedPayload(rmp_serde::to_vec_named(&lower(Default::default())).expect("request"));
@@ -393,16 +301,27 @@ mod tests {
         assert_eq!(identified.id(), identified.document().identity());
         assert_eq!(source_map.expect("a source map").document, identified.id());
 
-        let name = lash_kernel_doc::Name::new("advance");
+        let name = lash_vocabulary::legacy_names::Name::new("advance");
         let function = lash_vm_client::service::LowerFunction {
             name: name.clone(),
             document: identified.clone(),
-            helper_owners: Default::default(),
+            link: lash_vocabulary::LinkId::from_bytes([1; 32]),
+            callable: lash_vocabulary::CallableId {
+                link: lash_vocabulary::LinkId::from_bytes([1; 32]),
+                function: *identified
+                    .functions
+                    .keys()
+                    .next()
+                    .expect("authored function"),
+            },
+            environment: lash_kernel_doc::heap::EntityId {
+                family: lash_kernel_doc::heap::FamilyId(0),
+                ordinal: 0,
+            },
             references: Default::default(),
             written: None,
             token: None,
             held: None,
-            against: Default::default(),
         };
         let wire =
             rmp_serde::to_vec_named(&lower([(name.clone(), function)].into())).expect("request");
@@ -516,131 +435,5 @@ mod tests {
             ));
             assert_eq!(READER_CALLS.replace(0), 1);
         }
-    }
-}
-
-/// Lower against the declaration. A failed lowering may inspect the full
-/// surface solely to report all undeclared requirements; that document is
-/// never returned or admitted.
-fn import_selected(
-    embedding: &Embedding,
-    language: SourceLanguage,
-    source: &str,
-    operations: lash_kernel_dialect::Operations,
-    packages: &lash_vm_client::service::SurfaceRef,
-    declared: &lash_kernel_package::PackageSelection,
-    limits: Option<WorkflowSourceLimits>,
-) -> Result<Response, PoolError> {
-    let surface = surface_of(embedding, packages)?;
-    let view = surface.view(embedding.packages().functions());
-    let selected = lash_kernel_package::SelectedPackages::new(view.surface(), declared);
-    let reserves = |root: &str| {
-        embedding
-            .dialects
-            .values()
-            .find_map(|package| package.front_end.reserves(root))
-    };
-    let permitted = operations
-        .iter()
-        .filter(|(operation, _)| selected.permits_operation(operation))
-        .map(|(operation, offered)| (operation.clone(), offered.clone()))
-        .collect();
-    let namespaces = lash_kernel_dialect::Namespaces::build(
-        &lash_kernel_dialect::Reserving {
-            view: &selected,
-            reserves: &reserves,
-        },
-        permitted,
-    )
-    .map_err(|error| PoolError::payload(PayloadKind::ServiceRequest, error))?;
-    let library = SelectedLibrary {
-        library: surface.library(),
-        packages: &selected,
-    };
-    let environment = lash_kernel_dialect::Environment::new(&library, &namespaces);
-    let lowered = import_module(embedding, language, source, &environment, limits);
-    match lowered {
-        None => Ok(Response::UnknownDialect {
-            dialect: dialect_name(language).into(),
-        }),
-        Some(Ok(lowered)) => {
-            let requirements =
-                lash_kernel_check::requirements(lowered.document.document(), surface.library());
-            let members = selected.undeclared(
-                &requirements.functions,
-                requirements
-                    .effects
-                    .iter()
-                    .chain(requirements.performs.keys()),
-            );
-            if !members.is_empty() {
-                return Ok(Response::UndeclaredMembers { members });
-            }
-            Ok(Response::Lowered {
-                document: lowered.document.body().to_vec(),
-                source_map: lowered.source_map,
-                written: lowered.written,
-                captions: Some(lowered.captions),
-                function_values: None,
-                reads: Default::default(),
-            })
-        }
-        Some(Err(diagnostic)) => {
-            let full_namespaces = match embedding.namespaces(operations, &surface) {
-                Ok(namespaces) => namespaces,
-                Err(refusal) => return Ok(namespace_refused(refusal)),
-            };
-            let full_environment =
-                lash_kernel_dialect::Environment::new(surface.library(), &full_namespaces);
-            if let Some(Ok(lowered)) =
-                import_module(embedding, language, source, &full_environment, limits)
-            {
-                let requirements =
-                    lash_kernel_check::requirements(lowered.document.document(), surface.library());
-                let members = selected.undeclared(
-                    &requirements.functions,
-                    requirements
-                        .effects
-                        .iter()
-                        .chain(requirements.performs.keys()),
-                );
-                if !members.is_empty() {
-                    return Ok(Response::UndeclaredMembers { members });
-                }
-            }
-            Ok(Response::DialectRefused(refusal(diagnostic)))
-        }
-    }
-}
-
-struct SelectedLibrary<'a> {
-    library: &'a dyn lash_kernel_dialect::Library,
-    packages: &'a lash_kernel_package::SelectedPackages<'a>,
-}
-impl lash_kernel_doc::FunctionCatalog for SelectedLibrary<'_> {
-    fn definition(
-        &self,
-        function: &lash_kernel_doc::FunctionId,
-    ) -> Option<&lash_kernel_doc::FunctionDefinition> {
-        self.packages
-            .permits_function(function)
-            .then(|| self.library.definition(function))
-            .flatten()
-    }
-    fn registered(
-        &self,
-        function: &lash_kernel_doc::FunctionId,
-    ) -> Option<&lash_kernel_doc::RegisteredFunction> {
-        self.packages
-            .permits_function(function)
-            .then(|| self.library.registered(function))
-            .flatten()
-    }
-}
-impl lash_kernel_dialect::Library for SelectedLibrary<'_> {
-    fn resolve(&self, name: &str) -> Option<lash_kernel_doc::FunctionId> {
-        self.library
-            .resolve(name)
-            .filter(|function| self.packages.permits_function(function))
     }
 }

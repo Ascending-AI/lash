@@ -23,6 +23,7 @@ impl CensusGraph for PagedHeap {
         &mut self,
         visit: &mut dyn FnMut(&PageValue) -> Result<(), HeapFault>,
     ) -> Result<(), HeapFault> {
+        self.visit_saved_environments(visit)?;
         self.visit_session_bindings(&mut |b| binding_values(b, visit))?;
         visit_tree(&self.joins, &self.access, &mut |join| {
             visit_tree(&join.members, &self.access, &mut |member| {

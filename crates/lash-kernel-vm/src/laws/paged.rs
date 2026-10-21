@@ -1,11 +1,11 @@
 //! Continuation and pressure laws over the real persistent heap and S7 census.
 use super::embedder::{Embedder, Setup, int, result};
 use crate::{Machine, Request, Step};
-use lash_kernel_doc::graph_tokens::encode_body;
 use lash_kernel_doc::heap::PageValue;
 use lash_kernel_state::kernel_internals::census_impl::Census;
 use lash_kernel_state::kernel_internals::{PagedHeap, tree};
 use lash_kernel_state::paged::*;
+use lash_vocabulary::tokens::encode_body;
 
 fn reopen(embedder: &mut Embedder) -> CheckpointRoot {
     embedder.reopen(crate::compile::Layout::default(), true)
@@ -630,8 +630,8 @@ fn checkpoint_equality_keeps_continuations_and_ignores_allocator_history() {
     let frame_key = lash_kernel_state::kernel_internals::directory::ordinal_key(0);
     let mut frame = task.frames.get(&frame_key, heap.pages()).unwrap().unwrap();
     frame.statement = lash_kernel_state::paged::SiteRef::new(
-        &lash_kernel_doc::Site {
-            unit: lash_kernel_doc::Unit::Main,
+        &lash_vocabulary::sites::Site {
+            unit: lash_vocabulary::sites::Unit::Main,
             path: vec![0],
         },
         heap.pages(),
@@ -653,7 +653,7 @@ fn checkpoint_equality_keeps_continuations_and_ignores_allocator_history() {
     assert_ne!(snapshot(&moved), original, "a frame pc is exact");
     let mut bindings = Tree::<BindingRecord>::of_keyed(&garbage.session);
     let key = lash_kernel_state::kernel_internals::metadata::metadata_key(
-        &lash_kernel_doc::Name::new("b"),
+        &lash_vocabulary::legacy_names::Name::new("b"),
     );
     let mut binding = bindings.get(&key, heap.pages()).unwrap().unwrap();
     let independent = heap

@@ -1,7 +1,10 @@
 //! The forms, strict operations, the effect boundary, host reads, charges
 //! and sessions: one case per rule, in kernel text.
 
-use lash_kernel_doc::{Datum, Float, Handle, Integer, Name, Site, Timestamp, Unit};
+use lash_kernel_doc::{Datum, Float, Handle, Integer, Timestamp};
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 use super::embedder::{Embedder, Setup, int, record, result, run, text, uncaught, value};
 use crate::{CellStart, End, Layout, Machine, Step, Target};

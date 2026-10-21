@@ -4,10 +4,10 @@
 //! Host-owned source operations, isolated in the service's worker pool.
 use lash_kernel_dialect::{GeneratedSourceLimits, PrintOptions, PrintedSource, SourceFormat};
 use lash_kernel_doc::{Captions, Document, IdentifiedDocument};
+use lash_protocol_types::engine_fault::{PayloadKind, SequenceFault};
 
 use super::{DialectRefusal, Request, Response, Service, runtime_ops::ServiceRuntimeOps as _};
 use crate::PoolError;
-use lash_vm_protocol::{PayloadKind, SequenceFault};
 
 /// A pure source operation's typed refusal or worker failure. Decoding a
 /// document does not admit it; admission remains a separate host operation.
@@ -69,18 +69,14 @@ impl Service {
         &self,
         language: lash_kernel_doc::SourceLanguage,
         source: &str,
-        operations: &lash_kernel_dialect::Operations,
-        packages: super::SurfaceRef,
-        declared_packages: lash_kernel_package::PackageSelection,
+        namespaces: &lash_kernel_dialect::Namespaces,
         limits: Option<lash_kernel_dialect::workflow::WorkflowSourceLimits>,
     ) -> Result<(Document, lash_kernel_doc::SourceMap, Captions), SourceServiceError> {
         let response = self
             .request_accounted(Request::ImportWorkflow {
                 language,
                 source: source.to_owned(),
-                operations: operations.clone(),
-                packages,
-                declared_packages,
+                namespaces: namespaces.clone(),
                 limits,
             })
             .await?;

@@ -27,13 +27,16 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use lash_kernel_doc as doc;
-use lash_kernel_doc::{
-    Document, FunctionDefinition, FunctionId, FunctionRegistry, JoinMode, Name, Site, Type, Unit,
-};
+use lash_kernel_doc::{Document, FunctionDefinition, FunctionRegistry, JoinMode};
 use lash_kernel_exec::{
     ActIx, BoundaryKind, KirError, Op, OpRange, Reg, RegionTable, StepEdge, StmtRanges,
     Tables as StreamTables, verify_stream,
 };
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
+use lash_vocabulary::types::Type;
 
 use crate::costs::Costs;
 use crate::functions::{MachineFunction, machine_function, machine_name};
@@ -382,6 +385,7 @@ fn missing(registry: &FunctionRegistry) -> BTreeMap<FunctionId, FunctionId> {
 /// The document's codes, blocks and statements are numbered after the
 /// library's.
 pub(crate) struct Executable {
+    pub(crate) instances: BTreeMap<lash_vocabulary::content_ids::LinkId, Arc<Document>>,
     // Immutable census boundaries, beside the document hot path.
     code_base: usize,
     block_base: usize,
@@ -404,8 +408,8 @@ pub(crate) struct DocumentCode {
     pub(crate) site_count: usize,
     pub(crate) action_ordinals: BTreeMap<Site, u32>,
     pub(crate) condition_ordinals: BTreeMap<u32, u32>,
-    pub(crate) main: CodeId,
-    pub(crate) declared: BTreeMap<Name, CodeId>,
+    pub(crate) main: Option<CodeId>,
+    pub(crate) declared: BTreeMap<FunctionId, CodeId>,
     /// The functions the bodies of the library functions the document
     /// lists reach where the machine runs them, which a frame of the run
     /// may stand in beside those it lists. Found only when a run asks for
@@ -578,13 +582,28 @@ impl Executable {
 
     /// The run-root cleanup of the entry whose body is `code`, when its
     /// start convention declares one (`StartConvention::PyDirect`).
-    pub(crate) fn root_cleanup(&self, code: CodeId) -> Option<LibId> {
-        let site = &self.code(code).site;
-        let (doc::Unit::Function(name), true) = (&site.unit, site.path.is_empty()) else {
+    pub(crate) fn root_cleanup(&self, code: CodeId) -> Option<LinkedHook> {
+        let Unit::Library(function) = self.code(code).site.unit else {
             return None;
         };
-        match &self.document.entries.get(name)?.convention {
-            doc::StartConvention::PyDirect { cleanup } => self.lib_of(cleanup),
+        let definition = self
+            .document
+            .exports
+            .values()
+            .find_map(|export| match export {
+                doc::Export::Function(export) if export.function == function => Some(export),
+                _ => None,
+            })?;
+        match &definition.convention {
+            doc::StartConvention::PyDirect { cleanup } => match cleanup {
+                doc::FunctionTarget::Local(function) => self
+                    .declared
+                    .get(function)
+                    .copied()
+                    .map(LinkedHook::Code)
+                    .or_else(|| self.lib_of(function).map(LinkedHook::Library)),
+                doc::FunctionTarget::Import(slot) => Some(LinkedHook::Import(*slot)),
+            },
             _ => None,
         }
     }
@@ -607,8 +626,11 @@ impl Executable {
     /// `function`: the document lists it, or the body of one it lists
     /// reaches it where the machine runs that body.
     fn reaches(&self, function: &FunctionId) -> bool {
-        let listed = &self.document.manifest.functions;
-        listed.contains_key(function)
+        let listed = &self.document.functions;
+        self.instances
+            .values()
+            .any(|document| document.functions.contains_key(function))
+            || listed.contains_key(function)
             || self
                 .own
                 .reached
@@ -638,6 +660,9 @@ impl Executable {
     fn tables_of(&self, unit: &Unit) -> Option<&Tables> {
         match unit {
             Unit::Library(function) => {
+                if self.own.declared.contains_key(function) {
+                    return Some(&self.own.tables);
+                }
                 if !self.reaches(function) {
                     return None;
                 }
@@ -693,7 +718,10 @@ impl Executable {
     }
 
     /// The registered name of a library function, listed or not.
-    pub(crate) fn library_name(&self, function: &FunctionId) -> Option<&doc::FunctionName> {
+    pub(crate) fn library_name(
+        &self,
+        function: &FunctionId,
+    ) -> Option<&lash_vocabulary::legacy_names::FunctionName> {
         self.library
             .0
             .registry
@@ -705,6 +733,7 @@ impl Executable {
 /// One function body: `main`, a declared function, a library body or a
 /// closure.
 pub(crate) struct Code {
+    pub(crate) created: Option<Site>,
     /// The site of the body: a unit's, or a closure expression's child.
     pub(crate) site: Site,
     pub(crate) params: Vec<Local>,
@@ -881,13 +910,11 @@ pub(crate) enum NestedKind {
     /// so no occurrence of its site is counted.
     Body(LibId),
     Perform {
-        effect: doc::EffectName,
+        slot: lash_vocabulary::names::ImportSlot,
         result: Type,
         then_yield: bool,
     },
-    Sleep {
-        then_yield: bool,
-    },
+
     Spawn(NestedCallee),
     Join,
     JoinMany(JoinMode),
@@ -902,13 +929,14 @@ impl NestedKind {
             Self::Perform {
                 then_yield: true,
                 ..
-            } | Self::Sleep { then_yield: true }
+            }
         )
     }
 }
 
 /// What a nested call or `spawn` runs.
 pub(crate) enum NestedCallee {
+    Import(lash_vocabulary::names::ImportSlot),
     Declared(CodeId),
     Library(LibId),
     /// A closure or function reference held in a variable, read into the
@@ -939,7 +967,7 @@ pub(crate) enum Form {
     Plain,
     ReturnVia {
         site: Site,
-        policy: LibId,
+        policy: LinkedHook,
     },
     If {
         then_block: BlockId,
@@ -978,13 +1006,28 @@ pub(crate) enum Form {
     Action(Action),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LinkedHook {
+    Library(LibId),
+    Code(CodeId),
+    Import(lash_vocabulary::names::ImportSlot),
+}
+impl LinkedHook {
+    pub(crate) fn library(self) -> Option<LibId> {
+        match self {
+            Self::Library(lib) => Some(lib),
+            _ => None,
+        }
+    }
+}
+
 /// A loop protocol's hooks, compiled (`K-ITER-005`).
 #[derive(Clone, Copy)]
 pub(crate) struct Via {
-    pub(crate) open: LibId,
-    pub(crate) next: Option<LibId>,
-    pub(crate) item: Option<LibId>,
-    pub(crate) check: Option<LibId>,
+    pub(crate) open: LinkedHook,
+    pub(crate) next: Option<LinkedHook>,
+    pub(crate) item: Option<LinkedHook>,
+    pub(crate) check: Option<LinkedHook>,
 }
 
 impl Stmt {
@@ -1038,15 +1081,12 @@ pub(crate) enum ActionKind {
         args: Vec<Atom>,
     },
     Perform {
-        effect: doc::EffectName,
+        slot: lash_vocabulary::names::ImportSlot,
         args: Vec<Atom>,
         result: Type,
         then_yield: bool,
     },
-    Sleep {
-        duration: Atom,
-        then_yield: bool,
-    },
+
     Join(Atom),
     JoinMany(JoinMode, Atom),
     Yield,
@@ -1066,9 +1106,6 @@ impl ActionKind {
             Self::Perform {
                 then_yield: true,
                 ..
-            } | Self::Sleep {
-                then_yield: true,
-                ..
             }
         )
     }
@@ -1078,6 +1115,7 @@ pub(crate) enum Callee {
     Declared(CodeId),
     Value(Var),
     Library(LibId),
+    Import(lash_vocabulary::names::ImportSlot),
 }
 
 pub(crate) enum Atom {
@@ -1144,7 +1182,7 @@ struct Resolve<'a> {
     library: &'a Prepared,
     /// The functions a document lists; a library body's calls resolve
     /// against the whole registry, which its registration checked.
-    listed: Option<&'a BTreeMap<FunctionId, doc::FunctionName>>,
+    listed: Option<&'a BTreeMap<FunctionId, lash_vocabulary::legacy_names::FunctionName>>,
 }
 
 /// How a library function runs when it is called inside an expression.
@@ -1213,7 +1251,7 @@ struct Compiler<'a> {
     spare_regions: Vec<lower::Regions>,
     /// The next property read site.
     sites: u32,
-    declared: BTreeMap<Name, CodeId>,
+    declared: BTreeMap<FunctionId, CodeId>,
     resolve: Resolve<'a>,
     /// The codes being compiled, the outermost first; each closure adds one.
     scopes: Vec<Scopes>,
@@ -1231,7 +1269,7 @@ struct Compiler<'a> {
 
 enum UnitSource<'a> {
     Main,
-    Function(&'a Name),
+    Function(&'a FunctionId),
 }
 
 /// Compiles `document`'s own code over `library`, which holds every
@@ -1242,7 +1280,7 @@ fn compile_document(
 ) -> Result<DocumentCode, Missing> {
     let prepared = &library.0;
     if !prepared.missing.is_empty() {
-        for function in document.manifest.functions.keys() {
+        for function in document.functions.keys() {
             if let Some(absent) = prepared.missing.get(function) {
                 return Err(Missing(*absent));
             }
@@ -1250,15 +1288,34 @@ fn compile_document(
     }
     let layout = prepared.layout.shape();
     let mut shuffler = Shuffler(layout.0);
-    let mut units: Vec<UnitSource<'_>> = vec![UnitSource::Main];
-    units.extend(document.functions.keys().map(UnitSource::Function));
+    let mut units: Vec<UnitSource<'_>> = document
+        .main
+        .as_ref()
+        .map(|_| UnitSource::Main)
+        .into_iter()
+        .collect();
+    units.extend(
+        document
+            .functions
+            .iter()
+            .filter(|(_, f)| {
+                matches!(
+                    &f.implementation,
+                    doc::Implementation::Guest {
+                        metering: doc::Metering::Statements,
+                        ..
+                    }
+                )
+            })
+            .map(|(id, _)| UnitSource::Function(id)),
+    );
     shuffler.shuffle(layout, &mut units);
     let mut compiler = Compiler::new(
         layout,
         shuffler,
         Resolve {
             library: prepared,
-            listed: Some(&document.manifest.functions),
+            listed: None,
         },
         &document.private_bindings,
         Base {
@@ -1271,10 +1328,10 @@ fn compile_document(
     );
     compiler.metered = prepared.charge == crate::Charge::Exact;
     let codes: Vec<CodeId> = units.iter().map(|_| compiler.reserve()).collect();
-    let mut main = codes.first().copied().unwrap_or(CodeId(0));
+    let mut main = None;
     for (unit, code) in units.iter().zip(&codes) {
         match unit {
-            UnitSource::Main => main = *code,
+            UnitSource::Main => main = Some(*code),
             UnitSource::Function(name) => {
                 compiler.declared.insert((*name).clone(), *code);
             }
@@ -1282,11 +1339,25 @@ fn compile_document(
     }
     for (unit, code) in units.iter().zip(codes) {
         match unit {
-            UnitSource::Main => compiler.unit_code(code, Unit::Main, &[], &document.main, true),
+            UnitSource::Main => compiler.unit_code(
+                code,
+                Unit::Main,
+                &[],
+                document.main.as_ref().unwrap_or(&Vec::new()),
+                true,
+            ),
             UnitSource::Function(name) => {
                 if let Some(function) = document.functions.get(*name) {
-                    let unit = Unit::Function((*name).clone());
-                    compiler.unit_code(code, unit, &function.params, &function.body, true);
+                    let unit = Unit::Library(**name);
+                    let params: Vec<_> = function
+                        .signature
+                        .params
+                        .iter()
+                        .map(|p| p.name.clone())
+                        .collect();
+                    if let Some(body) = function.body() {
+                        compiler.unit_code(code, unit, &params, &body.block, true);
+                    }
                 }
             }
         }
@@ -1569,7 +1640,7 @@ impl From<doc::Literal> for Constant {
             doc::Literal::Float(value) => Some(doc::Value::Float(*value)),
             doc::Literal::Int(value) => value.word().map(doc::Value::Int),
             doc::Literal::Text(text) => ShortText::new(text).map(doc::Value::Text),
-            doc::Literal::Function(name) => ShortText::new(name.as_str()).map(doc::Value::Function),
+            doc::Literal::Function(_) => None,
             doc::Literal::Bytes(_) => None,
         };
         resident.map_or_else(|| Self::Deferred(literal), Self::Resident)

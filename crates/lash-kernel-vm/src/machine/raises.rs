@@ -17,8 +17,10 @@
 //! which names it; one a run-root cleanup held leaves the entry with no
 //! document statement to name it.
 
-use lash_kernel_doc::{Site, TaskId, Unit};
+use lash_kernel_doc::TaskId;
 use lash_kernel_exec::ActIx;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 use super::{Control, Frame, Halt, KernelMachine};
 use crate::compile::{ActionKind, BlockId, Executable, Form, NestedKind, StmtId};
@@ -66,10 +68,7 @@ fn standing(frame: &Frame, exe: &Executable) -> Option<Coordinate> {
     let waits = |kind: &NestedKind| {
         matches!(
             kind,
-            NestedKind::Perform { .. }
-                | NestedKind::Sleep { .. }
-                | NestedKind::Join
-                | NestedKind::JoinMany(_)
+            NestedKind::Perform { .. } | NestedKind::Join | NestedKind::JoinMany(_)
         )
     };
     match (frame.awaiting, frame.nested) {
@@ -82,7 +81,7 @@ fn standing(frame: &Frame, exe: &Executable) -> Option<Coordinate> {
                 Form::Action(action) if matches!(
                     action.kind,
                     ActionKind::Perform { .. }
-                        | ActionKind::Sleep { .. }
+
                         | ActionKind::Join(_)
                         | ActionKind::JoinMany(..)
                 )

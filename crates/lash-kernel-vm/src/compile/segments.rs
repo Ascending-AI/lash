@@ -14,8 +14,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash_kernel_doc::plan::{HelperPlan, PlanLoop, SiteCall};
-use lash_kernel_doc::{Site, Unit};
 use lash_kernel_exec::ActIx;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 use super::{ActionKind, Base, BlockId, CodeId, Form, Local, NestedKind, StmtId, Suffix, Tables};
 

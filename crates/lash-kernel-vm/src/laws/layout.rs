@@ -312,7 +312,7 @@ fn session_binding_images_are_identical_across_layouts_and_cold_caches() {
         lash_kernel_state::paged::HeapLifecycle::adopt(&mut heap, &carry).unwrap();
         for name in ["v0", "v69", long.as_str()] {
             assert!(
-                heap.session_binding(&lash_kernel_doc::Name::new(name))
+                heap.session_binding(&lash_vocabulary::legacy_names::Name::new(name))
                     .unwrap()
                     .is_some(),
                 "the prepared key must equal the canonical key for {name}"

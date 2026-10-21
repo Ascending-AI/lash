@@ -2,8 +2,8 @@
 //! scripted delivery order. Each asserts values, errors, effect identities
 //! and the order of side effects.
 
-const WAIT_0: lash_kernel_doc::WaitId = lash_kernel_doc::kernel_internals::wait_id(0);
-const WAIT_7: lash_kernel_doc::WaitId = lash_kernel_doc::kernel_internals::wait_id(7);
+const WAIT_0: lash_vocabulary::sites::WaitId = lash_kernel_doc::kernel_internals::wait_id(0);
+const WAIT_7: lash_vocabulary::sites::WaitId = lash_kernel_doc::kernel_internals::wait_id(7);
 
 use lash_kernel_doc::kernel_internals::{
     EffectIdentity, LoopIteration, SpawnIdentity, TaskIdentity,
@@ -30,7 +30,11 @@ fn pair(a: &str, b: &str) -> Datum {
     Datum::Tuple(vec![text(a), text(b)])
 }
 
-fn spawned(parent: TaskIdentity, site: lash_kernel_doc::Site, occurrence: u64) -> TaskIdentity {
+fn spawned(
+    parent: TaskIdentity,
+    site: lash_vocabulary::sites::Site,
+    occurrence: u64,
+) -> TaskIdentity {
     TaskIdentity::Spawned(SpawnIdentity {
         parent: Arc::new(parent),
         site,
@@ -947,8 +951,8 @@ main {{
 /// closure its body makes.
 fn own_probe(
     registry: &mut lash_kernel_doc::FunctionRegistry,
-    _: &std::collections::BTreeMap<&'static str, lash_kernel_doc::FunctionId>,
-) -> Vec<(&'static str, lash_kernel_doc::FunctionId)> {
+    _: &std::collections::BTreeMap<&'static str, lash_vocabulary::legacy_names::FunctionId>,
+) -> Vec<(&'static str, lash_vocabulary::legacy_names::FunctionId)> {
     let definition = lash_kernel_doc::parse_definition(&format!(
         "function probe.own() -> Any\nkernel 1\ncharge 4\nuse brand.built = @{}\n\
          body {{ let own = brand.built() let inner = fn() {{ return brand.built() }} \

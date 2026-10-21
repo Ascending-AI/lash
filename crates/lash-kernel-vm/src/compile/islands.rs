@@ -36,8 +36,9 @@
 
 use std::sync::OnceLock;
 
-use lash_kernel_doc::{Unit, Value};
+use lash_kernel_doc::Value;
 use lash_kernel_exec::{Op, Reg};
+use lash_vocabulary::sites::Unit;
 
 use super::expr::{self, Arm, Callee, Close, Expr, Kind as ExprKind, Make};
 use super::{

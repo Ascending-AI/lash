@@ -23,7 +23,8 @@
 
 use super::{NameRef, SiteRef};
 use lash_kernel_doc::heap::{EntityId, HeapFault, LogicalBytes, PageId, PageRef, PageValue};
-use lash_kernel_doc::{DocumentId, JoinMode, TaskId};
+use lash_kernel_doc::{JoinMode, TaskId};
+use lash_vocabulary::legacy_names::DocumentId;
 
 use super::census::AccountingCertificate;
 use super::family::FrozenRef;
@@ -255,6 +256,7 @@ pub struct CheckpointRoot {
     pub limits: SavedLimits,
     pub kernel: u32,
     pub document: DocumentId,
+    pub link: lash_vocabulary::content_ids::LinkId,
     /// The ExecutionClosure node the run pins: every library function its
     /// document reaches, by identity. Derived from the document, so a
     /// resume checks it names the run's own; the parent stages it and the
@@ -279,14 +281,14 @@ pub struct CheckpointRoot {
     pub withdrawn: KeyedRoot,
     /// Withdrawn waits the next park reports, in order (`K-MACH-003`).
     pub unreported: SequenceRoot,
-    /// Effects the run performs as reads (`K-EFF-012`), by name.
+    /// Operation uses the run performs as reads (`K-EFF-012`).
     pub reads: KeyedRoot,
     /// A session cell's bindings: [`BindingRecord`]s by name.
     pub session: KeyedRoot,
     /// The bindings the host projected into a session cell's `main`, which
     /// its carry leaves out: the host's, not the session's.
     /// Admitted by `CellStart` within [`Self::HOST_METADATA_LIMIT`].
-    pub host: Vec<lash_kernel_doc::Name>,
+    pub host: Vec<lash_vocabulary::legacy_names::Name>,
     pub meters: SavedMeters,
 }
 
@@ -305,12 +307,12 @@ impl CheckpointRoot {
     /// Even empty names cost two bytes, so this bounds their count as well
     /// as each name. No guest allocation or park can grow the list.
     pub const HOST_METADATA_LIMIT: usize =
-        4096 - (2 + 6 + 34 + 66 + 24 + 3 + 9 * 58 + 33 + 66 + 41) - 256;
+        4096 - (2 + 6 + 34 + 34 + 66 + 24 + 3 + 9 * 58 + 33 + 66 + 41) - 256;
 
     /// The canonical host-name list's size, without allocating its encoding.
     /// Overflow saturates so admission refuses it.
     pub fn host_metadata_bytes<'a>(names: impl IntoIterator<Item = &'a str>) -> usize {
-        use lash_kernel_doc::graph_tokens::varint_len;
+        use lash_vocabulary::tokens::varint_len;
         let mut count = 0_u64;
         let mut bytes = 0_usize;
         for name in names {
@@ -338,7 +340,7 @@ impl CheckpointRoot {
         if answer.kind != super::PageKind::CHECKPOINT_ROOT {
             return Err(corrupt("not a checkpoint root".into()));
         }
-        let mut root: Self = lash_kernel_doc::graph_tokens::decode_body(&answer.tokens)
+        let mut root: Self = lash_vocabulary::tokens::decode_body(&answer.tokens)
             .map_err(|error| corrupt(error.to_string()))?;
         let grant = |page: &mut PageRef| super::tree::grant(page, &answer.children);
         grant(&mut root.heap)?;
@@ -461,6 +463,8 @@ pub struct BindingRecord {
 /// the frozen captures each call instantiates as a fresh family.
 #[derive(Clone, Debug)]
 pub struct FunctionRecord {
+    pub environment: EntityId,
+    pub callable: lash_vocabulary::names::CallableId,
     /// The name the function is declared under.
     pub name: NameRef,
     /// A bytes value: the saved function's canonical description, a token
@@ -472,7 +476,7 @@ pub struct FunctionRecord {
     /// reaches.
     pub closure: PageRef,
     /// Each variable the function reads, by name.
-    pub captures: std::collections::BTreeMap<lash_kernel_doc::Name, FrozenRef>,
+    pub captures: std::collections::BTreeMap<lash_vocabulary::legacy_names::Name, FrozenRef>,
     /// The token's frozen data before and after the function, when a token
     /// holds it.
     pub before: Vec<FrozenRef>,
@@ -575,7 +579,6 @@ pub struct WaitRecord {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WaitKindRecord {
     Effect,
-    Sleep,
 }
 
 #[derive(Clone, Debug)]
@@ -596,7 +599,6 @@ pub enum CommittedOutcomeRecord {
     Failed(FrozenRef),
     /// A Completed input rejected by the perform type; no inbound work charge.
     Rejected(FrozenRef),
-    Elapsed,
 }
 
 #[derive(Clone)]

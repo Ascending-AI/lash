@@ -6,10 +6,10 @@
 use std::collections::BTreeSet;
 
 use lash_kernel_dialect::{Left, Saved, SavedFunction};
-use lash_kernel_doc::Name;
 use lash_kernel_doc::heap::{HeapFault, PageValue};
 use lash_kernel_state::kernel_internals::PagedHeap;
 use lash_kernel_state::paged::{FunctionRecord, NameRef};
+use lash_vocabulary::legacy_names::Name;
 
 /// A session cell's end, as its [`crate::CellSave`] saves functions on it.
 pub struct CellSaveContext<'a> {
@@ -50,6 +50,8 @@ impl<'a> CellSaveContext<'a> {
             .map(|token| (token.before.clone(), token.after.clone()))
             .unwrap_or_default();
         Ok(FunctionRecord {
+            environment: function.environment,
+            callable: function.callable,
             name: NameRef::new(&function.name, self.heap.pages())?,
             meta: PageValue::Bytes(self.heap.bytes(description)?),
             closure: function.closure,

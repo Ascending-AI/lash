@@ -22,8 +22,12 @@ use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 use lash_kernel_dialect::{NamedLibrary, define_functions};
-use lash_kernel_doc::{Datum, FunctionId, FunctionRegistry, Name, Site, Unit};
+use lash_kernel_doc::{Datum, FunctionRegistry};
 use lash_kernel_package::Package;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 use super::embedder::{Embedder, Setup, wait_of};
 use super::{Drive, Trace, bodies, drive, everywhere, int, list, text};

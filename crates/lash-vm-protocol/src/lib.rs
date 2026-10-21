@@ -24,7 +24,6 @@
 //! There is no transport and no pool here; both belong to the worker entry.
 
 pub mod bounds;
-pub mod checkpoint;
 pub mod codec;
 pub mod message;
 pub mod outcome;
@@ -34,26 +33,17 @@ pub mod state;
 mod version;
 
 pub use bounds::{PAGE_BATCH_BYTES, PAGE_BATCH_PAGES, ProtocolBounds};
-pub use checkpoint::{CheckpointRefusal, KernelRestoreRefusal};
 pub use codec::{
-    CodecRefusal, DecodeLimits, FRAME_HEADER_BYTES, FRAME_MAGIC, FrameCodec, FrameReader,
-    ObservationChunker,
+    DecodeLimits, FRAME_HEADER_BYTES, FRAME_MAGIC, FrameCodec, FrameReader, ObservationChunker,
 };
 pub use message::{
     BorrowedParentFrame, BorrowedParentMessage, BoundReached, Charge, CheckpointStart, Delivery,
-    EncodedPayload, ExecutionLease, FrameEpoch, HeaderRefusal, HostReadId, HostReadKind,
-    LimitDecision, LimitedBound, MemoryMeter, MessageFence, MessageHeader, OwnerEpoch, ParentFrame,
-    ParentMessage, PoolStart, PoolStartParts, PoolStarted, RunBounds, RunMeters, Start, StartFrom,
-    StoredDefinition, TransportSequence, WorkerFrame, WorkerMessage, WorkerPhase, WorkerWork,
-};
-pub use outcome::{
-    BootstrapFault, CgroupController, CgroupRefusal, Detail, DetailLimit, Exchange,
-    InfrastructureOutcome, PayloadKind, PoolFault, ProtocolBreach, RunBound, RunInput, RunRefusal,
-    SequenceFault, SupervisorEvidence, WorkerDeploymentFault, WorkerFrameKind, WorkerLimit,
-    WorkerRefusal,
+    EncodedPayload, HostReadId, HostReadKind, LimitDecision, LimitedBound, MemoryMeter,
+    MessageFence, MessageHeader, ParentFrame, ParentMessage, PoolStart, PoolStartParts,
+    PoolStarted, RunBounds, RunMeters, Start, StartFrom, StoredDefinition, WorkerFrame,
+    WorkerMessage, WorkerPhase, WorkerWork,
 };
 pub use state::VmOwner;
 pub use version::{
-    MIN_SUPPORTED_WORKER_PROTOCOL_VERSION, ProtocolVersionRefusal, WORKER_PROTOCOL_VERSION,
-    check_worker_protocol_version,
+    MIN_SUPPORTED_WORKER_PROTOCOL_VERSION, WORKER_PROTOCOL_VERSION, check_worker_protocol_version,
 };

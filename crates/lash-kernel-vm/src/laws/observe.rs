@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use lash_kernel_doc::Datum;
-use lash_kernel_doc::graph_tokens::encode_body;
 use lash_kernel_state::paged::SealBudget;
+use lash_vocabulary::tokens::encode_body;
 
 use super::embedder::{Embedder, ROOMY, Setup};
 use crate::observe::{GuestContext, WorkReport};

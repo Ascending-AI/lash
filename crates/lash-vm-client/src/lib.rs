@@ -28,16 +28,19 @@ pub use config::{
 pub use error::PoolError;
 /// The VM-protocol vocabulary a worker pool's configuration and outcomes
 /// name.
-pub use lash_vm_protocol::{
-    BootstrapFault, BoundReached, CgroupController, CgroupRefusal, Charge, CheckpointRefusal,
-    CodecRefusal, DecodeLimits, Detail, DetailLimit, Exchange, ExecutionLease, FrameEpoch,
-    HeaderRefusal, HostReadId, HostReadKind, InfrastructureOutcome, KernelRestoreRefusal,
-    LimitDecision, LimitedBound, MemoryMeter, OwnerEpoch, PayloadKind, PoolFault, ProtocolBounds,
-    ProtocolBreach, ProtocolVersionRefusal, RunBound, RunBounds, RunInput, RunMeters, RunRefusal,
-    SequenceFault, SupervisorEvidence, TransportSequence, VmOwner, WorkerDeploymentFault,
-    WorkerLimit, WorkerWork,
-    page::{HeapFault, HostResource, PageRefusal},
+pub use lash_protocol_types::engine_fault::{
+    BootstrapFault, CgroupController, CgroupRefusal, CheckpointRefusal, CodecRefusal, Detail,
+    DetailLimit, Exchange, ExecutionLease, FrameEpoch, HeaderRefusal, HeapFault, HostResource,
+    InfrastructureOutcome, KernelRestoreRefusal, OwnerEpoch, PageRefusal, PayloadKind, PoolFault,
+    ProtocolBreach, ProtocolVersionRefusal, RunBound, RunInput, RunRefusal, SequenceFault,
+    SupervisorEvidence, TransportSequence, WorkerDeploymentFault,
 };
+pub use lash_protocol_types::worker_limit::WorkerLimit;
+pub use lash_vm_protocol::{
+    BoundReached, Charge, DecodeLimits, HostReadId, HostReadKind, LimitDecision, LimitedBound,
+    MemoryMeter, ProtocolBounds, RunBounds, RunMeters, VmOwner, WorkerWork,
+};
+
 pub use machine::{
     RemoteMachine, RemoteMachines, RunChargeLimiter, RunHost, RunMemoryLimiter, RunStart,
     kernel_reads,

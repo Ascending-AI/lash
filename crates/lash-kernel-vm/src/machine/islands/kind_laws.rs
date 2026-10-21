@@ -5,8 +5,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash_kernel_doc::arena::{ArenaHandle, ShortText};
-use lash_kernel_doc::{Float, FunctionId, FunctionRegistry, TaskId, ValueKind};
+use lash_kernel_doc::{Float, FunctionRegistry, TaskId, ValueKind};
 use lash_kernel_exec::Weight;
+use lash_vocabulary::legacy_names::FunctionId;
 
 use super::super::{ISLAND_DEPTH, Island, Scratch};
 use super::*;
@@ -378,7 +379,7 @@ fn operand_machine() -> Embedder {
 fn specialised_operands_stop_with_the_general_paths_held_registers() {
     let mut embedder = operand_machine();
     let exe = Arc::clone(&embedder.machine.exe);
-    let code = exe.declared[&lash_kernel_doc::Name::new("compare")];
+    let code = exe.declared[&lash_vocabulary::legacy_names::Name::new("compare")];
     let plan = &exe.islands.plans[exe.island_of(code).unwrap() as usize];
     let StatementKind::Return { value, .. } = &plan.body.statements[0].kind else {
         panic!("compare returns its operator")

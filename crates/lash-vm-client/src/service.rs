@@ -1,11 +1,13 @@
 //! Pure work a worker does for its parent: lowering and printing source.
 //! None of it has parent authority, and all of it reads guest-controlled input, so it runs in the
 //! worker's crash domain.
+use lash_protocol_types::engine_fault::{FrameEpoch, OwnerEpoch};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
-use lash_kernel_doc::{EffectName, Name, PackageSetDigest, Site};
-use lash_vm_protocol::{EncodedPayload, FrameEpoch, OwnerEpoch, VmOwner};
+use lash_vm_protocol::{EncodedPayload, VmOwner};
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
 use serde::{Deserialize, Serialize};
 
 use crate::{ExecutionBudget, PoolConfig, PoolError, WorkerEntry, WorkerPool};
@@ -25,10 +27,7 @@ pub enum Request {
         bindings: BTreeSet<Name>,
         functions: BTreeMap<Name, LowerFunction>,
         /// The operations the cell is offered.
-        #[serde(with = "lash_kernel_dialect::operation_keys")]
-        operations: lash_kernel_dialect::Operations,
-        /// The package surface whose names the source resolves against.
-        packages: SurfaceRef,
+        namespaces: lash_kernel_dialect::Namespaces,
     },
     /// Lower `source`, written in `dialect`, to a kernel document against
     /// the operations the host offers and the session bindings in scope.
@@ -38,16 +37,11 @@ pub enum Request {
         /// The operations the cell is offered: each a catalog tool, a
         /// deferred grant or an unavailable note. The worker composes the
         /// cell's namespaces from them.
-        #[serde(with = "lash_kernel_dialect::operation_keys")]
-        operations: lash_kernel_dialect::Operations,
+        namespaces: lash_kernel_dialect::Namespaces,
         bindings: BTreeSet<Name>,
         /// The functions the session holds: the document declares the
         /// ones the source names.
         functions: BTreeMap<Name, LowerFunction>,
-        /// The package surface whose names the source resolves against:
-        /// the cell's, the newest stored one every live serving node meets
-        /// the requirements of (FIG-6991).
-        packages: SurfaceRef,
     },
     /// Lower a host-authored workflow module in the worker, in the dialect
     /// of `language`, under the shared workflow contract. Without `limits`
@@ -56,12 +50,9 @@ pub enum Request {
         language: lash_kernel_doc::SourceLanguage,
         source: String,
         /// The operations the workflow is offered.
-        #[serde(with = "lash_kernel_dialect::operation_keys")]
-        operations: lash_kernel_dialect::Operations,
+        namespaces: lash_kernel_dialect::Namespaces,
         /// The gate's package surface whose names the module resolves
         /// against: the worker's own set, or a stored one sent whole.
-        packages: SurfaceRef,
-        declared_packages: lash_kernel_package::PackageSelection,
         limits: Option<lash_kernel_dialect::workflow::WorkflowSourceLimits>,
     },
     /// Print `document` (its token body) in the selected generated format,
@@ -85,66 +76,6 @@ pub enum Request {
     },
 }
 
-/// The package surface a source resolves against: the worker's own set, by
-/// its digest, or a stored surface that is not, sent whole with the
-/// definitions it names that the worker lacks (FIG-6991).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SurfaceRef {
-    pub digest: PackageSetDigest,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stored: Option<StoredSurface>,
-}
-
-/// A stored surface as it crosses to a worker: its stored bytes, and the
-/// token body of each definition it names that the worker does not hold.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StoredSurface {
-    #[serde(with = "serde_bytes")]
-    pub surface: Vec<u8>,
-    pub definitions: Vec<serde_bytes::ByteBuf>,
-}
-
-impl StoredSurface {
-    /// The stored `surface` bytes, with the token body of each definition
-    /// the worker does not hold.
-    #[must_use]
-    pub fn new(surface: Vec<u8>, definitions: impl IntoIterator<Item = Vec<u8>>) -> Self {
-        Self {
-            surface,
-            definitions: definitions
-                .into_iter()
-                .map(serde_bytes::ByteBuf::from)
-                .collect(),
-        }
-    }
-}
-
-impl SurfaceRef {
-    /// The worker's own set `digest`.
-    #[must_use]
-    pub fn held(digest: PackageSetDigest) -> Self {
-        Self {
-            digest,
-            stored: None,
-        }
-    }
-
-    /// The set `digest`, sent as its stored `surface` with the token body
-    /// of each definition it names that the worker lacks, or by digest
-    /// alone when it is the worker's own (`stored` is `None`).
-    #[must_use]
-    pub fn of(digest: PackageSetDigest, stored: Option<(&[u8], &[Vec<u8>])>) -> Self {
-        Self {
-            digest,
-            stored: stored.map(|(surface, definitions)| {
-                StoredSurface::new(surface.to_vec(), definitions.iter().cloned())
-            }),
-        }
-    }
-}
-
 /// A saved function as lowering reads it: its code and what it requires.
 /// Its frozen captures and token members stay in heap pages; lowering never
 /// reads them (S8), so they do not cross.
@@ -157,17 +88,16 @@ impl SurfaceRef {
 pub struct LowerFunction {
     pub name: Name,
     pub document: lash_kernel_doc::IdentifiedDocument,
-    pub helper_owners: BTreeSet<Name>,
-    pub references: BTreeSet<Name>,
+    pub link: lash_vocabulary::content_ids::LinkId,
+    pub callable: lash_vocabulary::names::CallableId,
+    pub environment: lash_kernel_doc::heap::EntityId,
+    pub references: BTreeSet<lash_kernel_doc::heap::EntityId>,
     pub written: Option<lash_kernel_dialect::Written>,
     /// The tag of the function value that held it, when one did.
     pub token: Option<String>,
     /// Where a carried binding held it, for one saved under a generated
     /// name.
     pub held: Option<lash_kernel_dialect::HeldAt>,
-    /// The signature of each library function its code holds, as it was
-    /// saved or last relinked.
-    pub against: BTreeMap<lash_kernel_doc::FunctionId, lash_kernel_doc::Signature>,
 }
 
 impl From<&lash_kernel_dialect::SavedFunction> for LowerFunction {
@@ -175,12 +105,13 @@ impl From<&lash_kernel_dialect::SavedFunction> for LowerFunction {
         Self {
             name: function.name.clone(),
             document: lash_kernel_doc::IdentifiedDocument::new(function.document.clone()),
-            helper_owners: function.helper_owners.clone(),
+            link: function.link,
+            callable: function.callable,
+            environment: function.environment,
             references: function.references.clone(),
             written: function.written.clone(),
             token: function.token.as_ref().map(|token| token.tag.clone()),
             held: function.held.clone(),
-            against: function.against.clone(),
         }
     }
 }
@@ -198,7 +129,9 @@ impl LowerFunction {
                 id: lash_kernel_doc::heap::PageId([0; 32]),
                 grant: lash_kernel_doc::heap::PageGrant::NONE,
             },
-            helper_owners: self.helper_owners,
+            link: self.link,
+            callable: self.callable,
+            environment: self.environment,
             references: self.references,
             written: self.written,
             token: self.token.map(|tag| lash_kernel_dialect::Token {
@@ -207,7 +140,6 @@ impl LowerFunction {
                 after: Vec::new(),
             }),
             held: self.held,
-            against: self.against,
         }
     }
 
@@ -217,17 +149,18 @@ impl LowerFunction {
     /// held it and the signatures of its library functions.
     #[must_use]
     pub fn description(&self) -> Vec<u8> {
-        use lash_kernel_doc::graph_tokens::{TokenCodec as _, TokenWriter};
+        use lash_vocabulary::tokens::{TokenCodec as _, TokenWriter};
         let mut out = TokenWriter::with_capacity(self.document.body().len() + 64);
-        out.seq(8);
+        out.seq(9);
         self.name.encode(&mut out);
         out.raw(self.document.body());
-        self.helper_owners.encode(&mut out);
+        self.link.encode(&mut out);
+        self.callable.encode(&mut out);
+        self.environment.encode(&mut out);
         self.references.encode(&mut out);
         self.written.encode(&mut out);
         self.token.encode(&mut out);
         self.held.encode(&mut out);
-        self.against.encode(&mut out);
         out.into_bytes()
     }
 
@@ -239,24 +172,30 @@ impl LowerFunction {
     /// Any token the description does not hold.
     pub fn from_description(
         description: &[u8],
-        limits: lash_kernel_doc::KernelDataLimits,
-    ) -> Result<Self, lash_kernel_doc::graph_tokens::TokenError> {
-        use lash_kernel_doc::graph_tokens::{TokenCodec as _, TokenReader};
+        limits: lash_vocabulary::data_limits::KernelDataLimits,
+    ) -> Result<Self, lash_vocabulary::tokens::TokenError> {
+        use lash_vocabulary::tokens::{TokenCodec as _, TokenReader};
         let mut input = TokenReader::new(description).with_data_limits(limits);
-        input.expect_struct(8)?;
+        input.expect_struct(9)?;
         let name = Name::decode(&mut input)?;
         let document = lash_kernel_doc::IdentifiedDocument::decode(input.tree()?, limits)?;
         let function = Self {
             name,
             document,
-            helper_owners: BTreeSet::decode(&mut input)?,
+            link: lash_vocabulary::content_ids::LinkId::decode(&mut input)?,
+            callable: lash_vocabulary::names::CallableId::decode(&mut input)?,
+            environment: lash_kernel_doc::heap::EntityId::decode(&mut input)?,
             references: BTreeSet::decode(&mut input)?,
             written: Option::decode(&mut input)?,
             token: Option::decode(&mut input)?,
             held: Option::decode(&mut input)?,
-            against: BTreeMap::decode(&mut input)?,
         };
         input.finish()?;
+        if function.link != function.callable.link {
+            return Err(lash_vocabulary::tokens::TokenError::Invalid(
+                "saved function Link mismatch".into(),
+            ));
+        }
         Ok(function)
     }
 }
@@ -271,8 +210,11 @@ impl Serialize for LowerFunction {
 impl<'de> Deserialize<'de> for LowerFunction {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let bytes = serde_bytes::ByteBuf::deserialize(deserializer)?;
-        Self::from_description(&bytes, lash_kernel_doc::KernelDataLimits::standard())
-            .map_err(serde::de::Error::custom)
+        Self::from_description(
+            &bytes,
+            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+        )
+        .map_err(serde::de::Error::custom)
     }
 }
 
@@ -314,11 +256,6 @@ pub enum Response {
         /// the functions a cell binds for later cells
         /// ([`lash_kernel_dialect::Dialect::function_values`]).
         function_values: Option<lash_kernel_doc::FunctionRepresentation>,
-        /// Those of the request's operations offered as reads the
-        /// document's `main` calls or spawns, as the checked document's linked effects count them;
-        /// none when they cannot be certified (`lash_kernel_check::main_effects`).
-        #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-        reads: BTreeSet<EffectName>,
     },
     Printed(lash_kernel_dialect::PrintedSource),
     Read {
@@ -428,16 +365,16 @@ impl Service {
     /// packages before cloning or starting the service so a live pool's frame
     /// cannot diverge from its configuration. Selecting the holdings this
     /// service already binds keeps its pool, which its clones share.
-    pub fn with_packages(mut self, packages: Arc<lash_kernel_package::HeldPackages>) -> Self {
+    pub fn with_library(mut self, library: Arc<crate::packages::WorkerLibrary>) -> Self {
         if self
             .config
-            .held_packages()
-            .is_ok_and(|held| Arc::ptr_eq(&held, &packages))
+            .worker_library()
+            .is_ok_and(|held| Arc::ptr_eq(&held, &library))
         {
             return self;
         }
         self.config = Arc::new(PoolConfig {
-            packages: Some(packages),
+            library: Some(library),
             ..self.config.as_ref().clone()
         });
         self.pool = Arc::new(Mutex::new(None));
@@ -510,7 +447,7 @@ impl Service {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             if receipts.len() >= 1024 {
                 return Err(PoolError::breach(
-                    lash_vm_protocol::SequenceFault::ReceiptProbeOverflow,
+                    lash_protocol_types::engine_fault::SequenceFault::ReceiptProbeOverflow,
                 ));
             }
             receipts.push(WorkerReceipt { path, pid });
@@ -755,9 +692,11 @@ pub mod runtime_ops {
             tokio::task::spawn_blocking(move || service.pool())
                 .await
                 .map_err(|error| {
-                    PoolError::breach(lash_vm_protocol::ProtocolBreach::Panicked {
-                        detail: lash_vm_protocol::Detail::new(error),
-                    })
+                    PoolError::breach(
+                        lash_protocol_types::engine_fault::ProtocolBreach::Panicked {
+                            detail: lash_protocol_types::engine_fault::Detail::new(error),
+                        },
+                    )
                 })?
         }
     }
@@ -777,9 +716,11 @@ pub mod runtime_ops {
             tokio::task::spawn_blocking(move || service.request_blocking(request, for_run))
                 .await
                 .map_err(|error| {
-                    PoolError::breach(lash_vm_protocol::ProtocolBreach::Panicked {
-                        detail: lash_vm_protocol::Detail::new(error),
-                    })
+                    PoolError::breach(
+                        lash_protocol_types::engine_fault::ProtocolBreach::Panicked {
+                            detail: lash_protocol_types::engine_fault::Detail::new(error),
+                        },
+                    )
                 })?
         }
 
@@ -788,14 +729,17 @@ pub mod runtime_ops {
                 && source.len() as u64 > self.config.protocol.max_source_bytes
             {
                 return Err(PoolError::refused(
-                    lash_vm_protocol::RunRefusal::PayloadTooLarge {
+                    lash_protocol_types::engine_fault::RunRefusal::PayloadTooLarge {
                         limit: self.config.protocol.max_source_bytes,
                         size: source.len() as u64,
                     },
                 ));
             }
             let bytes = rmp_serde::to_vec_named(&request).map_err(|error| {
-                PoolError::payload(lash_vm_protocol::PayloadKind::ServiceRequest, error)
+                PoolError::payload(
+                    lash_protocol_types::engine_fault::PayloadKind::ServiceRequest,
+                    error,
+                )
             })?;
             let mut worker = self.pool()?.checkout(
                 bytes.len().saturating_add(4096),
@@ -820,7 +764,10 @@ pub mod runtime_ops {
                 .with_detail_limit(self.config.tuning.diagnostic_bytes)
                 .check_payload(&response.0)?;
             let response = rmp_serde::from_slice(&response.0).map_err(|error| {
-                PoolError::payload(lash_vm_protocol::PayloadKind::ServiceResponse, error)
+                PoolError::payload(
+                    lash_protocol_types::engine_fault::PayloadKind::ServiceResponse,
+                    error,
+                )
             })?;
             // The worker that lowered the run's document starts the run.
             if for_run

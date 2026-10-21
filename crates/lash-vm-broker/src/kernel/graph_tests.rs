@@ -7,8 +7,9 @@ use lash_core_store::checkpoint_graph::{
     GraphStaging, NodeId, parse_envelope,
 };
 use lash_core_store::effect_opener::EffectOpener;
-use lash_kernel_doc::{Site, Unit};
 use lash_protocol_types::{ExecutionPolicy, ToolCallId, ToolId};
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 use super::*;
 use crate::kernel::value::datum_to_json;
@@ -87,7 +88,7 @@ fn call(id: &str, args: serde_json::Value) -> CellCall {
         id: ToolCallId::fixture(id),
         tool_id: ToolId::new("read"),
         args,
-        contract: lash_kernel_doc::ContractId::new("1"),
+        contract: lash_vocabulary::operations::ContractId::new("1"),
         execution_grant: None,
         issuing_language_node_id: Some("main/1.2".to_owned()),
     }

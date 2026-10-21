@@ -223,7 +223,7 @@ impl Publication {
     fn new(record: &TaskRecord, frames: &Tree<lash_kernel_state::paged::FrameRecord>) -> Self {
         Self {
             identity: record.identity.root.map(|p| p.id),
-            state: lash_kernel_doc::graph_tokens::encode_body(&record.state),
+            state: lash_vocabulary::tokens::encode_body(&record.state),
             observed: record.observed,
             passed: record.passed,
             frames: frames.version(),
@@ -242,7 +242,7 @@ impl Publication {
             && self.frames.matches(frames)
             && self.joiners.matches(&record.joiners)
             && self.occurrences.matches(&record.occurrences)
-            && self.state == lash_kernel_doc::graph_tokens::encode_body(&record.state)
+            && self.state == lash_vocabulary::tokens::encode_body(&record.state)
     }
 }
 
@@ -768,19 +768,19 @@ pub(super) fn source_body(
     frames: &Tree<lash_kernel_state::paged::FrameRecord>,
     exe: &Executable,
     access: &Access<'_>,
-) -> Result<Option<lash_kernel_doc::Site>, HeapFault> {
+) -> Result<Option<lash_vocabulary::sites::Site>, HeapFault> {
     for index in 0..frames.len() {
         let (_, frame) = frames
             .rank_get(index, access)?
             .ok_or_else(|| HeapFault::Malformed("a task frame is missing".into()))?;
         let statement = frame.statement.resolve(access)?;
-        if matches!(statement.unit, lash_kernel_doc::Unit::Library(_)) {
+        if matches!(statement.unit, lash_vocabulary::sites::Unit::Library(_)) {
             continue;
         }
         let body = (0..=statement.path.len())
             .rev()
             .find_map(|length| {
-                exe.code_at(&lash_kernel_doc::Site::new(
+                exe.code_at(&lash_vocabulary::sites::Site::new(
                     statement.unit.clone(),
                     &statement.path[..length],
                 ))

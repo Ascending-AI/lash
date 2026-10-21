@@ -7,9 +7,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, OnceLock, Weak};
 
-use lash_kernel_doc::{
-    Document, DocumentId, FunctionId, Invalid, KernelDataLimits, validate_document_with_limits,
-};
+use lash_kernel_doc::{Document, Invalid, validate_document_with_limits};
+use lash_vocabulary::data_limits::KernelDataLimits;
+use lash_vocabulary::legacy_names::DocumentId;
 
 use super::*;
 use crate::{OpenError, StartError};
@@ -29,19 +29,16 @@ const VALIDATED: usize = 4096;
 
 pub(crate) struct Admission {
     document: Weak<Document>,
-    code: OnceLock<Result<Arc<DocumentCode>, Missing>>,
     identity: OnceLock<DocumentId>,
 }
 
 pub(crate) enum Refused {
-    Missing(FunctionId),
     Invalid(Invalid),
 }
 
 impl From<Refused> for StartError {
     fn from(refused: Refused) -> Self {
         match refused {
-            Refused::Missing(function) => Self::MissingFunction { function },
             Refused::Invalid(invalid) => Self::NotAdmitted(invalid),
         }
     }
@@ -50,7 +47,6 @@ impl From<Refused> for StartError {
 impl From<Refused> for OpenError {
     fn from(refused: Refused) -> Self {
         match refused {
-            Refused::Missing(function) => Self::MissingFunction { function },
             Refused::Invalid(invalid) => Self::NotAdmitted(invalid),
         }
     }
@@ -120,11 +116,6 @@ impl PreparedLibrary {
         documents
             .0
             .retain(|_, admitted| admitted.document.strong_count() != 0);
-        for function in document.manifest.functions.keys() {
-            if self.registry().get(function).is_none() {
-                return Err(Refused::Missing(*function));
-            }
-        }
         let validated = identity
             .is_some_and(|identity| documents.1.contains(&(identity, limits.document_depth())));
         if !validated {
@@ -139,7 +130,6 @@ impl PreparedLibrary {
         }
         let admitted = Arc::new(Admission {
             document: Arc::downgrade(document),
-            code: OnceLock::new(),
             identity: identity.map_or_else(OnceLock::new, OnceLock::from),
         });
         documents.0.insert(key, Arc::clone(&admitted));
@@ -156,18 +146,70 @@ impl Admission {
         self: &Arc<Self>,
         document: &Arc<Document>,
         library: &PreparedLibrary,
+        documents: &BTreeMap<DocumentId, Arc<Document>>,
+        instances: &BTreeMap<
+            lash_vocabulary::content_ids::LinkId,
+            crate::interface::PreparedInstance,
+        >,
     ) -> Result<Arc<Executable>, Missing> {
-        let own = self
-            .code
-            .get_or_init(|| compile_document(document, library).map(Arc::new));
-        let own = own.as_ref().map_err(|missing| *missing)?;
+        // Link tables are instance-specific; compile the reached documents together,
+        // deduplicating identical FunctionIds while keeping frame Links separate.
+        let mut reached = document.as_ref().clone();
+        for loaded in documents.values() {
+            reached.functions.extend(loaded.functions.clone());
+        }
+        let loaded;
+        let library = if reached
+            .functions
+            .keys()
+            .any(|id| library.registry().get(id).is_none())
+        {
+            let mut registry = library.registry().as_ref().clone();
+            let mut pending: BTreeSet<_> = reached
+                .functions
+                .keys()
+                .filter(|id| registry.get(id).is_none())
+                .copied()
+                .collect();
+            while let Some(blocked) = pending.first().copied() {
+                let ready = pending.iter().copied().find(|id| {
+                    reached.functions[id].body().is_none_or(|body| {
+                        body.functions.keys().all(|dependency| {
+                            dependency == id || registry.get(dependency).is_some()
+                        })
+                    })
+                });
+                let id = ready.ok_or(Missing(blocked))?;
+                registry
+                    .register(reached.functions[&id].clone(), None)
+                    .map_err(|_| Missing(id))?;
+                pending.remove(&id);
+            }
+            loaded = PreparedLibrary::with_layout_and_charge(
+                Arc::new(registry),
+                library.0.layout,
+                library.0.charge,
+            );
+            &loaded
+        } else {
+            library
+        };
+        let own = Arc::new(compile_document(&reached, library)?);
         Ok(Arc::new(Executable {
             code_base: library.0.tables.codes.len(),
             block_base: library.0.tables.blocks.len(),
             stmt_base: library.0.tables.stmts.len(),
+            instances: instances
+                .iter()
+                .filter_map(|(link, instance)| {
+                    documents
+                        .get(&instance.document)
+                        .map(|doc| (*link, Arc::clone(doc)))
+                })
+                .collect(),
             library: library.clone(),
             document: Arc::clone(document),
-            own: Arc::clone(own),
+            own,
             admission: Arc::clone(self),
         }))
     }

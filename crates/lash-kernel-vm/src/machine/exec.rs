@@ -22,6 +22,7 @@ use lash_kernel_state::paged::HeapLifecycle;
 /// A function about to run in a new frame.
 pub(super) struct Call<'a> {
     pub(super) code: CodeId,
+    pub(super) link: Option<lash_vocabulary::content_ids::LinkId>,
     /// The register the call's arguments start at.
     pub(super) args: Reg,
     /// How many arguments there are.
@@ -38,12 +39,18 @@ impl<'a> Call<'a> {
     pub(super) fn new(code: CodeId, args: Reg, count: usize) -> Self {
         Self {
             code,
+            link: None,
             args,
             count,
             captures: &[],
             library: None,
             awaited_by: None,
         }
+    }
+
+    pub(super) fn in_link(mut self, link: lash_vocabulary::content_ids::LinkId) -> Self {
+        self.link = Some(link);
+        self
     }
 
     pub(super) fn sharing(mut self, captures: &'a [ArenaHandle]) -> Self {
@@ -87,6 +94,7 @@ impl KernelMachine {
             crate::compile::Constant::Resident(value) => return Ok(*value),
             crate::compile::Constant::Deferred(literal) => literal,
         };
+        let link = self.current_link();
         let mut arena = self.arena.borrow_mut();
         Ok(match literal {
             Literal::Null => Value::Null,
@@ -96,7 +104,10 @@ impl KernelMachine {
             Literal::Int(value) => arena.int(value.clone()),
             Literal::Text(value) => arena.text(value),
             Literal::Bytes(value) => arena.bytes(value.as_slice()),
-            Literal::Function(name) => arena.function(name.as_str()),
+            Literal::Function(function) => arena.function(lash_vocabulary::names::CallableId {
+                link,
+                function: *function,
+            }),
         })
     }
 }
@@ -110,6 +121,7 @@ impl KernelMachine {
         host: &mut dyn Host,
         exe: &Executable,
     ) -> Eval<Completion> {
+        self.active_link = self.frame(task)?.link;
         let frame = self
             .tasks
             .get_mut(task.0 as usize)?
@@ -307,7 +319,7 @@ impl KernelMachine {
                         lash_kernel_state::paged::SiteRef::new(site, self.heap.pages())?;
                     self.regs.statement(exe.stmt(stmt).regs);
                     self.put(0, *value);
-                    match self.call_lib(task, exe, *policy, 0, 1, Some(stmt)) {
+                    match self.call_hook(task, exe, *policy, 0, 1, Some(stmt)) {
                         Ok(super::ops::Flow::Step) => return Ok(()),
                         Ok(super::ops::Flow::Done) => {
                             let value = self.take(0);
@@ -336,7 +348,15 @@ impl KernelMachine {
                     Completion::Throw(value) => Err(*value),
                     _ => return Err(fault("a break or a continue left its function")),
                 };
-                if let Some(cleanup) = self.root_cleanup(task, exe)? {
+                let settle = result.is_ok()
+                    || !matches!(
+                        self.frame(task)?.convention,
+                        Some(
+                            lash_kernel_doc::StartConvention::TsDirect { .. }
+                                | lash_kernel_doc::StartConvention::TsArgsList { .. }
+                        )
+                    );
+                if settle && let Some(cleanup) = self.root_cleanup(task, exe)? {
                     self.raise_held();
                     match self.clean_up(task, exe, cleanup, result)? {
                         Some(cleaned) => result = cleaned,
@@ -410,12 +430,41 @@ impl KernelMachine {
     /// The run-root cleanup to call as the entry the run started on is
     /// left: its start convention's, when the departing frame is that
     /// entry's root frame.
-    fn root_cleanup(&mut self, task: TaskId, exe: &Executable) -> Result<Option<LibId>, Halt> {
-        if task != TaskId::MAIN || self.task(task)?.frames.len() != 1 {
-            return Ok(None);
-        }
+    fn root_cleanup(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+    ) -> Result<Option<crate::compile::LinkedHook>, Halt> {
+        let is_root = task == TaskId::MAIN && self.task(task)?.frames.len() == 1;
         let code = self.frame(task)?.code;
-        Ok(exe.root_cleanup(code))
+        match self.frame(task)?.convention.as_ref() {
+            Some(
+                lash_kernel_doc::StartConvention::PyDirect { cleanup }
+                | lash_kernel_doc::StartConvention::TsDirect { await_fn: cleanup }
+                | lash_kernel_doc::StartConvention::TsArgsList {
+                    await_fn: cleanup, ..
+                },
+            ) => Ok(match cleanup {
+                lash_kernel_doc::FunctionTarget::Local(function) => exe
+                    .declared
+                    .get(function)
+                    .copied()
+                    .map(crate::compile::LinkedHook::Code)
+                    .or_else(|| {
+                        exe.lib_of(function)
+                            .map(crate::compile::LinkedHook::Library)
+                    }),
+                lash_kernel_doc::FunctionTarget::Import(slot) => {
+                    Some(crate::compile::LinkedHook::Import(*slot))
+                }
+            }),
+            Some(lash_kernel_doc::StartConvention::Direct) => Ok(None),
+            None => Ok(if is_root {
+                exe.root_cleanup(code)
+            } else {
+                None
+            }),
+        }
     }
 
     /// Calls the run-root cleanup `cleanup` with no source scope left, the
@@ -426,7 +475,7 @@ impl KernelMachine {
         &mut self,
         task: TaskId,
         exe: &Executable,
-        cleanup: LibId,
+        cleanup: crate::compile::LinkedHook,
         result: Result<Value, Value>,
     ) -> Result<Option<Result<Value, Value>>, Halt> {
         let code = exe.code(self.frame(task)?.code);
@@ -437,12 +486,32 @@ impl KernelMachine {
         }
         frame.statement = statement;
         frame.awaiting = None;
+        let settle = matches!(
+            frame.convention,
+            Some(
+                lash_kernel_doc::StartConvention::TsDirect { .. }
+                    | lash_kernel_doc::StartConvention::TsArgsList { .. }
+            )
+        );
         frame.cleaning = Some(result);
-        match self.call_lib(task, exe, cleanup, 0, 0, None) {
+        let count = if settle {
+            let value = frame
+                .cleaning
+                .as_ref()
+                .and_then(|value| value.as_ref().ok())
+                .copied()
+                .ok_or_else(|| fault("settlement has no return value"))?;
+            self.put(0, value);
+            1
+        } else {
+            0
+        };
+        match self.call_hook(task, exe, cleanup, 0, count, None) {
             Ok(super::ops::Flow::Step) => Ok(None),
             Ok(super::ops::Flow::Done) => {
-                self.take(0);
-                Ok(self.frame(task)?.cleaning.take())
+                let value = self.take(0);
+                let original = self.frame(task)?.cleaning.take();
+                Ok(if settle { Some(Ok(value)) } else { original })
             }
             Err(interrupt) => {
                 let value = self.thrown_by(task, interrupt)?;
@@ -478,6 +547,14 @@ impl KernelMachine {
         frame: Box<Frame>,
         result: Result<Value, Value>,
     ) -> Result<Option<Completion>, Halt> {
+        let result = if let (Ok(value), Some(ty)) = (&result, &frame.public_result) {
+            match self.check_public_result(exe, value, ty) {
+                Ok(()) => result,
+                Err(error) => Err(*self.thrown_by(task, error)?),
+            }
+        } else {
+            result
+        };
         self.refresh_charging(task)?;
         if self.charging
             && let Some(call) = &frame.library
@@ -488,24 +565,15 @@ impl KernelMachine {
             })?;
             self.charge_call(exe, call.lib, units)?;
         }
-        // A TypeScript entry's result is what `JSON.stringify` carries.
         let spelled_as_json = task == TaskId::MAIN
             && self.task(task)?.frames.is_empty()
-            && match &exe.code(frame.code).site.unit {
-                lash_kernel_doc::Unit::Function(name) => self
-                    .program
-                    .document
-                    .entries
-                    .get(name)
-                    .is_some_and(|entry| {
-                        matches!(
-                            entry.convention,
-                            lash_kernel_doc::StartConvention::TsArgsList { .. }
-                                | lash_kernel_doc::StartConvention::TsDirect { .. }
-                        )
-                    }),
-                _ => false,
-            };
+            && matches!(
+                frame.convention,
+                Some(
+                    lash_kernel_doc::StartConvention::TsArgsList { .. }
+                        | lash_kernel_doc::StartConvention::TsDirect { .. }
+                )
+            );
         self.observe(Event::Pop { task });
         self.recycle(frame);
         if self.task(task)?.frames.is_empty() {
@@ -515,10 +583,22 @@ impl KernelMachine {
             }
             return Ok(None);
         }
+        self.active_link = self.frame(task)?.link;
         // The run-root cleanup has returned or raised: the body's departure,
         // or the cleanup's raise, leaves the entry.
         if let Some(departed) = self.frame(task)?.cleaning.take() {
-            let result = if result.is_ok() { departed } else { result };
+            let settled = matches!(
+                self.frame(task)?.convention,
+                Some(
+                    lash_kernel_doc::StartConvention::TsDirect { .. }
+                        | lash_kernel_doc::StartConvention::TsArgsList { .. }
+                )
+            );
+            let result = if result.is_ok() && !settled {
+                departed
+            } else {
+                result
+            };
             return self.leave_frame(task, host, exe, result);
         }
         Ok(match result {
@@ -751,6 +831,7 @@ impl KernelMachine {
             .ok_or_else(|| fault("a prepared body has no entry site"))?;
         Ok(match self.storage.frames.pop() {
             Some(mut frame) => {
+                frame.link = self.program.link;
                 frame.code = code_id;
                 frame.charging = code.charging;
                 frame.paced = code.paced;
@@ -765,6 +846,7 @@ impl KernelMachine {
                 #[cfg(test)]
                 self.storage.activation_records.push(code_id);
                 Box::new(Frame {
+                    link: self.program.link,
                     code: code_id,
                     charging: code.charging,
                     paced: code.paced,
@@ -775,6 +857,8 @@ impl KernelMachine {
                     awaiting: None,
                     nested: None,
                     library: None,
+                    convention: None,
+                    public_result: None,
                     cleaning: None,
                     held: Vec::new(),
                     owned: false,
@@ -792,6 +876,7 @@ impl KernelMachine {
     ) -> Eval<()> {
         let Call {
             library,
+            link,
             code: code_id,
             args: base,
             count: given,
@@ -817,7 +902,19 @@ impl KernelMachine {
         // SiteRef contains page-access-local trees. Prepare each body's
         // immutable entry once here, after the same admission checks as a
         // cold call; sharing it across machines would share their page port.
+        let defining_link = match link {
+            Some(link) => link,
+            None => self
+                .task(task)?
+                .frames
+                .last_mut()?
+                .map(|frame| frame.link)
+                .unwrap_or(self.program.link),
+        };
         let mut frame = self.fresh_frame(exe, code_id)?;
+        frame.link = defining_link;
+        frame.convention = None;
+        frame.public_result = None;
         frame.slots.fresh(code.slots_by_at.len());
         frame.control.push(Control::Block {
             block: code.body,
@@ -834,6 +931,9 @@ impl KernelMachine {
                 Box::default()
             };
             frame.library = Some(LibraryCall { lib, args });
+        }
+        for ((_, local), cell) in code.free.iter().zip(captures) {
+            frame.set_slot(local.at, SlotState::Cell(*cell));
         }
         for (capture, cell) in code.captures.iter().zip(captures) {
             frame.set_slot(capture.inner_at, SlotState::Cell(*cell));
@@ -864,36 +964,6 @@ impl KernelMachine {
                 self.frame(task)?.set_slot(param.at, state);
             } else {
                 self.bind(task, param.at, param.shared, value)?;
-            }
-        }
-        if !code.free.is_empty() {
-            self.bind_captures(task, code)?;
-        }
-        Ok(())
-    }
-
-    /// Binds each free name of a saved function's code to a fresh instance
-    /// of the capture its session holds for it: every call its own family,
-    /// none sharing an identity with another call's (`K-SES-004`). A name
-    /// the session holds no capture of stays unbound.
-    fn bind_captures(&mut self, task: TaskId, code: &crate::compile::Code) -> Eval<()> {
-        let lash_kernel_doc::Unit::Function(function) = &code.site.unit else {
-            return Ok(());
-        };
-        let saved =
-            super::Tree::<lash_kernel_state::paged::FunctionRecord>::of_keyed(&self.functions)
-                .get(
-                    &lash_kernel_state::kernel_internals::metadata::metadata_key(function),
-                    self.heap.pages(),
-                )?;
-        let Some(saved) = saved else {
-            return Ok(());
-        };
-        for (name, local) in &code.free {
-            if let Some(frozen) = saved.captures.get(name) {
-                let value = self.heap.instantiate(frozen).map_err(super::write_halt)?;
-                let value = self.admit_page(&value)?;
-                self.bind(task, local.at, local.shared, value)?;
             }
         }
         Ok(())
@@ -940,6 +1010,38 @@ impl KernelMachine {
         }
     }
 
+    /// Host and data-only import results fit the public settled signature,
+    /// whose types can differ from the function's private ABI.
+    pub(super) fn check_public_result(
+        &mut self,
+        exe: &Executable,
+        value: &Value,
+        ty: &lash_vocabulary::types::Type,
+    ) -> Eval<()> {
+        if !lash_vocabulary::type_relations::data_only(ty) {
+            return Ok(());
+        }
+        let datum = self.copy_datum(value)?;
+        let decoder = lash_kernel_doc::Decoder {
+            max_depth: self.limits.value_depth(),
+            policy: exe
+                .instances
+                .get(&self.current_link())
+                .map_or(self.program.document.numbers, |document| document.numbers),
+            declared: &|callable| {
+                exe.instances
+                    .get(&callable.link)
+                    .is_some_and(|document| document.functions.contains_key(&callable.function))
+            },
+        };
+        decoder.decode(&datum, ty).map(|_| ()).map_err(|error| {
+            Interrupt::refused(
+                "function_result",
+                format!("settled result does not fit the public signature: {error}"),
+            )
+        })
+    }
+
     /// Copies a value out of the run, charging its deep size
     /// (`K-EFF-002`, `K-CHG-002`).
     pub(super) fn copy_out(&mut self, value: &Value) -> Eval<lash_kernel_doc::Datum> {
@@ -984,7 +1086,7 @@ impl KernelMachine {
     /// value's canonical form.
     pub(super) fn copy_out_tool_arg(
         &mut self,
-        effect: &lash_kernel_doc::EffectName,
+        effect: &lash_vocabulary::names::OperationUse,
         index: usize,
         value: &Value,
     ) -> Eval<lash_kernel_doc::Datum> {
@@ -1005,30 +1107,42 @@ impl KernelMachine {
         self.identify_values(std::slice::from_ref(value))?;
         self.flush_arena()?;
         let value = &self.page_form(value)?;
-        let document = Arc::clone(&self.program.document);
+        let instance = self
+            .program
+            .instances
+            .get(&effect.link)
+            .ok_or_else(|| fault("operation Link is not loaded"))?;
+        let document = Arc::clone(
+            self.program
+                .documents
+                .get(&instance.document)
+                .ok_or_else(|| fault("operation document is not loaded"))?,
+        );
         let library = self.program.library.clone();
         let mut heap = crate::crossing::CrossingHeap {
             heap: &mut self.heap,
             functions: &self.functions,
-            budget: lash_kernel_doc::snapshot::Budget::new(
-                lash_kernel_doc::FunctionValueLimits::CEILING,
-            ),
         };
         let mut run = crate::crossing::CrossingRun {
             document: &document,
+            documents: &self.program.documents,
+            instances: &self.program.instances,
             captions: &self.captions,
             catalog: library.registry().as_ref(),
             data: self.limits,
-            tag: None,
         };
         // Admission declared every operation a document or a body it
         // reaches performs; an argument past its parameters, or of an effect
         // the manifest does not list, is data.
         let param = document
-            .manifest
-            .effects
-            .get(effect)
-            .and_then(|requirement| requirement.signature.params.get(index));
+            .imports
+            .get(&effect.slot)
+            .and_then(|import| match &import.kind {
+                lash_vocabulary::names::ImportKind::Operation { signature } => {
+                    signature.params.get(index)
+                }
+                _ => None,
+            });
         let datum = match param {
             Some(param) => crate::crossing::copy_out_tool_arg(
                 &mut heap,
@@ -1042,7 +1156,7 @@ impl KernelMachine {
                 &mut run,
                 value,
                 &format!("args[{index}]"),
-                &lash_kernel_doc::Type::Json,
+                &lash_vocabulary::types::Type::Json,
             )?,
         };
         self.charge_boundary(crossed_bytes(&datum))?;
@@ -1053,10 +1167,7 @@ impl KernelMachine {
     /// effect argument crosses as a function value.
     fn reaches_function(&mut self, value: &Value) -> Result<bool, Halt> {
         fn function(value: &Value) -> bool {
-            matches!(
-                value,
-                Value::Closure(_) | Value::Function(_) | Value::LongFunction(_)
-            )
+            matches!(value, Value::Closure(_) | Value::Function(_))
         }
         if function(value) {
             return Ok(true);
@@ -1119,7 +1230,6 @@ impl KernelMachine {
         };
         use lash_kernel_state::paged::CommittedOutcomeRecord;
         let (value, failed) = match outcome {
-            CommittedOutcomeRecord::Elapsed => (lash_kernel_doc::heap::PageValue::Null, false),
             CommittedOutcomeRecord::Rejected(frozen) => (
                 self.heap.instantiate(&frozen).map_err(Interrupt::from)?,
                 true,
@@ -1178,7 +1288,7 @@ impl KernelMachine {
         &mut self,
         exe: &Executable,
         datum: &lash_kernel_doc::Datum,
-        ty: &lash_kernel_doc::Type,
+        ty: &lash_vocabulary::types::Type,
     ) -> Eval<Value> {
         self.decode_as(exe, datum, ty, "the result", self.charging)
     }
@@ -1189,7 +1299,7 @@ impl KernelMachine {
         &mut self,
         exe: &Executable,
         datum: &lash_kernel_doc::Datum,
-        ty: &lash_kernel_doc::Type,
+        ty: &lash_vocabulary::types::Type,
     ) -> Eval<Value> {
         let metered = self.metered();
         self.decode_as(exe, datum, ty, "the result", metered)
@@ -1201,15 +1311,15 @@ impl KernelMachine {
         &mut self,
         exe: &Executable,
         datum: &lash_kernel_doc::Datum,
-        ty: &lash_kernel_doc::Type,
-        effect: &lash_kernel_doc::EffectName,
+        ty: &lash_vocabulary::types::Type,
+        effect: &lash_vocabulary::names::OperationUse,
     ) -> Eval<Value> {
         let metered = self.metered();
         self.decode_as(
             exe,
             datum,
             ty,
-            &format!("the result of `{effect}`"),
+            &format!("the result of `{effect:?}`"),
             metered,
         )
     }
@@ -1219,14 +1329,21 @@ impl KernelMachine {
         &mut self,
         exe: &Executable,
         datum: &lash_kernel_doc::Datum,
-        ty: &lash_kernel_doc::Type,
+        ty: &lash_vocabulary::types::Type,
         what: &str,
         charged: bool,
     ) -> Eval<Value> {
         let decoder = lash_kernel_doc::Decoder {
             max_depth: self.limits.value_depth(),
-            policy: self.program.document.manifest.numbers,
-            declared: &|name| exe.declared.contains_key(name),
+            policy: exe
+                .instances
+                .get(&self.current_link())
+                .map_or(self.program.document.numbers, |document| document.numbers),
+            declared: &|callable| {
+                exe.instances
+                    .get(&callable.link)
+                    .is_some_and(|doc| doc.functions.contains_key(&callable.function))
+            },
         };
         let decoded = match decoder.decode(datum, ty) {
             Ok(decoded) => decoded,

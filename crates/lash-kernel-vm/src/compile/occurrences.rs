@@ -11,9 +11,7 @@ impl Compiler<'_> {
                 && (!matches!(action.site.unit, Unit::Library(_))
                     || matches!(
                         action.kind,
-                        ActionKind::Perform { .. }
-                            | ActionKind::Sleep { .. }
-                            | ActionKind::Spawn { .. }
+                        ActionKind::Perform { .. } | ActionKind::Spawn { .. }
                     ))
             {
                 sites.insert(action.site.clone());
@@ -24,9 +22,7 @@ impl Compiler<'_> {
                 && (!matches!(action.site.unit, Unit::Library(_))
                     || matches!(
                         action.kind,
-                        NestedKind::Perform { .. }
-                            | NestedKind::Sleep { .. }
-                            | NestedKind::Spawn(_)
+                        NestedKind::Perform { .. } | NestedKind::Spawn(_)
                     ))
             {
                 sites.insert(action.site.clone());

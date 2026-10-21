@@ -17,7 +17,8 @@
 //!
 //! [`Float::json_number`]: lash_kernel_doc::Float::json_number
 
-use lash_kernel_doc::{Datum, KernelDataLimits, NumberToken};
+use lash_kernel_doc::{Datum, NumberToken};
+use lash_vocabulary::data_limits::KernelDataLimits;
 
 /// The field a package value holds its brand in
 /// (`lash_kernel_dialect::BRAND_FIELD`).

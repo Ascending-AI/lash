@@ -25,9 +25,10 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use lash_kernel_doc::{
-    Document, FunctionDefinition, FunctionId, FunctionRegistry, KernelDataLimits, KernelVersion,
-    RegistryError,
+    Document, FunctionDefinition, FunctionRegistry, KernelVersion, RegistryError,
 };
+use lash_vocabulary::data_limits::KernelDataLimits;
+use lash_vocabulary::legacy_names::FunctionId;
 
 use super::closure::{Closure, ClosureRefusal};
 
@@ -77,16 +78,6 @@ pub enum LoadRefusal {
         function: FunctionId,
         problem: String,
     },
-    /// A stored definition performs an operation a package declares
-    /// internal, and no stored snapshot lists it as that package's own
-    /// (R5).
-    #[error(
-        "function {function} performs `{operation}`, internal to a package it is not a member of"
-    )]
-    InternalOperation {
-        function: FunctionId,
-        operation: lash_kernel_doc::EffectName,
-    },
     /// A definition did not encode as a graph node.
     #[error("the closure does not encode: {problem}")]
     Graph { problem: String },
@@ -103,7 +94,7 @@ impl From<ClosureRefusal> for LoadRefusal {
     }
 }
 
-impl From<LoadRefusal> for lash_vm_protocol::KernelRestoreRefusal {
+impl From<LoadRefusal> for lash_protocol_types::engine_fault::KernelRestoreRefusal {
     fn from(refusal: LoadRefusal) -> Self {
         match refusal {
             LoadRefusal::NativeMissing { function } => Self::MissingNative {
@@ -115,8 +106,7 @@ impl From<LoadRefusal> for lash_vm_protocol::KernelRestoreRefusal {
             | LoadRefusal::Unlisted { function }
             | LoadRefusal::KernelVersion { function, .. }
             | LoadRefusal::Cycle { function }
-            | LoadRefusal::Invalid { function, .. }
-            | LoadRefusal::InternalOperation { function, .. } => Self::DefinitionRefused {
+            | LoadRefusal::Invalid { function, .. } => Self::DefinitionRefused {
                 function: function.to_string(),
                 problem: refusal.to_string(),
             },
@@ -137,7 +127,7 @@ pub fn decode(
     limits: KernelDataLimits,
 ) -> Result<FunctionDefinition, LoadRefusal> {
     let definition =
-        lash_kernel_doc::graph_tokens::decode_body_with_limits::<FunctionDefinition>(bytes, limits)
+        lash_vocabulary::tokens::decode_body_with_limits::<FunctionDefinition>(bytes, limits)
             .map_err(|error| LoadRefusal::Undecodable {
                 function,
                 problem: error.to_string(),
@@ -251,9 +241,26 @@ pub fn assemble(
     held: &Arc<FunctionRegistry>,
     stored: &BTreeMap<FunctionId, Arc<FunctionDefinition>>,
 ) -> Result<Assembled, LoadRefusal> {
+    let mut definitions = stored.clone();
+    definitions.extend(
+        document
+            .functions
+            .iter()
+            .map(|(id, definition)| (*id, Arc::new(definition.clone()))),
+    );
+    let stored = &definitions;
     let admitted = admit(
-        document.manifest.functions.keys().copied().collect(),
-        document.manifest.kernel,
+        document
+            .functions
+            .keys()
+            .chain(&document.requires.natives)
+            .copied()
+            .collect(),
+        *document
+            .requires
+            .kernels
+            .first()
+            .unwrap_or(&lash_kernel_doc::KERNEL_VERSION),
         held,
         stored,
     )?;
@@ -406,12 +413,8 @@ fn register(
 /// what its operation `links` require. A pure projection of the closure
 /// and the links, so a stored record is derived again to check it.
 #[must_use]
-pub fn requirements<'a>(
-    closure: &Closure,
-    kernel: u32,
-    links: impl IntoIterator<Item = &'a lash_core_store::tool_surface::OperationLink>,
-) -> lash_kernel_doc::ExecutionRequirements {
-    let mut requirements = lash_kernel_doc::ExecutionRequirements {
+pub fn requirements(closure: &Closure, kernel: u32) -> lash_vocabulary::claims::NodeRequirements {
+    lash_vocabulary::claims::NodeRequirements {
         natives: closure
             .body()
             .functions()
@@ -420,12 +423,7 @@ pub fn requirements<'a>(
             .map(|member| member.function)
             .collect(),
         kernels: BTreeSet::from([kernel]),
-        ..Default::default()
-    };
-    for link in links {
-        link.require(&mut requirements);
     }
-    requirements
 }
 
 fn refused(function: FunctionId, error: &RegistryError) -> LoadRefusal {
@@ -544,7 +542,3 @@ impl<L: Clone> Libraries<L> {
         Ok(library)
     }
 }
-
-#[cfg(test)]
-#[path = "loader_tests.rs"]
-mod tests;

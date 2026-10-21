@@ -6,7 +6,8 @@
 
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{Datum, FunctionId, FunctionRegistry, parse_definition};
+use lash_kernel_doc::{Datum, FunctionRegistry, parse_definition};
+use lash_vocabulary::legacy_names::FunctionId;
 
 use super::embedder::{Embedder, ROOMY, Setup, int, result, text};
 use crate::machine::Boundary;

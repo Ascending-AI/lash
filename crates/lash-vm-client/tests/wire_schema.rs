@@ -1,7 +1,8 @@
 //! Independent vectors for the custom capability encoding at the carry boundary.
 use lash_kernel_doc::Datum;
+use lash_protocol_types::engine_fault::PageRefusal;
 use lash_vm_client::wire::{CarryWire, PageLink, StartWire};
-use lash_vm_protocol::page::{PageAuthority, PageCapability, PageRefusal, PageReply};
+use lash_vm_protocol::page::{PageAuthority, PageCapability, PageReply};
 use serde_json::json;
 
 // Reviewed 1.0 bytes: page 00..1f, kind, little-endian authority and epoch,

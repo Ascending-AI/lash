@@ -30,10 +30,10 @@ use super::{
     ArenaHandle, Body, Bytes, Chunk, Chunks, ErrorBody, LongText, Objects, Sequence, ShortText,
     Table, Value,
 };
-use crate::KernelDataLimits;
 use crate::heap::{IMMUTABLE_INLINE_MAX, LogicalBytes, NormalKey};
 use crate::native::{GuardExceeded, WorkCounter};
 use crate::number::Integer;
+use lash_vocabulary::data_limits::KernelDataLimits;
 
 /// What the machine must do before a call can answer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -228,16 +228,15 @@ impl<'call> Args<'call> {
         }
     }
 
-    /// A function reference's name.
+    /// A function reference's admitted identity.
     #[inline]
-    pub fn function(&self, value: &'call Value) -> Result<Option<TextView<'call>>, NativeError> {
+    pub fn function(
+        &self,
+        value: &Value,
+    ) -> Result<Option<lash_vocabulary::names::CallableId>, NativeError> {
         match value {
-            Value::Function(short) => Ok(Some(TextView::Short(short))),
-            Value::LongFunction(object) => match self.body(*object)? {
-                Body::LongFunction(text) => Ok(Some(TextView::Long {
-                    object: *object,
-                    text,
-                })),
+            Value::Function(handle) => match self.body(*handle)? {
+                Body::Function(callable) => Ok(Some(**callable)),
                 _ => Err(NativeError::Malformed(
                     "a function handle names another body",
                 )),
@@ -349,12 +348,10 @@ impl<'call> Args<'call> {
             (V::Int(a), V::Int(b)) => a == b,
             (V::Float(a), V::Float(b)) => a.get() == b.get(),
             (V::Int(i), V::Float(f)) | (V::Float(f), V::Int(i)) => word_float(*i, f.get()),
-            (V::Text(a), V::Text(b)) | (V::Function(a), V::Function(b)) => a == b,
+            (V::Text(a), V::Text(b)) => a == b,
+            (V::Function(_), V::Function(_)) => self.function(a)? == self.function(b)?,
             // A short text is never equal to a long one.
-            (V::Text(_), V::LongText(_))
-            | (V::LongText(_), V::Text(_))
-            | (V::Function(_), V::LongFunction(_))
-            | (V::LongFunction(_), V::Function(_)) => false,
+            (V::Text(_), V::LongText(_)) | (V::LongText(_), V::Text(_)) => false,
             (V::Timestamp(a), V::Timestamp(b)) => a == b,
             (V::Task(a), V::Task(b)) | (V::TaskRef(a), V::TaskRef(b)) => a == b,
             (V::Closure(a), V::Closure(b)) | (V::ObjectRef(a), V::ObjectRef(b)) => a == b,
@@ -605,7 +602,7 @@ pub enum NewObject {
     Record(Vec<(Value, Value)>),
     LongText(Arc<str>),
     /// A function reference by a name past [`ShortText::MAX`] bytes.
-    LongFunction(Arc<str>),
+    Function(lash_vocabulary::names::CallableId),
     Bytes(Arc<[u8]>),
     BigInt(Integer),
     /// A timestamp whose nanoseconds pass a word.
@@ -627,7 +624,7 @@ impl NewObject {
             Self::Set(_) => Value::Set,
             Self::Record(_) => Value::Record,
             Self::LongText(_) => Value::LongText,
-            Self::LongFunction(_) => Value::LongFunction,
+            Self::Function(_) => Value::Function,
             Self::Bytes(_) => Value::Bytes,
             Self::BigInt(_) => Value::BigInt,
             Self::Timestamp(_) => Value::BigTimestamp,
@@ -798,11 +795,8 @@ impl<'call> Nursery<'call> {
 
     /// A function reference by `name`: inline when it is short, otherwise
     /// built.
-    pub fn function(&mut self, name: &str) -> Value {
-        match ShortText::new(name) {
-            Some(short) => Value::Function(short),
-            None => self.allocate(NewObject::LongFunction(Arc::from(name))),
-        }
+    pub fn function(&mut self, callable: lash_vocabulary::names::CallableId) -> Value {
+        self.allocate(NewObject::Function(callable))
     }
 
     /// What the call has reserved: the machine holds it once the call

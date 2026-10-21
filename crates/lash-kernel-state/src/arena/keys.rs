@@ -14,10 +14,11 @@ use std::collections::BTreeSet;
 use std::hash::BuildHasher;
 
 use lash_kernel_doc::arena::{ArenaHandle, Body, Chunk, Objects, Sequence, ShortText, Table};
-use lash_kernel_doc::graph_tokens::{TokenCodec, TokenWriter};
 use lash_kernel_doc::heap::{Identity, NormalKey};
 use lash_kernel_doc::heap_values::{integral_float, key_digest};
-use lash_kernel_doc::{Integer, KernelDataLimits, NativeError, Retry, Semantics, Timestamp, Value};
+use lash_kernel_doc::{Integer, NativeError, Retry, Semantics, Timestamp, Value};
+use lash_vocabulary::data_limits::KernelDataLimits;
+use lash_vocabulary::tokens::{TokenCodec, TokenWriter};
 
 use super::Facts;
 
@@ -206,14 +207,12 @@ fn table(objects: &Objects, handle: ArenaHandle) -> Result<(&Table, &[Value]), N
 /// A text's or a function name's UTF-8, whole.
 pub(crate) fn text<'a>(objects: &'a Objects, value: &'a Value) -> Result<&'a str, NativeError> {
     match value {
-        Value::Text(short) | Value::Function(short) => Ok(short.as_str()),
-        Value::LongText(handle) | Value::LongFunction(handle) => match body(objects, *handle)? {
+        Value::Text(short) => Ok(short.as_str()),
+        Value::LongText(handle) => match body(objects, *handle)? {
             Body::LongText(long) if long.moved() => Err(NativeError::Malformed(
                 "a text whose storage moved was read",
             )),
-            Body::LongText(long) | Body::LongFunction(long) => {
-                Ok(whole(*handle, &long.chunks)?.map_or("", |text| text))
-            }
+            Body::LongText(long) => Ok(whole(*handle, &long.chunks)?.map_or("", |text| text)),
             _ => Err(NativeError::Malformed("a text handle names another body")),
         },
         _ => Err(NativeError::Malformed("a text was expected")),
@@ -354,9 +353,12 @@ fn tokens(
             out.sum(10, 1);
             out.unsigned(token);
         }
-        Value::Function(_) | Value::LongFunction(_) => {
+        Value::Function(handle) => {
             out.sum(8, 1);
-            out.text(text(objects, value)?);
+            match body(objects, *handle)? {
+                Body::Function(callable) => callable.encode(out),
+                _ => return Err(NativeError::Malformed("function body")),
+            }
         }
         Value::Tuple(handle) => {
             let members = sequence(objects, *handle)?;
@@ -435,10 +437,13 @@ pub(crate) fn equal(
                 integral_float(f.get())
                     .is_some_and(|f| integer(objects, int).ok().flatten() == Some(f))
             }
-            (V::Text(_) | V::LongText(_), V::Text(_) | V::LongText(_))
-            | (V::Function(_) | V::LongFunction(_), V::Function(_) | V::LongFunction(_)) => {
+            (V::Text(_) | V::LongText(_), V::Text(_) | V::LongText(_)) => {
                 text(objects, &a)? == text(objects, &b)?
             }
+            (V::Function(a), V::Function(b)) => match (body(objects, *a)?, body(objects, *b)?) {
+                (Body::Function(a), Body::Function(b)) => a == b,
+                _ => return Err(NativeError::Malformed("function body")),
+            },
             (V::Bytes(a), V::Bytes(b)) => bytes(objects, *a)? == bytes(objects, *b)?,
             (V::Timestamp(_) | V::BigTimestamp(_), V::Timestamp(_) | V::BigTimestamp(_)) => {
                 nanoseconds(objects, &a)? == nanoseconds(objects, &b)?
@@ -689,7 +694,7 @@ mod tests {
             .iter()
             .flat_map(|text| {
                 let short = ShortText::new(text).unwrap();
-                [Value::Text(short), Value::Function(short)]
+                [Value::Text(short)]
             })
             .collect();
         for word in [0, 1, -1, 2, i64::MAX, i64::MIN, 1 << 53] {

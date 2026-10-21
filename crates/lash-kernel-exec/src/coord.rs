@@ -48,9 +48,7 @@ pub enum ActionKind {
     Perform {
         then_yield: bool,
     },
-    Sleep {
-        then_yield: bool,
-    },
+
     Spawn,
     Join,
     JoinMany,
@@ -60,10 +58,7 @@ impl ActionKind {
     /// Whether the task takes one more turn once the action's outcome is
     /// in (`K-TASK-005`).
     pub const fn then_yield(self) -> bool {
-        matches!(
-            self,
-            Self::Perform { then_yield: true } | Self::Sleep { then_yield: true }
-        )
+        matches!(self, Self::Perform { then_yield: true })
     }
 
     /// Whether an action of this kind can stand at `phase`.
@@ -72,10 +67,7 @@ impl ActionKind {
             (phase, self),
             (ActionPhase::Yielded, Self::Yield)
                 | (ActionPhase::Called, Self::Call | Self::Body)
-                | (
-                    ActionPhase::Waiting,
-                    Self::Perform { .. } | Self::Sleep { .. }
-                )
+                | (ActionPhase::Waiting, Self::Perform { .. })
                 | (ActionPhase::Spawned, Self::Spawn)
                 | (ActionPhase::Joining, Self::Join | Self::JoinMany)
         )
@@ -389,5 +381,37 @@ pub fn admit_arguments(saved: Option<u32>, takes: Option<u32>) -> Result<(), Res
             saved: saved.unwrap_or(0),
             expected: takes.unwrap_or(0),
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// K-TASK-005: the delivered phase retains the additional queued turn.
+    #[test]
+    fn waited_perform_retains_delivered_then_yield_phase() {
+        let action = SitePath(Box::new([0]));
+        let saved = StatementCoordinate::Nested {
+            action: action.clone(),
+            phase: ActionPhase::Waiting,
+            roles: Box::new([]),
+        };
+        let entry = ActionEntry {
+            action,
+            kind: ActionKind::Perform { then_yield: true },
+            roles: Box::new([]),
+        };
+        assert_eq!(admit(&entry, &saved, Arrival::Requested), Ok(()));
+        assert_eq!(admit(&entry, &saved, Arrival::Delivered), Ok(()));
+        let immediate = ActionEntry {
+            kind: ActionKind::Perform { then_yield: false },
+            ..entry
+        };
+        assert!(matches!(
+            admit(&immediate, &saved, Arrival::Delivered),
+            Err(RestoreRefusal::TaskState { .. })
+        ));
+        assert_eq!(admit(&immediate, &saved, Arrival::Requested), Ok(()));
     }
 }

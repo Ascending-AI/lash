@@ -148,7 +148,6 @@ pub(crate) fn size_one(value: &Value) -> bool {
             | Value::Closure(_)
             | Value::Task(_)
             | Value::Function(_)
-            | Value::LongFunction(_)
             | Value::Handle(_)
             | Value::TaskRef(_)
             | Value::ObjectRef(_)
@@ -354,9 +353,11 @@ fn copy(
                     .ok_or(NativeError::Malformed("a timestamp was expected"))?,
             })
         }
-        Value::Function(_) | Value::LongFunction(_) => {
-            Datum::Function(lash_kernel_doc::Name::new(text_of(arena, value)?))
-        }
+        Value::Function(handle) => Datum::Function(
+            arena
+                .callable(*handle)
+                .map_err(|error| CopyError::Heap(HeapFault::Malformed(error.to_string())))?,
+        ),
         Value::Handle(handle) => match arena.body(*handle)? {
             Body::Handle(handle) => Datum::Handle(handle.clone()),
             _ => return Err(NativeError::Malformed("a handle names another body").into()),
@@ -528,7 +529,7 @@ fn copy_page(
             Datum::Bytes(lash_kernel_doc::Bytes::new(bytes))
         }
         PageValue::Timestamp(t) => Datum::Timestamp(t.clone()),
-        PageValue::Function(n) => Datum::Function(lash_kernel_doc::Name::new(text_copy(heap, n)?)),
+        PageValue::Function(n) => Datum::Function(**n),
         PageValue::Handle(h) => Datum::Handle(h.as_ref().clone()),
         PageValue::Error(e) => Datum::Error(Box::new(ErrorDatum {
             kind: text_copy(heap, &e.kind)?,

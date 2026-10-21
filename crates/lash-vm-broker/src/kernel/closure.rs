@@ -27,11 +27,12 @@ use lash_core_store::checkpoint_graph::stage::{CandidateManifest, ManifestEntry,
 use lash_core_store::checkpoint_graph::{
     EncodedNode, GraphRefusal, GraphStaging, NodeId, NodeKind, TypedBody,
 };
-use lash_kernel_doc::graph_tokens::{
+use lash_kernel_doc::{FunctionDefinition, FunctionRegistry};
+use lash_protocol_types::engine_fault::KernelRestoreRefusal;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::tokens::{
     ChildRef, TokenCodec, TokenError, TokenReader, TokenWriter, check_ascending, encode_body,
 };
-use lash_kernel_doc::{FunctionDefinition, FunctionId, FunctionRegistry};
-use lash_vm_protocol::KernelRestoreRefusal;
 
 /// One function a closure holds.
 #[derive(Clone, Debug, PartialEq, Eq)]

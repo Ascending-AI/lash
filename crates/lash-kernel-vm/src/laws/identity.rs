@@ -8,10 +8,10 @@
 use std::collections::BTreeMap;
 
 use lash_kernel_doc::{
-    FunctionId, FunctionRegistry, NativeCall, NativeError, NativeFunction, NewObject, Value,
-    parse_definition,
+    FunctionRegistry, NativeCall, NativeError, NativeFunction, NewObject, Value, parse_definition,
 };
 use lash_kernel_state::paged::SealBudget;
+use lash_vocabulary::legacy_names::FunctionId;
 
 use super::embedder::{Embedder, Setup, int, result};
 use crate::conformance::{Checkpoint, checkpoint};

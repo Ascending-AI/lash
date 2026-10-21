@@ -3,7 +3,8 @@
 use std::sync::OnceLock;
 
 use lash_kernel_doc::plan::{HeapTemplate, HelperTemplate};
-use lash_kernel_doc::{FunctionId, FunctionRegistry, PreparedNative, Value};
+use lash_kernel_doc::{FunctionRegistry, PreparedNative, Value};
+use lash_vocabulary::legacy_names::FunctionId;
 
 impl super::NestedKind {
     /// A statically named library call, whether written as a native

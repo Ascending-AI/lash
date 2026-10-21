@@ -6,7 +6,8 @@
 //! (`K-MACH-008`).
 
 use lash_kernel_doc::heap::PageId;
-use lash_kernel_doc::{Datum, Name, parse_document};
+use lash_kernel_doc::{Datum, parse_document};
+use lash_vocabulary::legacy_names::Name;
 
 use super::embedder::{ROOMY, Source, World, census, library};
 use crate::{

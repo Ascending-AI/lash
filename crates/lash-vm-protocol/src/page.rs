@@ -15,11 +15,9 @@
 //! Like the rest of this crate, nothing here reaches the kernel: a page is
 //! opaque bytes.
 
+use lash_protocol_types::engine_fault::PageRefusal;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
-
-use crate::Detail;
 
 /// Names one page exchange within a lease, so its reply answers exactly
 /// it.
@@ -299,111 +297,4 @@ pub enum PageReply {
         pages: Vec<PageCapability>,
     },
     Refused(PageRefusal),
-}
-
-/// Why the parent refused a page exchange. Every refusal ends the
-/// activation as infrastructure; none is a guest outcome.
-#[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum PageRefusal {
-    #[error("a capability is forged, foreign or of another epoch")]
-    Unauthorized,
-    #[error("the activation's root or stage lease is no longer valid")]
-    LeaseLost,
-    #[error("a page is missing from the store")]
-    Missing,
-    #[error("a page does not check against its digest or envelope")]
-    Corrupt,
-    #[error("the request exceeds the batch bound of {pages} pages or {bytes} bytes")]
-    BatchTooLarge { pages: u64, bytes: u64 },
-    #[error("the activation's staging quota of {bytes} bytes is exhausted")]
-    StagingExhausted { bytes: u64 },
-    #[error("the activation's page deadline passed")]
-    Deadline,
-    #[error("the store is unavailable")]
-    StoreUnavailable,
-}
-
-impl PageRefusal {
-    /// Whether redriving the owning invocation can succeed: a page the
-    /// store lacks or holds corrupt is so on every attempt; a lease,
-    /// deadline, quota or transport refusal is the host's moment.
-    pub fn is_retryable(&self) -> bool {
-        !matches!(self, Self::Missing | Self::Corrupt)
-    }
-}
-
-/// A heap fault the worker met itself (FIG-6422), as it crosses to the
-/// parent: infrastructure, never a guest outcome. The wire mirrors the
-/// kernel's `lash_kernel_doc::heap::HeapFault`, which this crate cannot
-/// name: the worker carries each fault's `Display`, which names the page,
-/// as its `detail`.
-#[derive(Clone, Debug, PartialEq, Eq, Error, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum HeapFault {
-    #[error("{detail}")]
-    Missing { detail: Detail },
-    #[error("{detail}")]
-    Corrupt { detail: Detail },
-    #[error("{detail}")]
-    Unauthorized { detail: Detail },
-    #[error("the activation's root or stage lease is no longer valid")]
-    LeaseLost,
-    #[error("host resource {resource:?} is exhausted")]
-    Exhausted { resource: HostResource },
-    #[error("{detail}")]
-    Transport { detail: Detail },
-    #[error("{detail}")]
-    Malformed { detail: Detail },
-}
-
-/// The host resources a heap draws on beside guest memory, as they cross.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum HostResource {
-    /// Quiescent census bitmap, work-list and root scratch budget.
-    TraceBudget,
-    /// Resident clean-page cache.
-    CleanResidency,
-    /// Resident dirty-page budget.
-    DirtyResidency,
-    /// Pages pinned for an activation.
-    PinnedPages,
-    /// Uncommitted staged page bytes.
-    StagingBytes,
-    /// One page-read batch.
-    ReadBatch,
-    /// Host work granted to an activation.
-    HostWork,
-}
-
-impl HostResource {
-    /// Whether redriving from committed state can succeed once the host
-    /// resource is available. The engine owns redrive; this is no guarantee
-    /// that the same resource grant will suffice on another attempt.
-    #[must_use]
-    pub const fn is_retryable(self) -> bool {
-        match self {
-            Self::TraceBudget
-            | Self::CleanResidency
-            | Self::DirtyResidency
-            | Self::PinnedPages
-            | Self::StagingBytes
-            | Self::ReadBatch
-            | Self::HostWork => true,
-        }
-    }
-}
-
-impl HeapFault {
-    /// Whether redriving the owning invocation can succeed: missing and
-    /// corrupt content is so on every attempt, and the heap's own stored
-    /// state is no different; a lease, grant, host resource or transport
-    /// fault is the host's moment.
-    pub fn is_retryable(&self) -> bool {
-        !matches!(
-            self,
-            Self::Missing { .. } | Self::Corrupt { .. } | Self::Malformed { .. }
-        )
-    }
 }

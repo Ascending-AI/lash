@@ -69,9 +69,12 @@ use lash_durable::domain::graph::{HydratedGraph, RootOwner};
 use lash_durable::domain::pages::{CandidateOwner, CandidatePublication};
 use lash_durable::domain::{ExecKey, RunFactWrite, RunSeq, SnapshotRev};
 use lash_durable::{CommitLabel, DomainWrite, DurableError, DurableInstant};
-use lash_kernel_doc::{Datum, DocumentId, EffectId, EffectName, ErrorDatum, KERNEL_VERSION};
+use lash_kernel_doc::{Datum, ErrorDatum, KERNEL_VERSION};
 use lash_kernel_state::paged::CheckpointHeader;
 use lash_kernel_vm::{End, Outcome, WaitId};
+use lash_vocabulary::legacy_names::DocumentId;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::sites::EffectId;
 use tokio_util::sync::CancellationToken;
 
 use super::closure::Closure;

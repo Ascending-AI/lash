@@ -4,12 +4,10 @@ use super::directory::{
 };
 use super::tree::{Access, Cell, SealWork, Tree};
 use super::*;
-use lash_kernel_doc::Name;
-use lash_kernel_doc::graph_tokens::{
-    TokenCodec, TokenError, TokenReader, TokenWriter, encode_body,
-};
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::heap_values::{decode_value_with_family, encode_relative};
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::tokens::{TokenCodec, TokenError, TokenReader, TokenWriter, encode_body};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ops::ControlFlow;
 use std::sync::Arc;
@@ -146,12 +144,16 @@ fn decode_header(answer: &PageAnswer, frozen: &FrozenRef) -> Result<FrozenHeader
     {
         return Err(invalid("frozen root summary mismatch"));
     }
-    validate_occurrence(&header.value.0, header.summary.entities)?;
+    validate_occurrence(
+        &header.value.0,
+        header.summary.entities,
+        !header.summary.data_only,
+    )?;
     header.objects.grants(&answer.children)?;
     header.value.grants(&answer.children)?;
     Ok(header)
 }
-fn validate_occurrence(value: &PageValue, extent: u64) -> Result<(), HeapFault> {
+fn validate_occurrence(value: &PageValue, extent: u64, closures: bool) -> Result<(), HeapFault> {
     match value {
         PageValue::List(id) | PageValue::Map(id) | PageValue::Set(id) | PageValue::Record(id) => {
             if id.family != RELATIVE || id.ordinal >= extent {
@@ -161,15 +163,16 @@ fn validate_occurrence(value: &PageValue, extent: u64) -> Result<(), HeapFault> 
         PageValue::Tuple(t) => {
             if let Payload::Resident(values) = &t.body {
                 for value in values.iter() {
-                    validate_occurrence(value, extent)?;
+                    validate_occurrence(value, extent, closures)?;
                 }
             }
         }
         PageValue::Error(e) => {
             if let Payload::Resident(data) = &e.data {
-                validate_occurrence(data, extent)?;
+                validate_occurrence(data, extent, closures)?;
             }
         }
+        PageValue::Closure(id) if closures && id.family != RELATIVE => {}
         PageValue::Closure(_) | PageValue::Task(_) | PageValue::Ref(_) => {
             return Err(invalid("a frozen root contains a runtime identity"));
         }
@@ -251,8 +254,9 @@ struct Freezer<'a> {
     cost: u64,
     charge: u64,
     depth: usize,
-    named: &'a BTreeMap<EntityId, Name>,
-    functions: BTreeSet<Name>,
+    named: &'a BTreeSet<EntityId>,
+    functions: BTreeSet<EntityId>,
+    seen: BTreeMap<EntityId, u64>,
 }
 impl Freezer<'_> {
     fn sequence(&self, values: Vec<PageValue>, nested: bool) -> Result<Tree<PageValue>, HeapFault> {
@@ -282,29 +286,12 @@ impl Freezer<'_> {
             | PageValue::Map(id)
             | PageValue::Set(id)
             | PageValue::Record(id) => self.object(*id, value),
-            PageValue::Closure(id) => match self.named.get(id) {
-                Some(name) => {
-                    self.functions.insert(name.clone());
-                    Ok(PageValue::Function(datum::text(
-                        &self.heap.access,
-                        name.as_str(),
-                    )?))
-                }
-                None => Err(nondata()),
-            },
-            PageValue::Function(name) => {
-                let name = Name::new(self.heap.copy_text(name)?.to_string());
-                self.functions.insert(name.clone());
-                match value {
-                    PageValue::Function(TextRef {
-                        body: Payload::Resident(text),
-                        ..
-                    }) if text.len() as u64 > IMMUTABLE_INLINE_MAX => Ok(PageValue::Function(
-                        datum::text(&self.heap.access, name.as_str())?,
-                    )),
-                    _ => Ok(value.clone()),
-                }
+            PageValue::Closure(id) if self.named.contains(id) => {
+                self.functions.insert(*id);
+                Ok(value.clone())
             }
+            PageValue::Closure(_) => Err(nondata()),
+            PageValue::Function(_) => Ok(value.clone()),
             PageValue::Task(_) | PageValue::Ref(_) => Err(nondata()),
             PageValue::Tuple(t) => {
                 let mut values = Vec::new();
@@ -353,20 +340,41 @@ impl Freezer<'_> {
         result
     }
     fn object(&mut self, id: EntityId, value: &PageValue) -> Result<PageValue, HeapWriteError> {
+        if let Some(ordinal) = self.seen.get(&id).copied() {
+            if self.active.contains(&id) && !self.named.contains(&id) {
+                return Err(nondata());
+            }
+            let id = EntityId {
+                family: RELATIVE,
+                ordinal,
+            };
+            return Ok(match value {
+                PageValue::Closure(_) => PageValue::Closure(id),
+                PageValue::List(_) => PageValue::List(id),
+                PageValue::Map(_) => PageValue::Map(id),
+                PageValue::Set(_) => PageValue::Set(id),
+                _ => PageValue::Record(id),
+            });
+        }
         if !self.active.insert(id) {
             return Err(nondata());
         }
         let ordinal = self.entities;
         self.entities = plus(self.entities, 1)?;
+        self.seen.insert(id, ordinal);
         let mut elements = Vec::new();
-        self.heap.visit(id, &mut |e| {
-            elements.push(match e {
-                Element::Item(v) => (v.clone(), PageValue::Absent),
-                Element::Entry { key, value } => (key.clone(), value.clone()),
-                Element::Field { name, value } => (PageValue::Text(name.clone()), value.clone()),
-            });
-            ControlFlow::Continue(())
-        })?;
+        if !matches!(value, PageValue::Closure(_)) {
+            self.heap.visit(id, &mut |e| {
+                elements.push(match e {
+                    Element::Item(v) => (v.clone(), PageValue::Absent),
+                    Element::Entry { key, value } => (key.clone(), value.clone()),
+                    Element::Field { name, value } => {
+                        (PageValue::Text(name.clone()), value.clone())
+                    }
+                });
+                ControlFlow::Continue(())
+            })?;
+        }
         let body = if matches!(value, PageValue::List(_)) {
             let values = elements
                 .iter()
@@ -433,19 +441,23 @@ impl Freezer<'_> {
             PageValue::List(_) => PageValue::List(id),
             PageValue::Map(_) => PageValue::Map(id),
             PageValue::Set(_) => PageValue::Set(id),
+            PageValue::Closure(_) => PageValue::Closure(id),
             _ => PageValue::Record(id),
         })
     }
 }
 impl Freezer<'_> {
-    fn finish(mut self, value: PageValue) -> Result<(FrozenRef, BTreeSet<Name>), HeapWriteError> {
+    fn finish(
+        mut self,
+        value: PageValue,
+    ) -> Result<(FrozenRef, BTreeSet<EntityId>), HeapWriteError> {
         self.cost = plus(self.cost, value_cost(&value))?;
         self.objects
             .seal_nested(&self.heap.access, &mut SealWork::new(budget()))?;
         let summary = FrozenSummary {
             entities: self.entities,
             cost: LogicalBytes(self.cost),
-            data_only: true,
+            data_only: self.functions.is_empty(),
         };
         let functions = self.functions;
         let header = FrozenHeader {
@@ -470,8 +482,8 @@ impl PagedHeap {
     pub fn freeze_named(
         &mut self,
         value: &PageValue,
-        named: &BTreeMap<EntityId, Name>,
-    ) -> Result<(FrozenRef, BTreeSet<Name>), HeapWriteError> {
+        named: &BTreeSet<EntityId>,
+    ) -> Result<(FrozenRef, BTreeSet<EntityId>), HeapWriteError> {
         let mut freezer = Freezer {
             heap: self,
             objects: Tree::new(false),
@@ -482,6 +494,7 @@ impl PagedHeap {
             depth: 0,
             named,
             functions: BTreeSet::new(),
+            seen: BTreeMap::new(),
         };
         let value = freezer.value(value)?;
         freezer.finish(value)
@@ -512,7 +525,7 @@ fn logical_size(heap: &PagedHeap, value: &PageValue) -> Result<u64, HeapFault> {
 }
 impl HeapLifecycle for PagedHeap {
     fn freeze(&mut self, value: &PageValue, _data_only: bool) -> Result<FrozenRef, HeapWriteError> {
-        self.freeze_named(value, &BTreeMap::new())
+        self.freeze_named(value, &BTreeSet::new())
             .map(|(frozen, _)| frozen)
     }
     fn instantiate(&mut self, frozen: &FrozenRef) -> Result<PageValue, HeapWriteError> {
@@ -531,84 +544,19 @@ impl HeapLifecycle for PagedHeap {
         Ok(value)
     }
     fn classify_carry(&mut self, bindings: &KeyedRoot) -> Result<CarryClassification, HeapFault> {
-        let certificate = self.data_only_certificate();
-        if certificate.closure_entities == 0 && certificate.task_edges == 0 {
-            return Ok(CarryClassification {
-                carried: *bindings,
-                dropped: Vec::new(),
-            });
-        }
-        let mut table = Tree::<BindingRecord>::of_keyed(bindings);
-        let mut candidates = Vec::new();
-        table.visit(&self.access, &mut |key, record| {
-            candidates.push((key.to_vec(), record.clone()));
-            true
-        })?;
-        let mut roots = Vec::new();
-        let mut pending = VecDeque::new();
-        for (_, record) in &candidates {
-            let mut edges = Vec::new();
-            match &record.value {
-                BoundRecord::Value(value) => self.edges_of(value, &mut edges)?,
-                BoundRecord::Shared(id) => edges.push(Identity::Object(*id)),
-            }
-            pending.extend(edges.iter().copied());
-            roots.push(edges);
-        }
-        // One union graph, then reverse propagation from forbidden nodes.
-        let mut seen = BTreeSet::new();
-        let mut reverse: BTreeMap<Identity, Vec<Identity>> = BTreeMap::new();
-        let mut bad = BTreeSet::new();
-        while let Some(identity) = pending.pop_front() {
-            if !seen.insert(identity) {
-                continue;
-            }
-            match identity {
-                Identity::Task(_) => {
-                    bad.insert(identity);
-                }
-                Identity::Object(id) => {
-                    if self.kind(id)? == Some(ObjectKind::Closure) {
-                        bad.insert(identity);
-                        continue;
-                    }
-                    let mut edges = Vec::new();
-                    self.entity_edges(id, &mut |e| {
-                        edges.push(e);
-                        Ok(())
-                    })?;
-                    for edge in edges {
-                        reverse.entry(edge).or_default().push(identity);
-                        pending.push_back(edge);
-                    }
-                }
-            }
-        }
-        let mut queue: VecDeque<_> = bad.iter().copied().collect();
-        while let Some(identity) = queue.pop_front() {
-            if let Some(parents) = reverse.get(&identity) {
-                for parent in parents {
-                    if bad.insert(*parent) {
-                        queue.push_back(*parent);
-                    }
-                }
-            }
-        }
-        let mut dropped = Vec::new();
-        for ((key, record), edges) in candidates.iter().zip(roots) {
-            if edges.iter().any(|e| bad.contains(e)) {
-                dropped.push(record.name.resolve(&self.access)?);
-                table.remove(key, &self.access)?;
-            }
-        }
-        table.seal(&self.access, &mut SealWork::new(budget()))?;
-        Ok(CarryClassification {
-            carried: super::heap_impl::keyed(&table)?,
-            dropped,
-        })
+        self.classify_carry_with_saved(bindings, &BTreeSet::new())
     }
     fn carry(&mut self, roots: CarryRoots) -> Result<SessionRoot, HeapFault> {
-        let classification = self.classify_carry(&roots.bindings)?;
+        self.set_saved_functions(&roots.functions);
+        let mut saved = BTreeSet::new();
+        Tree::<FunctionRecord>::of_keyed(&roots.functions).visit(
+            &self.access,
+            &mut |_, record| {
+                saved.insert(record.environment);
+                true
+            },
+        )?;
+        let classification = self.classify_carry_with_saved(&roots.bindings, &saved)?;
         let bindings = classification.carried;
         // A selected root is already sealed. Replacing it updates only its
         // holding summary and the root, never reconstructing its members.
@@ -656,6 +604,7 @@ impl HeapLifecycle for PagedHeap {
         // The heap-header certificate already counts what the bindings
         // name. Attach the admitted root without counting it again.
         self.session = Tree::of_keyed(&session.bindings);
+        self.set_saved_functions(&session.functions);
         Ok(session.bindings)
     }
 }
@@ -699,4 +648,88 @@ fn frozen_error(
                 .ok_or_else(|| invalid("error data page missing"))?,
         ),
     })
+}
+
+impl PagedHeap {
+    fn classify_carry_with_saved(
+        &mut self,
+        bindings: &KeyedRoot,
+        saved: &BTreeSet<EntityId>,
+    ) -> Result<CarryClassification, HeapFault> {
+        let certificate = self.data_only_certificate();
+        if certificate.closure_entities == 0 && certificate.task_edges == 0 {
+            return Ok(CarryClassification {
+                carried: *bindings,
+                dropped: Vec::new(),
+            });
+        }
+        let mut table = Tree::<BindingRecord>::of_keyed(bindings);
+        let mut candidates = Vec::new();
+        table.visit(&self.access, &mut |key, record| {
+            candidates.push((key.to_vec(), record.clone()));
+            true
+        })?;
+        let mut roots = Vec::new();
+        let mut pending = VecDeque::new();
+        for (_, record) in &candidates {
+            let mut edges = Vec::new();
+            match &record.value {
+                BoundRecord::Value(value) => self.edges_of(value, &mut edges)?,
+                BoundRecord::Shared(id) => edges.push(Identity::Object(*id)),
+            }
+            pending.extend(edges.iter().copied());
+            roots.push(edges);
+        }
+        // One union graph, then reverse propagation from forbidden nodes.
+        let mut seen = BTreeSet::new();
+        let mut reverse: BTreeMap<Identity, Vec<Identity>> = BTreeMap::new();
+        let mut bad = BTreeSet::new();
+        while let Some(identity) = pending.pop_front() {
+            if !seen.insert(identity) {
+                continue;
+            }
+            match identity {
+                Identity::Task(_) => {
+                    bad.insert(identity);
+                }
+                Identity::Object(id) => {
+                    if self.kind(id)? == Some(ObjectKind::Closure) && !saved.contains(&id) {
+                        bad.insert(identity);
+                        continue;
+                    }
+                    let mut edges = Vec::new();
+                    self.entity_edges(id, &mut |e| {
+                        edges.push(e);
+                        Ok(())
+                    })?;
+                    for edge in edges {
+                        reverse.entry(edge).or_default().push(identity);
+                        pending.push_back(edge);
+                    }
+                }
+            }
+        }
+        let mut queue: VecDeque<_> = bad.iter().copied().collect();
+        while let Some(identity) = queue.pop_front() {
+            if let Some(parents) = reverse.get(&identity) {
+                for parent in parents {
+                    if bad.insert(*parent) {
+                        queue.push_back(*parent);
+                    }
+                }
+            }
+        }
+        let mut dropped = Vec::new();
+        for ((key, record), edges) in candidates.iter().zip(roots) {
+            if edges.iter().any(|e| bad.contains(e)) {
+                dropped.push(record.name.resolve(&self.access)?);
+                table.remove(key, &self.access)?;
+            }
+        }
+        table.seal(&self.access, &mut SealWork::new(budget()))?;
+        Ok(CarryClassification {
+            carried: super::heap_impl::keyed(&table)?,
+            dropped,
+        })
+    }
 }

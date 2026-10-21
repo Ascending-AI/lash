@@ -34,11 +34,10 @@ mod entry;
 
 use lash_kernel_doc::arena::{ArenaHandle, LocalCode};
 use lash_kernel_doc::heap::LogicalBytes;
-use lash_kernel_doc::{
-    Args, KernelDataLimits, NativeCall, Nursery, PreparedAnswer, TaskId, Value, WorkCounter,
-};
+use lash_kernel_doc::{Args, NativeCall, Nursery, PreparedAnswer, TaskId, Value, WorkCounter};
 use lash_kernel_exec::{ActIx, Weight};
 use lash_kernel_state::arena::Arena;
+use lash_vocabulary::data_limits::KernelDataLimits;
 
 use super::frames::Role;
 use super::session::Session;
@@ -1151,7 +1150,12 @@ fn found_code(arena: &mut Arena, exe: &Executable, handle: ArenaHandle) -> Optio
     let executable = exe.local();
     let found = match arena.closure(handle).ok()? {
         (_, _, Some(code)) if code.executable == executable => return Some(CodeId(code.code)),
-        (site, ..) => super::project::closure_code(exe, site).ok()?,
+        (identity, ..) => exe
+            .code_at(&lash_vocabulary::sites::Site::new(
+                lash_vocabulary::sites::Unit::Library(identity.callable.function),
+                [],
+            ))
+            .or_else(|| super::project::closure_code(exe, &identity.site.site).ok())?,
     };
     arena
         .found_closure_code(

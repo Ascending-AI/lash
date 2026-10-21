@@ -20,14 +20,15 @@
 
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{Datum, FunctionId, FunctionRegistry, TaskId, parse_definition};
+use lash_kernel_doc::{Datum, FunctionRegistry, TaskId, parse_definition};
 use lash_kernel_state::paged::{
     HeaderRecord, IncomingRecord, PendingRecord, PhaseRecord, RoleRecord, RolesRecord,
     TaskStateRecord,
 };
+use lash_vocabulary::legacy_names::FunctionId;
 
-use lash_kernel_doc::Site;
 use lash_kernel_exec::coord::{ActionPhase, LoopPhase, RestoreRefusal, SitePath};
+use lash_vocabulary::sites::Site;
 
 use super::embedder::{self, Embedder, Setup, label};
 use crate::{Bounds, End, Layout, Machine, Request, Step};
@@ -176,12 +177,13 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
         ..setup(drive.slice)
     };
     if let Some((entry, arg)) = drive.entry {
-        setup.start.target = crate::Target::Entry(lash_kernel_doc::Name::new(entry));
+        setup.start.target = crate::Target::Entry(lash_vocabulary::legacy_names::Name::new(entry));
         setup.start.args = vec![int(arg)];
     }
     if drive.reads {
-        setup.start.modes =
-            crate::EffectModes::reading([lash_kernel_doc::EffectName::new("echo").unwrap()]);
+        setup.start.modes = crate::EffectModes::reading([
+            lash_vocabulary::legacy_names::EffectName::new("echo").unwrap(),
+        ]);
     }
     let mut embedder = match Embedder::try_with(text, setup) {
         Ok(embedder) => embedder,
@@ -805,14 +807,12 @@ fn sequential_and_recursive_calls_keep_task_wide_effect_identities() {
     let mut warm = Embedder::with(SOURCE, setup(u64::MAX));
     warm.run_to_end(&[]);
     let expected: Vec<_> = (0..5)
-        .map(
-            |occurrence| lash_kernel_doc::kernel_internals::EffectIdentity {
-                task: lash_kernel_doc::kernel_internals::TaskIdentity::Main,
-                site: embedder::function_site("work", [0, 0]),
-                occurrence,
-                loops: Vec::new(),
-            },
-        )
+        .map(|occurrence| lash_vocabulary::sites::EffectIdentity {
+            task: lash_vocabulary::sites::TaskIdentity::Main,
+            site: embedder::function_site("work", [0, 0]),
+            occurrence,
+            loops: Vec::new(),
+        })
         .collect();
     let identities = |requests: &[Request]| {
         requests
@@ -1209,7 +1209,7 @@ fn a_loop_moved_past_its_cursor_or_off_its_site_is_refused() {
     embedder
         .machine
         .tamper_loop(TaskId::MAIN, 0, |record, access| {
-            let moved = Site::new(lash_kernel_doc::Unit::Main, [9, 9]);
+            let moved = Site::new(lash_vocabulary::sites::Unit::Main, [9, 9]);
             record.site = lash_kernel_state::paged::SiteRef::new(&moved, access).unwrap();
         })
         .unwrap();

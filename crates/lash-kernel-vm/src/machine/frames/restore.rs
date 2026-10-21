@@ -11,6 +11,15 @@ pub(super) fn frame(
     arena: &mut Arena,
 ) -> Result<Box<Frame>, Unrestored> {
     let site = record.statement.resolve(access)?;
+    let document = exe
+        .instances
+        .get(&record.link)
+        .ok_or_else(|| malformed("frame Link is not loaded"))?;
+    match &site.unit {
+        Unit::Main if document.main.is_some() => {}
+        Unit::Library(function) if document.functions.contains_key(function) => {}
+        _ => return Err(malformed("frame code is not in its defining Link").into()),
+    }
     let code_id = (0..=site.path.len())
         .rev()
         .find_map(|length| exe.code_at(&Site::new(site.unit.clone(), &site.path[..length])))
@@ -49,7 +58,9 @@ pub(super) fn frame(
     let cleaning = if *site == code.site
         && arrival == Arrival::Returned
         && pending.is_none()
-        && exe.root_cleanup(code_id).is_some()
+        && (record.convention.as_ref().is_some_and(|convention| {
+            !matches!(convention, lash_kernel_doc::StartConvention::Direct)
+        }) || exe.root_cleanup(code_id).is_some())
     {
         let saved = row(&record.finally, 0, access)?;
         let value = admit(arena, access, &row(&record.departing, 0, access)?)?;
@@ -238,7 +249,7 @@ pub(super) fn frame(
     {
         return Err(malformed("a frame has excess saved control rows").into());
     }
-    let library = match (&code.site.unit, code.site.path.is_empty()) {
+    let library = match (&code.site.unit, code.site.path.is_empty() && !code.charged) {
         (Unit::Library(function), true) => {
             let lib = exe
                 .lib_of(function)
@@ -279,6 +290,9 @@ pub(super) fn frame(
         };
     }
     Ok(Box::new(Frame {
+        link: record.link,
+        convention: record.convention.clone(),
+        public_result: record.public_result.clone(),
         slots,
         code: code_id,
         charging: code.charging,

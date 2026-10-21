@@ -10,9 +10,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash_kernel_doc::{
-    Datum, FunctionId, FunctionRegistry, NativeCall, NativeError, NativeFunction, Value,
-    parse_definition,
+    Datum, FunctionRegistry, NativeCall, NativeError, NativeFunction, Value, parse_definition,
 };
+use lash_vocabulary::legacy_names::FunctionId;
 
 use super::embedder::{Embedder, ROOMY, Setup, int, text};
 use crate::{Bound, BoundExceeded, Bounds, End, Layout, RunError, Step};
@@ -187,7 +187,14 @@ main {
 /// How a run ended: a finished run's result, finish and the bindings it did
 /// not carry, or any other end. The carry's page identities are left out,
 /// for a run reopened cold may lay its heap out on other pages.
-type Ended = Result<(Datum, bool, Vec<(lash_kernel_doc::Name, String)>), End>;
+type Ended = Result<
+    (
+        Datum,
+        bool,
+        Vec<(lash_vocabulary::legacy_names::Name, String)>,
+    ),
+    End,
+>;
 
 /// What a law compares of a run: how it ended, what it printed, the
 /// requests it made, and its charge.

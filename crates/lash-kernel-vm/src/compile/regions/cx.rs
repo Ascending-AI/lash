@@ -11,10 +11,11 @@ use lash_kernel_doc::arena::{ArenaHandle, ShortText};
 use lash_kernel_doc::heap::{HeapFault, LogicalBytes};
 use lash_kernel_doc::plan::{Collection, HeapTemplate, Table, TemplateHeap};
 use lash_kernel_doc::{
-    Args, KernelDataLimits, Measure, NativeCall, NativeError, NewObject, Nursery, PreparedAnswer,
-    PreparedNative, Value, ValueKind, WorkCounter,
+    Args, Measure, NativeCall, NativeError, NewObject, Nursery, PreparedAnswer, PreparedNative,
+    Value, ValueKind, WorkCounter,
 };
 use lash_kernel_state::arena::Arena;
+use lash_vocabulary::data_limits::KernelDataLimits;
 
 use super::super::{
     Charge, Entry, Executable, Fast, INNER, Lib, LibId, LibRun, Plan, ReadSite, Source,

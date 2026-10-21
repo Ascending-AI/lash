@@ -8,11 +8,14 @@ use std::sync::Arc;
 use lash_kernel_doc::arena::ShortText;
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::{
-    Datum, Document, ErrorDatum, FunctionId, FunctionRegistry, Handle, Integer, NativeCall,
-    NativeError, NativeFunction, NewObject, NumberToken, PreparedNative, Site, Timestamp, Unit,
-    Value, parse_definition, parse_document,
+    Datum, Document, ErrorDatum, FunctionRegistry, Handle, Integer, NativeCall, NativeError,
+    NativeFunction, NewObject, NumberToken, PreparedNative, Timestamp, Value, parse_definition,
+    parse_document,
 };
 use lash_kernel_state::paged::*;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -340,7 +343,7 @@ pub(crate) struct World {
     pub(crate) printed: Vec<Datum>,
     pub(crate) reads: Vec<Datum>,
     /// Each read-bound `perform`, with its arguments and its origin.
-    pub(crate) performed: Vec<(lash_kernel_doc::EffectName, Vec<Datum>, Site)>,
+    pub(crate) performed: Vec<(lash_vocabulary::legacy_names::EffectName, Vec<Datum>, Site)>,
     pub(crate) now: i64,
     pub(crate) random: u64,
     pub(crate) cancel: bool,
@@ -375,9 +378,9 @@ impl Host for World {
     /// Answers a read-bound `perform` from the effects' table.
     fn perform(
         &mut self,
-        effect: &lash_kernel_doc::EffectName,
+        effect: &lash_vocabulary::legacy_names::EffectName,
         args: &[Datum],
-        _site: &lash_kernel_doc::PositionLabel,
+        _site: &lash_vocabulary::sites::PositionLabel,
         origin: &Site,
     ) -> Result<Result<Datum, ErrorDatum>, crate::HostFault> {
         self.performed
@@ -643,8 +646,8 @@ impl Embedder {
             })?
             .unwrap();
         let certificate = self.machine.accounting();
-        let root: CheckpointRoot = lash_kernel_doc::graph_tokens::decode_body(
-            &lash_kernel_doc::graph_tokens::encode_body(&sealed.root),
+        let root: CheckpointRoot = lash_vocabulary::tokens::decode_body(
+            &lash_vocabulary::tokens::encode_body(&sealed.root),
         )
         .unwrap();
         Ok((root, certificate))

@@ -26,6 +26,7 @@
 //! and the conformance harness drive it through. Its rules are the `K-MACH` rules of
 //! `docs/kernel/semantics.md`.
 
+pub use observe::ObservationMode;
 mod compile;
 pub(crate) mod conformance;
 mod costs;
@@ -50,9 +51,11 @@ mod laws;
 pub(crate) use compile::Layout;
 pub use compile::{PreparedLibrary, body_census};
 pub use functions::{MachineFunctions, implement_machine_functions, register_machine_functions};
-pub use lash_kernel_doc::ExecutionPath;
+pub use lash_vocabulary::observation::ExecutionPath;
+pub use lash_vocabulary::observation::RunObservation;
+pub use lash_vocabulary::observation::SiteCounts;
 pub use machine::KernelMachine;
-pub use observe::{ChargeTape, ObservationMode, SiteCounts};
+pub use observe::ChargeTape;
 pub use paged::{SealedRoot, validate_foreign_checkpoint};
 pub use save::CellSaveContext;
 pub use session_editor::{SessionEditor, SessionValue};
@@ -66,10 +69,10 @@ pub mod kernel_internals;
 
 pub use interface::{
     Bound, BoundExceeded, Bounds, CellSave, CellStart, Charge, ChargeLimiter, DeliverError,
-    Delivered, EffectMode, EffectModes, EffectRequest, End, Finished, Host, HostFault,
-    LimitDecision, Machine, MachineError, MachineOptions, MemoryLimiter, MemoryMeter, Meters,
-    OpenError, Outcome, Park, Program, Request, RunError, RunObserver, SaveCell, SavedCell,
-    SealError, SleepRequest, StartError, Step, Target, WaitId,
+    Delivered, EffectModes, EffectRequest, End, Finished, Host, HostFault, LimitDecision, Machine,
+    MachineError, MachineOptions, MemoryLimiter, MemoryMeter, Meters, OpenError, Outcome, Park,
+    Program, Request, RunError, RunObserver, SaveCell, SavedCell, SealError, StartError, Step,
+    Target, WaitId,
 };
 
 pub use functions::machine_native;

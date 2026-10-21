@@ -128,7 +128,7 @@ fn an_identity_validated_against_the_library_is_admitted_without_validating_it_a
     let document =
         Arc::new(parse_document("numbers by_spelling\nkernel 1\nmain { break }\n").unwrap());
     let identity = document.identity();
-    let limits = lash_kernel_doc::KernelDataLimits::standard();
+    let limits = lash_vocabulary::data_limits::KernelDataLimits::standard();
     assert!(
         !prepared.admit_identified(&document, identity, limits),
         "validation refuses it"

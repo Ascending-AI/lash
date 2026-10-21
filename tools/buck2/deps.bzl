@@ -1244,6 +1244,7 @@ PACKAGE_DEPS = {
             "lash_protocol_types": "//crates/lash-protocol-types:lash-protocol-types",
             "lash_vm_protocol": "//crates/lash-vm-protocol:lash-vm-protocol",
             "lash_vm_releases": "//crates/lash-vm-releases:lash-vm-releases",
+            "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "serde_json": "//third-party/rust:p0322",
             "thiserror": "//third-party/rust:p0375",
             "tokio": "//third-party/rust:p0381",
@@ -1265,6 +1266,7 @@ PACKAGE_DEPS = {
             "lash_vm_broker": "//crates/lash-vm-broker:lash-vm-broker",
             "lash_vm_protocol": "//crates/lash-vm-protocol:lash-vm-protocol",
             "lash_vm_releases": "//crates/lash-vm-releases:lash-vm-releases",
+            "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "libc": "//third-party/rust:p0188",
             "rmp_serde": "//third-party/rust:p0285",
             "schemars": "//third-party/rust:p0309",
@@ -1282,6 +1284,7 @@ PACKAGE_DEPS = {
         },
         "normal": {
             "lash_protocol_types": "//crates/lash-protocol-types:lash-protocol-types",
+            "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "rmp_serde": "//third-party/rust:p0285",
             "schemars": "//third-party/rust:p0309",
             "serde": "//third-party/rust:p0317",
@@ -1407,6 +1410,7 @@ PACKAGE_DEPS = {
             "lash_vm_client": "//crates/lash-vm-client:lash-vm-client",
             "lash_vm_protocol": "//crates/lash-vm-protocol:lash-vm-protocol",
             "lash_vm_releases": "//crates/lash-vm-releases:lash-vm-releases",
+            "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "libc": "//third-party/rust:p0188",
             "rmp_serde": "//third-party/rust:p0285",
             "serde": "//third-party/rust:p0317",
@@ -1522,6 +1526,7 @@ PACKAGE_DEPS = {
         "build": {},
         "dev": {},
         "normal": {
+            "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "thiserror": "//third-party/rust:p0375"
         }
     },
@@ -1622,6 +1627,8 @@ PACKAGE_DEPS = {
             "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "num_bigint": "//third-party/rust:p0212",
             "num_traits": "//third-party/rust:p0218",
+            "schemars": "//third-party/rust:p0309",
+            "serde": "//third-party/rust:p0317",
             "serde_json": "//third-party/rust:p0322",
             "thiserror": "//third-party/rust:p0375"
         }

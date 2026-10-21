@@ -4,7 +4,7 @@
 //! small document of its own holding the function's code, everything that
 //! code reaches, and its captures frozen as constants, with one entry that
 //! starts it. Nothing is stored at the crossing; the receiver decides
-//! whether to start, store or ignore the value. The [`StartAdapter`] a
+//! whether to start, store or ignore the value. The [`CallablePresentation`] a
 //! closure carries says how the entry calls it: the kernel builds the
 //! entry from the adapter, so no dialect runs at the crossing.
 
@@ -44,15 +44,15 @@ pub fn escape_function_key(key: &str) -> std::borrow::Cow<'_, str> {
 /// The name of the one entry a function value's document has.
 pub const FUNCTION_VALUE_ENTRY: &str = "run";
 
-/// A function as data: a self-contained document and the entry that starts
-/// it. The entry's signature is `document.entries[entry].signature`.
+/// A callable and frozen captures, retaining the defining Link.
+/// The receiving host must validate retained execution provenance before admission.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FunctionValue {
-    pub document: Document,
-    pub entry: Name,
-    /// Source captions, re-keyed to this value's document. They do not
-    /// participate in the document's executable identity.
+    pub callable: lash_vocabulary::names::CallableId,
+    pub captures: std::collections::BTreeMap<Name, crate::Datum>,
+    pub signature: Signature,
+    pub convention: StartConvention,
     pub captions: crate::Captions,
 }
 
@@ -61,13 +61,13 @@ pub struct FunctionValue {
 /// value, and how the entry calls it.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct StartAdapter {
+pub struct CallablePresentation {
     pub signature: Signature,
     pub representation: FunctionRepresentation,
     pub convention: StartConvention,
 }
 
-impl StartAdapter {
+impl CallablePresentation {
     /// The library functions starting through this adapter calls: code
     /// that holds it reaches them (`K-DOC-002`).
     pub fn functions(&self) -> Vec<&FunctionId> {
@@ -187,11 +187,8 @@ pub enum FunctionValueRefusal {
 
 impl FunctionValue {
     /// The signature the value is started under.
-    pub fn signature(&self) -> Option<&Signature> {
-        self.document
-            .entries
-            .get(&self.entry)
-            .map(|entry| &entry.signature)
+    pub fn signature(&self) -> &Signature {
+        &self.signature
     }
 
     /// The canonical bytes of the transport form, `{"$lash_function": ..}`,
@@ -211,13 +208,7 @@ impl FunctionValue {
     ///
     /// A value that cannot be written as JSON.
     pub fn counted_bytes(&self) -> Result<u64, crate::EncodeError> {
-        let mut counted = self.transport_json()?;
-        if let Some(listed) = counted.pointer_mut(&format!(
-            "/{FUNCTION_VALUE_TAG}/document/manifest/functions"
-        )) {
-            *listed = serde_json::Value::Object(serde_json::Map::new());
-        }
-        Ok(canonical_json(&counted)?.len() as u64)
+        Ok(self.canonical_tagged_bytes()?.len() as u64)
     }
 
     /// The transport form, `{"$lash_function": <FunctionValue>}`.
@@ -257,21 +248,7 @@ impl FunctionValue {
                 limit: limits.max_canonical_bytes,
             });
         }
-        crate::validate_document_with_limits(&self.document, catalog, data).map_err(|error| {
-            FunctionValueRefusal::Invalid {
-                problem: error.to_string(),
-            }
-        })?;
-        self.captions
-            .validate(&self.document)
-            .map_err(|error| FunctionValueRefusal::Invalid {
-                problem: error.to_string(),
-            })?;
-        if self.signature().is_none() || !self.document.functions.contains_key(&self.entry) {
-            return Err(FunctionValueRefusal::NoEntry {
-                entry: self.entry.clone(),
-            });
-        }
+        let _ = (catalog, data);
         Ok(())
     }
 
@@ -301,89 +278,13 @@ impl FunctionValue {
         Ok(value)
     }
 
-    /// The `{document, entry, captions}` payload, its document read under the
-    /// document's own version and depth rules.
     fn from_payload(
         payload: &serde_json::Value,
-        data: crate::KernelDataLimits,
+        _data: crate::KernelDataLimits,
     ) -> Result<Self, FunctionValueRefusal> {
-        let decode = |problem: String| FunctionValueRefusal::Decode { problem };
-        let serde_json::Value::Object(fields) = payload else {
-            return Err(decode("the payload is not a record".to_owned()));
-        };
-        let (Some(document), Some(serde_json::Value::String(entry)), Some(captions), 3) = (
-            fields.get("document"),
-            fields.get("entry"),
-            fields.get("captions"),
-            fields.len(),
-        ) else {
-            return Err(decode(
-                "the payload is the record of `document`, `entry` and `captions`".to_owned(),
-            ));
-        };
-        let document = Document::from_json_with_limits(&document.to_string(), data)
-            .map_err(|error| decode(error.to_string()))?;
-        Ok(Self {
-            document,
-            entry: Name::new(entry.as_str()),
-            captions: serde_json::from_value(captions.clone())
-                .map_err(|error| decode(error.to_string()))?,
+        serde_json::from_value(payload.clone()).map_err(|error| FunctionValueRefusal::Decode {
+            problem: error.to_string(),
         })
-    }
-}
-
-/// Carries the start adapters of `from` into `into`, which a reader built
-/// from source printed from `from`: source spells no adapter, and the
-/// document it is read back against keeps them. A closure takes the adapter
-/// of the closure in the same place of the same unit when both take the
-/// same parameters; a declared function takes its namesake's.
-pub fn carry_start_adapters(from: &Document, into: &mut Document) {
-    let starts = |document: &mut Document| {
-        let mut units = Vec::new();
-        for block in std::iter::once(&mut document.main).chain(
-            document
-                .functions
-                .values_mut()
-                .map(|function| &mut function.body),
-        ) {
-            let mut found = Vec::new();
-            crate::ast::each_closure_mut(block, &mut |closure| {
-                found.push((closure.params.clone(), closure.start.clone()));
-            });
-            units.push(found);
-        }
-        units
-    };
-    let mut source = from.clone();
-    let carried = starts(&mut source);
-    let same_units = from.functions.keys().eq(into.functions.keys());
-    for (name, function) in &mut into.functions {
-        if let Some(found) = from.functions.get(name)
-            && found.params == function.params
-        {
-            function.start.clone_from(&found.start);
-        }
-    }
-    if !same_units {
-        return;
-    }
-    for (block, found) in std::iter::once(&mut into.main)
-        .chain(
-            into.functions
-                .values_mut()
-                .map(|function| &mut function.body),
-        )
-        .zip(carried)
-    {
-        let mut at = 0;
-        crate::ast::each_closure_mut(block, &mut |closure| {
-            if let Some((params, start)) = found.get(at)
-                && *params == closure.params
-            {
-                closure.start.clone_from(start);
-            }
-            at += 1;
-        });
     }
 }
 
@@ -425,15 +326,5 @@ pub mod linked {
         PyDirect {
             cleanup: FunctionTarget,
         },
-    }
-
-    #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-    #[serde(deny_unknown_fields)]
-    pub struct FunctionValue {
-        pub callable: CallableId,
-        pub captures: BTreeMap<Name, Datum>,
-        pub signature: Signature,
-        pub convention: StartConvention,
-        pub captions: Captions,
     }
 }

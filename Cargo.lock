@@ -3105,6 +3105,7 @@ dependencies = [
  "lash-internal-protocol-types",
  "lash-internal-vm-protocol",
  "lash-internal-vm-releases",
+ "lash-internal-vocabulary",
  "lash-kernel-doc",
  "lash-kernel-package",
  "lash-kernel-state",
@@ -3126,6 +3127,7 @@ dependencies = [
  "lash-internal-vm-broker",
  "lash-internal-vm-protocol",
  "lash-internal-vm-releases",
+ "lash-internal-vocabulary",
  "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-package",
@@ -3146,6 +3148,7 @@ name = "lash-internal-vm-protocol"
 version = "0.0.0-dev"
 dependencies = [
  "lash-internal-protocol-types",
+ "lash-internal-vocabulary",
  "rmp-serde",
  "schemars",
  "serde",
@@ -3236,6 +3239,7 @@ dependencies = [
  "lash-internal-vm-protocol",
  "lash-internal-vm-releases",
  "lash-internal-vm-worker",
+ "lash-internal-vocabulary",
  "lash-kernel-check",
  "lash-kernel-dialect",
  "lash-kernel-doc",
@@ -3359,6 +3363,7 @@ dependencies = [
 name = "lash-kernel-exec"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-internal-vocabulary",
  "thiserror 2.0.18",
 ]
 
@@ -3453,6 +3458,8 @@ dependencies = [
  "lash-kernel-state",
  "num-bigint",
  "num-traits",
+ "schemars",
+ "serde",
  "serde_json",
  "thiserror 2.0.18",
 ]

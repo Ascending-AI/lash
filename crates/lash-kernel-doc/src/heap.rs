@@ -282,7 +282,7 @@ pub enum PageValue {
     Closure(EntityId),
     Error(Arc<ErrorRef>),
     Task(TaskId),
-    Function(TextRef),
+    Function(Box<lash_vocabulary::names::CallableId>),
     Handle(Arc<Handle>),
     Ref(Identity),
 }

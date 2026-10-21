@@ -31,6 +31,7 @@ use lash_durable::domain::pages::{LeaseFence, RootLease, RootLeaseId, StoredPage
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch};
 use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageKind, PageSource};
+use lash_protocol_types::engine_fault::{ExecutionLease, FrameEpoch, OwnerEpoch};
 use lash_vm_broker::kernel::pages::{
     ActivationPages, CapabilityKey, LeasedReads, PageExchange, PageLimits, SpoolRoot,
 };

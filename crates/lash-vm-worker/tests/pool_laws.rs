@@ -2245,8 +2245,8 @@ fn a_frame_holding_a_native_only_function_the_shipped_worker_lacks_is_refused_at
     };
     let InfrastructureOutcome::ProtocolViolation {
         breach:
-            lash_vm_protocol::ProtocolBreach::Pool {
-                fault: lash_vm_protocol::PoolFault::Package { refusal },
+            lash_protocol_types::engine_fault::ProtocolBreach::Pool {
+                fault: lash_protocol_types::engine_fault::PoolFault::Package { refusal },
             },
     } = *outcome
     else {

@@ -5,9 +5,10 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash_kernel_doc::{
-    Datum, Float, FunctionId, FunctionRegistry, NativeCall, NativeError, NativeFunction,
-    PreparedNative, Value, parse_definition,
+    Datum, Float, FunctionRegistry, NativeCall, NativeError, NativeFunction, PreparedNative, Value,
+    parse_definition,
 };
+use lash_vocabulary::legacy_names::FunctionId;
 
 use super::embedder::{Embedder, ROOMY, Setup, text};
 use crate::{Bounds, End, Layout, Machine, Step};
@@ -515,7 +516,12 @@ fn template_bearing_invokes_are_prepared_operator_sites() {
         .admit(&program.document, Default::default())
         .unwrap_or_else(|_| panic!("the invoke is admitted"));
     let exe = admitted
-        .executable(&program.document, &program.library)
+        .executable(
+            &program.document,
+            &program.library,
+            &program.documents,
+            &program.instances,
+        )
         .unwrap_or_else(|_| panic!("the invoke compiles"));
     let (stream, _, _) = exe.statement(exe.block(exe.code(exe.main).body).stmts[0]);
     let invoke = stream

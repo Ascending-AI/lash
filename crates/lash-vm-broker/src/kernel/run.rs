@@ -31,12 +31,14 @@ use lash_core_store::checkpoint_graph::{GraphStaging, NodeId};
 use lash_durable::domain::graph::RootOwner;
 use lash_durable::domain::pages::{RootLease, RootLeaseRequest};
 use lash_durable::{DurableError, DurableInstant};
-use lash_kernel_doc::{DocumentId, ErrorDatum};
+use lash_kernel_doc::ErrorDatum;
 use lash_kernel_vm::{
     Bound, BoundExceeded, Bounds, DeliverError, EffectRequest, End, MachineError, OpenError,
     Outcome, Request, RunError, StartError, WaitId,
 };
-use lash_vm_protocol::{CheckpointRefusal, InfrastructureOutcome};
+use lash_protocol_types::engine_fault::CheckpointRefusal;
+use lash_protocol_types::engine_fault::InfrastructureOutcome;
+use lash_vocabulary::legacy_names::DocumentId;
 use tokio_util::sync::CancellationToken;
 
 use super::closure::Closure;

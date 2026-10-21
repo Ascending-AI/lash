@@ -2,7 +2,8 @@
 //! growth's frame is unpublished: the capacity meter counts storage and
 //! control as they grow, and decides at its next verdict point (FIG-6791).
 
-use lash_kernel_doc::{Datum, FunctionName};
+use lash_kernel_doc::Datum;
+use lash_vocabulary::legacy_names::FunctionName;
 
 use super::embedder::{Embedder, ROOMY, Setup, text};
 use crate::machine::Boundary;

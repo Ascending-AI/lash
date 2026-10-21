@@ -35,6 +35,7 @@ pub enum StoredObject {
         next: u64,
     },
     Closure {
+        callable: lash_vocabulary::names::CallableId,
         site: Box<SiteRef>,
         captures: Vec<(NameRef, EntityId)>,
     },
@@ -104,13 +105,18 @@ impl PagedHeap {
                 len: rows.len(),
                 next: *next,
             },
-            Body::Closure { site, captures } => {
+            Body::Closure {
+                callable,
+                site,
+                captures,
+            } => {
                 let mut held = Vec::with_capacity(captures.len() as usize);
                 captures.visit(access, &mut |_, capture| {
                     held.push(capture.clone());
                     true
                 })?;
                 StoredHead::Small(StoredObject::Closure {
+                    callable: *callable,
                     site: Box::new(site.clone()),
                     captures: held,
                 })
@@ -430,13 +436,18 @@ impl PagedHeap {
                     next,
                 }
             }
-            StoredObject::Closure { site, captures } => {
+            StoredObject::Closure {
+                callable,
+                site,
+                captures,
+            } => {
                 let mut rows = Tree::new(false);
                 for (name, id) in captures {
                     let key = name.key(self.pages())?;
                     rows.write(key, (name, id), self.pages())?;
                 }
                 Body::Closure {
+                    callable,
                     site: *site,
                     captures: rows,
                 }
@@ -622,12 +633,12 @@ pub mod pages {
     use super::super::tree::{Access, SealWork, Tree, checked_sum};
     use super::super::{SealBudget, payload};
     use lash_kernel_doc::Integer;
-    use lash_kernel_doc::graph_tokens::encode_body;
     use lash_kernel_doc::heap::{
         BytesRef, ErrorRef, HeapFault, IMMUTABLE_INLINE_MAX, IntRef, IntSummary, LogicalBytes,
         PageValue, Payload, TextRef, TupleRef, TupleSummary,
     };
     use lash_kernel_doc::heap_values::{integer_digits, task_count, text_summary};
+    use lash_vocabulary::tokens::encode_body;
 
     /// A text: inline when short, else payload pages.
     ///

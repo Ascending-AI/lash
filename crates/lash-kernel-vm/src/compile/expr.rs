@@ -22,10 +22,11 @@
 //! verifier checks what its formation derived against the ops themselves,
 //! never against this tree.
 
-use lash_kernel_doc::{Unit, Value};
+use lash_kernel_doc::Value;
 use lash_kernel_exec::{
     ActIx, FieldIx, FieldListIx, LocalRef, NameIx, Op, OpRange, Reg, RegRange, SiteIx,
 };
+use lash_vocabulary::sites::Unit;
 
 use super::{CodeId, Constant, LibId, NestedCallee, NestedKind, Stream};
 
@@ -565,6 +566,7 @@ impl<'s> Reader<'s> {
         }
         let declared = match nested.kind {
             NestedKind::Call(NestedCallee::Read) if args.len >= 1 => None,
+            NestedKind::Call(NestedCallee::Import(_)) => return None,
             NestedKind::Call(NestedCallee::Declared(code)) => Some(code),
             _ => return None,
         };

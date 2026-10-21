@@ -28,7 +28,7 @@ fn project(
         PageValue::Text(v) => Datum::Text(heap.copy_text(v)?.to_string()),
         PageValue::Bytes(v) => Datum::Bytes(Bytes::new(heap.copy_bytes(v)?.to_vec())),
         PageValue::Timestamp(v) => Datum::Timestamp(v.clone()),
-        PageValue::Function(v) => Datum::Function(Name::new(heap.copy_text(v)?.to_string())),
+        PageValue::Function(v) => Datum::Function(**v),
         PageValue::Handle(v) => Datum::Handle(v.as_ref().clone()),
         PageValue::Tuple(tuple) => {
             let mut values = Vec::new();
@@ -46,7 +46,7 @@ fn project(
             data: nested(&heap.error_data(error)?)?,
         })),
         PageValue::List(id) | PageValue::Map(id) | PageValue::Set(id) | PageValue::Record(id) => {
-            validate_occurrence(value, header.summary.entities)?;
+            validate_occurrence(value, header.summary.entities, !header.summary.data_only)?;
             let head = header
                 .objects
                 .get(&id.ordinal.to_be_bytes(), &heap.access)?

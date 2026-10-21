@@ -3,10 +3,13 @@ use super::super::directory::ordinal_key;
 use super::super::tree::{SealWork, Tree};
 use super::super::*;
 use super::heap::{fresh, seal};
-use lash_kernel_doc::graph_tokens::{decode_body, encode_body};
+use lash_kernel_doc::Datum;
 use lash_kernel_doc::heap::*;
-use lash_kernel_doc::kernel_internals::TaskIdentity;
-use lash_kernel_doc::{Datum, Name, Site, Unit};
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::TaskIdentity;
+use lash_vocabulary::sites::Unit;
+use lash_vocabulary::tokens::{decode_body, encode_body};
 
 fn work() -> SealWork {
     SealWork::new(SealBudget {
@@ -28,6 +31,10 @@ fn megabyte_binding_and_capture_names_keep_bounded_cells() {
         .unwrap();
     let closure = heap
         .allocate_object(ObjectInit::Closure {
+            callable: lash_vocabulary::names::CallableId {
+                link: lash_vocabulary::LinkId::from_bytes([1; 32]),
+                function: lash_vocabulary::names::FunctionId::from_bytes([2; 32]),
+            },
             site: site.clone(),
             captures: vec![(named.clone(), variable)],
         })
@@ -126,68 +133,6 @@ fn ten_thousand_spawn_ancestors_have_bounded_writes_and_exact_diagnostics() {
         };
     }
     assert!(matches!(projected, TaskIdentity::Main));
-}
-
-/// S1 function-name amendment / D-KEY: payload placement cannot change a
-/// function's name, normal form or boundary representation.
-#[test]
-fn a_megabyte_function_name_is_bounded_and_round_trips_exactly() {
-    let (mut heap, pages) = fresh();
-    let name = Name::new("f".repeat(1 << 20));
-    let descriptor = heap.text(name.as_str()).unwrap();
-    let value = PageValue::Function(descriptor.clone());
-    let resident = PageValue::Function(TextRef {
-        normal: Default::default(),
-        summary: descriptor.summary,
-        body: Payload::Resident(std::sync::Arc::from(name.as_str())),
-    });
-    assert!(heap.equal(&value, &resident).unwrap());
-    assert_eq!(
-        heap.normal_key(&value).unwrap(),
-        heap.normal_key(&resident).unwrap()
-    );
-    assert_ne!(
-        heap.normal_key(&value).unwrap(),
-        heap.normal_key(&PageValue::Text(descriptor)).unwrap(),
-        "function and text key domains differ"
-    );
-    let tuple = heap.tuple(vec![value.clone()]).unwrap();
-    let mut bindings = Tree::new(false);
-    bindings
-        .write(
-            ordinal_key(0),
-            BindingRecord {
-                name: NameRef::new(&Name::from("function"), &heap.access).unwrap(),
-                declared: SiteRef::new(&Site::new(Unit::Main, [0]), &heap.access).unwrap(),
-                value: BoundRecord::Value(value.clone()),
-            },
-            &heap.access,
-        )
-        .unwrap();
-    bindings.seal(&heap.access, &mut work()).unwrap();
-    let member = heap.tuple_get(&tuple, 0).unwrap().unwrap();
-    assert!(encode_body(&member).len() < 256);
-    let frozen = heap.freeze(&value, true).unwrap();
-    let datum = heap.frozen_datum(&frozen).unwrap();
-    assert_eq!(datum, Datum::Function(name));
-    let restored = heap.freeze_datum(&datum).unwrap();
-    let value2 = heap.instantiate(&restored).unwrap();
-    assert!(heap.equal(&value, &value2).unwrap());
-    let decoded: PageValue = decode_body(&encode_body(&member)).unwrap();
-    assert!(matches!(
-        decoded,
-        PageValue::Function(TextRef {
-            body: Payload::Paged(_),
-            ..
-        })
-    ));
-    assert!(
-        pages
-            .borrow()
-            .pages
-            .values()
-            .all(|page| page.tokens.len() + page.children.len() * 32 + 32 <= 65_536)
-    );
 }
 
 /// S1 fault law: a decoded-name cache must retain the descriptor's summary

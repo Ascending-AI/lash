@@ -6,20 +6,19 @@
 //! address-space ceiling ([`crate::WorkerConfinement`]) holds whether or not
 //! a host places it.
 
+use lash_protocol_types::engine_fault::{CgroupController, CgroupRefusal};
 use std::io::Write as _;
 use std::os::fd::{AsRawFd as _, RawFd};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use lash_vm_protocol::{CgroupController, CgroupRefusal};
-
 /// A cgroup v2 subtree the host delegates to a pool, and the limits each
 /// worker runs under in it. The pool makes a cgroup of the worker's own in
 /// [`Self::subtree`] for each worker it starts and removes it once the
 /// worker is reaped. A worker whose resident memory passes
 /// [`Self::memory_max_bytes`] is killed by the kernel, and its run ends with
-/// [`lash_vm_protocol::WorkerLimit::Memory`], as it would again on the same
+/// [`lash_protocol_types::worker_limit::WorkerLimit::Memory`], as it would again on the same
 /// inputs. Swap is closed to the worker where the kernel offers it, so the
 /// ceiling bounds resident memory.
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -20,13 +20,19 @@ pub(crate) fn start(
     source: Box<dyn PageSource>,
     census: Option<Box<dyn AllocationCensus>>,
     layout: Layout,
-    limits: lash_kernel_doc::KernelDataLimits,
+    limits: lash_vocabulary::data_limits::KernelDataLimits,
 ) -> Result<KernelMachine, StartError> {
     CellStart::admit_host_metadata(start.host.iter().map(|(name, _)| name.as_str()))?;
+    program.validate_links()?;
     let library = program.library.in_charge(bounds.charge).in_layout(layout);
     let admitted = library.admit(&program.document, limits)?;
     let exe = admitted
-        .executable(&program.document, &library)
+        .executable(
+            &program.document,
+            &library,
+            &program.documents,
+            &program.instances,
+        )
         .map_err(|missing| StartError::MissingFunction {
             function: missing.0,
         })?;
@@ -66,6 +72,7 @@ pub(crate) fn start(
         lash_kernel_state::arena::Arena::from_ordinal(heap.next_ordinal()),
     ));
     let mut machine = KernelMachine {
+        active_link: program.link,
         closure: program.closure,
         owner: start.owner,
         census_refinements: heap.certificate().refinements,
@@ -135,6 +142,80 @@ pub(crate) fn start(
     let arguments = |problem: String| StartError::Arguments { problem };
     // Host-supplied start values are not guest work (`K-CHG-002`).
     // The first statement selects charging from its prepared code.
+    let descriptor = match &start.target {
+        Target::Main => None,
+        Target::Entry(name) => match machine.program.document.exports.get(name) {
+            Some(lash_kernel_doc::Export::Function(export)) => Some(export.clone()),
+            _ => {
+                return Err(StartError::UnknownEntry {
+                    entry: name.clone(),
+                });
+            }
+        },
+        Target::Callable(function) => {
+            if function.callable.link != machine.program.link {
+                return Err(arguments(
+                    "callable Link differs from the program root".into(),
+                ));
+            }
+            let definition = machine
+                .program
+                .document
+                .functions
+                .get(&function.callable.function)
+                .ok_or_else(|| {
+                    arguments("callable definition is absent from the defining Link".into())
+                })?;
+            lash_kernel_doc::validate_callable_signature(
+                &function.signature,
+                &function.convention,
+                &definition.signature,
+            )
+            .map_err(StartError::NotAdmitted)?;
+            for target in match &function.convention {
+                lash_kernel_doc::StartConvention::Direct => Vec::new(),
+                lash_kernel_doc::StartConvention::TsDirect { await_fn } => vec![await_fn],
+                lash_kernel_doc::StartConvention::TsArgsList { await_fn, same_fn } => {
+                    vec![await_fn, same_fn]
+                }
+                lash_kernel_doc::StartConvention::PyDirect { cleanup } => vec![cleanup],
+            } {
+                let declared = match target {
+                    lash_kernel_doc::FunctionTarget::Local(id) => {
+                        machine.program.document.functions.contains_key(id)
+                            || machine.program.document.requires.natives.contains(id)
+                    }
+                    lash_kernel_doc::FunctionTarget::Import(slot) => machine
+                        .program
+                        .document
+                        .imports
+                        .get(slot)
+                        .is_some_and(|import| {
+                            matches!(import.kind, lash_vocabulary::ImportKind::Code { .. })
+                        }),
+                };
+                if !declared {
+                    return Err(arguments(
+                        "callable convention helper is absent from its defining Link".into(),
+                    ));
+                }
+            }
+            function
+                .check(
+                    machine.program.library.registry().as_ref(),
+                    lash_kernel_doc::FunctionValueLimits::standard(),
+                    limits,
+                )
+                .map_err(|error| arguments(error.to_string()))?;
+            Some(lash_kernel_doc::FunctionExport {
+                function: function.callable.function,
+                signature: function.signature.clone(),
+                convention: function.convention.clone(),
+                asynchronous: false,
+                rest: false,
+            })
+        }
+    };
     let (code, args) = match &start.target {
         Target::Main => {
             if !start.args.is_empty() {
@@ -144,29 +225,38 @@ pub(crate) fn start(
             // charge nothing: the cell did not make them.
             for (name, datum) in &start.host {
                 let value = machine
-                    .decode(&exe, datum, &lash_kernel_doc::Type::Any)
+                    .decode(&exe, datum, &lash_vocabulary::types::Type::Any)
                     .map_err(|error| start_interrupt(name.as_str(), error))?;
                 machine
                     .session_write(&BindingName::new(name.clone()), value, false)
                     .map_err(|error| start_interrupt(name.as_str(), error.into()))?;
                 machine.host.push(name.clone());
             }
-            (exe.main, Vec::new())
+            (
+                Some(
+                    exe.main
+                        .ok_or_else(|| arguments("the document has no Main".into()))?,
+                ),
+                Vec::new(),
+            )
         }
-        Target::Entry(entry) => {
+        Target::Entry(_) | Target::Callable(_) => {
             if start.session.is_some() {
                 return Err(StartError::Bindings {
                     problem: "an entry starts without a session".into(),
                 });
             }
-            let document = Arc::clone(&machine.program.document);
-            let (Some(definition), Some(code)) =
-                (document.entries.get(entry), exe.declared.get(entry))
-            else {
-                return Err(StartError::UnknownEntry {
-                    entry: entry.clone(),
-                });
-            };
+            let definition = descriptor.as_ref().unwrap();
+            let entry = "callable";
+            let code = exe.declared.get(&definition.function).copied().or_else(|| {
+                exe.code_at(&lash_vocabulary::sites::Site::new(
+                    lash_vocabulary::sites::Unit::Library(definition.function),
+                    [],
+                ))
+            });
+            if code.is_none() && exe.lib_of(&definition.function).is_none() {
+                return Err(arguments("start function is not loaded".into()));
+            }
             let signature = &definition.signature;
             let given = start.args.len();
             if matches!(
@@ -197,7 +287,7 @@ pub(crate) fn start(
                     machine.regs = args.clone().into();
                     args.push(
                         machine
-                            .decode(&exe, datum, &lash_kernel_doc::Type::Any)
+                            .decode(&exe, datum, &lash_vocabulary::types::Type::Any)
                             .map_err(|error| start_interrupt("extra argument", error))?,
                     );
                 }
@@ -208,14 +298,115 @@ pub(crate) fn start(
                     .map_err(|error| start_interrupt("arguments", error.into()))?;
                 args = vec![Value::Absent, list];
             }
-            (*code, args)
+            if matches!(
+                definition.convention,
+                lash_kernel_doc::StartConvention::TsDirect { .. }
+            ) {
+                let arity = code
+                    .map(|code| exe.code(code).params.len())
+                    .or_else(|| {
+                        exe.lib_of(&definition.function)
+                            .map(|lib| exe.lib(lib).arity)
+                    })
+                    .ok_or_else(|| arguments("start function is absent".into()))?;
+                args.truncate(arity);
+            }
+            (code, args)
         }
     };
     let count = args.len();
     machine.regs = args.into();
-    machine
-        .push_frame(TaskId::MAIN, &exe, exec::Call::new(code, 0, count))
-        .map_err(|error| start_interrupt("the start", error))?;
+    if let Some(code) = code {
+        let mut call = exec::Call::new(code, 0, count);
+        if let Some(descriptor) = &descriptor
+            && !exe.code(code).charging
+            && let Some(lib) = exe.lib_of(&descriptor.function)
+        {
+            call = call.of_library(lib);
+        }
+        machine
+            .push_frame(TaskId::MAIN, &exe, call)
+            .map_err(|error| start_interrupt("the start", error))?;
+    } else {
+        let descriptor = descriptor
+            .as_ref()
+            .ok_or_else(|| arguments("start descriptor is absent".into()))?;
+        let lib = exe
+            .lib_of(&descriptor.function)
+            .ok_or_else(|| arguments("start native is absent".into()))?;
+        machine
+            .refresh_charging(TaskId::MAIN)
+            .map_err(|e| start_interrupt("start charge", e.into()))?;
+        match machine.call_lib_linked(
+            TaskId::MAIN,
+            &exe,
+            lib,
+            machine.program.link,
+            0,
+            count,
+            None,
+        ) {
+            Ok(super::ops::Flow::Done) => {
+                let value = machine.take(0);
+                let result =
+                    match machine.check_public_result(&exe, &value, &descriptor.signature.result) {
+                        Ok(()) => Ok(value),
+                        Err(error) => Err(*machine
+                            .thrown_by(TaskId::MAIN, error)
+                            .map_err(|e| start_interrupt("start result", e.into()))?),
+                    };
+                machine
+                    .end_task(TaskId::MAIN, result)
+                    .map_err(|e| start_interrupt("start result", e.into()))?;
+            }
+            Ok(super::ops::Flow::Step) => {}
+            Err(error) => {
+                let value = machine
+                    .thrown_by(TaskId::MAIN, error)
+                    .map_err(|e| start_interrupt("start native", e.into()))?;
+                machine
+                    .end_task(TaskId::MAIN, Err(*value))
+                    .map_err(|e| start_interrupt("start native", e.into()))?;
+            }
+        }
+    }
+    if let Some(descriptor) = &descriptor
+        && machine.end.is_none()
+    {
+        machine
+            .frame(TaskId::MAIN)
+            .map_err(|e| start_interrupt("start frame", e.into()))?
+            .convention = Some(descriptor.convention.clone());
+        machine
+            .frame(TaskId::MAIN)
+            .map_err(|e| start_interrupt("start result", e.into()))?
+            .public_result = Some(descriptor.signature.result.clone());
+    }
+    if let Target::Callable(function) = &start.target
+        && let Some(code) = code
+    {
+        if exe.code(code).free.len() != function.captures.len()
+            || exe
+                .code(code)
+                .free
+                .iter()
+                .any(|(name, _)| !function.captures.contains_key(name))
+        {
+            return Err(arguments(
+                "callable captures differ from its lexical environment".into(),
+            ));
+        }
+        for (name, local) in &exe.code(code).free {
+            if let Some(datum) = function.captures.get(name) {
+                let value = machine
+                    .decode(&exe, datum, &lash_vocabulary::types::Type::Any)
+                    .map_err(|e| start_interrupt(name.as_str(), e))?;
+                machine
+                    .bind(TaskId::MAIN, local.at, true, value)
+                    .map_err(|e| start_interrupt(name.as_str(), e.into()))?;
+            }
+        }
+    }
     machine.regs.clear();
     machine
         .publish_roots()
@@ -350,9 +541,22 @@ impl KernelMachine {
             id: self.closure,
             grant: lash_kernel_doc::heap::PageGrant::NONE,
         };
+        let documents = self
+            .program
+            .instances
+            .iter()
+            .filter_map(|(link, instance)| {
+                self.program
+                    .documents
+                    .get(&instance.document)
+                    .map(|doc| (*link, doc.as_ref().clone()))
+            })
+            .collect();
         let saved = save.save(
             &mut crate::CellSaveContext::new(&mut self.heap),
             crate::paged::SaveCell {
+                link: self.program.link,
+                documents: &documents,
                 document: &document,
                 closure,
                 bindings: &bindings,
@@ -410,7 +614,14 @@ impl KernelMachine {
     fn binding_record(&mut self, name: &Name, value: PageValue) -> Result<BindingRecord, Halt> {
         binding_record(
             &mut self.heap,
-            &self.exe.code(self.exe.main).site,
+            &self
+                .exe
+                .code(
+                    self.exe
+                        .main
+                        .ok_or_else(|| super::fault("a session cell has no Main"))?,
+                )
+                .site,
             name,
             value,
         )
@@ -634,7 +845,7 @@ impl KernelMachine {
             source,
             census,
             layout,
-            lash_kernel_doc::KernelDataLimits::standard(),
+            lash_vocabulary::data_limits::KernelDataLimits::standard(),
         )
     }
 
@@ -648,7 +859,7 @@ impl KernelMachine {
         program: Program,
         bounds: Bounds,
         start: CellStart,
-        limits: lash_kernel_doc::KernelDataLimits,
+        limits: lash_vocabulary::data_limits::KernelDataLimits,
         mut source: Box<dyn PageSource>,
     ) -> Result<Self, StartError> {
         let census = if bounds.memory_meter == crate::MemoryMeter::Off {
@@ -687,7 +898,7 @@ impl KernelMachine {
             source,
             Some(census),
             layout,
-            lash_kernel_doc::KernelDataLimits::standard(),
+            lash_vocabulary::data_limits::KernelDataLimits::standard(),
         )
     }
 }
@@ -765,7 +976,7 @@ fn start_interrupt(what: &str, error: Interrupt) -> StartError {
 
 fn binding_record(
     heap: &mut PagedHeap,
-    declared: &lash_kernel_doc::Site,
+    declared: &lash_vocabulary::sites::Site,
     name: &Name,
     value: PageValue,
 ) -> Result<BindingRecord, HeapWriteError> {

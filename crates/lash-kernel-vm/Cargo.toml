@@ -27,6 +27,8 @@ synthetic-next = ["lash-kernel-doc/synthetic-next", "lash-kernel-state/synthetic
 workspace = true
 
 [dependencies]
+schemars = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 lash-vocabulary = { workspace = true }
 lash-kernel-dialect = { workspace = true }
 lash-kernel-doc = { workspace = true }

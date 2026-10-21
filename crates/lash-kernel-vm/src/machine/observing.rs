@@ -64,7 +64,7 @@ impl KernelMachine {
 
     /// Dispatch is reached once after operands, never by delivery or resume.
     #[inline(always)]
-    pub(super) fn observe_action(&mut self, exe: &Executable, site: &lash_kernel_doc::Site) {
+    pub(super) fn observe_action(&mut self, exe: &Executable, site: &lash_vocabulary::sites::Site) {
         if !self.ran.is_empty()
             && let Some(ordinal) = exe.action_ordinals.get(site)
         {
@@ -89,7 +89,7 @@ impl KernelMachine {
     fn trace_block(&mut self, task: TaskId, block: BlockId, exe: &Executable) {
         let site = &exe.block(block).site;
         if let Some(path) = self.observer.as_deref_mut().and_then(|o| o.path.as_mut())
-            && !matches!(site.unit, lash_kernel_doc::Unit::Library(_))
+            && !matches!(site.unit, lash_vocabulary::sites::Unit::Library(_))
         {
             let (tasks, access) = (&mut self.tasks, self.heap.pages());
             path.push(
@@ -204,7 +204,7 @@ impl KernelMachine {
                 && let Some(Control::Block { block, next }) = frame.control.last()
                 && !matches!(
                     self.exe.block(*block).site.unit,
-                    lash_kernel_doc::Unit::Library(_)
+                    lash_vocabulary::sites::Unit::Library(_)
                 )
             {
                 // The path uses the live coordinate, independently of the

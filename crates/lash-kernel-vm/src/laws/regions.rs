@@ -31,7 +31,12 @@ fn checked(text: &str, check: impl FnOnce(&LoopPlan, &dyn Fn(&LoopPlan) -> Resul
         .admit(&program.document, Default::default())
         .unwrap_or_else(|_| panic!("the loop program is admitted"));
     let exe = admitted
-        .executable(&program.document, &program.library)
+        .executable(
+            &program.document,
+            &program.library,
+            &program.documents,
+            &program.instances,
+        )
         .unwrap_or_else(|_| panic!("the loop program compiles"));
     let [plan] = &exe.regions[..] else {
         panic!("one loop region forms, not {}", exe.regions.len());
@@ -239,7 +244,12 @@ fn lowering_admits_an_island_plan_only_as_its_stream_states_it() {
         .admit(&program.document, Default::default())
         .unwrap_or_else(|_| panic!("the island program is admitted"));
     let exe = admitted
-        .executable(&program.document, &program.library)
+        .executable(
+            &program.document,
+            &program.library,
+            &program.documents,
+            &program.instances,
+        )
         .unwrap_or_else(|_| panic!("the island program compiles"));
     let [plan] = &exe.islands.plans[..] else {
         panic!("one island forms, not {}", exe.islands.plans.len());

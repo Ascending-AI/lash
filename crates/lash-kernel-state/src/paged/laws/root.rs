@@ -1,8 +1,8 @@
 //! S4 root grammar laws.
 use super::super::*;
-use lash_kernel_doc::DocumentId;
-use lash_kernel_doc::graph_tokens::{TokenCodec, decode_body, encode_body};
 use lash_kernel_doc::heap::*;
+use lash_vocabulary::legacy_names::DocumentId;
+use lash_vocabulary::tokens::{TokenCodec, decode_body, encode_body};
 
 /// FIG-6197 F3: an external tree root is empty, with no page and no
 /// summary, or nonempty, with a page and at least one row. A page-less
@@ -25,13 +25,13 @@ fn a_tree_root_admits_only_its_occupancy() {
     assert_eq!(decode_body::<KeyedRoot>(&encode_body(&full)).unwrap(), full);
     // A nonempty tag holding no rows, and an empty tag with fields, do not
     // decode.
-    let mut rowless = lash_kernel_doc::graph_tokens::TokenWriter::new();
+    let mut rowless = lash_vocabulary::tokens::TokenWriter::new();
     rowless.sum(1, 3);
     page.encode(&mut rowless);
     0_u64.encode(&mut rowless);
     LogicalBytes(0).encode(&mut rowless);
     assert!(decode_body::<KeyedRoot>(&rowless.into_bytes()).is_err());
-    let mut padded = lash_kernel_doc::graph_tokens::TokenWriter::new();
+    let mut padded = lash_vocabulary::tokens::TokenWriter::new();
     padded.sum(0, 1);
     3_u64.encode(&mut padded);
     assert!(decode_body::<SequenceRoot>(&padded.into_bytes()).is_err());
@@ -55,12 +55,16 @@ fn a_checkpoint_root_fits_its_root_bound() {
         len: u64::MAX,
         cost: LogicalBytes(u64::MAX),
     };
-    for host in [vec![lash_kernel_doc::Name::new("h".repeat(3038))], {
-        let mut names = vec![lash_kernel_doc::Name::new(""); 1519];
-        names[0] = lash_kernel_doc::Name::new("hh");
-        names
-    }] {
+    for host in [
+        vec![lash_vocabulary::legacy_names::Name::new("h".repeat(3038))],
+        {
+            let mut names = vec![lash_vocabulary::legacy_names::Name::new(""); 1519];
+            names[0] = lash_vocabulary::legacy_names::Name::new("hh");
+            names
+        },
+    ] {
         let root = CheckpointRoot {
+            link: lash_vocabulary::LinkId::from_bytes([1; 32]),
             limits: SavedLimits {
                 memory: Some(u64::MAX),
                 charge: u64::MAX,
@@ -114,7 +118,7 @@ fn a_checkpoint_root_fits_its_root_bound() {
 /// retain their members. The frame's fixed 64-byte offset survives the codec.
 #[test]
 fn loop_holdings_keep_their_exact_frame_offsets_after_open() {
-    use lash_kernel_doc::{Site, Unit};
+    use lash_vocabulary::sites::{Site, Unit};
     use tree::{Cell, SealWork, Tree};
     let (mut heap, _) = super::heap::fresh();
     let list = PageValue::List(
@@ -127,8 +131,10 @@ fn loop_holdings_keep_their_exact_frame_offsets_after_open() {
             .unwrap(),
     );
     for (value, expected) in [(list, 64), (map, 64), (tuple, 96)] {
-        let mut frame =
-            FrameRecord::fresh(SiteRef::new(&Site::new(Unit::Main, [0]), &heap.access).unwrap());
+        let mut frame = FrameRecord::fresh(
+            lash_vocabulary::LinkId::from_bytes([1; 32]),
+            SiteRef::new(&Site::new(Unit::Main, [0]), &heap.access).unwrap(),
+        );
         frame
             .iterated
             .write(

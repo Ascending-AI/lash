@@ -7,8 +7,9 @@
 
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{Datum, FunctionId, FunctionRegistry, parse_definition};
+use lash_kernel_doc::{Datum, FunctionRegistry, parse_definition};
 use lash_kernel_state::paged::HeaderRecord;
+use lash_vocabulary::legacy_names::FunctionId;
 
 use super::{Drive, bodies, exact, int, list, text, tuple};
 

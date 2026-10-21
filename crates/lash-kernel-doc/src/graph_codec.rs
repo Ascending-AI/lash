@@ -30,22 +30,34 @@ use std::collections::{BTreeMap, BTreeSet};
 use num_bigint::{BigInt, Sign};
 use num_traits::ToPrimitive;
 
+use crate::Bytes;
+use crate::Datum;
+use crate::ErrorDatum;
+use crate::Float;
+use crate::Handle;
+use crate::Integer;
+use crate::JoinMode;
+use crate::NumberPolicy;
+use crate::NumberToken;
+use crate::TaskId;
+use crate::Timestamp;
+use lash_vocabulary::legacy_names::Name;
 #[cfg(test)]
-use crate::TaskIdentity;
-use crate::graph_tokens::{CodecVariant, TokenCodec, TokenError, TokenReader, TokenWriter};
-use crate::{
-    Bytes, Datum, ErrorDatum, Float, Handle, Integer, JoinMode, Name, NumberPolicy, NumberToken,
-    TaskId, Timestamp,
-};
+use lash_vocabulary::sites::TaskIdentity;
+use lash_vocabulary::tokens::CodecVariant;
+use lash_vocabulary::tokens::TokenCodec;
+use lash_vocabulary::tokens::TokenError;
+use lash_vocabulary::tokens::TokenReader;
+use lash_vocabulary::tokens::TokenWriter;
 
 /// The deepest a decoded value, form or type may nest, in recursive
 /// decodes. Deeper input is refused as a [`DecodeDimension::Depth`] limit.
-pub const MAX_DECODE_DEPTH: u64 = 512;
+use lash_vocabulary::tokens::MAX_DECODE_DEPTH;
 
 /// FrozenValue (node kind 8) variant numbers: what a frozen tree is.
-pub const FROZEN_DATUM: u32 = 0;
-pub const FROZEN_TOOL_VALUE: u32 = 1;
-pub const FROZEN_JSON: u32 = 2;
+use lash_vocabulary::tokens::FROZEN_DATUM;
+use lash_vocabulary::tokens::FROZEN_JSON;
+use lash_vocabulary::tokens::FROZEN_TOOL_VALUE;
 
 /// A datum as the body of a FrozenValue node: `sum(0, 1, <Datum>)`. A
 /// committed effect outcome and a run's result are staged through it, so
@@ -324,7 +336,7 @@ impl TokenCodec for Datum {
                 12 => Self::Set(Vec::decode(input)?),
                 13 => Self::Record(Vec::decode(input)?),
                 14 => Self::Error(Box::decode(input)?),
-                15 => Self::Function(Name::decode(input)?),
+                15 => Self::Function(lash_vocabulary::names::CallableId::decode(input)?),
                 16 => Self::Handle(Handle::decode(input)?),
                 _ => Self::FunctionValue(Box::decode(input)?),
             })
@@ -345,9 +357,13 @@ mod tests;
 /// authority and are deliberately absent from the durable grammar.
 pub mod heap_values {
     use super::{invalid, variant};
-    use crate::graph_tokens::{ChildRef, TokenCodec, TokenError, TokenReader, TokenWriter};
     use crate::heap::*;
     use crate::{Float, Integer, TaskId, Timestamp};
+    use lash_vocabulary::tokens::ChildRef;
+    use lash_vocabulary::tokens::TokenCodec;
+    use lash_vocabulary::tokens::TokenError;
+    use lash_vocabulary::tokens::TokenReader;
+    use lash_vocabulary::tokens::TokenWriter;
     use num_bigint::{BigInt, Sign};
     use num_traits::FromPrimitive;
     use sha2::{Digest, Sha256};
@@ -803,7 +819,7 @@ pub mod heap_values {
                     13 => PageValue::Closure(absolute_entity(input, family)?),
                     14 => PageValue::Error(Arc::new(decode_error(input, family)?)),
                     15 => PageValue::Task(TaskId::decode(input)?),
-                    16 => PageValue::Function(TextRef::decode(input)?),
+                    16 => PageValue::Function(Box::decode(input)?),
                     17 => PageValue::Handle(Arc::decode(input)?),
                     18 => {
                         let identity = Identity::decode(input)?;
@@ -846,7 +862,7 @@ pub mod heap_values {
             PageValue::Timestamp(v) => v.nanoseconds.bits().div_ceil(8),
             PageValue::Tuple(v) => v.summary.cost.0,
             PageValue::Error(v) => v.cost.0,
-            PageValue::Function(v) => v.summary.utf8_bytes,
+            PageValue::Function(_) => 64,
             PageValue::Handle(v) => (v.kind.len() + v.id.len()) as u64,
             _ => 0,
         })

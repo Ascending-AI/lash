@@ -49,6 +49,7 @@ pub(super) struct Walk {
 /// walks its loop (`super::plan_regions`): the closure in its variable,
 /// the code and cells that closure calls, and its island.
 pub(super) struct Steady {
+    pub(super) link: lash_vocabulary::LinkId,
     pub(super) closure: ArenaHandle,
     pub(super) code: crate::compile::CodeId,
     pub(super) cells: Vec<ArenaHandle>,

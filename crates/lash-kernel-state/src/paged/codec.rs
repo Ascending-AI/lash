@@ -1,9 +1,10 @@
 //! Canonical semantic record bodies. Every field is present, including
 //! empty roots; no runtime coordinate or transport grant is serialized.
 use super::*;
-use lash_kernel_doc::graph_tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
 use lash_kernel_doc::heap::*;
-use lash_kernel_doc::{DocumentId, JoinMode, TaskId};
+use lash_kernel_doc::{JoinMode, TaskId};
+use lash_vocabulary::legacy_names::DocumentId;
+use lash_vocabulary::tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
 
 macro_rules! record {
     ($name:ident { $($field:ident : $ty:ty),+ $(,)? }) => {
@@ -134,7 +135,7 @@ impl TokenCodec for SavedMeters {
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         input.expect_struct(4)?;
-        let charged = if input.peek_tag()? == lash_kernel_doc::graph_tokens::Tag::None {
+        let charged = if input.peek_tag()? == lash_vocabulary::tokens::Tag::None {
             input.option()?;
             None
         } else {
@@ -160,7 +161,7 @@ impl TokenCodec for SavedLimits {
     }
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
         input.expect_struct(2)?;
-        let memory = if input.peek_tag()? == lash_kernel_doc::graph_tokens::Tag::None {
+        let memory = if input.peek_tag()? == lash_vocabulary::tokens::Tag::None {
             input.option()?;
             None
         } else {
@@ -176,6 +177,7 @@ record!(CheckpointRoot {
     limits: SavedLimits,
     kernel: u32,
     document: DocumentId,
+    link: lash_vocabulary::content_ids::LinkId,
     closure: PageId,
     owner: PageId,
     target: CellTargetKind,
@@ -190,7 +192,7 @@ record!(CheckpointRoot {
     unreported: SequenceRoot,
     reads: KeyedRoot,
     session: KeyedRoot,
-    host: Vec<lash_kernel_doc::Name>,
+    host: Vec<lash_vocabulary::legacy_names::Name>,
     meters: SavedMeters
 });
 impl TokenCodec for RootStatus {
@@ -424,10 +426,12 @@ impl TokenCodec for EndedTask {
 }
 
 record!(FunctionRecord {
+    environment:EntityId,
+    callable: lash_vocabulary::names::CallableId,
     name: NameRef,
     meta: PageValue,
     closure: PageRef,
-    captures: std::collections::BTreeMap<lash_kernel_doc::Name, FrozenRef>,
+    captures: std::collections::BTreeMap<lash_vocabulary::legacy_names::Name, FrozenRef>,
     before: Vec<FrozenRef>,
     after: Vec<FrozenRef>
 });
@@ -525,7 +529,7 @@ record!(WaitRecord {
     kind: WaitKindRecord,
     phase: WaitPhase
 });
-units!(WaitKindRecord { Effect = 0, Sleep = 1 });
+units!(WaitKindRecord { Effect = 0 });
 impl TokenCodec for WaitPhase {
     fn encode(&self, out: &mut TokenWriter) {
         match self {
@@ -572,7 +576,7 @@ impl TokenCodec for CommittedOutcomeRecord {
                 out.sum(1, 1);
                 value.encode(out);
             }
-            Self::Elapsed => out.sum(2, 0),
+
             Self::Rejected(value) => {
                 out.sum(3, 1);
                 value.encode(out);
@@ -589,10 +593,6 @@ impl TokenCodec for CommittedOutcomeRecord {
             1 => {
                 TokenReader::expect_fields(fields, 1)?;
                 Self::Failed(<FrozenRef>::decode(input)?)
-            }
-            2 => {
-                TokenReader::expect_fields(fields, 0)?;
-                Self::Elapsed
             }
             3 => {
                 TokenReader::expect_fields(fields, 1)?;
