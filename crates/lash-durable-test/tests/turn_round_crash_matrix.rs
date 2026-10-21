@@ -1804,7 +1804,6 @@ async fn a_turns_tool_round_resumes_at_every_label_without_replay() {
         &[
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
-            CommitLabel::MODEL_ANSWER,
             CommitLabel::MODEL_DONE,
             CommitLabel::ROUND_OUTCOME,
             CommitLabel::ROUND_START,
@@ -1835,7 +1834,6 @@ async fn an_after_step_cancel_while_the_model_streams_keeps_the_response_and_its
     prove(
         Mode::AfterStepWhileStreaming,
         &[
-            CommitLabel::MODEL_ANSWER,
             CommitLabel::MODEL_DONE,
             CommitLabel::ROUND_OUTCOME,
             CommitLabel::TURN_CANCEL,

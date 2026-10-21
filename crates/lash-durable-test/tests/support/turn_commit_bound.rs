@@ -1,7 +1,7 @@
 //! FIG-5954: the owner commits through its answer, with exact retained
-//! boundaries: each model call's receipt (FIG-6230) that the turn's commit
-//! does not carry (FIG-6955), and the named cell boundaries. Tracing adds no
-//! commit (FIG-6299).
+//! boundaries: each model call's standalone receipt (FIG-6230) that neither
+//! native admission (FIG-7083) nor the turn's commit (FIG-6955) carries, and
+//! the named cell boundaries. Tracing adds no commit (FIG-6299).
 
 use super::*;
 
@@ -12,13 +12,12 @@ const CELL_BOUNDARIES: [(CommitLabel, &str); 1] = [(
     CommitLabel::ROUND_OUTCOME,
     "the VM consumes only a recorded tool outcome",
 )];
-/// Every provider send's outcome commits as its call's receipt before
-/// anything derives from it: one boundary per send, but the final answer of
-/// a turn no checkpoint callback runs in, whose receipt the turn's commit
-/// carries (FIG-6955). A code turn's protocol runs checkpoint callbacks.
+/// Code turns run checkpoint callbacks, so each provider send retains its
+/// standalone receipt. Callback-free native receipts commit with admission
+/// (FIG-7083) or the turn's commit (FIG-6955).
 const RECEIPT: (CommitLabel, &str) = (
     CommitLabel::MODEL_ANSWER,
-    "FIG-6230: a paid answer commits before its derivation, or with the turn's commit (FIG-6955)",
+    "FIG-6230: a paid answer commits before its derivation, with native admission (FIG-7083), or with the turn's commit (FIG-6955)",
 );
 
 async fn counted(turn: Turn, traced: bool, cell: &[(CommitLabel, &str)]) {
@@ -70,8 +69,8 @@ async fn counted(turn: Turn, traced: bool, cell: &[(CommitLabel, &str)]) {
     let receipts = owner.iter().filter(|found| **found == receipt).count();
     assert_eq!(
         receipts,
-        models - usize::from(!turn.code()),
-        "one receipt per provider send the turn's commit does not carry: {why}"
+        if turn.code() { models } else { 0 },
+        "one standalone receipt per provider send not carried by admission or turn commit: {why}"
     );
     for (label, why) in cell {
         assert!(!why.is_empty());

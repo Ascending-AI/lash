@@ -2294,8 +2294,8 @@ async fn a_native_call_cut_at_its_outcome_streams_its_activity_and_commits_one_o
 }
 
 /// REPLAY-PRESERVES-CONTROL-AND-FEED (FIG-6230): a native call's turn cut
-/// at its model call's receipt (`model.answer`), before the receipt enters
-/// the store, losing its acknowledgement, with its owner killed around it,
+/// at its receipt fused with native admission (`model.done`, FIG-7083),
+/// before it enters the store, losing its acknowledgement, its owner killed,
 /// or reaped while it commits, resumes on the other node: the host's sink
 /// is handed the call's start and one completion, and the session commits
 /// one outcome for the call under its one identity.
@@ -2303,7 +2303,7 @@ async fn a_native_call_cut_at_its_receipt_streams_its_activity_and_commits_one_o
     prove_under(
         Turn::Activity,
         tier,
-        &[CommitLabel::MODEL_ANSWER],
+        &[CommitLabel::MODEL_DONE],
         &[
             Fault::FailBefore,
             Fault::AckHidden,

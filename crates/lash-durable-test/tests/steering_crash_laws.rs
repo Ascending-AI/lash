@@ -816,14 +816,13 @@ fn uncut_labels(arrival: Arrival) -> Vec<CommitLabel> {
         // Two rounds of plain outcomes, each committed with its
         // presentation and the next model start: the admission of what
         // arrived commits with the first round's.
-        // The final answer's receipt commits with the turn (FIG-6955).
+        // Native receipts commit with admission (FIG-7083); the final
+        // answer's receipt commits with the turn (FIG-6955).
         arrival if arrival.at_work() => vec![
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
-            CommitLabel::MODEL_ANSWER,
             CommitLabel::MODEL_DONE,
             CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
-            CommitLabel::MODEL_ANSWER,
             CommitLabel::MODEL_DONE,
             CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
             CommitLabel::TURN_COMMIT,
@@ -832,14 +831,13 @@ fn uncut_labels(arrival: Arrival) -> Vec<CommitLabel> {
         // The first finish's round, then the iteration the steer opened:
         // its delivery commits with the first round's outcome and that
         // iteration's `model.start`; the second finish's outcome ends the
-        // turn on its own.
+        // turn on its own. Both native receipts commit with admission
+        // (FIG-7083).
         Arrival::Candidate => vec![
             CommitLabel::TURN_ADMIT,
             CommitLabel::MODEL_START,
-            CommitLabel::MODEL_ANSWER,
             CommitLabel::MODEL_DONE,
             CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
-            CommitLabel::MODEL_ANSWER,
             CommitLabel::MODEL_DONE,
             CommitLabel::ROUND_OUTCOME,
             CommitLabel::TURN_COMMIT,

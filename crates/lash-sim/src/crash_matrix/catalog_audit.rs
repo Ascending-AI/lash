@@ -56,19 +56,11 @@ pub const COVERAGE: [(CommitLabel, Coverage); 49] = [
         CommitLabel::MODEL_DONE,
         Coverage::Cases(&[Case::Round, Case::Cancel, Case::CellKilled]),
     ),
-    // A toolless turn's hook-free answer commits with its `turn.commit`
-    // (FIG-6955): the cases with a round, a cell or a hook cut it.
+    // Callback-free native answers commit with admission (FIG-7083) or
+    // `turn.commit` (FIG-6955); cell and hook cases cut standalone receipts.
     (
         CommitLabel::MODEL_ANSWER,
-        Coverage::Cases(&[
-            Case::Round,
-            Case::Cancel,
-            Case::Effects,
-            Case::Cell,
-            Case::CellKilled,
-            Case::Prompt,
-            Case::Pressure,
-        ]),
+        Coverage::Cases(&[Case::Cell, Case::CellKilled, Case::Prompt, Case::Pressure]),
     ),
     (
         CommitLabel::ROUND_PRESENT_MODEL_START,

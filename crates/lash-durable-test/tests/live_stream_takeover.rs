@@ -287,12 +287,12 @@ impl Takeover {
             .expect("the core builds");
         let script = Script::new();
         // The call's receipt owes no callback, so it commits with the
-        // turn's commit (FIG-6955), or before the tool round its answer
-        // calls: A dies there, its answer derived and published but never
-        // durable.
+        // turn's commit (FIG-6955), or the native tool admission
+        // (FIG-7083): A dies there, its answer derived and published but
+        // never durable.
         let receipt = match shape {
             Shape::Streamed | Shape::Unstreamed => CommitLabel::TURN_COMMIT,
-            Shape::UnstreamedBeforeATool => CommitLabel::MODEL_ANSWER,
+            Shape::UnstreamedBeforeATool => CommitLabel::MODEL_DONE,
         };
         script.cut_on("a", receipt, 1, Fault::Abort);
         let nodes = SimNodes::new(
@@ -566,8 +566,8 @@ async fn an_unstreamed_answer_resent_after_a_takeover_leaves_the_resent_answer_a
 }
 
 /// FIG-6969: A's unstreamed answer calls a tool and A dies at the
-/// `model.answer` the round commits first, after its derivation published
-/// the answer.
+/// `model.done` that carries its receipt with the native tool admission
+/// (FIG-7083), after its derivation published the answer.
 #[tokio::test]
 async fn an_unstreamed_answer_before_a_tool_resent_after_a_takeover_leaves_the_resent_answer_alone()
 {
