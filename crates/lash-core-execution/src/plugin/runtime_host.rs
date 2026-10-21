@@ -1,4 +1,6 @@
-pub use lash_core_store::session_append::{AppendSessionNodesOutcome, AppendSessionNodesRequest};
+pub use lash_core_store::session_append::{
+    AppendSessionNodesOutcome, AppendSessionNodesRequest, SessionGraphAppendResult,
+};
 
 use crate::SessionId;
 use crate::TurnId;
@@ -34,11 +36,14 @@ pub trait SessionLifecycleService: crate::core_internal::RuntimeService + Send +
 
 #[async_trait::async_trait]
 pub trait SessionGraphService: crate::core_internal::RuntimeService + Send + Sync {
+    /// Outside a turn, durably enqueue the append and return its status
+    /// without waiting for the owner. In a turn, apply it to that turn's
+    /// draft; its durability follows the turn's acknowledged commit.
     async fn append_session_nodes(
         &self,
         _session_id: &SessionId,
         _request: AppendSessionNodesRequest,
-    ) -> Result<AppendSessionNodesOutcome, PluginError>;
+    ) -> Result<SessionGraphAppendResult, PluginError>;
 
     async fn emit_trace_event(
         &self,

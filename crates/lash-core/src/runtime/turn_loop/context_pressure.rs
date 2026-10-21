@@ -244,6 +244,16 @@ impl LashRuntime {
         seed: Vec<crate::SessionAppendNode>,
         committing: &ActorContext,
     ) -> Result<(), RuntimeError> {
+        let stored = match self.services.store.clone() {
+            Some(store) => {
+                let tx = committing.begin().await.map_err(|error| {
+                    crate::runtime::durable::head_commit::HeadCommitError::Owner(error)
+                        .into_runtime_error()
+                })?;
+                Some((store, tx))
+            }
+            None => None,
+        };
         let opened = match self.open_context_pressure_frame(write, records, seed).await {
             Ok(opened) => opened,
             Err(error) => {
@@ -252,12 +262,12 @@ impl LashRuntime {
             }
         };
         let frame_node_id = opened.result.frame_node_id.clone();
-        if let Err(error) = self
-            .persist_context_pressure_frame(write, opened, committing)
-            .await
+        if let Some((store, tx)) = stored
+            && let Err(error) = self
+                .persist_context_pressure_frame(write, opened, committing, store, tx)
+                .await
         {
-            // Nothing of the frame is durable: drop it from resident state,
-            // which reloads from the store before the next turn.
+            // Nothing of the frame is durable: reload before retrying.
             self.invalidate_resident_session_state();
             return Err(error);
         }
@@ -319,12 +329,9 @@ impl LashRuntime {
         write: &ContextPressureWrite<'_>,
         opened: crate::runtime::frame_open::OpenedFrame,
         committing: &ActorContext,
+        store: crate::store::SessionStore,
+        tx: lash_durable::ActorTx,
     ) -> Result<(), RuntimeError> {
-        // A storeless runtime keeps the frame resident, as it keeps
-        // everything else.
-        let Some(store) = self.services.store.clone() else {
-            return Ok(());
-        };
         let fleet_format = self.fleet_format();
         let (mut commit, persisted_node_ids) =
             crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
@@ -350,6 +357,7 @@ impl LashRuntime {
         .map_err(super::runtime_error_from_store_commit)?;
         crate::runtime::durable::head_commit::commit(
             committing,
+            tx,
             self.code_executor().as_ref(),
             commit.clone(),
             lash_durable::CommitLabel::PRESSURE_FRAME,

@@ -1,13 +1,8 @@
 //! Resident-session continuation state and the reload gate that governs it.
 //!
-//! One runtime handle keeps five facts about how far its in-memory session has
-//! travelled with the durable one: whether resident plugin/protocol state is
-//! still valid, whether this handle has ever loaded the graph itself, whether
-//! a borrowed nested commit moved the durable head out from under it, which
-//! lease generation its last commit ran under, and which turn produced the
-//! revision an observation should attribute. They are one type here because
-//! their rules only make sense together: invalidation clears four of them at
-//! once, and a full durable adoption settles the same four.
+//! One runtime handle tracks resident plugin validity, whether it has loaded
+//! the graph, and the committed turn an observation attributes. Invalidation
+//! clears its continuation facts; full durable adoption establishes them.
 
 use super::*;
 use crate::TurnId;
@@ -141,17 +136,11 @@ pub(in crate::runtime) struct ResidentSessionReloadDecision<'a> {
 /// The continuation facts one runtime handle holds about its resident session.
 ///
 /// Constructed valid, cleared as a set by [`Self::invalidate`], and settled as
-/// a set by [`Self::mark_adopted`]. `graph_head_stale` is shared with the
-/// session services this handle hands out, so a borrowed nested commit can
-/// mark the resident graph stale from another owner.
+/// a set by [`Self::mark_adopted`].
 pub struct ResidentSessionContinuity {
     validity: ResidentSessionState,
     /// Set only after this handle itself has attempted a durable graph load.
     graph_loaded_from_store: bool,
-    /// The lane remains continuous, but the durable head may have advanced outside this
-    /// runtime's resident state, so the next physical turn must reload deliberately before
-    /// planning.
-    graph_head_stale: Arc<AtomicBool>,
     /// Most recent physical turn committed by this runtime, paired with the
     /// resulting session revision for observation-envelope attribution.
     last_committed_observation_turn: Option<(u64, TurnId)>,
@@ -167,7 +156,6 @@ impl ResidentSessionContinuity {
         Self {
             validity: ResidentSessionState::Valid,
             graph_loaded_from_store: false,
-            graph_head_stale: Arc::new(AtomicBool::new(false)),
             last_committed_observation_turn: None,
             invalidation_incidents: 0,
         }
@@ -202,27 +190,15 @@ impl ResidentSessionContinuity {
 
     /// Settle every resident-freshness fact after a full durable adoption
     /// (FIG-1875): the resident state is valid, the graph is the one loaded
-    /// from the store, and no cross-process staleness is pending.
+    /// from the store.
     pub(in crate::runtime) fn mark_adopted(&mut self) {
         self.validity = ResidentSessionState::Valid;
         self.graph_loaded_from_store = true;
-        self.graph_head_stale.store(false, Ordering::Release);
     }
 
     /// Record that this handle has now attempted a durable graph load.
     pub(in crate::runtime) fn mark_graph_loaded(&mut self) {
         self.graph_loaded_from_store = true;
-    }
-
-    /// Record that the resident graph matches the durable head again.
-    pub(in crate::runtime) fn mark_graph_head_current(&self) {
-        self.graph_head_stale.store(false, Ordering::Release);
-    }
-
-    /// The shared staleness flag handed to session services, which mark it from
-    /// a borrowed nested commit this handle never observes directly.
-    pub(in crate::runtime) fn graph_head_stale_flag(&self) -> &Arc<AtomicBool> {
-        &self.graph_head_stale
     }
 
     /// The turn id this handle committed at `revision`, when it is the most
@@ -238,18 +214,8 @@ impl ResidentSessionContinuity {
     }
 
     #[cfg(any(test, feature = "testing"))]
-    pub fn mark_graph_head_stale(&self) {
-        self.graph_head_stale.store(true, Ordering::Release);
-    }
-
-    #[cfg(any(test, feature = "testing"))]
     pub fn graph_loaded_from_store(&self) -> bool {
         self.graph_loaded_from_store
-    }
-
-    #[cfg(any(test, feature = "testing"))]
-    pub fn graph_head_is_stale(&self) -> bool {
-        self.graph_head_stale.load(Ordering::Acquire)
     }
 }
 

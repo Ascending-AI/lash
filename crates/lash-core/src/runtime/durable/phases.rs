@@ -1324,12 +1324,12 @@ pub(super) async fn refuse(
             "the turn was refused; the turn ends with the refusal"
         );
     }
+    let mut tx = cx.begin().await?;
     let current = cx.durable_reads()?.turn(&row.session).await?;
     let row = current
         .as_ref()
         .filter(|current| current.run == row.run)
         .unwrap_or(row);
-    let mut tx = cx.begin().await?;
     let cancelled = tool_round::cancel_open_round(cx, &mut tx, row).await?;
     let cause = crate::store::RunTerminalCause::Refused {
         refusal: refusal.into(),

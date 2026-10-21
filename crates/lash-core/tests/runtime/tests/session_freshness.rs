@@ -260,7 +260,6 @@ async fn freshness_falls_back_to_full_read_when_head_is_indeterminate() {
     append_history(&mut runtime, &store, 2).await;
     let head_reads_before = store.load_session_head_meta_count();
     let full_loads_before = store.load_session_count();
-    runtime.resident_session.mark_graph_head_stale();
     store.fail_next_load_session_head_meta();
 
     runtime
@@ -278,7 +277,6 @@ async fn freshness_falls_back_to_full_read_when_head_is_indeterminate() {
         1,
         "a failed head projection must not be treated as a fresh session"
     );
-    assert!(!runtime.resident_session.graph_head_is_stale());
 }
 
 /// FIG-1875 (head-authoritative adoption): a resident refresh adopts the

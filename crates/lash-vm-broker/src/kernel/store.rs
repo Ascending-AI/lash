@@ -1320,6 +1320,9 @@ impl DurableSnapshotStore {
             })
             .await
             .map_err(|undriven| match undriven {
+                Undriven::Round(
+                    lash_core_execution::runtime::actor::round::RoundError::Durable(error),
+                ) => DriveRefusal::Durable(error),
                 Undriven::Round(error) => DriveRefusal::from(refused(error)),
                 Undriven::Unbound => BrokerInvariant::Unbound.into(),
                 Undriven::Unanswerable => BrokerInvariant::Unanswerable {

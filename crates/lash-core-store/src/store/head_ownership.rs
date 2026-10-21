@@ -1,30 +1,6 @@
-//! Who owns a session's head when a head write arrives from outside a run
-//! (FIG-4202, ADR 0105).
-//!
-//! The bound turn owns the session head. A head commit the session actor
-//! writes on its own fenced transaction is the session's own: its epoch
-//! fences it, so a turn's commit and a context-pressure frame its turn
-//! opens (FIG-5355) pass whatever they name ([`HeadWriter::SessionActor`]).
-//! So does a store commit that names the run it commits under, or the
-//! command lane's commit that applies the open commands it settles, the
-//! owner it would otherwise wait on
-//! ([`RuntimeCommit::is_sessions_own_head_write`]). Any other commit is a
-//! writer outside every run (a host-scoped service's write): the store
-//! refuses it, in the commit's own transaction, while a run owns the head
-//! or is owed it, so no such write moves a head a bound run or an open
-//! command run was planned against. A host that must move the head
-//! submits its write as a session command, which the session applies at a
-//! turn boundary.
-//!
-//! The owners, as the transaction reads them:
-//!
-//! - an unfinished run: admitted, with its rows bound and no terminal;
-//! - an open session command: a command run applies it at the next
-//!   boundary.
-//!
-//! A session's first commit publishes over the created head, which is no
-//! head to own (FIG-4099), so creation is never refused.
-//!
+//! Head writes from outside the session actor require an unclaimed actor.
+//! The mutation transaction proves this independently of run/command identity
+//! and head materialization. Own actor writes use their owner fence instead.
 
 use crate::{SessionId, TurnId};
 
@@ -38,6 +14,8 @@ use super::{RuntimeCommit, StoreError};
 pub enum SessionHeadOwner {
     /// An admitted run without terminal evidence.
     Run { run: TurnId },
+    /// The session actor currently holds its grant.
+    Actor { epoch: i64 },
     /// An open session command, the earliest by `enqueue_seq`.
     CommandLane { enqueue_seq: u64 },
 }
@@ -45,6 +23,7 @@ pub enum SessionHeadOwner {
 impl std::fmt::Display for SessionHeadOwner {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Actor { epoch } => write!(formatter, "session actor at epoch `{epoch}`"),
             Self::Run { run } => write!(formatter, "unfinished run `{run}`"),
             Self::CommandLane { enqueue_seq } => {
                 write!(formatter, "the open session command at `{enqueue_seq}`")
@@ -59,6 +38,8 @@ impl std::fmt::Display for SessionHeadOwner {
 pub struct HeadOwnershipFacts {
     /// The session's unfinished run, if one is admitted.
     pub unfinished_run: Option<TurnId>,
+    /// The claimed epoch, only while the actor is owned.
+    pub claimed_epoch: Option<i64>,
     /// The `enqueue_seq` of the earliest open session command, if any.
     pub open_command: Option<u64>,
 }
@@ -72,11 +53,9 @@ pub enum HeadWriter {
     SessionActor,
 }
 
-/// Whether `commit`, written by `writer` onto a head that exists
-/// (`head_exists`), must be checked against the head's owners: exactly a
-/// write that is not the session's own onto an existing head. The session
-/// actor's writes are its own; a store commit is when it names its run or
-/// the commands it applies ([`RuntimeCommit::is_sessions_own_head_write`]).
+/// Whether the run/command guard applies, in addition to the unconditional
+/// actor guard on every fresh Store mutation. Run/command identity only
+/// exempts its own lane on a materialized head; it never grants actor authority.
 #[must_use]
 pub fn head_write_needs_ownership(
     commit: &RuntimeCommit,
@@ -86,13 +65,27 @@ pub fn head_write_needs_ownership(
     writer == HeadWriter::Store && !commit.is_sessions_own_head_write() && head_exists
 }
 
+/// Refuse every fresh direct mutation while the session actor is claimed.
+pub fn require_unclaimed_actor(
+    session_id: &SessionId,
+    facts: &HeadOwnershipFacts,
+) -> Result<(), StoreError> {
+    match facts.claimed_epoch {
+        Some(epoch) => Err(StoreError::SessionHeadOwned {
+            session_id: session_id.clone(),
+            owner: SessionHeadOwner::Actor { epoch },
+        }),
+        None => Ok(()),
+    }
+}
+
 /// Refuse a head write outside every run while `facts` name an owner of
-/// the head (FIG-4202). A run outranks the command lane, so the refusal
-/// names the owner a host waits on first.
+/// the head. A claimed actor outranks a run, which outranks the command lane.
 pub fn require_unowned_head(
     session_id: &SessionId,
     facts: HeadOwnershipFacts,
 ) -> Result<(), StoreError> {
+    require_unclaimed_actor(session_id, &facts)?;
     let owner = if let Some(run) = facts.unfinished_run {
         SessionHeadOwner::Run { run }
     } else if let Some(enqueue_seq) = facts.open_command {
@@ -115,7 +108,24 @@ mod tests {
         let error = require_unowned_head(
             &SessionId::from("s"),
             HeadOwnershipFacts {
+                claimed_epoch: Some(9),
                 unfinished_run: Some(TurnId::from("run")),
+                open_command: Some(7),
+            },
+        )
+        .expect_err("actor authority precedes run and command identity");
+        assert!(matches!(
+            error,
+            StoreError::SessionHeadOwned {
+                owner: SessionHeadOwner::Actor { epoch: 9 },
+                ..
+            }
+        ));
+        let error = require_unowned_head(
+            &SessionId::from("s"),
+            HeadOwnershipFacts {
+                unfinished_run: Some(TurnId::from("run")),
+                claimed_epoch: None,
                 open_command: Some(7),
             },
         )

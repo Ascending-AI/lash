@@ -305,8 +305,21 @@ impl ProcessActivation {
             record: lash_kernel_doc::ExecutionRequirements::default(),
             continuation: super::continuation::Continuation::default(),
         };
+        let mut retried_conflict = false;
+        let mut acknowledged = (
+            owned.acknowledged_commits(),
+            steps_cx.acknowledged_commits(),
+        );
         loop {
             let passed = Box::pin(self.pass(owned, process, &mut live)).await;
+            let progress = (
+                owned.acknowledged_commits(),
+                steps_cx.acknowledged_commits(),
+            );
+            if progress != acknowledged {
+                acknowledged = progress;
+                retried_conflict = false;
+            }
             self.publish(process, &live).await;
             match passed {
                 Ok(Pass::Again) => {}
@@ -320,6 +333,17 @@ impl ProcessActivation {
                     return Exit::Abandoned;
                 }
                 Ok(Pass::Released) | Err(DurableError::OwnershipLost(_)) => return Exit::Released,
+                Err(DurableError::RevisionConflict { .. }) => {
+                    // Admitted bodies and held outcomes survive one conflict;
+                    // the fresh fold reclassifies them by admission identity.
+                    live.continuation = super::continuation::Continuation::default();
+                    live.history_restored = false;
+                    steps_cx.discard_conflicted_attempt().await;
+                    if retried_conflict {
+                        return Exit::Abandoned;
+                    }
+                    retried_conflict = true;
+                }
                 // A refusal as corrupt answers every retry the same: the
                 // process ends Failed on the first one, and the next pass
                 // runs its cascade.
@@ -767,7 +791,7 @@ impl ProcessActivation {
         if owned.draining() {
             match live
                 .lifecycle
-                .drain(&fold, now)
+                .act_in(&fold, now, &tx, false)
                 .await
                 .map_err(steps_failure)?
             {
@@ -837,7 +861,7 @@ impl ProcessActivation {
             Next::Nothing { due } => {
                 let idle = match live
                     .lifecycle
-                    .act(&fold, now)
+                    .act_in(&fold, now, &tx, true)
                     .await
                     .map_err(steps_failure)?
                 {

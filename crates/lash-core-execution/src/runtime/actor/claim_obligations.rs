@@ -786,6 +786,12 @@ impl SessionObligations {
         }
     }
 
+    pub(super) async fn invalidate(&self) {
+        let mut state = self.state.lock().await;
+        state.work = None;
+        state.written = None;
+    }
+
     /// Commit `tx`, staged as `staged`, through `commit`, with the
     /// `requires` its records leave the session owing written into it when
     /// they change. A transaction whose writer set its requirements keeps

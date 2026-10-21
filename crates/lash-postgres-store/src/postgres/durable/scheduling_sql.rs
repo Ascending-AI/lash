@@ -170,6 +170,7 @@ lash_store_sql::statements! {
         owner_envelope = "WITH fenced AS (
                  UPDATE actors SET state_revision = state_revision + 1
                  WHERE actor_key = ?1 AND epoch = ?2 AND state = 'owned'
+                     AND state_revision = ?4
                  RETURNING state_revision
              )
              SELECT (SELECT format_version FROM fleet_format WHERE singleton = TRUE),

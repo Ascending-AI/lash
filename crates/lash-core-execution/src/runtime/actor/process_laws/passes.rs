@@ -218,6 +218,76 @@ pub async fn a_step_chain_restores_its_state_once_and_reloads_after_a_lost_ackno
     result
 }
 
+/// A Once body's held outcome survives one refused owner revision and is
+/// recorded exactly once against the freshly loaded admission.
+///
+/// # Errors
+///
+/// The first rule broken.
+pub async fn a_once_process_body_survives_one_revision_conflict(backend: &Backend) -> LawOutcome {
+    let backend = law_backend(backend)?;
+    let hook = DurableCommitHook::over(Arc::clone(backend.durable()));
+    let process = root(
+        &backend,
+        json!({ "tag": tag("conflict"), "act": "chain", "steps": 1 }),
+    )
+    .await?;
+    let key = actor(&process)?;
+    let injected = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    {
+        let injected = Arc::clone(&injected);
+        let store = Arc::clone(backend.durable());
+        hook.arm(move |tx, label| {
+            let intervene = label == CommitLabel::STEP_OUTCOME
+                && tx.actor() == &key
+                && !injected.swap(true, Ordering::SeqCst);
+            let tx = tx.clone();
+            let store = Arc::clone(&store);
+            async move {
+                if intervene {
+                    let winner = store.begin(tx.actor(), tx.epoch()).await?;
+                    store
+                        .commit(winner, CommitLabel::new("law.intervene"))
+                        .await?;
+                }
+                Ok(())
+            }
+        });
+    }
+    let serving = serve_over(&backend, NODE, Vec::new(), Arc::new(hook));
+    let result = async {
+        eventually(SETTLE, "the conflicted process ended", || async {
+            Ok(terminal(&backend, &process).await?.is_some())
+        })
+        .await?;
+        ensure!(
+            injected.load(Ordering::SeqCst),
+            "the outcome commit was not interposed"
+        );
+        let outcome = terminal(&backend, &process).await?.unwrap_or_default();
+        ensure!(
+            find(&outcome, "settled") == Some(&json!(1)),
+            "the Once body lost its outcome: {outcome}"
+        );
+        let rows = backend
+            .durable()
+            .run_facts(&OwnerKey::Process(process.clone()))
+            .await?;
+        ensure!(
+            rows.rows
+                .iter()
+                .filter(|row| row.kind == RunFactKind::XOutcome)
+                .count()
+                == 1,
+            "the Once body recorded more than one outcome"
+        );
+        each_ran_once(&backend, &process, 1).await
+    }
+    .await;
+    serving.stop().await;
+    result
+}
+
 /// The CheckpointRoot page a `law_paged` step of call `call` publishes:
 /// one page of its own, named by its outcome and supplied only by its
 /// candidate's manifest, as a kernel run's parked root is.

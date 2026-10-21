@@ -213,7 +213,7 @@ declare -A uniform_store_suites=(
   [pg-operator-laws]="//crates/lashctl:operator_json_contract__test||lashctl|--test operator_json_contract|cargo-test|ignored-only"
   [pg-chaos-laws]="//crates/lash-sim:chaos_soak__test|chaos_soak_on_postgres|lash-sim|--test chaos_soak|cargo-test|ignored-only"
   [pg-schema-laws]="//crates/lash-postgres-store:schema_constraints__test|postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when_configured,a_process_row_takes_its_lifecycle_columns_from_its_record_alone,postgres_obligation_checks_reject_incomplete_variants,turn_cancellation_shape_is_guarded,isolated_cells_do_not_checkpoint_or_share_state|lash-internal-postgres-store|--test schema_constraints|cargo-test|"
-  [pg-bound-run-settled-history]="//crates/lash-postgres-store:lash-postgres-store__unit_test|postgres_bound_run_skips_settled_history_without_changing_bindings_when_configured|lash-internal-postgres-store|--lib|cargo-test|ignored-only"
+  [pg-bound-run-settled-history]="//crates/lash-postgres-store:lash-postgres-store__unit_test|postgres_bound_run_skips_settled_history_without_changing_bindings_when_configured,durable::tests::lo_fence_explicit_when_configured,durable::tests::lo_fence_function_when_configured|lash-internal-postgres-store|--lib|cargo-test|ignored-only"
   [s3-attachment-differential]="//crates/lash-sim:cross_backend_store_differential__test|attachment_blob_store_differential_agrees|lash-sim|--test cross_backend_store_differential|cargo-test|include-ignored,nocapture"
 )
 
@@ -338,6 +338,7 @@ run_uniform_store_suite() {
 # after these.
 release_legs() {
   echo "store|shared|--skip isolated_cells_do_not_checkpoint_or_share_state|$(labels postgres default)|-p lash-internal-postgres-store"
+  echo "owner-only-append|shared|lo_owner_only_service_append_on_postgres_when_configured --include-ignored|//crates/lash-durable-test:open_session_commands__test|-p lash-internal-durable-test --test open_session_commands"
   echo "durable-crash-proof|shared|on_postgres|//crates/lash-durable-test:vertical_crash_proof__test //crates/lash-durable-test:turn_phases__test|-p lash-internal-durable-test --test vertical_crash_proof --test turn_phases"
   echo "crash-matrix|shared|the_crash_matrix_holds_on_postgres --include-ignored|//crates/lash-sim:crash_matrix__test|-p lash-sim --test crash_matrix"
   echo "crash-matrix-sqlite-file|shared|the_crash_matrix_holds_on_a_sqlite_file --include-ignored|//crates/lash-sim:crash_matrix__test|-p lash-sim --test crash_matrix"

@@ -1,164 +1,96 @@
 use super::*;
-use std::sync::atomic::Ordering;
+use crate::runtime::session_api::{
+    SessionCommandEnqueueError, enqueue_stored_session_command, stored_session_command_status,
+};
+use lash_execution_contracts::plugin_error::PluginError;
 
 impl CurrentOwnerCapability {
     pub(in crate::runtime::session_manager) async fn append_session_nodes(
         &self,
-        background: &ProcessCapability,
         session_id: &SessionId,
         request: crate::AppendSessionNodesRequest,
-    ) -> Result<crate::AppendSessionNodesOutcome, lash_execution_contracts::plugin_error::PluginError>
-    {
+    ) -> Result<crate::SessionGraphAppendResult, PluginError> {
         if request.operation_id.trim().is_empty() {
-            return Err(
-                lash_execution_contracts::plugin_error::PluginError::Session(
-                    "session graph append requires a non-empty stable operation_id".to_string(),
-                ),
-            );
+            return Err(PluginError::Runtime(crate::RuntimeError::new(
+                crate::RuntimeErrorCode::SessionCommandIdempotencyKey,
+                "session graph append requires a non-empty stable operation_id",
+            )));
         }
         let session = self.require_session("append_session_nodes")?;
         if *session_id != session.session_id {
-            return Err(
-                lash_execution_contracts::plugin_error::PluginError::Session(format!(
-                    "unknown session `{session_id}`"
-                )),
-            );
+            return Err(PluginError::Session(format!(
+                "unknown session `{session_id}`"
+            )));
         }
-
-        let mut state = match &session.snapshot {
-            // A turn-scoped service never commits on its own: the append rides
-            // the running turn's draft and lands with the turn's final commit.
-            CurrentSnapshot::ReadModel { graph_appends, .. } => {
-                return graph_appends.record(session_id, &request);
-            }
-            CurrentSnapshot::Owned(_) => self.current_snapshot_for_store_write().await?,
-        };
-        let Some(store) = &session.store else {
-            return Err(
-                lash_execution_contracts::plugin_error::PluginError::Session(
-                    "session graph mutation requires a runtime store".to_string(),
-                ),
-            );
-        };
-        let operation = super::super::state::boundary_operation(
-            &state.session_id,
-            &request.operation_id,
-            "append-session-nodes",
-        );
-        let append_stamp = crate::RuntimeTurnCommitStamp::append_session_nodes(
-            operation.clone(),
-            request.requires_ancestor_node_id.as_deref(),
-            &request.nodes,
-        )
-        .map_err(|err| {
-            lash_execution_contracts::plugin_error::PluginError::Session(err.to_string())
+        if let CurrentSnapshot::ReadModel { graph_appends, .. } = &session.snapshot {
+            // Applied here means visible in the turn draft. Durability
+            // follows the running turn's acknowledged commit.
+            return graph_appends
+                .record(session_id, &request)
+                .map(|outcome| crate::SessionGraphAppendResult::Applied { outcome });
+        }
+        let store = session.store.as_ref().ok_or_else(|| {
+            PluginError::Session("session graph mutation requires a runtime store".to_owned())
         })?;
-        let draft_namespace = operation.storage_key().map_err(|err| {
-            lash_execution_contracts::plugin_error::PluginError::Session(err.to_string())
-        })?;
-        let node_ids = append_session_nodes_to_state_with_clock(
-            &mut state,
-            &request.nodes,
-            &draft_namespace,
-            self.host.core.clock.as_ref(),
-        );
-        let requested_node_count = node_ids.len();
-        let mut graph = state.pending_graph_commit();
-        let node_id_mapping = graph
-            .derive_node_ids(&state.session_id, &operation)
-            .map_err(|err| {
-                lash_execution_contracts::plugin_error::PluginError::Session(err.to_string())
-            })?;
-        let persisted_node_ids = node_id_mapping
-            .iter()
-            .map(|(_, derived)| derived.clone())
-            .collect::<Vec<_>>();
-        let locally_derived_node_ids = persisted_node_ids[persisted_node_ids
-            .len()
-            .saturating_sub(requested_node_count)..]
-            .to_vec();
-        let locally_derived_leaf_node_id = graph.leaf_node_id().cloned();
-        state
-            .capture_plugin_states(
-                self.session_plugins("append_session_nodes")?,
-                self.fleet_format(),
-            )
-            .map_err(lash_execution_contracts::plugin_error::PluginError::Runtime)?;
-        let mut commit =
-            crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(
-                &state,
-                graph,
-                operation,
-                self.host.core.durability.commit_budget,
-                self.fleet_format(),
-            )
-            .map_err(|err| lash_execution_contracts::plugin_error::PluginError::Session(err.to_string()))?;
-        commit.turn_commit = append_stamp;
-        commit.debug_assert_append_envelope_scope();
-        let commit_result = super::super::state::commit_in_lane_context(
-            store.clone(),
-            commit,
-            &session.resident_graph_head_stale,
-            self.host.core.tracing.metrics(),
+        let operation_id = request.operation_id.clone();
+        let receipt = enqueue_stored_session_command(
+            store,
+            session_id,
+            crate::SessionCommand::AppendSessionNodes {
+                request: Box::new(request),
+            },
+            &operation_id,
+            None,
         )
-        .await;
-        let result = match commit_result {
-            Ok(result) => result,
-            Err(crate::StoreError::AppendAncestorNotActive { required_node_id }) => {
-                return Ok(crate::AppendSessionNodesOutcome::StaleBranch { required_node_id });
-            }
-            Err(crate::StoreError::AppendOperationIdentityConflict {
-                session_id,
-                operation_key,
-            }) => {
-                return Err(lash_execution_contracts::plugin_error::PluginError::AppendOperationIdentityConflict {
+        .await
+        .map_err(|error| match error {
+            SessionCommandEnqueueError::ChangedContent(_) => {
+                let operation = super::super::state::boundary_operation(
                     session_id,
-                    operation_key,
-                });
-            }
-            Err(crate::StoreError::AppendReceiptRequestedNodeCountCorrupt {
-                session_id,
-                operation_key,
-                stored,
-                attempted,
-            }) => {
-                return Err(lash_execution_contracts::plugin_error::PluginError::AppendReceiptRequestedNodeCountCorrupt {
-                    session_id,
-                    operation_key,
-                    stored,
-                    attempted,
-                });
-            }
-            Err(crate::StoreError::SessionExecutionLeaseExpired { session_id }) => {
-                return Err(lash_execution_contracts::plugin_error::PluginError::SessionExecutionLeaseLost { session_id });
-            }
-            Err(error @ crate::StoreError::SessionHeadOwned { .. }) => {
-                return Err(error.into());
-            }
-            Err(err) => {
-                return Err(
-                    lash_execution_contracts::plugin_error::PluginError::Session(err.to_string()),
+                    &operation_id,
+                    "append-session-nodes",
                 );
+                match operation.storage_key() {
+                    Ok(operation_key) => PluginError::AppendOperationIdentityConflict {
+                        session_id: session_id.clone(),
+                        operation_key,
+                    },
+                    Err(error) => error.into(),
+                }
             }
-        };
-        let receipt_replayed = result.receipt_replayed;
-        let committed_leaf_node_id = result.committed_leaf_node_id.clone();
-        let node_ids =
-            super::super::state::resolve_append_node_ids(&result, locally_derived_node_ids)
-                .map_err(|err| {
-                    lash_execution_contracts::plugin_error::PluginError::Session(err.to_string())
-                })?;
-        if !receipt_replayed {
-            super::super::state::apply_graph_commit_node_id_mapping(&mut state, &node_id_mapping)
-                .map_err(|err| {
-                lash_execution_contracts::plugin_error::PluginError::Session(err.to_string())
-            })?;
-            state.apply_persisted_commit_result(result);
+            SessionCommandEnqueueError::Runtime(error) => PluginError::Runtime(error),
+        })?;
+        // This is one status operation, never a wait for the applying owner:
+        // a caller may be a callback that owner's continuation needs to finish.
+        match stored_session_command_status(store, receipt)
+            .await
+            .map_err(PluginError::Runtime)?
+        {
+            crate::runtime::SessionCommandSettlement::Applied {
+                outcome: crate::runtime::SessionCommandOutcome::AppendSessionNodes { outcome },
+                ..
+            } => Ok(crate::SessionGraphAppendResult::Applied { outcome }),
+            crate::runtime::SessionCommandSettlement::Pending(receipt) => {
+                Ok(crate::SessionGraphAppendResult::Pending { receipt })
+            }
+            crate::runtime::SessionCommandSettlement::Applied {
+                outcome: crate::runtime::SessionCommandOutcome::Failed { refusal },
+                ..
+            } => Err(PluginError::Runtime(refusal.into())),
+            crate::runtime::SessionCommandSettlement::Rejected(error) => {
+                Err(PluginError::Runtime(error))
+            }
+            crate::runtime::SessionCommandSettlement::Cancelled(receipt) => {
+                Err(crate::StoreError::SessionCommandWithdrawn {
+                    session_id: receipt.session_id,
+                    batch_id: receipt.batch_id,
+                }
+                .into())
+            }
+            settlement => Err(PluginError::Runtime(crate::RuntimeError::new(
+                crate::RuntimeErrorCode::SessionCommandRun,
+                format!("an append command settled without its append outcome: {settlement:?}"),
+            ))),
         }
-        background.sync_needed.store(true, Ordering::Release);
-        Ok(crate::AppendSessionNodesOutcome::Appended {
-            node_ids,
-            leaf_node_id: committed_leaf_node_id.or(locally_derived_leaf_node_id),
-        })
     }
 }

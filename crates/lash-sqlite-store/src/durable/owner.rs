@@ -81,12 +81,13 @@ pub(super) fn apply_owner(
     let actor = write.actor().as_str().to_owned();
     let fence = tx
         .prepare_cached(SQL.actor.fence.sql())?
-        .query_row(rusqlite::params![actor, write.epoch().0], |row| {
-            row.get::<_, i64>(0)
-        })
+        .query_row(
+            rusqlite::params![actor, write.epoch().0, write.revision().0],
+            |row| row.get::<_, i64>(0),
+        )
         .optional()?;
     let Some(revision) = fence else {
-        return refuse(fenced(tx, write.actor(), write.epoch())?);
+        return refuse(fenced(tx, write.actor(), write.epoch(), write.revision())?);
     };
     // A session's unfinished turn's accepted cancel, read under the fence
     // before the commit writes: the receipt reports a cancel that arrived

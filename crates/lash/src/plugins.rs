@@ -335,7 +335,7 @@ pub use lash_core::tool_run::{
 /// Both are runtime-implemented — a plugin receives one, never writes one.
 pub use lash_core::{
     AppendSessionNodesOutcome, AppendSessionNodesRequest, PluginExtensions, SessionAppendNode,
-    SessionGraphService, SessionStateService,
+    SessionGraphAppendResult, SessionGraphService, SessionStateService,
 };
 /// Code-executor request, response, and runtime capability context.
 pub use lash_core::{

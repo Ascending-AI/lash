@@ -9,7 +9,7 @@ use lash_protocol_types::SessionId;
 /// transaction, so every comparison and derived expiry in that transaction is
 /// based on one database-owned instant.
 pub(crate) async fn postgres_transaction_epoch_ms(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
 ) -> Result<u64, StoreError> {
     #[cfg(any(test, feature = "testing"))]
     {
@@ -18,7 +18,7 @@ pub(crate) async fn postgres_transaction_epoch_ms(
                 .select_injected_lease_epoch_ms
                 .sql(),
         )
-        .fetch_one(crate::observed_sql::executor(&mut **tx))
+        .fetch_one(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
         if let Some(injected) = injected {
@@ -32,7 +32,7 @@ pub(crate) async fn postgres_transaction_epoch_ms(
             .select_transaction_epoch_ms
             .sql(),
     )
-    .fetch_one(crate::observed_sql::executor(&mut **tx))
+    .fetch_one(crate::observed_sql::executor(&mut *tx))
     .await
     .map_err(store_sqlx_error)?;
     u64::try_from(now)

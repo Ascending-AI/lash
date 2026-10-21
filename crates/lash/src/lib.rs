@@ -952,9 +952,6 @@ pub mod runtime {
     /// The durable session extension and turn options exposed to runtime integrators.
     pub use lash_core::ProtocolSessionExtension;
     pub use lash_core::ProtocolTurnOptions;
-    /// Structured cause carried by a [`RuntimeError`], so a host distinguishes
-    /// an expected retirement (a deleted session) from a real fault.
-    pub use lash_core::RuntimeErrorCause;
     pub use lash_core::SessionPolicy;
     pub use lash_core::SessionSnapshot;
     /// The session-state generations an admission refused, carried in-process
@@ -1017,6 +1014,9 @@ pub mod runtime {
     /// wall-clock default; tests open a backend on their own to make expiry
     /// deterministic.
     pub use lash_core::{Clock, ClockWallTime, facade_support::SystemClock};
+    /// Structured cause carried by a [`RuntimeError`], so a host distinguishes
+    /// an expected retirement (a deleted session) from a real fault.
+    pub use lash_core::{OwnerRevisionConflict, RuntimeErrorCause};
     pub use lash_core_store::runtime_error::SnapshotCandidate;
     pub use lash_execution_contracts::session_types::SessionHandle;
     pub use lash_execution_contracts::turn_prelude::TurnPreludeRef;

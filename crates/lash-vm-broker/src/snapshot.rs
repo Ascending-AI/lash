@@ -231,6 +231,9 @@ fn named(calls: &[lash_protocol_types::ToolCallId]) -> String {
 /// Why driving a run's effects failed.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum DriveRefusal {
+    /// The owner's read or commit failed, retaining its fence cause.
+    #[error(transparent)]
+    Durable(#[from] lash_durable::DurableError),
     /// The store refused or failed a read or a commit, or the activation
     /// stopped.
     #[error(transparent)]

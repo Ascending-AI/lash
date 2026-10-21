@@ -1417,12 +1417,24 @@ DECLARE
     v_answer JSONB;
     v_frame TEXT;
 BEGIN
-    -- Generated from this build's statements (registry d8edea84fe4bf6d1); a call
+    -- Generated from this build's statements (registry e9fc4b157d9178ca); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM 'd8edea84fe4bf6d1'
+    IF p_registry IS DISTINCT FROM 'e9fc4b157d9178ca'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
+    IF jsonb_typeof(p_steps) IS DISTINCT FROM 'object'
+        OR p_steps->'version' IS DISTINCT FROM '1'::JSONB
+        OR jsonb_typeof(p_steps->'expected_revision') IS DISTINCT FROM 'number'
+        OR (p_steps->>'expected_revision') !~ '^-?[0-9]+$'
+        OR jsonb_typeof(p_steps->'steps') IS DISTINCT FROM 'array' THEN
+        RAISE EXCEPTION 'lash_owner_commit: invalid owner-envelope-v1' USING ERRCODE = 'LX000';
+    END IF;
+    BEGIN
+        PERFORM (p_steps->>'expected_revision')::BIGINT;
+    EXCEPTION WHEN numeric_value_out_of_range OR invalid_text_representation THEN
+        RAISE EXCEPTION 'lash_owner_commit: invalid expected revision' USING ERRCODE = 'LX000';
+    END;
     IF p_lock_timeout IS NOT NULL THEN
         PERFORM set_config('lock_timeout', p_lock_timeout, true);
     END IF;
@@ -1430,6 +1442,7 @@ BEGIN
     WITH fenced AS (
                  UPDATE lash_actors SET state_revision = state_revision + 1
                  WHERE actor_key = (p_actor) AND epoch = (p_epoch) AND state = 'owned'
+                     AND state_revision = ((p_steps->>'expected_revision')::BIGINT)
                  RETURNING state_revision
              )
              SELECT (SELECT format_version FROM lash_fleet_format WHERE singleton = TRUE),
@@ -1511,7 +1524,7 @@ BEGIN
              FROM unnest((p_digests)::bytea[], (p_contents)::bytea[]) AS staged(digest, content)
              WHERE staged.digest = ANY((v_inserted)::bytea[]) INTO v_installed;
     END IF;
-    FOR v_step IN SELECT value FROM jsonb_array_elements(p_steps) LOOP
+    FOR v_step IN SELECT value FROM jsonb_array_elements(p_steps->'steps') LOOP
         v_index := v_index + 1;
         -- A step runs only when the slot it names holds what it names: a
         -- row, or a row whose column is true (FIG-5942).

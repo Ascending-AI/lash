@@ -1211,6 +1211,10 @@ pub(super) async fn read_facts(
     {
         return Ok(Err(replay.into_result()));
     }
+    if writer == HeadWriter::Store {
+        let now = crate::support::postgres_transaction_epoch_ms(tx).await?;
+        super::bump_unclaimed_session(tx, &commit.session_id, now).await?;
+    }
     // The bound turn owns the head (FIG-4202): a write outside every run
     // is refused while a run or an open command owns it. The session lock
     // serializes the read with every admission; the plan's own refusals (a
@@ -1520,6 +1524,11 @@ pub(super) async fn apply(
     configs: &lash_core_store::store_backend_support::ConfigCache,
 ) -> Result<RuntimeCommitReceipt, StoreError> {
     let commit = planner.commit();
+    if writer == HeadWriter::Store
+        && super::turns::head_writer(context.actor, &commit.session_id) == HeadWriter::Store
+    {
+        super::PostgresDurableStore::lock_cross_target(tx, &commit.session_id).await?;
+    }
     let held = match read_facts(tx, planner, writer, chunk_size, configs).await? {
         Ok(held) => held,
         Err(replayed) => return Ok(replayed),

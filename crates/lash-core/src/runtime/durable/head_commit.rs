@@ -42,6 +42,27 @@ impl HeadCommitError {
         match self {
             Self::Store(error) => crate::runtime::runtime_error_from_store_commit(error),
             Self::Refused(error) => error,
+            Self::Owner(DurableError::RevisionConflict {
+                actor,
+                epoch,
+                expected,
+                actual,
+            }) => RuntimeError::new(
+                RuntimeErrorCode::OwnerRevisionConflict,
+                format!("owner {actor} revision moved from {expected:?} to {actual:?}"),
+            )
+            .with_cause(crate::RuntimeErrorCause::OwnerRevisionConflict(Box::new(
+                lash_core_store::runtime_error::OwnerRevisionConflict {
+                    actor: actor.as_str().to_owned(),
+                    epoch: epoch.0,
+                    expected: expected.0,
+                    actual: actual.0,
+                },
+            ))),
+            Self::Owner(error @ DurableError::OwnershipLost(_)) => RuntimeError::new(
+                RuntimeErrorCode::SessionExecutionLeaseLost,
+                error.to_string(),
+            ),
             Self::Owner(error) => RuntimeError::new(
                 RuntimeErrorCode::StoreCommitFailed,
                 format!("the session's head commit: {error}"),
@@ -95,12 +116,13 @@ pub(crate) fn write_session_commit(
 /// [`HeadCommitError::Owner`] when the transaction failed.
 pub(crate) async fn commit(
     owner: &ActorContext,
+    tx: lash_durable::ActorTx,
     executor: Option<&Arc<dyn CodeExecutorPlugin>>,
     commit: RuntimeCommit,
     label: CommitLabel,
     metrics: &lash_trace::telemetry::metrics::TelemetryMetrics,
 ) -> Result<(), HeadCommitError> {
-    commit_in(owner, executor, commit, label, metrics, None, None).await
+    commit_in(owner, tx, executor, commit, label, metrics, None, None).await
 }
 
 /// [`commit`], recording in the same transaction that the session's state
@@ -114,8 +136,13 @@ pub(crate) async fn commit(
 ///
 /// As [`commit`]; a failed read of `ending`'s children is
 /// [`HeadCommitError::Owner`].
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the cutover preserves the supplied transaction and existing commit options"
+)]
 pub(crate) async fn commit_in(
     owner: &ActorContext,
+    tx: lash_durable::ActorTx,
     executor: Option<&Arc<dyn CodeExecutorPlugin>>,
     commit: RuntimeCommit,
     label: CommitLabel,
@@ -125,7 +152,7 @@ pub(crate) async fn commit_in(
 ) -> Result<(), HeadCommitError> {
     crate::store::admit_runtime_commit_budget(&commit, metrics).map_err(HeadCommitError::Store)?;
     let encoded = crate::store::encode_session_commit(&commit).map_err(HeadCommitError::Store)?;
-    let mut tx = owner.begin().await.map_err(HeadCommitError::Owner)?;
+    let mut tx = tx;
     if commit.frame_transition.is_some() || commit.applied_commands.is_some() || formats.is_some() {
         tx.write(DomainWrite::Prompt(
             lash_durable::domain::PromptWrite::ResetPrefix {
@@ -177,5 +204,36 @@ pub(crate) async fn commit_in(
             }),
         ),
         Err(error) => Err(HeadCommitError::Owner(error)),
+    }
+}
+
+impl crate::LashRuntime {
+    /// Open before loading the mutable head. A validating read cannot grant
+    /// a newer revision to a draft assembled from an older one.
+    pub(in crate::runtime) async fn open_head_attempt(
+        &mut self,
+        owner: &ActorContext,
+    ) -> Result<lash_durable::ActorTx, RuntimeError> {
+        let tx = owner
+            .begin()
+            .await
+            .map_err(|error| HeadCommitError::Owner(error).into_runtime_error())?;
+        self.invalidate_resident_session_state();
+        self.reload_invalidated_resident_session_state().await?;
+        let checked = owner
+            .begin()
+            .await
+            .map_err(|error| HeadCommitError::Owner(error).into_runtime_error())?;
+        if tx.revision() != checked.revision() {
+            self.invalidate_resident_session_state();
+            return Err(HeadCommitError::Owner(DurableError::RevisionConflict {
+                actor: tx.actor().clone(),
+                epoch: tx.epoch(),
+                expected: tx.revision(),
+                actual: checked.revision(),
+            })
+            .into_runtime_error());
+        }
+        Ok(tx)
     }
 }

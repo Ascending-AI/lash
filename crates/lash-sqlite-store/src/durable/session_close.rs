@@ -61,7 +61,7 @@ fn step(stored: Option<&str>) -> Result<Option<SessionCloseStep>, DurableError> 
 }
 
 pub(super) fn apply(
-    tx: &Connection,
+    tx: &crate::conn::FencedTx<'_>,
     commit: &Committing<'_>,
     write: &SessionCloseWrite,
 ) -> Answer<()> {
@@ -98,6 +98,29 @@ pub(super) fn apply(
                         done,
                     },
                 )));
+            }
+            if *next == SessionCloseStep::Artifacts {
+                let own = lash_durable::ActorKey::session(session.as_str())
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?;
+                if commit.actor != &own {
+                    return Ok(Err(corrupt(
+                        "session close authority",
+                        "Artifacts requires the session actor",
+                    )));
+                }
+                if let Err(error) = crate::session_deletion::delete_session_conn(
+                    tx,
+                    session,
+                    u64::try_from(commit.now.0).unwrap_or(0),
+                    &mut Default::default(),
+                ) {
+                    return Ok(Err(lash_durable::DurableError::Store(
+                        lash_durable::StoreFailure {
+                            kind: lash_durable::StoreFailureKind::Unavailable,
+                            message: error.to_string(),
+                        },
+                    )));
+                }
             }
             cached_execute(
                 tx,

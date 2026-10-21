@@ -46,22 +46,47 @@ pub(crate) async fn lock_session_history_mutations_tx(
     if session_ids.is_empty() {
         return Ok(());
     }
-    // A fork takes no actor row after history, so history alone orders it.
-    crate::observed_sql::query(
-        crate::connection_sql::connection_sql()
-            .lock_xact_session_history_batch
-            .sql(),
-    )
-    .bind(
-        session_ids
-            .iter()
-            .map(SessionId::as_str)
-            .collect::<Vec<_>>(),
-    )
-    .execute(crate::observed_sql::executor(&mut **tx))
-    .await
-    .map_err(store_sqlx_error)?;
-    Ok(())
+    let mut actors = session_ids
+        .iter()
+        .map(|session| {
+            lash_durable::ActorKey::session(session.as_str())
+                .map(|actor| actor.as_str().to_owned())
+                .map_err(|error| StoreError::Backend(error.to_string()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    actors.sort();
+    let connection = crate::connection_sql::connection_sql();
+    loop {
+        crate::observed_sql::query(connection.savepoint_session_history.sql())
+            .execute(crate::observed_sql::executor(&mut **tx))
+            .await
+            .map_err(store_sqlx_error)?;
+        let locked = crate::PostgresDurableStore::lock_session_actors(tx, &actors).await?;
+        crate::observed_sql::query(connection.lock_xact_session_history_batch.sql())
+            .bind(
+                session_ids
+                    .iter()
+                    .map(SessionId::as_str)
+                    .collect::<Vec<_>>(),
+            )
+            .execute(crate::observed_sql::executor(&mut **tx))
+            .await
+            .map_err(store_sqlx_error)?;
+        let current = crate::PostgresDurableStore::session_actor_keys(tx, &actors).await?;
+        if locked != current {
+            crate::observed_sql::query(connection.rollback_to_session_history.sql())
+                .execute(crate::observed_sql::executor(&mut **tx))
+                .await
+                .map_err(store_sqlx_error)?;
+        }
+        crate::observed_sql::query(connection.release_session_history.sql())
+            .execute(crate::observed_sql::executor(&mut **tx))
+            .await
+            .map_err(store_sqlx_error)?;
+        if locked == current {
+            return Ok(());
+        }
+    }
 }
 
 /// Refuse a write into session `session_id` once its close began: the

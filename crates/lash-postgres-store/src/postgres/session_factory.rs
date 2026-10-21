@@ -166,6 +166,22 @@ impl lash_core_store::store::SessionCatalogStore for PostgresStore {
             .await
             .map_err(lash_core_store::store::MaintenanceFailure::failed_before_any_work)?;
         let mut report = lash_core_store::store::SessionBlobReclaimReport::default();
+        crate::runtime_persistence::lock_session_history_mutation_tx(&mut tx, session_id)
+            .await
+            .map_err(lash_core_store::store::MaintenanceFailure::failed_before_any_work)?;
+        let live: bool = crate::observed_sql::query_scalar(
+            session_sql().meta_postgres.exists_materialized.sql(),
+        )
+        .bind(session_id.as_str())
+        .fetch_one(crate::observed_sql::executor(&mut **tx))
+        .await
+        .map_err(store_sqlx_error)
+        .map_err(lash_core_store::store::MaintenanceFailure::failed_before_any_work)?;
+        if live {
+            crate::durable::bump_unclaimed_session(&mut tx, session_id, self.clock.timestamp_ms())
+                .await
+                .map_err(lash_core_store::store::MaintenanceFailure::failed_before_any_work)?;
+        }
         let deleted = match delete_session_tx(
             &mut tx,
             session_id,
@@ -324,6 +340,12 @@ impl lash_core_store::store::SessionCatalogStore for PostgresStore {
         // The revision row is the retained point, share-locked until this
         // fork's own head roots what it names. No other revision is ever
         // forked in its place.
+        crate::durable::bump_unclaimed_session(
+            &mut tx,
+            &request.session_id,
+            self.clock.timestamp_ms(),
+        )
+        .await?;
         let retained = crate::observed_sql::query_as::<
             _,
             (
@@ -873,7 +895,7 @@ impl lash_core_store::attachments::AttachmentRootSet for PostgresStore {
 /// own among them, at `now`: the store clock's, which the cleanup relay
 /// claims with.
 async fn fence_deleted_session_frames_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     session_ids: &[SessionId],
     fleet_format: lash_core_store::store::FleetFormat,
     now: u64,
@@ -928,7 +950,7 @@ async fn fence_deleted_session_frames_tx(
             .bind(referrer.kind().as_str())
             .bind(referrer.canonical_id())
             .bind(crate::support::clamp_epoch_ms(now))
-            .execute(crate::observed_sql::executor(&mut **tx))
+            .execute(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(store_sqlx_error)?;
             lash_core_store::artifact_referrer::ArtifactCleanup::ended(referrer, Vec::new(), None)
@@ -940,25 +962,25 @@ async fn fence_deleted_session_frames_tx(
 
 /// The one text column `statement` selects for session `session_id`.
 async fn session_texts(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     statement: &str,
     session_id: &SessionId,
 ) -> Result<Vec<String>, StoreError> {
     crate::observed_sql::query_scalar(statement)
         .bind(session_id.as_str())
-        .fetch_all(crate::observed_sql::executor(&mut **tx))
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)
 }
 
 async fn session_keys(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     statement: &str,
     session_id: &SessionId,
 ) -> Result<Vec<String>, StoreError> {
     crate::keys::query_scalar(statement)
         .bind(session_id.as_str())
-        .fetch_all(crate::observed_sql::executor(&mut **tx))
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)
 }
@@ -967,7 +989,7 @@ async fn session_keys(
 /// record, when it was materialized, is the caller's to sequence at the
 /// transaction's tail.
 pub(crate) async fn delete_session_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     session_id: &SessionId,
     report: &mut lash_core_store::store::SessionBlobReclaimReport,
     fleet_format: lash_core_store::store::FleetFormat,
@@ -978,7 +1000,7 @@ pub(crate) async fn delete_session_tx(
         session_sql().meta_postgres.exists_materialized.sql(),
     )
     .bind(session_id.as_str())
-    .fetch_one(crate::observed_sql::executor(&mut **tx))
+    .fetch_one(crate::observed_sql::executor(&mut *tx))
     .await
     .map_err(store_sqlx_error)?;
     if materialized {
@@ -987,12 +1009,12 @@ pub(crate) async fn delete_session_tx(
         // Permanent identity evidence for host-facing session ids.
         crate::observed_sql::query(session_sql().deleted_postgres.insert_from_meta.sql())
             .bind(session_id.as_str())
-            .execute(crate::observed_sql::executor(&mut **tx))
+            .execute(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(store_sqlx_error)?;
         crate::observed_sql::query(session_sql().deleted_postgres.insert_root.sql())
             .bind(session_id.as_str())
-            .execute(crate::observed_sql::executor(&mut **tx))
+            .execute(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(store_sqlx_error)?;
     }
@@ -1003,7 +1025,7 @@ pub(crate) async fn delete_session_tx(
         session_sql().head.select_reclaim.sql(),
     )
     .bind(session_id.as_str())
-    .fetch_optional(crate::observed_sql::executor(&mut **tx))
+    .fetch_optional(crate::observed_sql::executor(&mut *tx))
     .await
     .map_err(store_sqlx_error)?;
     let (leaf_node_id, checkpoint_ref) = head.unwrap_or((None, None));
@@ -1033,7 +1055,7 @@ pub(crate) async fn delete_session_tx(
     checkpoint_refs.extend(
         crate::keys::query_scalar::<Option<String>>(session_sql().meta.select_admission_base.sql())
             .bind(session_id.as_str())
-            .fetch_optional(crate::observed_sql::executor(&mut **tx))
+            .fetch_optional(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(store_sqlx_error)?
             .flatten(),
@@ -1046,7 +1068,7 @@ pub(crate) async fn delete_session_tx(
     ] {
         crate::observed_sql::query(statement)
             .bind(session_id.as_str())
-            .execute(crate::observed_sql::executor(&mut **tx))
+            .execute(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(store_sqlx_error)?;
     }
@@ -1067,7 +1089,7 @@ pub(crate) async fn delete_session_tx(
         session_sql().graph_postgres.select_unreachable_leaves.sql(),
     )
     .bind(session_id.as_str())
-    .fetch_all(crate::observed_sql::executor(&mut **tx))
+    .fetch_all(crate::observed_sql::executor(&mut *tx))
     .await
     .map_err(store_sqlx_error)?;
     for node_id in unreachable_candidates {
@@ -1085,7 +1107,7 @@ pub(crate) async fn delete_session_tx(
             .sql(),
     )
     .bind(session_id.as_str())
-    .execute(crate::observed_sql::executor(&mut **tx))
+    .execute(crate::observed_sql::executor(&mut *tx))
     .await
     .map_err(store_sqlx_error)?;
     let turn_ingress = crate::turn_ingress::turn_ingress_sql();
@@ -1101,7 +1123,7 @@ pub(crate) async fn delete_session_tx(
     ] {
         crate::observed_sql::query(statement)
             .bind(session_id.as_str())
-            .execute(crate::observed_sql::executor(&mut **tx))
+            .execute(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(store_sqlx_error)?;
     }
@@ -1113,7 +1135,7 @@ pub(crate) async fn delete_session_tx(
     ] {
         crate::observed_sql::query(statement)
             .bind(session_id.as_str())
-            .execute(crate::observed_sql::executor(&mut **tx))
+            .execute(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(store_sqlx_error)?;
     }

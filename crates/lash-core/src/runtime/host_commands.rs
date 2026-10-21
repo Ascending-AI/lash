@@ -109,7 +109,7 @@ impl LashRuntime {
         owner: &crate::ActorContext,
     ) -> Result<bool, RuntimeError> {
         let batch_id = Self::sole_command_batch(&completion)?;
-        self.reload_invalidated_resident_session_state().await?;
+        let mut tx = self.open_head_attempt(owner).await?;
         // An append's receipt identity is owned by the append operation key.
         let operation = crate::OperationId::new(
             self.state.session_operation_scope(&batch_id),
@@ -144,26 +144,31 @@ impl LashRuntime {
                 // The protocol refused the nodes: the command settles failed
                 // over the durable head, with nothing appended.
                 self.invalidate_resident_session_state();
-                self.reload_invalidated_resident_session_state().await?;
-                let committed =
-                    Box::pin(
-                        self.commit_host_command(owner, &completion, None, None, |_, _| {
-                            crate::runtime::SessionCommandOutcome::Failed {
-                                refusal: RuntimeError::new(
-                                    RuntimeErrorCode::SessionCommandRun,
-                                    format!("the protocol refused the appended nodes: {error}"),
-                                )
-                                .into(),
-                            }
-                        }),
-                    )
-                    .await?;
+                tx = self.open_head_attempt(owner).await?;
+                let committed = Box::pin(self.commit_host_command(
+                    owner,
+                    tx,
+                    &completion,
+                    None,
+                    None,
+                    |_, _| {
+                        crate::runtime::SessionCommandOutcome::Failed {
+                            refusal: RuntimeError::new(
+                                RuntimeErrorCode::SessionCommandRun,
+                                format!("the protocol refused the appended nodes: {error}"),
+                            )
+                            .into(),
+                        }
+                    },
+                ))
+                .await?;
                 return Ok(!matches!(committed, CommandCommit::Withdrawn));
             }
         }
         self.stamp_live_plugin_state()?;
         let committed = Box::pin(self.commit_host_command(
             owner,
+            tx,
             &completion,
             Some(append_stamp),
             None,
@@ -181,18 +186,20 @@ impl LashRuntime {
             // The required ancestor left the active path: the command settles
             // refused, over the durable head, with nothing appended.
             CommandCommit::AncestorNotActive { required_node_id } => {
-                self.reload_invalidated_resident_session_state().await?;
-                let settled =
-                    Box::pin(
-                        self.commit_host_command(owner, &completion, None, None, |_, _| {
-                            crate::runtime::SessionCommandOutcome::AppendSessionNodes {
-                                outcome: crate::AppendSessionNodesOutcome::StaleBranch {
-                                    required_node_id: required_node_id.clone(),
-                                },
-                            }
-                        }),
-                    )
-                    .await?;
+                let tx = self.open_head_attempt(owner).await?;
+                let settled = Box::pin(self.commit_host_command(
+                    owner,
+                    tx,
+                    &completion,
+                    None,
+                    None,
+                    |_, _| crate::runtime::SessionCommandOutcome::AppendSessionNodes {
+                        outcome: crate::AppendSessionNodesOutcome::StaleBranch {
+                            required_node_id: required_node_id.clone(),
+                        },
+                    },
+                ))
+                .await?;
                 Ok(!matches!(settled, CommandCommit::Withdrawn))
             }
         }
@@ -255,6 +262,7 @@ impl LashRuntime {
                 )
             }
         };
+        let mut tx = self.open_head_attempt(run_controller).await?;
         let ran =
             Box::pin(self.run_host_plugin_operation(&name, args, &batch_id, task.as_ref(), parent))
                 .await?;
@@ -263,7 +271,7 @@ impl LashRuntime {
                 // Nothing of a cancelled task stays resident: the
                 // settlement is written over the durable head.
                 self.invalidate_resident_session_state();
-                self.reload_invalidated_resident_session_state().await?;
+                tx = self.open_head_attempt(run_controller).await?;
                 crate::runtime::PluginOperationCommandOutcome::Cancelled
             }
             Ok(outcome) => outcome,
@@ -271,7 +279,7 @@ impl LashRuntime {
                 // Nothing of a failed operation stays resident: the
                 // settlement is written over the durable head.
                 self.invalidate_resident_session_state();
-                self.reload_invalidated_resident_session_state().await?;
+                tx = self.open_head_attempt(run_controller).await?;
                 if !error.is_terminal() {
                     return Err(error.into_runtime_error());
                 }
@@ -289,10 +297,10 @@ impl LashRuntime {
         };
         let committed = Box::pin(self.commit_host_command_ending(
             run_controller,
+            tx,
             &completion,
             None,
-            None,
-            ending.as_ref(),
+            (None, ending.as_ref()),
             |_, _| crate::runtime::SessionCommandOutcome::PluginOperation { outcome },
         ))
         .await?;
@@ -503,7 +511,7 @@ impl LashRuntime {
         owner: &crate::ActorContext,
     ) -> Result<bool, RuntimeError> {
         let batch_id = Self::sole_command_batch(&completion)?;
-        self.reload_invalidated_resident_session_state().await?;
+        let mut tx = self.open_head_attempt(owner).await?;
         let committing = self.state.session_operation_scope(&batch_id);
         let staged = self
             .stage_agent_frame(request, super::frame_open::StagedOpen::Caller)
@@ -523,7 +531,7 @@ impl LashRuntime {
             }
             Err(error) => {
                 self.invalidate_resident_session_state();
-                self.reload_invalidated_resident_session_state().await?;
+                tx = self.open_head_attempt(owner).await?;
                 (
                     crate::runtime::OpenAgentFrameCommandOutcome::Refused {
                         refusal: error.into(),
@@ -535,6 +543,7 @@ impl LashRuntime {
         let opens = switch.is_some();
         let committed = Box::pin(self.commit_host_command(
             owner,
+            tx,
             &completion,
             None,
             switch,
@@ -599,6 +608,7 @@ impl LashRuntime {
     pub(super) async fn commit_host_command(
         &mut self,
         owner: &crate::ActorContext,
+        tx: lash_durable::ActorTx,
         completion: &crate::QueuedWorkCompletion,
         append_stamp: Option<crate::RuntimeTurnCommitStamp>,
         switch: Option<CommandFrameSwitch>,
@@ -609,10 +619,10 @@ impl LashRuntime {
     ) -> Result<CommandCommit, RuntimeError> {
         Box::pin(self.commit_host_command_ending(
             owner,
+            tx,
             completion,
             append_stamp,
-            switch,
-            None,
+            (switch, None),
             outcome,
         ))
         .await
@@ -624,21 +634,25 @@ impl LashRuntime {
     async fn commit_host_command_ending(
         &mut self,
         owner: &crate::ActorContext,
+        tx: lash_durable::ActorTx,
         completion: &crate::QueuedWorkCompletion,
         append_stamp: Option<crate::RuntimeTurnCommitStamp>,
-        switch: Option<CommandFrameSwitch>,
-        ending: Option<&lash_durable::domain::ScopeKey>,
+        ending: (
+            Option<CommandFrameSwitch>,
+            Option<&lash_durable::domain::ScopeKey>,
+        ),
         outcome: impl FnOnce(
             &crate::RuntimeSessionState,
             &[crate::NodeId],
         ) -> crate::runtime::SessionCommandOutcome,
     ) -> Result<CommandCommit, RuntimeError> {
+        let (switch, ending) = ending;
         let refusal = match Box::pin(self.commit_host_command_once(
             owner,
+            tx,
             completion,
             append_stamp,
-            switch,
-            ending,
+            (switch, ending),
             outcome,
         ))
         .await?
@@ -646,12 +660,13 @@ impl LashRuntime {
             Ok(committed) => return Ok(committed),
             Err(refusal) => refusal,
         };
+        let tx = self.open_head_attempt(owner).await?;
         let settled = Box::pin(self.commit_host_command_once(
             owner,
+            tx,
             completion,
             None,
-            None,
-            ending,
+            (None, ending),
             |_, _| crate::runtime::SessionCommandOutcome::Failed {
                 refusal: crate::RecordedRefusal::from(&refusal),
             },
@@ -673,15 +688,19 @@ impl LashRuntime {
     async fn commit_host_command_once(
         &mut self,
         owner: &crate::ActorContext,
+        tx: lash_durable::ActorTx,
         completion: &crate::QueuedWorkCompletion,
         append_stamp: Option<crate::RuntimeTurnCommitStamp>,
-        switch: Option<CommandFrameSwitch>,
-        ending: Option<&lash_durable::domain::ScopeKey>,
+        ending: (
+            Option<CommandFrameSwitch>,
+            Option<&lash_durable::domain::ScopeKey>,
+        ),
         outcome: impl FnOnce(
             &crate::RuntimeSessionState,
             &[crate::NodeId],
         ) -> crate::runtime::SessionCommandOutcome,
     ) -> Result<Result<CommandCommit, RuntimeError>, RuntimeError> {
+        let (switch, ending) = ending;
         let batch_id = Self::sole_command_batch(completion)?;
         // An append commits under the append's own operation, which owns its
         // receipt identity; every other command under the command's.
@@ -728,6 +747,7 @@ impl LashRuntime {
         ));
         let committed = super::durable::head_commit::commit_in(
             owner,
+            tx,
             self.code_executor().as_ref(),
             commit,
             lash_durable::CommitLabel::SESSION_COMMAND,

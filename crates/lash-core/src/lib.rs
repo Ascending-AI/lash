@@ -666,6 +666,7 @@ pub use plugin::OwnerChange;
 pub use plugin::OwnerConfigView;
 pub use plugin::PluginConfig;
 pub use plugin::PluginConfigNamespace;
+pub use plugin::SessionGraphAppendResult;
 
 pub use plugin::PluginExtensions;
 pub use plugin::PluginNamespaceState;
@@ -898,7 +899,6 @@ pub use runtime::RuntimeEffectLocalExecutor;
 pub use runtime::RuntimeEffectOutcome;
 pub use runtime::RuntimeEffectReplayMismatchReport;
 pub use runtime::RuntimeError;
-pub use runtime::RuntimeErrorCause;
 pub use runtime::RuntimeErrorCode;
 pub use runtime::RuntimeInvocation;
 pub use runtime::RuntimeReplay;
@@ -906,6 +906,7 @@ pub use runtime::RuntimeReplayAttribution;
 pub use runtime::RuntimeSessionAuthority;
 pub use runtime::RuntimeSessionState;
 pub use runtime::SCOPE_STORAGE_PAYLOAD_VERSION;
+pub use runtime::{OwnerRevisionConflict, RuntimeErrorCause};
 
 pub use runtime::ScopeId;
 

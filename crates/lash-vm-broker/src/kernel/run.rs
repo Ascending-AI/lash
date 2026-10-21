@@ -421,6 +421,9 @@ impl std::fmt::Debug for KernelEnd {
 /// Why a run did not stop where [`KernelEnd`] says. Every variant is typed.
 #[derive(Debug, thiserror::Error)]
 pub enum KernelFailure {
+    /// The owner's read or commit failed, retaining its fence cause.
+    #[error(transparent)]
+    Durable(#[from] DurableError),
     #[error("the run's {bound:?} bound of {stated} is over the broker's ceiling of {ceiling}")]
     OverCeiling {
         bound: Bound,
@@ -469,6 +472,7 @@ pub enum KernelFailure {
 impl From<DriveRefusal> for KernelFailure {
     fn from(refusal: DriveRefusal) -> Self {
         match refusal {
+            DriveRefusal::Durable(error) => Self::Durable(error),
             DriveRefusal::Refused(refusal) => Self::Checkpoint(refusal),
             DriveRefusal::Invariant(invariant) => Self::Invariant(invariant),
         }
