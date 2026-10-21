@@ -421,3 +421,70 @@ pub(super) async fn lost_owned_hint_reaches_the_mail_poll() {
         .unwrap();
     owner.kill().await;
 }
+
+/// WAKE-MAINTENANCE (FIG-7083): producer commits retain durable hints
+/// without running an expiry sweep. Liveness maintenance bounds each
+/// sweep and preserves every hint still inside its retention window.
+#[tokio::test]
+async fn producers_leave_wake_expiry_to_bounded_maintenance() {
+    let dir = tempfile::tempdir().unwrap();
+    let clock = Arc::new(lash_core::testing::TestClock::new(STORE_TIME));
+    let stores = SqliteStoreSet::open_with_options_and_clock(
+        dir.path().join("lash.db"),
+        crate::SqliteStoreSetOptions::standard(crate::SqliteSynchronous::Normal),
+        clock.clone(),
+    )
+    .await
+    .unwrap();
+    let store = stores.durable_store();
+    let (_, receipt) = lash_core_ids::operational_metrics::sql::collect(
+        "law.producer_wake",
+        "sqlite",
+        create(&store, &actor("maintenance")),
+    )
+    .await;
+    assert!(
+        receipt
+            .shapes
+            .keys()
+            .all(|sql| !sql.starts_with("delete from node_wakes")),
+        "a producer must not sweep disposable hints: {receipt:?}"
+    );
+    store.conn.write(|tx| {
+        tx.execute("INSERT INTO node_wakes (node_id, actors, published_at_ms) VALUES (NULL, 'young', ?1)", [i64::try_from(STORE_TIME).unwrap()])?;
+        for _ in 0..4200 {
+            tx.execute("INSERT INTO node_wakes (node_id, actors, published_at_ms) VALUES (NULL, 'old', 0)", [])?;
+        }
+        Ok(())
+    }).await.unwrap();
+    let count = || {
+        store.conn.read(|c| {
+            c.query_row(
+                "SELECT count(*) FROM node_wakes WHERE actors = 'old'",
+                [],
+                |row| row.get::<_, usize>(0),
+            )
+        })
+    };
+    stores.node_wakes().unwrap().liveness().await.unwrap();
+    assert_eq!(
+        count().await.unwrap(),
+        105,
+        "maintenance inspects at most 4096 hints, including the young one"
+    );
+    let young = store
+        .conn
+        .read(|c| {
+            c.query_row(
+                "SELECT count(*) FROM node_wakes WHERE published_at_ms = ?1",
+                [i64::try_from(STORE_TIME).unwrap()],
+                |row| row.get::<_, usize>(0),
+            )
+        })
+        .await
+        .unwrap();
+    assert!(young > 0, "unexpired hints remain visible");
+    clock.advance(11_000);
+    stores.node_wakes().unwrap().liveness().await.unwrap();
+    assert_eq!(count().await.unwrap(), 0);
+}

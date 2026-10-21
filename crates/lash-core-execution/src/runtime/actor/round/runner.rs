@@ -155,6 +155,7 @@ pub struct RoundRunner {
     lifecycle: Lifecycle,
     cancel: CancellationToken,
     bodies: Arc<dyn MemberBodies>,
+    facts: Option<(RunFacts, PinnedWaits)>,
 }
 
 impl RoundRunner {
@@ -196,7 +197,17 @@ impl RoundRunner {
             bodies,
             policies,
             cancel: CancellationToken::new(),
+            facts: None,
         }
+    }
+
+    /// Start from the owner's acknowledged facts and their immutable wait
+    /// bindings. Mutable wait resolutions and cancellation are still read by
+    /// the lifecycle under their own synchronization owner.
+    #[must_use]
+    pub fn with_committed_facts(mut self, facts: RunFacts, waits: PinnedWaits) -> Self {
+        self.facts = Some((facts, waits));
+        self
     }
 
     /// This runner observing `members` as settled here: the commit that
@@ -257,7 +268,13 @@ impl RoundRunner {
 
     async fn drive(mut self, prepare: bool) -> Result<PreparedRoundEnd, RoundError> {
         self.lifecycle.prepare_final(prepare);
-        let (mut rows, mut waits) = load(&self.cx, &self.owner, self.run).await?;
+        let (mut rows, mut waits) = match self.facts.take() {
+            Some((mut facts, waits)) => {
+                facts.read_limits = self.cx.backend().config().settings().graph_reads.owner();
+                (RunRecords::new(facts), waits)
+            }
+            None => load(&self.cx, &self.owner, self.run).await?,
+        };
         let clock = Arc::clone(self.cx.clock());
         let idle_evict = self.cx.backend().config().settings().idle_evict;
         // Since when the round has run nothing and waited only on rows.

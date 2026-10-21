@@ -58,6 +58,24 @@ fn store_error(error: lash_core::StoreError) -> crate::EmbedError {
     crate::EmbedError::Store(error)
 }
 
+/// A terminal handed over by its acknowledged writer, for this exact input
+/// or run. The input ids are the commit's completed ids, never a previously
+/// observed mutable run binding.
+pub(super) fn committed(
+    watch: &lash_durable::runner::KeyWatch,
+    subject: &Subject,
+) -> Option<Resolution> {
+    let subject = match subject {
+        Subject::Input(receipt) => FollowSubject::Input(receipt.input_id.clone()),
+        Subject::Run(run) => FollowSubject::Run(run.clone()),
+    };
+    let (run, outcome) = watch.committed_turn(&subject)?;
+    Some(Resolution::Settled {
+        run,
+        outcome: TurnOutcome::from(outcome),
+    })
+}
+
 /// Resolve `subject` from one keyed snapshot of its facts (FIG-7045).
 ///
 /// The snapshot answers an input's binding, whether its row is open, its

@@ -421,8 +421,17 @@ pub(super) async fn follow(
             if let Some(changes) = &mut changes {
                 lash_core::facade_support::witness_follow_heard(changes.seen());
             }
-            lash_core::facade_support::witness_follow_read(read);
-            match resolve::resolve(&ctx.parts, subject).await? {
+            let resolution = match changes
+                .as_ref()
+                .and_then(|watch| resolve::committed(watch, subject))
+            {
+                Some(committed) => committed,
+                None => {
+                    lash_core::facade_support::witness_follow_read(read);
+                    resolve::resolve(&ctx.parts, subject).await?
+                }
+            };
+            match resolution {
                 Resolution::OperationSettled { run, outcome } => {
                     adoption.adopt(run.clone(), tap).await;
                     drain(ctx, &mut adoption, &mut observation, tap).await;

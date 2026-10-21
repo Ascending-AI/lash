@@ -11,8 +11,9 @@
 //!   row for each owner node with the keys of its actors that took mail, and
 //!   a row for every node, naming none, with the keys of the actors whose
 //!   event logs grew. The
-//!   same transaction deletes the rows older than the configured wake retention: a hint that
-//!   old is worth nothing, since the polls have found its work.
+//!   bounded liveness-maintenance pass deletes expired hints, at most 4,096
+//!   per pass. Producers retain hints without doing expiry work: an old
+//!   hint is disposable because the polls also find its work.
 //! - **Listener.** Each node's listener runs on a thread of its own with a
 //!   read-only connection of its own, and asks it for `PRAGMA data_version`
 //!   every the configured wake poll. The version moves exactly when another connection
@@ -75,11 +76,12 @@ CREATE TABLE IF NOT EXISTS node_wakes (
 const INSERT: &str =
     "INSERT INTO node_wakes (node_id, actors, published_at_ms) VALUES (?1, ?2, ?3)";
 
-/// Delete every hint published before `?1`. Rows are numbered in commit
-/// order, so the scan stops at the first young row.
-const PRUNE: &str = "DELETE FROM node_wakes WHERE seq < COALESCE(
-    (SELECT seq FROM node_wakes WHERE published_at_ms >= ?1 ORDER BY seq LIMIT 1),
-    (SELECT COALESCE(MAX(seq), 0) + 1 FROM node_wakes))";
+/// Inspect and delete at most 4,096 hints per maintenance pass. The default
+/// two-second cadence can retire 2,048 hints/s, above the measured plain
+/// fixture's three hints/send at 146 sends/s. Recheck expiry on each row:
+/// a regressed clock may delay cleanup but cannot expire a young hint.
+const PRUNE: &str = "DELETE FROM node_wakes WHERE seq IN (
+    SELECT seq FROM node_wakes ORDER BY seq LIMIT 4096) AND published_at_ms < ?1";
 
 /// The last hint published so far: where a new listener's cursor starts.
 const TAIL: &str = "SELECT COALESCE(MAX(seq), 0) FROM node_wakes";
@@ -513,17 +515,12 @@ impl NodeWakes for SqliteNodeWakes {
             rung.add(node.as_deref());
         }
         let now = self.store.instant()?;
-        let oldest = now.0.saturating_sub(
-            i64::try_from(self.store.conn.operational.wake_retention.as_millis())
-                .unwrap_or(i64::MAX),
-        );
         self.store
             .conn
             .write(move |tx| {
                 for (node, actors) in &rows {
                     cached_execute(tx, INSERT, rusqlite::params![node, actors, now.0])?;
                 }
-                cached_execute(tx, PRUNE, [oldest])?;
                 Ok(())
             })
             .await
@@ -559,6 +556,20 @@ impl NodeWakes for SqliteNodeWakes {
     }
 
     async fn liveness(&self) -> Result<Vec<BootLiveness>, DurableError> {
+        // The runner's bounded maintenance cadence owns expiry, including
+        // periods with no producer. A failed sweep leaves only hints behind.
+        let oldest = self.store.instant()?.0.saturating_sub(
+            i64::try_from(self.store.conn.operational.wake_retention.as_millis())
+                .unwrap_or(i64::MAX),
+        );
+        self.store
+            .conn
+            .write(move |tx| {
+                cached_execute(tx, PRUNE, [oldest])?;
+                Ok(())
+            })
+            .await
+            .map_err(store_failure)?;
         self.store.liveness(self.locks.clone()).await
     }
 

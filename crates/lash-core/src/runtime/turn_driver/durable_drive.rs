@@ -72,6 +72,7 @@ pub(in crate::runtime) struct RuntimeDrive {
 
 #[derive(Default)]
 struct AfterCommit {
+    follow: Option<model_calls::CommittedFollow>,
     state: Option<crate::plugin::StagedPluginState>,
     finalized: Option<crate::plugin::TurnFinalized>,
     panic: Option<(&'static str, String)>,
@@ -1320,6 +1321,7 @@ impl TurnDrive for RuntimeDrive {
             _ => None,
         };
         self.after_commit = AfterCommit {
+            follow: None,
             panic,
             state: after_turn.map(|after_turn| after_turn.state),
             finalized: observed.then(|| crate::plugin::TurnFinalized {
@@ -1340,6 +1342,12 @@ impl TurnDrive for RuntimeDrive {
         if !settlement.completed_inputs.is_empty() {
             commit.ingress = Some(settlement);
         }
+        self.after_commit.follow = Some(model_calls::CommittedFollow::new(
+            cx,
+            &driver.turn_id,
+            commit.ingress.as_ref(),
+            crate::store::RunCommittedOutcome::of_turn_outcome(&outcome, done.finish_value_schema),
+        ));
         // The turn's activity reaches the live stream before its commit is
         // durable: a follower that reads the run ended from the store finds
         // everything the run published already there, and waits for no
@@ -1363,6 +1371,9 @@ impl TurnDrive for RuntimeDrive {
     /// commit itself, which settles the turn's provisional activity; then
     /// the lifecycle observers see the finalized turn.
     async fn committed(&mut self) {
+        if let Some(follow) = self.after_commit.follow.take() {
+            follow.publish();
+        }
         self.driver
             .publish_retained_model_calls(&self.observer)
             .await;
@@ -1373,6 +1384,7 @@ impl TurnDrive for RuntimeDrive {
             RuntimeTurnPhase::PostCommitDelivery,
         );
         let AfterCommit {
+            follow: _,
             state,
             finalized,
             panic,

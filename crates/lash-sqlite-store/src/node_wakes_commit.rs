@@ -13,13 +13,12 @@ use rusqlite::Connection;
 use rusqlite::functions::FunctionFlags;
 
 use super::doorbell::{Doorbell, Rung};
-use super::{INSERT, PRUNE, SqliteDurableStore, rows};
+use super::{INSERT, SqliteDurableStore, rows};
 use crate::conn::cached_execute;
 
 pub(crate) struct NodeWakeWriter {
     clock: Arc<dyn Clock>,
     sink: lash_durable::runner::WakeSink,
-    retention: std::time::Duration,
     captured: Capture,
     /// Rings the listeners the batch's rows name once it commits.
     doorbell: Doorbell,
@@ -42,7 +41,6 @@ impl NodeWakeWriter {
         Self {
             clock: Arc::clone(&store.clock),
             sink: store.conn.wakes().clone(),
-            retention: store.conn.operational.wake_retention,
             captured: Capture::default(),
             doorbell,
             rung: std::sync::Mutex::default(),
@@ -107,9 +105,6 @@ impl NodeWakeWriter {
             cached_execute(tx, INSERT, rusqlite::params![node, payload, now])?;
             self.rung().add(node.as_deref());
         }
-        let oldest =
-            now.saturating_sub(i64::try_from(self.retention.as_millis()).unwrap_or(i64::MAX));
-        cached_execute(tx, PRUNE, [oldest])?;
         Ok(())
     }
 }

@@ -160,7 +160,8 @@ pub(super) struct StagedReceipt {
 }
 
 impl StagedReceipt {
-    /// Whether the receipt may commit with the turn's commit instead of as
+    /// Whether the receipt may commit with the next native admission or
+    /// the turn's commit instead of as
     /// `model.answer` (FIG-6955): its derivation invokes no callback and no
     /// checkpoint or after-turn callback runs before the turn's commit, so
     /// nothing but the turn's own machine derives from it before that
@@ -436,13 +437,14 @@ async fn phase_loop(
         };
         // Only the receipt's emissions, its progress boundary (the commit
         // draft's, in memory), a checkpoint no callback runs at (it commits
-        // nothing; what it delivers binds in the next commit) and the turn's
-        // commit come between a held receipt and its commit: before any
-        // other effect it commits on its own, as `model.answer`, and the
+        // nothing; what it delivers binds in the next commit), a native
+        // round's admission and the turn's commit can consume a held receipt.
+        // Before any other effect it commits on its own, as `model.answer`, and the
         // effect then reads its cancel as after any `model.answer`.
         if !matches!(
             &effect,
             Effect::Done { .. }
+                | Effect::ToolCalls { .. }
                 | Effect::Emit(_)
                 | Effect::Log { .. }
                 | Effect::Progress { .. }
@@ -724,8 +726,8 @@ async fn phase_loop(
                     // a re-sent call retracts it (FIG-6969). It commits on
                     // its own, as `model.answer`, before any effect but its
                     // emissions, its progress boundary, a callback-free
-                    // checkpoint and the turn's commit (a tool round, a
-                    // cell or the next call), and whenever the turn leaves
+                    // checkpoint, a native round's admission and the turn's
+                    // commit (a cell or the next call), and whenever the turn leaves
                     // its phases without that commit carrying it
                     // ([`leave`]).
                     let receipt = stage_receipt(drive.as_mut())?;
@@ -933,6 +935,7 @@ async fn phase_loop(
                     answered_cell: &mut answered_cell,
                     present: &mut carry,
                     unsettled: &mut unsettled,
+                    receipt: held,
                 };
                 match Box::pin(tool_round::run(cx, drive.as_mut(), row, id, calls, done)).await? {
                     RoundExit::Answered { present, outcome } => {

@@ -156,3 +156,152 @@ async fn an_answer_in_a_turn_with_an_after_turn_callback_commits_its_receipt_on_
     assert_eq!(answered(&deployment.transcript().await), ANSWERS[0]);
     deployment.end();
 }
+
+/// NATIVE-RECEIPT-BOUNDARY (FIG-7083): a callback-free native round
+/// commits its paid answer with its admission, before any tool body runs.
+/// A failed admission preserves the answer on its own; a lost admission
+/// acknowledgement cannot buy the answer or execute its Once tool again.
+async fn a_native_answer_cut_at_its_admission(fault: Option<Fault>) {
+    let deployment = Deployment::new(Setup::new(Answer::Tool, Hooks::StreamOnly), |script| {
+        if let Some(fault) = fault {
+            script.cut_on("a", CommitLabel::MODEL_DONE, 1, fault);
+        }
+    })
+    .await;
+    let handle = deployment.send().await;
+    if matches!(fault, Some(Fault::Zombie)) {
+        deployment
+            .until("A pauses before its round admission", |d| {
+                d.nodes.paused().contains(&"a".to_owned())
+            })
+            .await;
+        deployment.nodes.start("b");
+    } else if fault.is_some_and(Fault::kills) {
+        deployment
+            .until("A dies at its round admission", |d| {
+                d.cut(CommitLabel::MODEL_DONE)
+            })
+            .await;
+        deployment.take_over().await;
+    }
+    deployment.settle().await;
+    handle.output().await.expect("the native turn settles");
+    let trace = deployment.nodes.script().rendered_trace();
+    assert_eq!(
+        deployment.committed(CommitLabel::MODEL_ANSWER),
+        usize::from(fault == Some(Fault::FailBefore)),
+        "the answer needs no separate commit before native admission: {trace}"
+    );
+    assert_eq!(deployment.committed(CommitLabel::MODEL_DONE), 1, "{trace}");
+    assert_eq!(
+        deployment.world.sends(),
+        if matches!(fault, Some(Fault::Abort | Fault::Zombie)) {
+            2
+        } else {
+            1
+        },
+        "only an uncommitted answer can be purchased again: {trace}"
+    );
+    assert!(
+        deployment.world.writes().len() <= 1,
+        "Once body repeated: {trace}"
+    );
+    let (_, rows) = retained_model_rows(&deployment.durable).await;
+    assert_eq!(
+        rows.len(),
+        2,
+        "one retained record per logical call: {trace}"
+    );
+    let usage = rows
+        .into_iter()
+        .map(|row| serde_json::from_value::<lash::turn::ModelCallRecord>(row).unwrap())
+        .try_fold(LlmUsage::default(), |sum, call| {
+            sum.checked_add(&call.usage()?)
+        })
+        .unwrap();
+    assert_eq!(
+        usage,
+        deployment.usage().await,
+        "the sealed calls account for the committed usage: {trace}"
+    );
+    deployment.end();
+}
+
+#[tokio::test]
+async fn a_native_answer_needs_no_commit_between_receipt_and_admission() {
+    a_native_answer_cut_at_its_admission(None).await;
+}
+
+#[tokio::test]
+async fn a_native_answer_recovers_at_every_cut_of_its_admission() {
+    for fault in [
+        Fault::FailBefore,
+        Fault::AckHidden,
+        Fault::CommitThenAbort,
+        Fault::Abort,
+        Fault::Zombie,
+    ] {
+        a_native_answer_cut_at_its_admission(Some(fault)).await;
+    }
+}
+
+/// COMMITTED-FOLLOW (FIG-7083): only acknowledged settlement publishes a
+/// subject's answer; another input must never inherit a known run's outcome.
+#[tokio::test]
+async fn an_observer_receives_only_its_inputs_acknowledged_terminal() {
+    let deployment = Deployment::new(Setup::new(Answer::Text, Hooks::StreamOnly), |script| {
+        script.cut_on(
+            "a",
+            CommitLabel::TURN_COMMIT,
+            1,
+            Fault::DelayedAck(std::time::Duration::from_secs(1)),
+        );
+    })
+    .await;
+    let sink = deployment.backend.stores().wake_sink();
+    let watch = sink.observe(actor(), None).await;
+    assert!(
+        watch
+            .committed_turn(&lash_core::store::FollowSubject::Input(
+                lash_core::InputId::from("unrelated-input")
+            ))
+            .is_none()
+    );
+    let handle = deployment.send().await;
+    let subject = lash_core::store::FollowSubject::Input(handle.input_id().clone());
+    deployment
+        .until(
+            "the terminal is durable but its acknowledgement is held",
+            |d| d.committed(CommitLabel::TURN_COMMIT) == 1,
+        )
+        .await;
+    assert!(
+        watch.committed_turn(&subject).is_none(),
+        "a durable write without its acknowledgement publishes no facts"
+    );
+    deployment
+        .until("the writer hands over its acknowledged terminal", |_| {
+            watch.committed_turn(&subject).is_some()
+        })
+        .await;
+    assert!(
+        watch
+            .committed_turn(&lash_core::store::FollowSubject::Input(
+                lash_core::InputId::from("unrelated-input")
+            ))
+            .is_none()
+    );
+    let (run, _) = watch
+        .committed_turn(&subject)
+        .expect("the commit handed over its run");
+    assert!(
+        watch
+            .committed_turn(&lash_core::store::FollowSubject::Run(run))
+            .is_some()
+    );
+    handle
+        .output()
+        .await
+        .expect("the subject observes its answer");
+    deployment.end();
+}

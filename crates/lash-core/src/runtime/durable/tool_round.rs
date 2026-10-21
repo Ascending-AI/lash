@@ -120,6 +120,9 @@ pub(super) struct ModelDone<'a> {
     /// `model.done` that admits the round settles it, and clears this
     /// (FIG-5946).
     pub(super) unsettled: &'a mut bool,
+    /// A callback-free receipt consumed by this admission. Kept until the
+    /// commit acknowledges it, so a failed admission records it on exit.
+    pub(super) receipt: &'a mut Option<super::phases::StagedReceipt>,
 }
 
 /// Run the tool round of effect `id` over `calls` to its members' outcomes,
@@ -143,6 +146,7 @@ pub(super) async fn run(
         answered_cell,
         present,
         unsettled,
+        receipt,
     } = done;
     let session = row.session.clone();
     let owner = OwnerKey::Turn(session.clone(), row.run.clone());
@@ -161,7 +165,13 @@ pub(super) async fn run(
         });
     }
     let reads = cx.durable_reads()?;
-    let rows = reads.run_facts_of(&owner, run).await?;
+    // Only a restore at this round can have admitted it. New rounds get
+    // their facts from the admission's acknowledged postimage below.
+    let rows = if matches!(row.phase, UnfinishedPhase::Tools { run: held, .. } if held == run) {
+        reads.run_facts_of(&owner, run).await?
+    } else {
+        lash_durable::domain::RunFacts::default()
+    };
     let waits = round::PinnedWaits::read(reads, &rows).await?;
     let folded = round::fold(&rows, &policies, &waits).map_err(exec)?;
     // Each member's attempt reads the turn's accepted stop before its answer
@@ -195,6 +205,7 @@ pub(super) async fn run(
                 return Err(TurnError::Runtime(drift));
             }
             RoundRunner::resumed(cx, owner.clone(), run, policies, bodies)
+                .with_committed_facts(rows, waits)
         }
         None => {
             // A call whose recorded entry's tool is missing on this node
@@ -263,6 +274,9 @@ pub(super) async fn run(
                     .map_err(exec)?;
                 }
             }
+            let facts =
+                lash_durable::domain::RunFacts::appended(tx.domain(), tx.graph(), tx.epoch())
+                    .of_run(run);
             super::session_publication::commit(
                 cx,
                 drive.code_executor().as_ref(),
@@ -272,7 +286,11 @@ pub(super) async fn run(
                 None,
             )
             .await?;
+            // The checkpoint consumed the response and its sealed call
+            // record. No raw receipt root survives the model phase.
+            receipt.take();
             *unsettled = false;
+            let waits = round::PinnedWaits::read(reads, &facts).await?;
             stored.committed(&mut *drive);
             drive.run_changes_committed(&written);
             drive.phase_committed().await;
@@ -282,9 +300,11 @@ pub(super) async fn run(
                 // outcomes: their spans close on this owner.
                 RoundRunner::resumed(cx, owner.clone(), run, policies, bodies)
                     .settled_here(admitted.members())
+                    .with_committed_facts(facts, waits)
             } else {
                 RoundRunner::admitted(cx, &admitted, policies, bodies)
                     .ok_or_else(|| exec("an admitted round has no members"))?
+                    .with_committed_facts(facts, waits)
             }
         }
     };

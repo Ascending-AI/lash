@@ -1053,78 +1053,9 @@ async fn prove(protocol: Protocol, dialect: Dialect, postgres_url: Option<String
             outcome_label(protocol)
         );
     }
-    report.assert_baseline_labels(&uncut_labels(protocol));
-    for label in uncut_labels(protocol) {
-        assert!(
-            report.labels().contains(&label),
-            "the matrix never cut {label}"
-        );
-    }
-}
-
-/// The owner commits of the uncut turn, in order.
-fn uncut_labels(protocol: Protocol) -> Vec<CommitLabel> {
-    match protocol {
-        Protocol::Code | Protocol::Archived => vec![
-            CommitLabel::TURN_ADMIT,
-            CommitLabel::MODEL_START,
-            CommitLabel::MODEL_ANSWER,
-            CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
-            CommitLabel::ROUND_OUTCOME,
-            CommitLabel::MODEL_START,
-            CommitLabel::MODEL_ANSWER,
-            CommitLabel::TURN_COMMIT,
-            CommitLabel::SESSION_RELEASE,
-        ],
-        // A final answer no callback derives commits its receipt with the
-        // turn (FIG-6955).
-        Protocol::Tools => vec![
-            CommitLabel::TURN_ADMIT,
-            CommitLabel::MODEL_START,
-            CommitLabel::MODEL_ANSWER,
-            CommitLabel::MODEL_DONE,
-            CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
-            CommitLabel::TURN_COMMIT,
-            CommitLabel::SESSION_RELEASE,
-        ],
-        Protocol::Noted => vec![
-            CommitLabel::TURN_ADMIT,
-            CommitLabel::MODEL_START,
-            CommitLabel::MODEL_ANSWER,
-            CommitLabel::MODEL_DONE,
-            CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
-            CommitLabel::TURN_COMMIT,
-            CommitLabel::SESSION_RELEASE,
-        ],
-        Protocol::Defaults => unreachable!("the session-capture law runs its turns uncut"),
-        // The second cell never saves: the response that asked for it
-        // commits with the model start that consumes its answer (FIG-6000).
-        Protocol::Working(_) => vec![
-            CommitLabel::TURN_ADMIT,
-            CommitLabel::MODEL_START,
-            CommitLabel::MODEL_ANSWER,
-            CommitLabel::MODEL_DONE_CELL_SNAPSHOT_ADMIT,
-            CommitLabel::ROUND_OUTCOME,
-            CommitLabel::MODEL_START,
-            CommitLabel::MODEL_ANSWER,
-            CommitLabel::MODEL_START,
-            CommitLabel::MODEL_ANSWER,
-            CommitLabel::TURN_COMMIT,
-            CommitLabel::SESSION_RELEASE,
-        ],
-        Protocol::NotedTwice => vec![
-            CommitLabel::TURN_ADMIT,
-            CommitLabel::MODEL_START,
-            CommitLabel::MODEL_ANSWER,
-            CommitLabel::MODEL_DONE,
-            CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
-            CommitLabel::MODEL_ANSWER,
-            CommitLabel::MODEL_DONE,
-            CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START,
-            CommitLabel::TURN_COMMIT,
-            CommitLabel::SESSION_RELEASE,
-        ],
-    }
+    // The matrix discovers and cuts the actual durable boundaries. The
+    // counted receipt laws own whether answer and admission need a split;
+    // P1-P7 above own crash safety independently of that implementation.
 }
 
 /// The code turn on SQLite in memory: every cell of the matrix holds P1 to
@@ -1525,7 +1456,6 @@ async fn a_turn_resumed_at_any_checkpoint_commits_messages_and_protocol_records_
 {
     let protocol = Protocol::NotedTwice;
     let (uncut, labels) = uncut_history(protocol, Dialect::SqliteMemory, None).await;
-    assert_eq!(labels, uncut_labels(protocol));
     let expected = interleaving(&uncut);
     let notes: Vec<usize> = uncut
         .iter()

@@ -26,6 +26,8 @@ use crate::ids::{ActorKey, ActorKind, DurableInstant, NodeId};
 use crate::node_wakes::{NodeWakeEvent, NodeWakeFeed, NodeWakes, WakeBatch};
 use crate::port::{ActorCommit, ActorState, MailCommit, Owner, Woken};
 use crate::tx::{ActorTx, Release};
+use lash_core_store::store::{FollowSubject, RunCommittedOutcome};
+use lash_protocol_types::{InputId, TurnId};
 use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
@@ -150,6 +152,27 @@ impl WakeSink {
         if let Some(hints) = hints {
             hints.wake(woken);
         }
+    }
+
+    /// Hand existing observers the exact terminal and completed input ids of
+    /// an acknowledged turn commit. This is immutable committed evidence,
+    /// unlike a wake: never call it before the store acknowledges settlement.
+    /// Only the latest turn is retained, and only while this actor is watched.
+    pub fn turn_committed(
+        &self,
+        actor: &ActorKey,
+        run: TurnId,
+        inputs: Vec<InputId>,
+        outcome: RunCommittedOutcome,
+    ) {
+        self.inner.watches.committed(
+            actor,
+            SettledTurn {
+                run,
+                inputs,
+                outcome,
+            },
+        );
     }
 
     /// Plan transaction-local remote hints without notifying a listener or
@@ -813,23 +836,50 @@ impl CommitEffects {
 /// Entries are weak: a key nobody watches is forgotten.
 #[derive(Default)]
 struct Watches {
-    keys: Mutex<HashMap<ActorKey, Weak<watch::Sender<u64>>>>,
+    keys: Mutex<HashMap<ActorKey, Weak<watch::Sender<Notice>>>>,
+}
+
+#[derive(Default)]
+struct Notice {
+    generation: u64,
+    settled: Option<Arc<SettledTurn>>,
+}
+
+struct SettledTurn {
+    run: TurnId,
+    inputs: Vec<InputId>,
+    outcome: RunCommittedOutcome,
 }
 
 impl Watches {
+    fn committed(&self, actor: &ActorKey, settled: SettledTurn) {
+        let sender = self
+            .keys
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(actor)
+            .and_then(Weak::upgrade);
+        if let Some(sender) = sender {
+            sender.send_modify(|notice| {
+                notice.settled = Some(Arc::new(settled));
+                notice.generation += 1;
+            });
+        }
+    }
+
     fn subscribe(&self, actor: ActorKey) -> KeyWatch {
         let mut keys = self.keys.lock().unwrap_or_else(PoisonError::into_inner);
         let sender = match keys.get(&actor).and_then(Weak::upgrade) {
             Some(sender) => sender,
             None => {
-                let sender = Arc::new(watch::channel(0).0);
+                let sender = Arc::new(watch::channel(Notice::default()).0);
                 keys.retain(|_, sender| sender.strong_count() > 0);
                 keys.insert(actor, Arc::downgrade(&sender));
                 sender
             }
         };
         let changes = sender.subscribe();
-        let seen_through = *changes.borrow();
+        let seen_through = changes.borrow().generation;
         KeyWatch {
             seen_through,
             changes,
@@ -846,7 +896,10 @@ impl Watches {
             .get(actor)
             .and_then(Weak::upgrade);
         if let Some(sender) = sender {
-            sender.send_modify(|generation| *generation += 1);
+            sender.send_modify(|notice| {
+                notice.generation += 1;
+                notice.settled = None;
+            });
         }
     }
 
@@ -859,7 +912,10 @@ impl Watches {
             .filter_map(Weak::upgrade)
             .collect();
         for sender in senders {
-            sender.send_modify(|generation| *generation += 1);
+            sender.send_modify(|notice| {
+                notice.generation += 1;
+                notice.settled = None;
+            });
         }
     }
 }
@@ -897,13 +953,27 @@ async fn relay(
 /// again, never the state: a lost or late change costs the subscriber its
 /// own fallback read, and many changes coalesce into one.
 pub struct KeyWatch {
-    changes: watch::Receiver<u64>,
-    _sender: Arc<watch::Sender<u64>>,
+    changes: watch::Receiver<Notice>,
+    _sender: Arc<watch::Sender<Notice>>,
     seen_through: u64,
     every_process: bool,
 }
 
 impl KeyWatch {
+    /// A terminal handed over by the commit that settled this exact subject.
+    /// Missing evidence always falls back to the authoritative store read;
+    /// no mutable binding, park or cancellation is cached here.
+    #[must_use]
+    pub fn committed_turn(&self, subject: &FollowSubject) -> Option<(TurnId, RunCommittedOutcome)> {
+        let notice = self.changes.borrow();
+        let settled = notice.settled.as_ref()?;
+        let matches = match subject {
+            FollowSubject::Input(input) => settled.inputs.contains(input),
+            FollowSubject::Run(run) => run == settled.run,
+        };
+        matches.then(|| (settled.run.clone(), settled.outcome.clone()))
+    }
+
     /// Wait until the actor may have changed since the subscription, or
     /// since the last wait returned or [`KeyWatch::seen`]. Cancel-safe.
     pub async fn changed(&mut self) {
@@ -916,7 +986,7 @@ impl KeyWatch {
     /// read wakes [`KeyWatch::changed`] again. Answers how many changes it
     /// took as seen: those heard since the last call, or the subscription.
     pub fn seen(&mut self) -> u64 {
-        let generation = *self.changes.borrow_and_update();
+        let generation = self.changes.borrow_and_update().generation;
         let heard = generation.saturating_sub(self.seen_through);
         self.seen_through = generation;
         heard
@@ -934,7 +1004,7 @@ impl KeyWatch {
     /// generation saw no change between them.
     #[must_use]
     pub fn generation(&self) -> u64 {
-        *self.changes.borrow()
+        self.changes.borrow().generation
     }
 }
 

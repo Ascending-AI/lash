@@ -404,25 +404,6 @@ fn zombie_laws(cut: &Cut, trace: &[lash_durable_test::Write]) -> Vec<String> {
     violations
 }
 
-/// The owner commits of the uncut run, in order: the switching turn admits,
-/// runs its tool round and commits the switch with its follow-on; the
-/// follow-on admits, answers and commits, its answer's receipt with its
-/// turn (FIG-6955); the actor releases.
-fn uncut_labels() -> Vec<CommitLabel> {
-    vec![
-        CommitLabel::TURN_ADMIT,
-        CommitLabel::MODEL_START,
-        CommitLabel::MODEL_ANSWER,
-        CommitLabel::MODEL_DONE,
-        CommitLabel::ROUND_OUTCOME,
-        CommitLabel::TURN_COMMIT,
-        CommitLabel::TURN_ADMIT,
-        CommitLabel::MODEL_START,
-        CommitLabel::TURN_COMMIT,
-        CommitLabel::SESSION_RELEASE,
-    ]
-}
-
 async fn prove(dialect: Dialect, postgres_url: Option<String>) {
     let report = Matrix::new()
         .faults(&[
@@ -443,13 +424,6 @@ async fn prove(dialect: Dialect, postgres_url: Option<String>) {
         labels.join(", ")
     );
     report.assert_held();
-    report.assert_baseline_labels(&uncut_labels());
-    for label in uncut_labels() {
-        assert!(
-            report.labels().contains(&label),
-            "the matrix never cut {label}"
-        );
-    }
 }
 
 /// On SQLite in memory: a frame switch killed at every label gives exactly

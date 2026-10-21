@@ -151,3 +151,39 @@ pub(super) async fn project_usage(
     }
     Ok(())
 }
+
+/// The host observer's immutable terminal facts, derived from exactly the
+/// settlement the turn's commit carries. Dropped on any unacknowledged commit.
+pub(super) struct CommittedFollow {
+    sink: lash_durable::runner::WakeSink,
+    actor: lash_durable::ActorKey,
+    run: crate::TurnId,
+    inputs: Vec<crate::InputId>,
+    outcome: crate::store::RunCommittedOutcome,
+}
+
+impl CommittedFollow {
+    pub(super) fn new(
+        cx: &ActorContext,
+        run: &crate::TurnId,
+        ingress: Option<&crate::store::IngressSettlement>,
+        outcome: crate::store::RunCommittedOutcome,
+    ) -> Self {
+        Self {
+            sink: cx.backend().stores().wake_sink(),
+            actor: cx.actor().clone(),
+            run: run.clone(),
+            inputs: ingress
+                .into_iter()
+                .flat_map(|ingress| &ingress.completed_inputs)
+                .flat_map(|input| input.input_ids.iter().cloned())
+                .collect(),
+            outcome,
+        }
+    }
+
+    pub(super) fn publish(self) {
+        self.sink
+            .turn_committed(&self.actor, self.run, self.inputs, self.outcome);
+    }
+}
