@@ -12,7 +12,9 @@ use lash_core_store::checkpoint_graph::{
 };
 use lash_protocol_types::{SessionId, TurnId};
 
+use crate::domain::RootOwner;
 use crate::domain::namespace_value::NamespaceValue;
+use crate::domain::pages::{LeaseFence, RootLeaseId, RootLeaseRequest};
 use crate::domain::{
     DomainWrite, MailDomainWrite, RunValuesWrite, StoredNamespaceWrite, StoredValues,
     TurnCancelRequest, TurnNamespaceWrite, TurnWrite,
@@ -89,6 +91,8 @@ pub struct ActorTx {
     opened_at: DurableInstant,
     turn_cancel: Option<TurnCancelRequest>,
     domain: Vec<DomainWrite>,
+    root_leases: Vec<RootLeaseRequest>,
+    release_root_leases: BTreeSet<RootLeaseId>,
     ack: Option<MailSeq>,
     release: Option<Release>,
     formats: Option<FormatSet>,
@@ -138,6 +142,8 @@ impl ActorTx {
             opened_at: read.at,
             turn_cancel: read.turn_cancel,
             domain: Vec::new(),
+            root_leases: Vec::new(),
+            release_root_leases: BTreeSet::new(),
             ack: None,
             release: None,
             formats: None,
@@ -213,6 +219,39 @@ impl ActorTx {
             })
         };
         immediate(fenced) && !immediate(self.turn_cancel())
+    }
+
+    /// Lease the exact root after this transaction's domain writes, under
+    /// this actor's fence. The receipt transfers the lease to its reader;
+    /// an unacknowledged lease expires through the retirement reaper.
+    pub fn lease_root(&mut self, owner: RootOwner, root: NodeId, ttl_millis: i64) {
+        self.root_leases.push(RootLeaseRequest {
+            owner,
+            expected: root,
+            fence: LeaseFence::Actor {
+                actor: self.actor.clone(),
+                epoch: self.epoch,
+            },
+            ttl_millis,
+        });
+    }
+
+    /// Leases acquired by the commit, in request order.
+    #[must_use]
+    pub fn root_leases(&self) -> &[RootLeaseRequest] {
+        &self.root_leases
+    }
+
+    /// Transfer cleanup of an ended reader to this commit. The caller
+    /// retains its obligation until acknowledgement; a refusal releases
+    /// nothing. The commit also keeps retirement holds for released roots.
+    pub fn release_root_lease(&mut self, lease: RootLeaseId) {
+        self.release_root_leases.insert(lease);
+    }
+
+    #[must_use]
+    pub fn released_root_leases(&self) -> &BTreeSet<RootLeaseId> {
+        &self.release_root_leases
     }
 
     /// The domain rows this transaction writes, in order.
@@ -369,6 +408,8 @@ impl ActorTx {
     #[must_use]
     pub fn advances(&self) -> bool {
         !self.domain.is_empty()
+            || !self.root_leases.is_empty()
+            || !self.release_root_leases.is_empty()
             || !self.graph.is_empty()
             || self.ack.is_some()
             || self.formats.is_some()

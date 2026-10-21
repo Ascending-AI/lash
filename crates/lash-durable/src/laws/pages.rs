@@ -61,6 +61,7 @@ pub use races::{PageLockProbe, publications_and_retirement_on_two_nodes_never_de
 pub use reads::{
     a_candidate_check_fetches_only_the_bytes_it_compares,
     a_page_read_is_one_statement_that_answers_its_lease_first,
+    checkpoint_lease_handoffs_are_atomic,
 };
 
 /// One dialect's page store and the raw access the laws need.

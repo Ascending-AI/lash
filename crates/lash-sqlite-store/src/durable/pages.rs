@@ -516,6 +516,49 @@ impl SqliteDurableStore {
     }
 }
 
+/// The owner's fence is already held by the enclosing transaction.
+pub(super) fn acquire_in(
+    tx: &Connection,
+    request: RootLeaseRequest,
+    now: DurableInstant,
+) -> Answer<RootLease> {
+    if request.ttl_millis <= 0 {
+        return Ok(Err(DurableError::Graph(GraphRefusal::LeaseLost)));
+    }
+    match graph::root_of(tx, &request.owner)? {
+        Ok(Some(root)) if root == request.expected => {}
+        Ok(Some(_)) => return Ok(Err(DurableError::Graph(GraphRefusal::RevisionConflict))),
+        Ok(None) => return Ok(Err(DurableError::Graph(GraphRefusal::RootRetired))),
+        Err(refusal) => return Ok(Err(DurableError::Graph(refusal))),
+    }
+    let id: i64 = tx.prepare_cached(SQL.pages.lease_insert.sql())?.query_row(
+        rusqlite::params![
+            owner_bytes(&request.owner),
+            request.expected.0.as_slice(),
+            fence_actor(&request.fence),
+            fence_epoch(&request.fence),
+            request.ttl_millis,
+            now.0
+        ],
+        |row| row.get(0),
+    )?;
+    Ok(Ok(RootLease {
+        id: RootLeaseId(id.cast_unsigned()),
+        owner: request.owner,
+        root: request.expected,
+        fence: request.fence,
+        expires_at: DurableInstant(now.0 + request.ttl_millis),
+    }))
+}
+
+pub(super) fn release_in(tx: &Connection, lease: RootLeaseId) -> rusqlite::Result<Option<String>> {
+    tx.prepare_cached(SQL.pages.lease_release.sql())?
+        .query_row([lease.0.cast_signed()], |row| {
+            crate::codec::hash_column(row, 0)
+        })
+        .optional()
+}
+
 #[async_trait::async_trait]
 impl PageStore for SqliteDurableStore {
     async fn acquire_root_lease(
@@ -529,30 +572,10 @@ impl PageStore for SqliteDurableStore {
             if let Some(refusal) = fenced(tx, &request.fence)? {
                 return refuse(refusal);
             }
-            match graph::root_of(tx, &request.owner)? {
-                Ok(Some(root)) if root == request.expected => {}
-                Ok(Some(_)) => return refuse(DurableError::Graph(GraphRefusal::RevisionConflict)),
-                Ok(None) => return refuse(DurableError::Graph(GraphRefusal::RootRetired)),
-                Err(refusal) => return refuse(DurableError::Graph(refusal)),
+            match acquire_in(tx, request, now)? {
+                Ok(lease) => commit(lease),
+                Err(error) => refuse(error),
             }
-            let id: i64 = tx.prepare_cached(SQL.pages.lease_insert.sql())?.query_row(
-                rusqlite::params![
-                    owner_bytes(&request.owner),
-                    request.expected.0.as_slice(),
-                    fence_actor(&request.fence),
-                    fence_epoch(&request.fence),
-                    request.ttl_millis,
-                    now.0
-                ],
-                |row| row.get(0),
-            )?;
-            commit(RootLease {
-                id: RootLeaseId(id.cast_unsigned()),
-                owner: request.owner,
-                root: request.expected,
-                fence: request.fence,
-                expires_at: DurableInstant(now.0 + request.ttl_millis),
-            })
         })
         .await
     }
@@ -588,14 +611,7 @@ impl PageStore for SqliteDurableStore {
 
     async fn release_root_lease(&self, lease: RootLeaseId) -> Result<(), DurableError> {
         self.write(PAGES_LEASE, move |tx, now| {
-            let root = tx
-                .prepare_cached(SQL.pages.lease_release.sql())?
-                .query_row([lease.0.cast_signed()], |row| {
-                    crate::codec::hash_column(row, 0)
-                })
-                .optional()?;
-            // What only the lease kept is peeled by a later step.
-            if let Some(root) = root {
+            if let Some(root) = release_in(tx, lease)? {
                 hold(tx, &BTreeSet::from([root]), true, now)?;
             }
             commit(())

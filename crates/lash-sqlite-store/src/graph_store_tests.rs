@@ -1177,3 +1177,5 @@ fn unpin(key: &str, expected: NodeId) -> lash_durable::DomainWrite {
         },
     )
 }
+
+page_law!(checkpoint_lease_handoffs_are_atomic);

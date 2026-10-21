@@ -910,11 +910,22 @@ impl DurableSnapshotStore {
             commit,
         )
         .map_err(refused)?;
-        let mut manifest = pages
-            .lock()
-            .await
-            .candidate(candidate, expected.map(|held| held.root), root, commit)
-            .map_err(refused)?;
+        let mut manifest = {
+            let mut page_owner = pages.lock().await;
+            // Every root a live activation publishes stays leased until
+            // its worker and carry end (FIG-6629), starting atomically
+            // with publication under the existing owner fence.
+            if status == ExecStatus::Parked {
+                tx.lease_root(
+                    RootOwner::Exec(self.exec.clone()),
+                    root,
+                    page_owner.lease_ttl_millis(),
+                );
+            }
+            page_owner
+                .candidate(candidate, expected.map(|held| held.root), root, commit)
+                .map_err(refused)?
+        };
         // The run's own closure is staged with its park below.
         super::closure::stage_named(
             manifest.as_mut(),
@@ -998,13 +1009,21 @@ impl DurableSnapshotStore {
             .latest
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        let mut page_owner = pages.lock().await;
         match self
             .cx
             .commit_candidate_owing(tx, candidate, label, Some(owing))
             .await
         {
-            Ok(committed) => {
-                pages.lock().await.settle(published.1).map_err(refused)?;
+            Ok(mut committed) => {
+                for lease in std::mem::take(&mut committed.root_leases) {
+                    if page_owner.lease().is_some() {
+                        page_owner.protect_published(lease);
+                    } else {
+                        page_owner.lease_on(lease);
+                    }
+                }
+                page_owner.settle(published.1).map_err(refused)?;
                 Ok(committed)
             }
             Err(error) => {
@@ -1017,7 +1036,7 @@ impl DurableSnapshotStore {
                         .candidate_state(&self.exec)
                         .await
                         .map_err(refused)?;
-                    let resolved = pages.lock().await.resolve(row).map_err(refused)?;
+                    let resolved = page_owner.resolve(row).map_err(refused)?;
                     let committed = matches!(resolved, Resolution::Committed);
                     return Err(refused(format!(
                         "the publication's acknowledgement was lost; the row {} it",

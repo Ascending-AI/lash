@@ -353,6 +353,15 @@ pub(super) async fn apply_owner(
     for domain in write.domain() {
         apply_domain(tx, &committing, domain).await?;
     }
+    let mut root_leases = Vec::new();
+    for request in write.root_leases() {
+        root_leases.push(pages::acquire_in(tx, request.clone(), now).await?);
+    }
+    for lease in write.released_root_leases() {
+        if let Some(root) = pages::release_in(tx, *lease).await? {
+            committing.retired.stored(root);
+        }
+    }
     pages::hold_retired(tx, committing.retired, now)
         .await
         .map_err(sqlx_failure)?;
@@ -454,6 +463,7 @@ pub(super) async fn apply_owner(
         }
     };
     Ok(ActorCommit {
+        root_leases,
         revision: fence.revision,
         state,
         turn_cancel: fence.turn_cancel,

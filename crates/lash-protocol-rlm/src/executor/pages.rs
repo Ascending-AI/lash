@@ -13,7 +13,7 @@
 //! the lease, so a read needs only the pages it reads, never a cache that
 //! holds them all at once (FIG-6419).
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -56,9 +56,14 @@ pub(crate) struct SessionPageAccess {
     fetches: u64,
 }
 
+/// One held activation's identity, assigned when its cleanup is claimed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct HeldRunId(u64);
+
 /// An ended run's activation the session holds, with the store its lease
 /// is ended in.
 pub(crate) struct HeldRun {
+    id: HeldRunId,
     pages: lash_vm_broker::kernel::pages::SharedPages,
     store: Arc<dyn lash_durable::domain::pages::PageStore>,
 }
@@ -68,7 +73,11 @@ impl HeldRun {
         pages: lash_vm_broker::kernel::pages::SharedPages,
         store: Arc<dyn lash_durable::domain::pages::PageStore>,
     ) -> Self {
-        Self { pages, store }
+        Self {
+            id: HeldRunId(next_stage_lease().0),
+            pages,
+            store,
+        }
     }
 
     /// Ends the run's activation and its lease.
@@ -149,17 +158,57 @@ impl SessionPageAccess {
         self.runs.push_back(run);
     }
 
-    /// How many ended runs the session holds.
-    pub(crate) fn held(&self) -> usize {
-        self.runs.len()
+    /// The ended activations included in a capture. Acknowledgement uses
+    /// these same identities even if another activation was held meanwhile.
+    pub(crate) fn held(&self) -> BTreeSet<HeldRunId> {
+        self.runs.iter().map(|run| run.id).collect()
     }
 
-    /// Ends the `count` oldest held runs: a committed capture owns their
-    /// carries now.
-    pub(crate) async fn release_runs(&mut self, count: usize) {
-        for _ in 0..count.min(self.runs.len()) {
-            if let Some(run) = self.runs.pop_front() {
+    fn take_run(&mut self, id: HeldRunId) -> Option<HeldRun> {
+        let position = self.runs.iter().position(|run| run.id == id)?;
+        self.runs.remove(position)
+    }
+
+    /// Ends exactly the activations the acknowledged capture owns.
+    pub(crate) async fn release_runs(&mut self, runs: &BTreeSet<HeldRunId>) {
+        for id in runs {
+            if let Some(run) = self.take_run(*id) {
                 run.end().await;
+            }
+        }
+    }
+
+    /// Transfer cleanup of the ended runs included in a capture to the
+    /// transaction publishing it. Keep the live obligations here until
+    /// that transaction is acknowledged: a cancelled preparation releases
+    /// nothing and the next capture may try again.
+    pub(crate) async fn release_with(
+        &self,
+        tx: &mut lash_durable::ActorTx,
+        runs: &BTreeSet<HeldRunId>,
+    ) -> bool {
+        // With a committed session handle, parent reads use its own lease,
+        // which stays live until acknowledgement. Without one, reads use
+        // a held run's page service: keep those leases until that reader
+        // has finished, as release_runs does under its page-owner lock.
+        if self.handle.is_none() || self.lease.is_none() {
+            return false;
+        }
+        for run in self.runs.iter().filter(|run| runs.contains(&run.id)) {
+            let pages = run.pages.lock().await;
+            for lease in pages.owned_leases() {
+                tx.release_root_lease(lease.id);
+            }
+        }
+        true
+    }
+
+    /// Finish the ended-run cleanup the acknowledged capture committed.
+    /// The session's own read lease stays live until its readers finish.
+    pub(crate) async fn released_with(&mut self, runs: &BTreeSet<HeldRunId>) {
+        for id in runs {
+            if let Some(run) = self.take_run(*id) {
+                let _ = run.pages.lock().await.end();
             }
         }
     }

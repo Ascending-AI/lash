@@ -698,6 +698,51 @@ impl PostgresDurableStore {
     }
 }
 
+/// The owner transaction already holds its epoch fence.
+pub(super) async fn acquire_in(
+    tx: &mut Tx,
+    request: RootLeaseRequest,
+    now: DurableInstant,
+) -> Result<RootLease, DurableError> {
+    if request.ttl_millis <= 0 {
+        return Err(DurableError::Graph(GraphRefusal::LeaseLost));
+    }
+    match graph::root_of(tx, &request.owner).await {
+        Ok(Some(root)) if root == request.expected => {}
+        Ok(Some(_)) => return Err(DurableError::Graph(GraphRefusal::RevisionConflict)),
+        Ok(None) => return Err(DurableError::Graph(GraphRefusal::RootRetired)),
+        Err(refusal) => return Err(DurableError::Graph(refusal)),
+    }
+    let id: i64 = crate::observed_sql::query_scalar(SQL.pages.lease_insert.sql())
+        .bind(owner_bytes(&request.owner))
+        .bind(crate::keys::key(request.expected.to_hex()))
+        .bind(fence_actor(&request.fence))
+        .bind(fence_epoch(&request.fence))
+        .bind(request.ttl_millis)
+        .bind(now.0)
+        .fetch_one(crate::observed_sql::executor(&mut ***tx))
+        .await
+        .map_err(sqlx_failure)?;
+    Ok(RootLease {
+        id: RootLeaseId(id.cast_unsigned()),
+        expires_at: DurableInstant(now.0 + request.ttl_millis),
+        owner: request.owner,
+        root: request.expected,
+        fence: request.fence,
+    })
+}
+
+pub(super) async fn release_in(
+    tx: &mut Tx,
+    lease: RootLeaseId,
+) -> Result<Option<String>, DurableError> {
+    crate::keys::query_scalar(SQL.pages.lease_release.sql())
+        .bind(lease.0.cast_signed())
+        .fetch_optional(crate::observed_sql::executor(&mut ***tx))
+        .await
+        .map_err(sqlx_failure)
+}
+
 #[async_trait::async_trait]
 impl PageStore for PostgresDurableStore {
     async fn acquire_root_lease(
@@ -712,29 +757,7 @@ impl PageStore for PostgresDurableStore {
                 if let LeaseFence::Actor { actor, epoch } = &request.fence {
                     fence(tx, actor, *epoch).await??;
                 }
-                match graph::root_of(tx, &request.owner).await {
-                    Ok(Some(root)) if root == request.expected => {}
-                    Ok(Some(_)) => return Err(DurableError::Graph(GraphRefusal::RevisionConflict)),
-                    Ok(None) => return Err(DurableError::Graph(GraphRefusal::RootRetired)),
-                    Err(refusal) => return Err(DurableError::Graph(refusal)),
-                }
-                let id: i64 = crate::observed_sql::query_scalar(SQL.pages.lease_insert.sql())
-                    .bind(owner_bytes(&request.owner))
-                    .bind(crate::keys::key(request.expected.to_hex()))
-                    .bind(fence_actor(&request.fence))
-                    .bind(fence_epoch(&request.fence))
-                    .bind(request.ttl_millis)
-                    .bind(now.0)
-                    .fetch_one(crate::observed_sql::executor(&mut ***tx))
-                    .await
-                    .map_err(sqlx_failure)?;
-                Ok(RootLease {
-                    id: RootLeaseId(id.cast_unsigned()),
-                    expires_at: DurableInstant(now.0 + request.ttl_millis),
-                    owner: request.owner,
-                    root: request.expected,
-                    fence: request.fence,
-                })
+                acquire_in(tx, request, now).await
             })
         })
         .await
@@ -771,13 +794,7 @@ impl PageStore for PostgresDurableStore {
     async fn release_root_lease(&self, lease: RootLeaseId) -> Result<(), DurableError> {
         self.page_write(PAGES_LEASE, move |tx, now| {
             Box::pin(async move {
-                let root: Option<String> = crate::keys::query_scalar(SQL.pages.lease_release.sql())
-                    .bind(lease.0.cast_signed())
-                    .fetch_optional(crate::observed_sql::executor(&mut ***tx))
-                    .await
-                    .map_err(sqlx_failure)?;
-                // What only the lease kept is peeled by a later step.
-                if let Some(root) = root {
+                if let Some(root) = release_in(tx, lease).await? {
                     hold(tx, &BTreeSet::from([root]), &BTreeSet::new(), now)
                         .await
                         .map_err(sqlx_failure)?;

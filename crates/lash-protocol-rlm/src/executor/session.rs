@@ -123,7 +123,9 @@ struct Pending {
     /// The execution closures the capture's commit stages.
     closures: BTreeSet<NodeId>,
     /// The held runs whose carries the capture owns once committed.
-    runs: usize,
+    runs: BTreeSet<super::pages::HeldRunId>,
+    /// The capture's transaction owns lease cleanup once acknowledged.
+    releases: bool,
 }
 
 /// Why a cell's saved functions could not be relinked to its package set.
@@ -1000,6 +1002,7 @@ impl CodeModeExecutionState {
             purpose,
             closures: BTreeSet::new(),
             runs: self.pages.held(),
+            releases: false,
         });
         Ok(ExecutionGraphCapture::Replace(graph))
     }
@@ -1067,6 +1070,7 @@ impl CodeModeExecutionState {
         let Some(pending) = self.pending.as_mut().filter(|pending| pending.root == root) else {
             return Ok(None);
         };
+        pending.releases = self.pages.release_with(tx, &pending.runs).await;
         let Some(mut spool) = self.pages.staged().cloned() else {
             return Ok(None);
         };
@@ -1112,7 +1116,11 @@ impl CodeModeExecutionState {
             self.closures.remove(closure);
         }
         self.installed_closures.extend(pending.closures);
-        self.pages.release_runs(pending.runs).await;
+        if pending.releases {
+            self.pages.released_with(&pending.runs).await;
+        } else {
+            self.pages.release_runs(&pending.runs).await;
+        }
         if let (Some(commit), Some(spool)) = (pending.commit, self.pages.staged()) {
             let _ = spool.clone().settle(commit);
         }

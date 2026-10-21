@@ -452,3 +452,66 @@ fn a_recorded_code_mode_session_keeps_its_cells() {
         std::fs::read_to_string(&captured).unwrap()
     );
 }
+
+/// FIG-7084: five sequential code calls must not add a pair of standalone
+/// root-lease commits per call. Publication and capture already own those
+/// boundaries; counting COMMITs also includes their transaction envelopes.
+#[test]
+fn code_call_root_leases_share_the_checkpoint_transactions() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("leases.json");
+    let mut cell: Vec<String> = (0..5)
+        .map(|i| format!("await tools.fixtureLookup({{key: \"{i}\", i: {i}}});"))
+        .collect();
+    cell.push("await control.finish(\"ok\");".to_owned());
+    std::fs::write(
+        &script,
+        serde_json::to_vec(&serde_json::json!({
+            "format": "lash-perf-replay/1",
+            "name": "cell-sequential-5",
+            "description": "FIG-7084 root-lease commit budget",
+            "protocol": "typescript",
+            "turns": [{"repeat": 2, "user": "Turn {turn}: go", "replies": [{"cell": cell}]}]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let shapes = dir.path().join("shapes.json");
+    let output = Command::new(env!("CARGO_BIN_EXE_lash-perf"))
+        .arg("replay")
+        .arg(script)
+        .arg("--store-dir")
+        .arg(dir.path().join("stores"))
+        .arg("--out")
+        .arg(dir.path().join("receipt.json"))
+        .arg("--sql-shapes")
+        .arg(&shapes)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let shapes: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(shapes).unwrap()).unwrap();
+    let turn = shapes["rounds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| row["phase"] == "turn")
+        .nth(1)
+        .unwrap();
+    let commits: u64 = turn["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| row["shape"] == "commit")
+        .map(|row| row["statements"].as_u64().unwrap())
+        .sum();
+    eprintln!("five code calls: {commits} SQLite write commits (ceiling 24)");
+    assert!(
+        commits <= 24,
+        "standalone root leases added write commits: {commits} > 24"
+    );
+}

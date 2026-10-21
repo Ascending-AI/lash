@@ -213,6 +213,8 @@ pub struct ActivationPages<R: ?Sized> {
     /// Renew the lease once this long has passed since it was last renewed
     /// (a third of its ttl, `D-LEASE`).
     renew_every: Duration,
+    /// Exact ttl of each publication lease, before dividing its renewal period.
+    lease_ttl: Duration,
     /// When the lease was last renewed, on `clock`.
     renewed: Instant,
     /// The runtime's clock: the activation's timing, and the schedule a
@@ -279,6 +281,7 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
             lease,
             published: Vec::new(),
             renew_every,
+            lease_ttl: renew_every * 3,
             clock,
             key,
             epoch,
@@ -427,6 +430,28 @@ impl<R: LeasedReads + ?Sized> ActivationPages<R> {
     #[must_use]
     pub fn lease(&self) -> Option<&RootLease> {
         self.lease.as_ref()
+    }
+
+    /// Keep the broker's exact ttl; dividing a renewal period and then
+    /// multiplying it back can truncate a millisecond at the SQL boundary.
+    pub(crate) fn with_lease_ttl(mut self, ttl: Duration) -> Self {
+        self.lease_ttl = ttl;
+        self
+    }
+
+    /// The ttl for a root published by this activation, using the same
+    /// renewal schedule as the activation's initial lease.
+    pub(crate) fn lease_ttl_millis(&self) -> i64 {
+        i64::try_from(self.lease_ttl.as_millis()).unwrap_or(i64::MAX)
+    }
+
+    /// The leases this activation owns. A capture may transfer their
+    /// cleanup to its transaction, retaining this owner until it commits.
+    pub fn owned_leases(&self) -> impl Iterator<Item = &RootLease> {
+        self.lease
+            .iter()
+            .filter(|_| self.owned)
+            .chain(&self.published)
     }
 
     /// Reads the store under `lease` from now on: an activation that read

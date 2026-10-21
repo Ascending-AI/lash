@@ -208,3 +208,89 @@ where
     );
     Ok(())
 }
+
+/// D-LEASE / FIG-7084: publishing a checkpoint and leasing its exact root
+/// are atomic. A refused or abandoned replacement releases nothing; an
+/// acknowledged replacement transfers the old lease's retirement to its
+/// transaction and hands the reader the new lease.
+///
+/// # Errors
+///
+/// The first rule broken.
+pub async fn checkpoint_lease_handoffs_are_atomic(tier: &dyn PageTier) -> LawOutcome {
+    use super::{drain, publish_in};
+    use crate::domain::RootOwner;
+    let owner = owned(tier, "pages-lease-handoff").await?;
+    let exec = owner.exec("handoff");
+    let store = tier.pages();
+    let mut fresh = BTreeMap::new();
+    let leaf = page(&mut fresh, NodeKind::PAYLOAD_LEAF, "handoff leaf", &[]);
+    let root = page(
+        &mut fresh,
+        NodeKind::CHECKPOINT_ROOT,
+        "handoff root",
+        &[leaf],
+    );
+    let first = Candidate { root, fresh };
+    let mut tx = store.begin(&owner.actor, owner.epoch).await?;
+    tx.lease_root(RootOwner::Exec(exec.clone()), exec_root(root).id, 60_000);
+    let receipt = publish_in(
+        store,
+        tx,
+        &simple(&exec, None),
+        Box::new(first.manifest(None, CommitId::mint())),
+    )
+    .await?;
+    ensure!(
+        receipt.actor.root_leases.len() == 1,
+        "publication did not hand on its lease"
+    );
+    let lease = receipt.actor.root_leases[0].clone();
+    ensure!(lease.root == exec_root(root).id, "leased another root");
+    store.read_pages(&lease, &[leaf]).await?;
+
+    let mut abandoned = store.begin(&owner.actor, owner.epoch).await?;
+    abandoned.release_root_lease(lease.id);
+    drop(abandoned);
+    store.read_pages(&lease, &[leaf]).await?;
+    let mut refused = store.begin(&owner.actor, owner.epoch).await?;
+    refused.release_root_lease(lease.id);
+    refused.lease_root(RootOwner::Exec(exec.clone()), NodeId([0xa9; 32]), 60_000);
+    ensure!(
+        super::refusal(store.commit(refused, super::super::LABEL).await)
+            == Some(GraphRefusal::RevisionConflict),
+        "a changed root was leased"
+    );
+    store.read_pages(&lease, &[leaf]).await?;
+
+    let mut fresh = BTreeMap::new();
+    let next = page(&mut fresh, NodeKind::CHECKPOINT_ROOT, "handoff next", &[]);
+    let second = Candidate { root: next, fresh };
+    let mut tx = store.begin(&owner.actor, owner.epoch).await?;
+    tx.lease_root(RootOwner::Exec(exec.clone()), exec_root(next).id, 60_000);
+    tx.release_root_lease(lease.id);
+    let receipt = publish_in(
+        store,
+        tx,
+        &simple(&exec, Some((1, exec_root(root).id))),
+        Box::new(second.manifest(Some(exec_root(root).id), CommitId::mint())),
+    )
+    .await?;
+    ensure!(
+        receipt.actor.root_leases.len() == 1,
+        "replacement did not hand on its lease"
+    );
+    store
+        .read_pages(&receipt.actor.root_leases[0], &[next])
+        .await?;
+    ensure!(
+        super::refusal(store.read_pages(&lease, &[leaf]).await) == Some(GraphRefusal::LeaseLost),
+        "the replaced lease still reads"
+    );
+    drain(store, 10).await?;
+    ensure!(
+        !tier.stored().await.contains(&leaf),
+        "the released root's pages were not retired"
+    );
+    Ok(())
+}

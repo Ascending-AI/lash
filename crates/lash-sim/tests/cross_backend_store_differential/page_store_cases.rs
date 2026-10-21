@@ -275,6 +275,22 @@ async fn page_transcript(store: &dyn PageStore) -> Transcript {
         })
         .await
         .expect("lease the first root");
+    // FIG-7084: the owner's adjacent transaction takes the next lease
+    // and releases the previous one with one atomic acknowledgement.
+    let mut handoff = store.begin(&actor, epoch).await.expect("open the handoff");
+    handoff.lease_root(RootOwner::Exec(exec.clone()), first_exec, 60_000);
+    handoff.release_root_lease(lease.id);
+    let receipt = store
+        .commit(handoff, lash_durable::CommitLabel::new("pages.handoff"))
+        .await
+        .expect("commit the handoff");
+    out.push(format!("handoff leases {}", receipt.root_leases.len()));
+    out.push(answer(&store.read_pages(&lease, &[kept.id]).await));
+    let lease = receipt
+        .root_leases
+        .into_iter()
+        .next()
+        .expect("the handed-on lease");
     out.push(format!("leased {}", lease.root == first_exec));
     let read = store.read_pages(&lease, &[first.id, kept.id]).await;
     out.push(answer(&read.map(|pages| {

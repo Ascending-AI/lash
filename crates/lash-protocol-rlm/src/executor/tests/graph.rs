@@ -497,3 +497,103 @@ async fn a_no_op_cell_writes_the_same_pages_and_bytes_whatever_the_binding_count
         large_noop.rows_affected
     );
 }
+
+/// FIG-7084: a cancelled capture keeps the held reader and its cleanup
+/// obligation. Only ended runs behind the session's independent read
+/// lease can transfer cleanup into the capture's transaction; that
+/// independent lease survives until capture acknowledgement.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cancelled_capture_keeps_its_readers_and_their_lease_obligations() {
+    use super::super::pages::{HeldRun, SessionPageAccess};
+    use lash_durable::domain::pages::{LeaseFence, RootLeaseRequest};
+    use lash_vm_broker::kernel::pages::{ActivationPages, CapabilityKey, PageLimits, SharedPages};
+    use std::time::Duration;
+
+    let host = open_host().await;
+    let mut state = typescript_state();
+    cell(&mut state, &host, "exec-code:0", "const kept = 'reader';").await;
+    commit_working(&mut state, &host).await;
+    let handle = host.session_pages().expect("committed session pages");
+    let lease = handle
+        .store
+        .acquire_root_lease(RootLeaseRequest {
+            owner: handle.owner.clone(),
+            expected: handle.root,
+            fence: LeaseFence::Actor {
+                actor: handle.actor.clone(),
+                epoch: handle.epoch,
+            },
+            ttl_millis: 60_000,
+        })
+        .await
+        .expect("a held run's lease");
+    let services = typescript_services();
+    let spools = services.workers.spools().expect("the reader stages pages");
+    let stage = lash_vm_broker::kernel::next_stage_lease();
+    let run: SharedPages = Arc::new(tokio::sync::Mutex::new(
+        ActivationPages::new(
+            handle.store.clone(),
+            Some(lease.clone()),
+            Duration::from_secs(20),
+            CapabilityKey::fresh(),
+            stage.0,
+            Box::new(spools.spool(stage).unwrap()),
+            Arc::new(lash_core::facade_support::SystemClock),
+            Duration::from_secs(60),
+            PageLimits::within(lash_vm_protocol::ProtocolBounds::standard().decode),
+        )
+        .owning(),
+    ));
+    let mut access = SessionPageAccess::default();
+    access.hold(HeldRun::new(run.clone(), handle.store.clone()));
+    let held = access.held();
+    let cx = host.context();
+    let mut tx = cx.begin().await.unwrap();
+    assert!(
+        !access.release_with(&mut tx, &held).await,
+        "a parent still reading through the held run cannot release it in-flight"
+    );
+    assert!(tx.released_root_leases().is_empty());
+    drop(tx);
+
+    access.note(Some(&handle));
+    let session_lease = access.lease().await.unwrap().unwrap();
+    let reader = run.lock().await;
+    let mut tx = cx.begin().await.unwrap();
+    let mut capture = Box::pin(access.release_with(&mut tx, &held));
+    std::future::poll_fn(|cx| {
+        assert!(std::future::Future::poll(capture.as_mut(), cx).is_pending());
+        std::task::Poll::Ready(())
+    })
+    .await;
+    drop(capture);
+    drop(tx);
+    assert_eq!(
+        access.held(),
+        held,
+        "the cancelled capture retains its reader"
+    );
+    assert_eq!(reader.owned_leases().next().unwrap().id, lease.id);
+    handle
+        .store
+        .read_pages(&lease, &[handle.root])
+        .await
+        .unwrap();
+    drop(reader);
+
+    let mut tx = cx.begin().await.unwrap();
+    assert!(access.release_with(&mut tx, &held).await);
+    assert!(tx.released_root_leases().contains(&lease.id));
+    assert!(!tx.released_root_leases().contains(&session_lease.id));
+    cx.commit(tx, lash_durable::CommitLabel::new("law.capture-leases"))
+        .await
+        .unwrap();
+    handle
+        .store
+        .read_pages(&session_lease, &[handle.root])
+        .await
+        .unwrap();
+    access.released_with(&held).await;
+    assert!(access.held().is_empty());
+    access.release().await;
+}

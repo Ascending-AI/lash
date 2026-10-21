@@ -820,3 +820,5 @@ async fn turn_and_owned_model_calls_survive_an_idempotent_outcome_commit() {
         .await
         .unwrap_or_else(|broken| panic!("{broken}"));
 }
+
+page_law!(checkpoint_lease_handoffs_are_atomic);

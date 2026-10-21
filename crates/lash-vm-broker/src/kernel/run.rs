@@ -616,7 +616,6 @@ impl KernelBroker<'_> {
             };
             saved = true;
             ledger = committed.ledger;
-            self.lease_published(&activation, committed.root).await?;
             resting = Some(self.resting(committed.root, state, &ledger)?);
         }
         loop {
@@ -724,7 +723,6 @@ impl KernelBroker<'_> {
                 };
                 saved = true;
                 ledger = committed.ledger;
-                self.lease_published(&activation, committed.root).await?;
                 resting = Some(self.resting(committed.root, state, &ledger)?);
             }
             if ledger.pending().next().is_none() {
@@ -821,7 +819,8 @@ impl KernelBroker<'_> {
             self.pages.span,
             self.pages.limits,
         )
-        .with_references(references);
+        .with_references(references)
+        .with_lease_ttl(self.pages.lease_ttl);
         let pages = match &self.pages.cache {
             Some(cache) => pages.caching(cache.clone()),
             None => pages,
@@ -855,29 +854,6 @@ impl KernelBroker<'_> {
             })
             .await
             .map_err(KernelFailure::Lease)
-    }
-
-    /// After a park published `root`, the activation takes a lease on it:
-    /// the pages its candidate staged are the store's now, and read there
-    /// under the activation's lease, its first when it read under none. A
-    /// later park retires `root`, while the worker may still name those
-    /// pages under the capabilities it holds without sealing them again,
-    /// so the lease keeps `root` stored until the activation ends
-    /// (FIG-6629).
-    async fn lease_published(
-        &self,
-        activation: &PageActivation,
-        root: NodeId,
-    ) -> Result<(), KernelFailure> {
-        let mut pages = activation.pages.lock().await;
-        let store = self.store.context().pages().map_err(KernelFailure::Lease)?;
-        let lease = self.lease(&store, root).await?;
-        if pages.lease().is_some() {
-            pages.protect_published(lease);
-        } else {
-            pages.lease_on(lease);
-        }
-        Ok(())
     }
 
     /// Ends an activation's page service: the lease this broker took goes;

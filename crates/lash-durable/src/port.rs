@@ -251,6 +251,9 @@ pub struct Reaped {
 /// An owner commit's receipt.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActorCommit {
+    /// Root leases acquired atomically with this commit, in request order.
+    /// Their expiry remains owned by retirement if acknowledgement is lost.
+    pub root_leases: Vec<crate::domain::pages::RootLease>,
     /// The actor's state revision after the commit.
     pub revision: StateRevision,
     /// The state the actor was left in: [`ActorState::Owned`] unless the
