@@ -257,6 +257,7 @@ fn validate_requested(grant: &DeferredGrant, requested: &QualifiedName) -> Resul
 pub fn start_requirements(
     inspection: &LinkInspection,
     environment: &ExecutionEnvironment,
+    seeded: &std::collections::BTreeSet<OperationUse>,
     mut deferred: impl FnMut(&DeferredGrant, RegistryKind) -> Result<ClaimRequirements, EnginePortError>,
 ) -> Result<ClaimRequirements, EnginePortError> {
     let mut requirements = ClaimRequirements {
@@ -283,7 +284,9 @@ pub fn start_requirements(
             (OperationNeed::Deferred { grant, .. }, Some(UseBinding::Deferred(recorded)))
                 if grant.as_ref() == recorded =>
             {
-                requirements.extend(&deferred(grant, environment.registry)?)
+                if !seeded.contains(use_) {
+                    requirements.extend(&deferred(grant, environment.registry)?);
+                }
             }
             _ => {
                 return Err(EnginePortError::Refused(AdmissionRefusal::MissingRoute {

@@ -43,14 +43,35 @@ pub fn tool_plugin(
 pub fn run_policy_naming(
     keys: &[crate::ProcessConfigKey<()>],
 ) -> std::sync::Arc<dyn crate::ProcessEnvPolicy> {
-    let keys = keys.to_vec();
-    crate::runtime::env_policy::policy::restrict_or(crate::runtime::env_policy::policy::from_run(
-        move |_| {
-            keys.iter()
-                .map(|key| crate::ProcessComponentEntry::new(*key, &(), std::iter::empty()))
-                .collect()
-        },
-    ))
+    struct Named(Vec<crate::ProcessConfigKey<()>>);
+    #[async_trait::async_trait]
+    impl crate::ProcessEnvPolicy for Named {
+        async fn choose(
+            &self,
+            cx: &crate::ProcessEnvCx<'_>,
+        ) -> Result<crate::ProcessStartChoice, crate::ProcessEnvPolicyError> {
+            let run = cx.run.ok_or_else(|| {
+                crate::ProcessEnvPolicyError::Fault("fixture requires a recorded run".into())
+            })?;
+            let mut builder = crate::ProcessEnv::builder(run.config().max_tool_calls);
+            for key in &self.0 {
+                builder = builder.entry(
+                    crate::ProcessComponentEntry::new(*key, &(), std::iter::empty())
+                        .map_err(crate::ProcessEnvPolicyError::Refused)?,
+                );
+            }
+            Ok(crate::ProcessStartChoice {
+                env: crate::ProcessEnvChoice::New(
+                    builder
+                        .build()
+                        .map_err(crate::ProcessEnvPolicyError::Refused)?,
+                ),
+                engine_settings: cx.engine_defaults()?,
+                initial_resolutions: Vec::new(),
+            })
+        }
+    }
+    Arc::new(Named(keys.to_vec()))
 }
 
 /// Hold the fixture environment under `context`'s execution claim for a
@@ -68,7 +89,7 @@ pub async fn held_engine_launch(
     context
         .declare_engine_launch(
             &crate::ProcessStartChoice {
-                fits: Default::default(),
+                initial_resolutions: Default::default(),
                 env: crate::ProcessEnvChoice::Published(process_execution_env_fixture_ref()),
                 engine_settings: None,
             },
@@ -98,11 +119,27 @@ impl lash_execution_contracts::process::ProcessEngine for HeldProcessEngine {
         lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
-    async fn performed_effects(
+    async fn inspect_link(
         &self,
-        _payload: &serde_json::Value,
-    ) -> Result<lash_execution_contracts::process::PerformedEffects, crate::ProcessEnvRefusal> {
-        Ok(lash_execution_contracts::process::PerformedEffects::new())
+        start: &lash_vocabulary::LinkedStart,
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Ok(lash_execution_contracts::process::linking::LinkInspection {
+            link: start.link,
+            document: lash_vocabulary::DocumentId::from_bytes([0; 32]),
+            selector: lash_execution_contracts::process::linking::ReachSelector::Start(
+                start.selector.clone(),
+            ),
+            operations: Default::default(),
+            machine: Default::default(),
+            artifacts: Vec::new(),
+            signature: None,
+        })
+    }
+    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+        Default::default()
     }
 
     async fn check_args(
@@ -253,11 +290,27 @@ impl lash_execution_contracts::process::ProcessEngine for FixtureProcessEngine {
         lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
-    async fn performed_effects(
+    async fn inspect_link(
         &self,
-        _payload: &serde_json::Value,
-    ) -> Result<lash_execution_contracts::process::PerformedEffects, crate::ProcessEnvRefusal> {
-        Ok(lash_execution_contracts::process::PerformedEffects::new())
+        start: &lash_vocabulary::LinkedStart,
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Ok(lash_execution_contracts::process::linking::LinkInspection {
+            link: start.link,
+            document: lash_vocabulary::DocumentId::from_bytes([0; 32]),
+            selector: lash_execution_contracts::process::linking::ReachSelector::Start(
+                start.selector.clone(),
+            ),
+            operations: Default::default(),
+            machine: Default::default(),
+            artifacts: Vec::new(),
+            signature: None,
+        })
+    }
+    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+        Default::default()
     }
 
     async fn check_args(

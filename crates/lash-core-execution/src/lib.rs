@@ -384,7 +384,8 @@ pub(crate) use crate::plugin::RuntimeServices;
 pub(crate) use lash_core_store::session_identity::SessionObservedProcessOutcome;
 pub(crate) use lash_core_store::session_identity::SessionObservedProcessReceipt;
 pub(crate) use lash_core_store::session_identity::SessionObserverIntent;
-pub(crate) use lash_protocol_types::{ToolCatalogBuildInput, validate_tool_input};
+pub(crate) use lash_protocol_types::ToolCatalogBuildInput;
+pub(crate) use lash_vocabulary::validate_tool_input;
 
 pub mod sansio {
     pub use crate::{CompletedToolCall, Response};
@@ -480,13 +481,15 @@ pub use deferred_provider::{
     DeferredResolveContext, DeferredToolProvider, DeferredToolProviderRegistration, DispatchGrant,
     DispatchGrantRefusal, DispatchRefusal, DispatchTarget, DispatchTransform, TransformRefusal,
 };
-pub use lash_core_store::obligations::{ObligationToken, RegistryKind};
 pub use lash_core_store::tool_surface::{
-    DeferredMatch, DeferredOutcome, DeferredResolutionPolicy, ExecutionBinding,
-    ExecutionBindingUnreadable, Judgement, OperationRoute, ProviderKey, RecordedSurface,
+    DeferredMatch, DeferredOutcome, Judgement, OperationRoute, ProviderKey, RecordedSurface,
     RouteSource, SurfaceCollision, SurfaceDuplicateTool, SurfaceEntry, SurfaceRefusal, judge,
 };
-pub use lash_kernel_doc::EffectName;
+pub use lash_vocabulary::claims::{ObligationToken, RegistryKind};
+pub use lash_vocabulary::legacy_names::EffectName;
+pub use lash_vocabulary::providers::{
+    DeferredResolutionPolicy, ExecutionBinding, ExecutionBindingUnreadable,
+};
 pub use protocol_build::{FleetWriterFormats, ProtocolBuildInput};
 pub use tool_reads::{ReadCall, ReadError, ReadRoute, ToolProviderRegistration, ToolReads};
 pub use tool_registry::{

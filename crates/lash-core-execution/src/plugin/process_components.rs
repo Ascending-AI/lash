@@ -269,6 +269,18 @@ impl ProcessComponentRegistry {
         lash_vocabulary::claims::ClaimRequirements,
         lash_execution_contracts::process::linking::EnginePortError,
     > {
+        self.check_links_with_seeds(env, inspection, &[])
+    }
+
+    pub fn check_links_with_seeds(
+        &self,
+        env: &Arc<ProcessEnv>,
+        inspection: &lash_execution_contracts::process::linking::LinkInspection,
+        seeds: &[lash_core_store::resolutions::ResolutionSeed],
+    ) -> Result<
+        lash_vocabulary::claims::ClaimRequirements,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
         use lash_core_store::tool_surface::UseBinding;
         use lash_execution_contracts::process::linking::{AdmissionRefusal, EnginePortError};
         let composition =
@@ -279,6 +291,7 @@ impl ProcessComponentRegistry {
         let requirements = crate::runtime::actor::resolutions::start_requirements(
             inspection,
             env.execution(),
+            &seeds.iter().map(|seed| seed.use_).collect(),
             |grant, registry| {
                 composition
                     .composition
@@ -487,8 +500,14 @@ impl ProcessComponentRegistry {
     ) -> Result<ProcessEnv, ProcessEnvRefusal> {
         for id in self.retired_in(env) {
             if let Some(effect) = env.execution().uses.iter().find_map(|(effect, link)| {
-                (link.provider.registry() == crate::RegistryKind::Process
-                    && link.provider.owner() == id.as_str())
+                (match link {
+                    lash_core_store::tool_surface::UseBinding::Fixed(fixed) => {
+                        fixed.route.provider.owner() == id.as_str()
+                    }
+                    lash_core_store::tool_surface::UseBinding::Deferred(grant) => {
+                        grant.provider.owner == id.as_str()
+                    }
+                })
                 .then_some(effect)
             }) {
                 return Err(ProcessEnvRefusal::RetiredComponentServes {
@@ -1165,7 +1184,13 @@ impl ProcessComposition {
         if let Err(refusal) = refuse_package_path(env.execution(), &path) {
             return Ok(Err(refusal));
         }
-        let link = &env.execution().uses[effect];
+        let link = &env
+            .execution()
+            .fixed(effect)
+            .ok_or_else(|| {
+                PluginError::Registration(format!("dispatch use {effect} is not fixed"))
+            })?
+            .route;
         let config = super::OwnerConfigView::components(Arc::clone(env));
         config.validate_provider(&link.provider)?;
         let provider = self
@@ -1192,7 +1217,7 @@ impl ProcessComposition {
         if let crate::DeferredOutcome::Resolved { link } = &outcome
             && let Some(definition) = link.resolution()
             && let Err(refusal) = refuse_package_path(
-                env.package_roots(),
+                env.execution(),
                 definition.manifest.operation.effect_name().as_str(),
             )
         {
@@ -1229,6 +1254,15 @@ impl ProcessComposition {
         input: &serde_json::Value,
         matched: &crate::DeferredMatch,
     ) -> Result<Result<serde_json::Value, crate::DispatchRefusal>, PluginError> {
+        let tool = env
+            .execution()
+            .fixed(effect)
+            .ok_or_else(|| {
+                PluginError::Registration(format!("dispatch use {effect} is not fixed"))
+            })?
+            .route
+            .tool
+            .clone();
         Ok(self
             .dispatch_target(env, effect, input)?
             .and_then(|target| {
@@ -1236,7 +1270,7 @@ impl ProcessComposition {
                     Ok(target.args)
                 } else {
                     Err(crate::DispatchRefusal::Diverged {
-                        tool: env.execution().uses[effect].tool.clone(),
+                        tool: tool.clone(),
                         committed: matched.requested.clone(),
                         recomputed: target.path,
                     })

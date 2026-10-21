@@ -15,8 +15,8 @@ use lash_trace::{
 };
 
 use super::*;
-use crate::store::plugin_writers::PluginCallbackIdentity;
 use crate::trace::{JournalFrontier, StepIssue, TraceRuntime};
+use lash_vocabulary::providers::PluginCallbackIdentity;
 
 /// A wall clock that moves one millisecond each time it is read, so every
 /// end is strictly after what it follows.

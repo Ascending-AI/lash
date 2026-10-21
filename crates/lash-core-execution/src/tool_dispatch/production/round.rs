@@ -269,6 +269,12 @@ impl ProductionToolHandlers<'_> {
                         Vec::new(),
                     ));
                 }
+                Err(crate::HoldEnvError::Admission(error)) => {
+                    return Err(crate::RuntimeEffectControllerError::from(
+                        crate::PluginError::from(error),
+                    )
+                    .into());
+                }
                 Err(crate::HoldEnvError::Fault(error)) => {
                     return Err(crate::RuntimeEffectControllerError::from(error).into());
                 }

@@ -506,6 +506,18 @@ impl ProcessEngineRegistry {
     > {
         self.components().check_links(env, inspection)
     }
+    pub fn check_links_with_seeds(
+        &self,
+        env: &Arc<crate::ProcessEnv>,
+        inspection: &lash_execution_contracts::process::linking::LinkInspection,
+        seeds: &[lash_core_store::resolutions::ResolutionSeed],
+    ) -> Result<
+        lash_vocabulary::claims::ClaimRequirements,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        self.components()
+            .check_links_with_seeds(env, inspection, seeds)
+    }
 
     /// Resolve the engine a `ProcessInput::Engine` start names, refusing a kind
     /// this host never registered.

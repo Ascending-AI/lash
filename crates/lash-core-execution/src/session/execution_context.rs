@@ -1028,6 +1028,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             crate::HoldEnvError::Refused(refusal) => {
                 lash_execution_contracts::plugin_error::PluginError::ProcessEnvRefused { refusal }
             }
+            crate::HoldEnvError::Admission(error) => error.into(),
             crate::HoldEnvError::Fault(error) => error,
         })
     }

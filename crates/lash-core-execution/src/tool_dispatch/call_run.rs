@@ -9,6 +9,7 @@
 //! reruns a `Repeatable` one from its admission at the same ordinal. No
 //! code here is ever run again against a recorded history.
 
+use lash_vocabulary::{DeclarationRefusal, ExecutionPolicy, OutcomeShape};
 use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
@@ -29,8 +30,7 @@ use crate::runtime::process::{
 };
 use crate::tool_run::{
     AdmissionRefusal, AfterCheckVerdict, AttemptOrdinal, AttributedVerdict, CallDecision,
-    CheckRank, CheckRecord, DeclarationRefusal, ExecutionPolicy, ExternalCancelPolicy, HookCause,
-    OutcomeShape, RankedVerdict, ResultSource,
+    CheckRank, CheckRecord, ExternalCancelPolicy, HookCause, RankedVerdict, ResultSource,
 };
 use lash_execution_contracts::process::ConsumerHold;
 use lash_execution_contracts::process::ProcessStartRegistration;

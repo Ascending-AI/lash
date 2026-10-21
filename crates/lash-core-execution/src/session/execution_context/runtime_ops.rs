@@ -239,6 +239,8 @@ fn enclosing_process(
     };
     Some(Arc::new(crate::EnclosingProcess {
         process: process.id.clone(),
+        execution: lash_core_store::resolutions::ExecutionId::process(&process.id),
+        resolutions: Default::default(),
         env_ref: launch.env.clone(),
         env: Arc::unwrap_or_clone(env?),
         engine_kind: kind.clone(),

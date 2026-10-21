@@ -700,9 +700,7 @@ pub fn resolved_match(output: &SettledOutput) -> Option<crate::DeferredMatch> {
 /// The call of the tool `matched` resolved `resolution`'s path to: the
 /// step lash issues in the commit that consumes the resolution, under the
 /// same step name, site and input, the granted tool's, whose arguments its
-/// grant's transform names again when the call runs. `None` when `matched`
-/// resolved nothing, or `resolution` is not a resolution.
-#[must_use]
+/// grant's transform names again when the call runs.
 /// What a body that called a granted tool is answered when its
 /// resolution decided `matched` against it: a refused or unavailable path
 /// is a tool failure it may catch, typed, from the recorded decision alone.

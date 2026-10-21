@@ -104,8 +104,8 @@ pub fn step_tool(
     engine: &str,
 ) -> crate::ToolId {
     match step {
-        lash_execution_contracts::process::StepRequest::Tool { effect, .. } => {
-            crate::ToolId::new(effect.as_str())
+        lash_execution_contracts::process::StepRequest::Tool { use_, .. } => {
+            lash_vocabulary::tool_contract::ToolId::new(use_.to_string())
         }
         lash_execution_contracts::process::StepRequest::Engine { kind, .. } => {
             kind.admitted_tool(engine)
@@ -127,31 +127,6 @@ pub fn effect(name: &str) -> crate::EffectName {
 #[must_use]
 pub fn effect_of(definition: &crate::ToolDefinition) -> crate::EffectName {
     definition.manifest.operation.effect_name()
-}
-
-/// What an engine that performs each of `tools` declares (P3): each tool's
-/// effect, under the signature its schemas project to and the contract the
-/// tool serves.
-#[cfg(any(test, feature = "testing"))]
-#[must_use]
-pub fn performs(
-    tools: &[crate::ToolDefinition],
-) -> lash_execution_contracts::process::PerformedEffects {
-    tools
-        .iter()
-        .map(|tool| {
-            (
-                effect_of(tool),
-                lash_kernel_doc::OperationRequirement {
-                    signature: lash_protocol_types::tool_signature(
-                        &tool.contract.input_schema.canonical,
-                        &tool.contract.output_schema.canonical,
-                    ),
-                    contract: tool.contract_id(),
-                },
-            )
-        })
-        .collect()
 }
 
 /// Collect a fixture's roster through single-record pages, exercising continuations.
@@ -196,6 +171,7 @@ pub async fn publish_process_env_for_testing(
         crate::HoldEnvError::Refused(refusal) => {
             lash_execution_contracts::plugin_error::PluginError::ProcessEnvRefused { refusal }
         }
+        crate::HoldEnvError::Admission(error) => error.into(),
         crate::HoldEnvError::Fault(error) => error,
     })
 }

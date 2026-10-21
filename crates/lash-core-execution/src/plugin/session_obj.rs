@@ -670,7 +670,7 @@ impl PluginSession {
     #[doc(hidden)]
     pub fn code_executor_identity(
         &self,
-    ) -> Option<crate::store::plugin_writers::PluginCallbackIdentity> {
+    ) -> Option<lash_vocabulary::providers::PluginCallbackIdentity> {
         self.capabilities()
             .contributions
             .code_executor

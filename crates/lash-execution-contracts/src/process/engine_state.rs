@@ -20,6 +20,7 @@
 
 use std::time::Duration;
 
+use lash_core_store::resolutions::{ExecutionId, ResolutionEntry};
 use lash_durable::DurableInstant;
 
 use crate::waits::PinnedKey;

@@ -985,6 +985,10 @@ impl PluginError {
     pub fn class(&self) -> PluginErrorClass {
         use PluginErrorClass::{Redrivable, Retryable, Terminal};
         match self {
+            Self::Package(source) => match source.failure_class() {
+                crate::ToolFailureClass::Unavailable => Retryable,
+                _ => Terminal,
+            },
             Self::Operation(failure) => plugin_error_class(failure.class),
             Self::HookFailures { causes } => plugin_error_class(
                 causes

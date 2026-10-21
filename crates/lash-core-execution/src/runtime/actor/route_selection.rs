@@ -106,7 +106,7 @@ mod tests {
             .unwrap();
             AdvertisedRoute {
                 operation: definition.manifest.operation.clone(),
-                route: lash_core_store::tool_surface::OperationRoute::admitted(
+                route: lash_core_store::tool_surface::OperationRoute::advertised(
                     provider,
                     &definition,
                     None,

@@ -10,6 +10,7 @@ use crate::session::runtime_ops::RuntimeExecutionContextRuntimeOps as _;
 use crate::tool_run::*;
 use lash_execution_contracts::tool_intent::ToolIntents;
 use lash_protocol_types::sync::MutexExt;
+use lash_vocabulary::{ExecutionPolicy, OutcomeShape};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -251,17 +252,24 @@ impl<'run> ProductionToolHandlers<'run> {
                 run: self.context.resolved_run().map(Arc::as_ref),
             })
             .map_err(crate::HoldEnvError::Refused)?;
+        let linked = crate::runtime::process::linked_start(
+            &self.context.dispatch().process_engines,
+            engine,
+            &start.payload,
+        )
+        .await
+        .map_err(|error| crate::HoldEnvError::Fault(error))?;
         let launch = crate::runtime::process::hold_launch(
             &self.context.dispatch().process_engines,
             self.context.dispatch().effect_controller.execution_scope(),
-            enclosing.as_deref(),
             &crate::ProcessStartChoice {
-                fits: Default::default(),
+                initial_resolutions: Default::default(),
                 env: start.env,
                 engine_settings: start.engine_settings,
             },
             engine,
             &start.payload,
+            &linked,
         )
         .await?;
         let provenance = owner.session_id().map_or_else(

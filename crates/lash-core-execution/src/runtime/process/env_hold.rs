@@ -234,7 +234,11 @@ pub(crate) async fn hold_launch_performing(
         }
     };
     let requirements = engines
-        .check_links(&std::sync::Arc::new(env.clone()), inspection)
+        .check_links_with_seeds(
+            &std::sync::Arc::new(env.clone()),
+            inspection,
+            &choice.initial_resolutions,
+        )
         .map_err(port_error)?;
     let composition = engines
         .components()

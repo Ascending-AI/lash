@@ -422,7 +422,7 @@ pub enum Judgement {
 /// The live contract id must equal the pinned one; nothing else about the
 /// live tool is compared.
 pub fn judge(
-    pinned: &lash_kernel_doc::ContractId,
+    pinned: &lash_vocabulary::operations::ContractId,
     link: &OperationRoute,
     live: Option<&ToolDefinition>,
 ) -> Judgement {

@@ -9,11 +9,11 @@ use super::super::singleton_run::{
 };
 use super::{AdmittedToolCall, AttemptEnd, CallEnd};
 use crate::ToolCallId;
-use crate::store::plugin_writers::PluginCallbackIdentity;
 use crate::tool_run::{
     AdmittedBinding, AfterCheckVerdict, AttemptOrdinal, AttributedVerdict, ExternalCancelPolicy,
     PresentationBinding, ToolDeclaration,
 };
+use lash_vocabulary::providers::PluginCallbackIdentity;
 
 fn callback(key: &str) -> PluginCallbackIdentity {
     PluginCallbackIdentity {

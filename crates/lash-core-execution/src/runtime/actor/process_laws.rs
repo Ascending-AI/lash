@@ -310,19 +310,26 @@ const LAW_PARK: &str = "law_park";
     clippy::expect_used,
     reason = "every law tool name is a fixed valid effect name"
 )]
-fn law_effect(tool: &str) -> crate::EffectName {
-    crate::EffectName::new(tool).expect("a law effect name")
+fn law_use(tool: &str) -> lash_vocabulary::OperationUse {
+    lash_vocabulary::OperationUse {
+        link: lash_vocabulary::LinkId::from_bytes({
+            let mut id = [0; 32];
+            let bytes = tool.as_bytes();
+            id[..bytes.len()].copy_from_slice(bytes);
+            id
+        }),
+        slot: lash_vocabulary::ImportSlot(0),
+    }
 }
 
 fn law_step(step: &str, tool: &str) -> EngineAction {
     EngineAction::Steps {
         steps: vec![StepRequest::Tool {
             step: StepName(step.to_owned()),
-            effect: law_effect(tool),
-            contract: lash_kernel_doc::ContractId::new("law"),
+            use_: law_use(tool),
+
             input: json!({}),
             site: None,
-            matched: None,
         }],
         wake: None,
     }
@@ -340,11 +347,10 @@ const LAW_PAGED: &str = "law_paged";
 fn tool_step(step: &str, tool: &str) -> StepRequest {
     StepRequest::Tool {
         step: StepName(step.to_owned()),
-        effect: law_effect(tool),
-        contract: lash_kernel_doc::ContractId::new("law"),
+        use_: law_use(tool),
+
         input: json!({}),
         site: None,
-        matched: None,
     }
 }
 
@@ -407,11 +413,27 @@ impl ProcessEngine for LawEngine {
         lash_execution_contracts::process::ProcessTraceClass::Internal
     }
 
-    async fn performed_effects(
+    async fn inspect_link(
         &self,
-        _payload: &serde_json::Value,
-    ) -> Result<lash_execution_contracts::process::PerformedEffects, crate::ProcessEnvRefusal> {
-        Ok(lash_execution_contracts::process::PerformedEffects::new())
+        start: &lash_vocabulary::LinkedStart,
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Ok(lash_execution_contracts::process::linking::LinkInspection {
+            link: start.link,
+            document: lash_vocabulary::DocumentId::from_bytes([0; 32]),
+            selector: lash_execution_contracts::process::linking::ReachSelector::Start(
+                start.selector.clone(),
+            ),
+            operations: Default::default(),
+            machine: Default::default(),
+            artifacts: Vec::new(),
+            signature: None,
+        })
+    }
+    fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
+        Default::default()
     }
 
     async fn check_args(
@@ -492,11 +514,10 @@ impl ProcessEngine for LawEngine {
                 "stuck" => EngineAction::Steps {
                     steps: vec![StepRequest::Tool {
                         step: StepName("stuck".to_owned()),
-                        effect: law_effect("law_stuck"),
-                        contract: lash_kernel_doc::ContractId::new("law"),
+                        use_: law_use("law_stuck"),
+
                         input: json!({}),
                         site: None,
-                        matched: None,
                     }],
                     wake: None,
                 },
@@ -513,11 +534,10 @@ impl ProcessEngine for LawEngine {
                         .iter()
                         .map(|step| StepRequest::Tool {
                             step: StepName((*step).to_owned()),
-                            effect: law_effect(LAW_PARK),
-                            contract: lash_kernel_doc::ContractId::new("law"),
+                            use_: law_use(LAW_PARK),
+
                             input: json!({}),
                             site: Some(Box::new(law_site(step))),
-                            matched: None,
                         })
                         .collect(),
                     wake: None,
@@ -684,7 +704,10 @@ fn step_entries(call: &ToolCallId) -> u32 {
 
 fn step_tool(step: &StepRequest) -> &str {
     match step {
-        StepRequest::Tool { effect, .. } => effect.as_str(),
+        StepRequest::Tool { use_, .. } => [LAW_FLAKY, LAW_PARK, LAW_READY, LAW_PAGED, "law_stuck"]
+            .into_iter()
+            .find(|name| law_use(name) == *use_)
+            .unwrap_or(""),
         StepRequest::Engine { .. } => "",
     }
 }
@@ -710,6 +733,7 @@ impl ProcessSteps for LawSteps {
         _runtime: &Arc<crate::runtime::process::StepRuntime>,
         _process: &ProcessRecord,
         step: &StepRequest,
+        _target: Option<&crate::runtime::process::steps::InvocationTarget>,
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
         let policy = match step_tool(step) {

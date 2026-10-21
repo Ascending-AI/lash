@@ -262,16 +262,6 @@ impl Activation for ProcessActivation {
         self.forget_published(&owned, &process).await;
         exit
     }
-    /// What the backend's node's package code offers running code
-    /// (FIG-6993), once installed.
-    async fn capabilities(
-        &self,
-    ) -> Result<lash_durable::NodeCapabilities, lash_durable::DurableError> {
-        match self.backend.packages() {
-            Some(packages) => packages.install(&self.backend).await,
-            None => Ok(lash_durable::NodeCapabilities::default()),
-        }
-    }
 }
 
 impl ProcessActivation {
@@ -673,7 +663,13 @@ impl ProcessActivation {
         for step in driver.steps.values() {
             if let Ok(admission) = self
                 .steps
-                .admit(&live.bodies.runtime, &record, &step.request, millis(now))
+                .admit(
+                    &live.bodies.runtime,
+                    &record,
+                    &step.request,
+                    step.target.as_ref(),
+                    millis(now),
+                )
                 .await
             {
                 policies.push((admission.tool, admission.policy));

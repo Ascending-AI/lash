@@ -18,9 +18,10 @@ use lash_core_store::run_spec::ResolvedRun;
 use super::ProcessDefinitionId;
 use super::ProcessEngineRegistry;
 use super::model::ProcessEnvRef;
-use crate::{EffectName, ExecutionOwner, ProcessId, SurfaceTools, ToolExecutionGrant};
+use crate::{ExecutionOwner, SurfaceTools};
 use lash_execution_contracts::process::EngineSettings;
 use lash_execution_contracts::process::ProcessSignature;
+use lash_vocabulary::identity::ProcessId;
 
 /// Chooses the environment and engine settings of a model's process start.
 ///

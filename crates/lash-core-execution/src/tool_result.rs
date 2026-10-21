@@ -41,6 +41,7 @@ pub enum PendingResolver {
     DeclaredStart(DeclaredStart),
     /// The existing durable timer resolves this call with the recorded result.
     Timer {
+        #[serde(with = "durable_instant")]
         deadline: lash_durable::DurableInstant,
         result: serde_json::Value,
     },
@@ -734,5 +735,20 @@ mod tests {
             }),
             "a start naming another session is refused"
         );
+    }
+}
+
+mod durable_instant {
+    use serde::{Deserialize, Serialize};
+    pub fn serialize<S: serde::Serializer>(
+        value: &lash_durable::DurableInstant,
+        out: S,
+    ) -> Result<S::Ok, S::Error> {
+        value.0.serialize(out)
+    }
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
+        input: D,
+    ) -> Result<lash_durable::DurableInstant, D::Error> {
+        i64::deserialize(input).map(lash_durable::DurableInstant)
     }
 }

@@ -1,8 +1,8 @@
 //! A bound extension capability for a test that calls a plugin callback
 //! directly, outside the runtime that would bind it.
 
-use crate::store::plugin_writers::PluginCallbackIdentity;
 use crate::trace::{BodyTrace, ExtensionTrace, TraceRuntime};
+use lash_vocabulary::providers::PluginCallbackIdentity;
 use std::sync::{Arc, Mutex};
 
 /// The capability of one run of a registered callback under a fresh,

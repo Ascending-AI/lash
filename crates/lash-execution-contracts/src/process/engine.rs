@@ -729,6 +729,10 @@ pub mod linked {
         Linked {
             start: LinkedStart,
         },
+        /// Opaque engine-authored input validated by its InlineStarts adapter.
+        Engine {
+            payload: serde_json::Value,
+        },
     }
     #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
     #[serde(deny_unknown_fields)]

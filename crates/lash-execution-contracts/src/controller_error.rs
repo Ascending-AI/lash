@@ -29,7 +29,8 @@ impl From<PluginError> for RuntimeEffectControllerError {
                     terminal_reason,
                 })
                 .into(),
-            error @ (PluginError::PackageNamespace { .. }
+            error @ (PluginError::Package(_)
+            | PluginError::PackageNamespace { .. }
             | PluginError::InternalOperation { .. }
             | PluginError::Preflight(_)
             | PluginError::ProviderConfig { .. }

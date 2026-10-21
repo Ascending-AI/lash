@@ -95,8 +95,7 @@ impl EngineEffectReads for ProcessReads {
             Ok(input) => input,
             Err(message) => return Ok(Err(EngineReadError::Arguments(message))),
         };
-        if let Err(source) = lash_protocol_types::validate_tool_input(&definition.contract, &input)
-        {
+        if let Err(source) = lash_vocabulary::validate_tool_input(&definition.contract, &input) {
             return Ok(Err(EngineReadError::Tool(Box::new(
                 crate::ToolFailure::runtime(
                     crate::ToolFailureClass::InvalidRequest,

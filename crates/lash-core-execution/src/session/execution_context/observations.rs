@@ -239,7 +239,7 @@ impl RuntimeExecutionContext<'_> {
     #[doc(hidden)]
     pub async fn run_executing<F, Fut>(
         self,
-        callback: Option<&crate::store::plugin_writers::PluginCallbackIdentity>,
+        callback: Option<&lash_vocabulary::providers::PluginCallbackIdentity>,
         run: F,
     ) -> Fut::Output
     where

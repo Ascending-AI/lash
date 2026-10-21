@@ -22,6 +22,7 @@
 //! registration; and the adoption of what was staged once the row committed
 //! ([`StartStaging::adopt`]).
 
+use crate::PluginError;
 use lash_execution_contracts::process::StagedRegistration;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -609,7 +610,14 @@ async fn stage<'a>(
         execution_requirements.extend(
             &stores
                 .engines
-                .check_links(&Arc::new(env.clone()), inspection)
+                .check_links_with_seeds(
+                    &Arc::new(env.clone()),
+                    inspection,
+                    registration
+                        .input
+                        .launch()
+                        .map_or(&[], |launch| launch.initial_resolutions.as_slice()),
+                )
                 .map_err(package_start_error)?,
         );
         if let Some(launch) = registration.input.launch() {
@@ -992,6 +1000,7 @@ async fn acquire_env(
     .await;
     let acquired = match held {
         Ok(_) => Ok(()),
+        Err(HoldEnvError::Admission(error)) => Err(error.into()),
         Err(HoldEnvError::Fault(error)) => Err(error),
         Err(HoldEnvError::Refused(refusal)) => {
             return Err(
