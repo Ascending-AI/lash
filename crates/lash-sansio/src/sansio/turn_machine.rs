@@ -1,6 +1,7 @@
 use super::checkpoint_content::Chain;
 use super::*;
 use lash_protocol_types::ReportedFailure;
+use lash_protocol_types::llm::types::RetainedLlmRequest;
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 
 impl<M: TurnProtocol> TurnMachine<M> {
@@ -94,6 +95,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
         protocol_run_offset: usize,
     ) -> Self {
         Self {
+            projection_refusal: None,
             config,
             state: MachineState::PreparingProtocol,
             side_effect_outbox: VecDeque::new(),
@@ -198,7 +200,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// and the checkpoint taken next names this request, so a restore
     /// re-delivers it unchanged. Answers `false`, changing nothing, when the
     /// machine waits on no model call under `id`.
-    pub fn admit_request(&mut self, id: EffectId, request: Arc<LlmRequest>) -> bool {
+    pub fn admit_request(&mut self, id: EffectId, request: Arc<RetainedLlmRequest>) -> bool {
         match &mut self.state {
             MachineState::Waiting {
                 effect_id,
@@ -602,6 +604,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             request,
         });
         let machine = Self {
+            projection_refusal: None,
             config,
             state,
             side_effect_outbox,
@@ -824,6 +827,22 @@ impl<M: TurnProtocol> TurnMachine<M> {
 
     /// Drain the next pending effect. Returns `None` when the host must call
     /// `handle_response()` before more effects become available.
+    pub fn set_allocation_budget(
+        &mut self,
+        budget: lash_protocol_types::allocation::AllocationBudget,
+    ) {
+        self.config.allocation_budget = budget;
+    }
+    pub fn try_poll_effect(
+        &mut self,
+    ) -> Result<Option<Effect<M>>, lash_protocol_types::allocation::ProjectionError> {
+        let effect = self.poll_effect();
+        match self.projection_refusal.take() {
+            Some(error) => Err(error),
+            None => Ok(effect),
+        }
+    }
+
     pub fn poll_effect(&mut self) -> Option<Effect<M>> {
         if let Some(effect) = self.poll_scheduled_effect() {
             return Some(effect);
@@ -932,6 +951,10 @@ impl<M: TurnProtocol> TurnMachine<M> {
         let mut progress_dirty = false;
         for action in actions {
             match action {
+                DriverAction::ProjectionRefused(error) => {
+                    self.projection_refusal = Some(error);
+                    break;
+                }
                 DriverAction::Emit(event) => self.emit(event),
                 DriverAction::AppendEvents(events) => {
                     if !events.is_empty() {
@@ -1155,7 +1178,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     fn handle_llm_complete(
         &mut self,
         id: EffectId,
-        request: Arc<LlmRequest>,
+        request: Arc<RetainedLlmRequest>,
         driver_state: Option<M::DriverState>,
         result: Result<LlmResponse, LlmCallError>,
         text_streamed: bool,
@@ -1192,7 +1215,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
                     .model_tool_calls
                     .response(self.protocol_iteration, id);
                 self.shift(|driver, ctx| {
-                    driver.handle_llm_success(
+                    driver.handle_llm_success_retained(
                         ctx,
                         request,
                         driver_state,

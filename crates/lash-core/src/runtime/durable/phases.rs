@@ -52,7 +52,7 @@ use lash_durable::domain::{
 };
 use output_boundary::OutputBoundary;
 
-use super::head::HeadCache;
+use super::head::SessionOwner;
 use super::phase_root::StagedPhase;
 use super::session::{
     CellExit, CodeCell, ComposedCall, OpenTurn, ParkedTurnState, PhaseCheckpoint, PhaseExit,
@@ -63,7 +63,7 @@ use super::session_mail::{agent_frame_switches, follow_on_mail};
 use super::tool_round::{self, RoundExit};
 use super::turn_scope::end_turn_scope;
 use super::{model_call, turn_cancel, turn_trace};
-use crate::plugin::prompt::{admission_record, load_admitted_call};
+use crate::plugin::prompt::load_admitted_call;
 use crate::{
     ActorContext, Effect, HeldResponse, HostTurnProtocol, SessionStreamEvent, TurnMachine,
 };
@@ -256,7 +256,7 @@ async fn record_answer(
         answer: root,
     }));
     let committed = cx.commit(tx, CommitLabel::MODEL_ANSWER).await?;
-    drive.phase_committed().await;
+    drive.phase_committed(cx).await?;
     Ok(committed)
 }
 
@@ -275,7 +275,7 @@ pub async fn run_phases(
     cx: &ActorContext,
     services: &dyn TurnServices,
     turn: OpenTurn,
-    heads: &mut HeadCache,
+    heads: &mut SessionOwner,
 ) -> Result<PhaseExit, TurnError> {
     let OpenTurn {
         mut drive,
@@ -371,7 +371,7 @@ async fn phase_loop(
     drive: &mut Box<dyn TurnDrive>,
     mut pending: Option<Effect>,
     row: &TurnRow,
-    heads: &mut HeadCache,
+    heads: &mut SessionOwner,
     held: &mut Option<StagedReceipt>,
 ) -> Result<Left, TurnError> {
     let session = row.session.clone();
@@ -430,7 +430,20 @@ async fn phase_loop(
     loop {
         let effect = match pending.take() {
             Some(effect) => effect,
-            None => match drive.machine().poll_effect() {
+            None => match drive.machine().try_poll_effect().map_err(|error| {
+                TurnError::Runtime(match error {
+                    lash_protocol_types::allocation::ProjectionError::Allocation(error) => {
+                        crate::RuntimeError::allocation(error)
+                    }
+                    lash_protocol_types::allocation::ProjectionError::Stored(error) => {
+                        crate::RuntimeEffectControllerError::stored_data_corrupt(
+                            error.record_kind,
+                            error.message,
+                        )
+                        .into_runtime_error()
+                    }
+                })
+            })? {
                 Some(effect) => effect,
                 None => return Err(TurnError::Exec("the turn machine stalled".to_owned())),
             },
@@ -551,6 +564,8 @@ async fn phase_loop(
                                     request,
                                     prompt,
                                     template,
+                                    mut prompt_state,
+                                    allocation_budget,
                                 } = *composed;
                                 // The turn's execution holds them, as it holds
                                 // the turn's own puts.
@@ -575,18 +590,20 @@ async fn phase_loop(
                                 }
                                 let admitted =
                                     AdmittedSend::of_request(&request, Arc::new(template));
-                                let record = admission_record(
+                                let record = lash_core_execution::plugin::prompt::admission_record_retained(
                                     call_key(&session, &run, call),
                                     prompt.as_ref(),
                                     &admitted.template,
                                     &admitted.response,
                                     None,
+                                    &mut prompt_state,
+                                    &allocation_budget,
                                 )
-                                .map_err(|error| {
-                                    TurnError::Exec(format!(
-                                        "the model call's admission does not encode: {error}"
-                                    ))
+                                .map_err(|error| match error {
+                                    lash_core_execution::plugin::prompt::AdmissionRecordError::Encoding(error)=>TurnError::Exec(format!("the model call's admission does not encode: {error}")),
+                                    lash_core_execution::plugin::prompt::AdmissionRecordError::Allocation(error)=>TurnError::Runtime(crate::RuntimeError::allocation(error)),
                                 })?;
+                                tx.stage_prompt_postimage(prompt_state);
                                 (None, request, admitted, Some(record))
                             }
                             PreparedCall::Unsent(refused) => {
@@ -691,7 +708,7 @@ async fn phase_loop(
                     boundary.committed(cx, drive.as_mut()).await?;
                     stored.committed(drive.as_mut());
                     drive.run_changes_committed(&written);
-                    drive.phase_committed().await;
+                    drive.phase_committed(cx).await?;
                     tool_round::release_cell_emissions(cx, drive.as_mut(), held, label).await?;
                     unsettled = true;
                     if !resent {
@@ -834,7 +851,7 @@ async fn phase_loop(
                             response.committed(CommitLabel::MODEL_DONE);
                         }
                         unsettled = false;
-                        after.committed(drive.as_mut()).await;
+                        after.committed(cx, drive.as_mut()).await?;
                         tool_round::release_cell_emissions(
                             cx,
                             drive.as_mut(),
@@ -869,7 +886,7 @@ async fn phase_loop(
                 let unconsumed = match held {
                     Some((response, after)) if response.committed_as().is_some() => {
                         unsettled = false;
-                        after.committed(drive.as_mut()).await;
+                        after.committed(cx, drive.as_mut()).await?;
                         None
                     }
                     Some((response, _)) => Some(response),
@@ -1008,7 +1025,7 @@ async fn phase_loop(
                 .await?;
                 stored.committed(drive.as_mut());
                 drive.run_changes_committed(&written);
-                drive.phase_committed().await;
+                drive.phase_committed(cx).await?;
                 tool_round::release_cell_emissions(
                     cx,
                     drive.as_mut(),
@@ -1085,6 +1102,7 @@ async fn phase_loop(
                     let commit = drive
                         .finish(cx, done, heads.head(cx, &session).await?)
                         .await?;
+                    tx.session_postimage(commit.postimage);
                     drive.stage_model_calls(&mut tx)?;
                     if let Some(present) = carry.take() {
                         present.write(&mut tx);
@@ -1153,7 +1171,7 @@ async fn phase_loop(
                         });
                         if more { Release::Ready } else { Release::Idle }
                     });
-                    super::session_publication::commit(
+                    let receipt = super::session_publication::commit(
                         cx,
                         drive.code_executor().as_ref(),
                         &session,
@@ -1169,6 +1187,8 @@ async fn phase_loop(
                         };
                         refusal.map_or(TurnError::Durable(error), TurnError::Runtime)
                     })?;
+                    heads.acknowledged(cx, &session).await?;
+                    drive.committed(cx, &receipt).await?;
                     // The turn's commit carried a held receipt: the call's
                     // sealed record is in it, and nothing reads the receipt
                     // once the turn has ended. A commit that failed leaves it
@@ -1202,9 +1222,7 @@ async fn phase_loop(
                             ),
                         ),
                     );
-                    drive.committed().await;
-                    // The commit moved the head: the next turn loads it again.
-                    heads.evict();
+
                     Ok::<_, TurnError>(if released {
                         PhaseExit::Released
                     } else {
@@ -1241,10 +1259,14 @@ struct AfterModelDone {
 impl AfterModelDone {
     /// The response committed: the phase's content is stored, its run
     /// changes recorded and the working state it carried installed.
-    async fn committed(self, drive: &mut dyn TurnDrive) {
+    async fn committed(
+        self,
+        cx: &ActorContext,
+        drive: &mut dyn TurnDrive,
+    ) -> Result<(), TurnError> {
         self.stored.committed(drive);
         drive.run_changes_committed(&self.written);
-        drive.phase_committed().await;
+        drive.phase_committed(cx).await
     }
 }
 
@@ -1272,7 +1294,7 @@ async fn stop(
     row: &TurnRow,
     request: Option<TurnCancelRequest>,
     stopped: turn_cancel::StoppedTurn,
-    heads: &mut HeadCache,
+    heads: &mut SessionOwner,
 ) -> Result<PhaseExit, TurnError> {
     let Some(request) = request else {
         return Ok(PhaseExit::CancelRequested);
@@ -1324,12 +1346,23 @@ pub(super) async fn refuse(
             "the turn was refused; the turn ends with the refusal"
         );
     }
+    let current = match cx.session_projection().await {
+        Ok(Some(projection)) => projection.turn,
+        Ok(None) | Err(_) => {
+            // A refused head commit has already poisoned its whole basis.
+            // Reload coherently before deriving the refusal's terminal.
+            cx.invalidate_session_projection().await;
+            let mut heads = super::head::SessionOwner::default();
+            heads.head(cx, &row.session).await?;
+            cx.session_projection()
+                .await?
+                .and_then(|projection| projection.turn)
+        }
+    };
+    let Some(row) = current.as_ref().filter(|current| current.run == row.run) else {
+        return Ok(());
+    };
     let mut tx = cx.begin().await?;
-    let current = cx.durable_reads()?.turn(&row.session).await?;
-    let row = current
-        .as_ref()
-        .filter(|current| current.run == row.run)
-        .unwrap_or(row);
     let cancelled = tool_round::cancel_open_round(cx, &mut tx, row).await?;
     let cause = crate::store::RunTerminalCause::Refused {
         refusal: refusal.into(),

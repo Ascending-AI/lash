@@ -377,7 +377,16 @@ impl Scenario for ParkScenario {
     async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
         *self.shared.clock.lock().expect("clock") = Some(Arc::clone(&clock));
         let (stores, durable) = park_store::open(self.tier, clock, &self.keep).await;
-        *self.shared.backend.lock().expect("backend") = Some(Backend::for_testing(stores));
+        *self.shared.backend.lock().expect("backend") = Some(Backend::for_testing(
+            stores,
+            lash_durable::OwnerRetentionSettings {
+                idle_evict: std::time::Duration::from_secs(60),
+                max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+                max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+                max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+                max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+            },
+        ));
         durable
     }
 

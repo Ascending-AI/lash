@@ -30,6 +30,7 @@ pub const EDGES_TABLE: &str = "prompt_snapshot_texts";
 /// Immutable fragment-to-fragment edges.
 pub const INDEX_EDGES_TABLE: &str = "prompt_text_edges";
 /// The one reusable lowered history root owned by each session.
+pub const RETIREMENT_TABLE: &str = "prompt_retirement_frontier";
 pub const PREFIXES_TABLE: &str = "prompt_prefixes";
 
 /// The edge part of a text a call's snapshot references.
@@ -42,6 +43,8 @@ crate::statements! {
     /// `prompt_snapshots`, `prompt_texts` and `prompt_snapshot_texts`
     /// statements both backends issue verbatim.
     pub struct PromptStatements @ "durable_prompt" {
+        /// Durable prompt cleanup still queued.
+        retirement_count = "SELECT count(*) FROM prompt_retirement_frontier";
         /// Record call `?3` of owner `?2` in session `?1` with snapshot `?4`
         /// and request `?5`, written at epoch `?6`. No row when the call
         /// already has one.

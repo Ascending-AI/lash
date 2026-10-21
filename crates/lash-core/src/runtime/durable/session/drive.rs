@@ -109,7 +109,7 @@ pub trait TurnDrive: Send {
         &mut self,
         cx: &ActorContext,
         id: EffectId,
-        request: Arc<LlmRequest>,
+        request: Arc<lash_protocol_types::llm::types::RetainedLlmRequest>,
         admitted: &lash_protocol_types::llm::types::AdmittedSend,
         attempt: ModelCallAttempt,
     ) -> Result<(), TurnError>;
@@ -131,7 +131,7 @@ pub trait TurnDrive: Send {
         cx: &ActorContext,
         id: EffectId,
         call: u32,
-        request: Arc<LlmRequest>,
+        request: Arc<lash_protocol_types::llm::types::RetainedLlmRequest>,
     ) -> Result<PreparedCall, TurnError>;
 
     /// The steering input the turn's checkpoints delivered, with its
@@ -216,7 +216,9 @@ pub trait TurnDrive: Send {
     /// Record that the phase whose transaction carried the last
     /// [`consume_cell`](Self::consume_cell) committed: its working capture
     /// is installed.
-    async fn phase_committed(&mut self) {}
+    async fn phase_committed(&mut self, _cx: &ActorContext) -> Result<(), TurnError> {
+        Ok(())
+    }
 
     /// The session's code executor: what publishes the heap pages of the
     /// execution root a phase commit names (FIG-6418). None for a drive
@@ -403,5 +405,9 @@ pub trait TurnDrive: Send {
     /// (ADR 0122, FIG-5800). A drive whose commit was refused, or whose
     /// acknowledgement was lost, is dropped without it and publishes none of
     /// what it held.
-    async fn committed(&mut self);
+    async fn committed(
+        &mut self,
+        cx: &ActorContext,
+        receipt: &lash_durable::ActorCommit,
+    ) -> Result<(), TurnError>;
 }

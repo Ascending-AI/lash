@@ -165,8 +165,23 @@ async fn resumed_turn_keeps_its_trace_scope(tier: Tier, resume: Resume) {
     // The owner keeps the parked session hot only briefly, so the
     // resolution wakes a released actor that a claim resumes.
     let settings = lash_core_execution::DurableSettings {
-        idle_evict: Duration::from_millis(50),
-        ..lash_core_execution::DurableSettings::default()
+        owner_retention: Some(lash_durable::OwnerRetentionSettings {
+            idle_evict: Duration::from_millis(50),
+            max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+            max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+            max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+            max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+        }),
+        ..lash_core_execution::DurableSettings {
+            owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                idle_evict: std::time::Duration::from_secs(60),
+                max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+                max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+                max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+                max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+            }),
+            ..lash_core_execution::DurableSettings::default()
+        }
     };
     let Some(mut world) = World::configured(tier, settings, builder(&telemetry, &keys)).await
     else {
@@ -283,8 +298,23 @@ async fn suspended_cell_closes_on_takeover(tier: Tier, discard: bool) {
     let telemetry = Telemetry::default();
     let (keys, mut parked) = tokio::sync::mpsc::unbounded_channel();
     let settings = lash_core_execution::DurableSettings {
-        idle_evict: Duration::from_millis(50),
-        ..lash_core_execution::DurableSettings::default()
+        owner_retention: Some(lash_durable::OwnerRetentionSettings {
+            idle_evict: Duration::from_millis(50),
+            max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+            max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+            max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+            max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+        }),
+        ..lash_core_execution::DurableSettings {
+            owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                idle_evict: std::time::Duration::from_secs(60),
+                max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+                max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+                max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+                max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+            }),
+            ..lash_core_execution::DurableSettings::default()
+        }
     };
     let Some(mut world) = World::configured(tier, settings, cell_builder(&telemetry, &keys)).await
     else {

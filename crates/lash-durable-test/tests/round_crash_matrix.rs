@@ -594,7 +594,19 @@ impl Scenario for RoundScenario {
     async fn database(&self, clock: Arc<SimClock>) -> Arc<dyn DurableStore> {
         let stores = sim::memory(Arc::clone(&clock)).await;
         let database = Arc::new(stores.durable_store());
-        *self.backend.lock_recover() = Some((Backend::for_testing(Arc::new(stores)), clock));
+        *self.backend.lock_recover() = Some((
+            Backend::for_testing(
+                Arc::new(stores),
+                lash_durable::OwnerRetentionSettings {
+                    idle_evict: std::time::Duration::from_secs(60),
+                    max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+                    max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+                    max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+                    max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+                },
+            ),
+            clock,
+        ));
         database
     }
 

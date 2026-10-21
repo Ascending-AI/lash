@@ -286,6 +286,35 @@ impl DurableStore for RecordedStore {
         opened
     }
 
+    async fn begin_retained(
+        &self,
+        actor: &ActorKey,
+        epoch: lash_durable::Epoch,
+        expected: lash_durable::StateRevision,
+        max_mail_bytes: u64,
+    ) -> Result<ActorTx, DurableError> {
+        let opened = self
+            .inner
+            .begin_retained(actor, epoch, expected, max_mail_bytes)
+            .await;
+        if let Err(error) = &opened {
+            let outcome = match error {
+                DurableError::OwnershipLost(_) => "ownership_lost",
+                _ => "failed",
+            };
+            report(
+                &self.node,
+                Event::BeginRefused {
+                    actor: actor.to_string(),
+                    epoch: epoch.0,
+                    outcome: outcome.to_owned(),
+                    error: error.to_string(),
+                },
+            );
+        }
+        opened
+    }
+
     async fn open_process(
         &self,
         actor: &ActorKey,

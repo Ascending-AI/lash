@@ -259,12 +259,12 @@ struct ScriptedProtocol;
 
 impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for ScriptedProtocol {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
-        match ctx.project_llm_request(false) {
+        match ctx.project_llm_request_retained(false) {
             Ok(request) => vec![DriverAction::Start(PendingWork::Llm {
                 request,
                 driver_state: None,
             })],
-            Err(error) => lash_sansio::sansio::stored_history_refusal_actions(error),
+            Err(error) => vec![lash_sansio::DriverAction::ProjectionRefused(error)],
         }
     }
 
@@ -355,6 +355,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for ScriptedProtocol {
 /// The machine every turn of the deployment runs under.
 fn machine_config(session: &SessionId, run: &TurnId) -> TurnMachineConfig {
     TurnMachineConfig {
+        allocation_budget: lash_protocol_types::allocation::AllocationBudget::unowned(),
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         protocol_driver: Arc::new(ScriptedProtocol),
         projector: Arc::new(ChatContextProjector::default()),
@@ -654,7 +655,7 @@ impl TurnDrive for SimDrive {
         _cx: &ActorContext,
         _id: EffectId,
         _call: u32,
-        request: Arc<LlmRequest>,
+        request: Arc<lash_protocol_types::llm::types::RetainedLlmRequest>,
     ) -> Result<PreparedCall, TurnError> {
         let route = ProviderRouteIdentity {
             provider: "sim".into(),
@@ -663,13 +664,15 @@ impl TurnDrive for SimDrive {
         };
         let template = RecordedRequestTemplate::of_request(
             route,
-            &request,
+            &request.materialize(),
             &lash_protocol_types::llm::types::SegmentCache::disabled(),
         )
         .map_err(|error| TurnError::Exec(error.to_string()))?;
         Ok(PreparedCall::Admit(Box::new(ComposedCall {
             request,
             prompt: None,
+            allocation_budget: lash_protocol_types::allocation::AllocationBudget::unowned(),
+            prompt_state: Default::default(),
             template,
         })))
     }
@@ -678,7 +681,7 @@ impl TurnDrive for SimDrive {
         &mut self,
         _cx: &ActorContext,
         _id: EffectId,
-        request: Arc<LlmRequest>,
+        request: Arc<lash_protocol_types::llm::types::RetainedLlmRequest>,
         _admitted: &lash_protocol_types::llm::types::AdmittedSend,
         attempt: ModelCallAttempt,
     ) -> Result<(), TurnError> {
@@ -774,7 +777,13 @@ impl TurnDrive for SimDrive {
     fn stop_cell(&mut self) {}
 
     /// Nothing is held for the commit.
-    async fn committed(&mut self) {}
+    async fn committed(
+        &mut self,
+        _cx: &ActorContext,
+        _receipt: &lash_durable::ActorCommit,
+    ) -> Result<(), TurnError> {
+        Ok(())
+    }
 }
 
 /// A body's journal-local output, owned by its turn.

@@ -1,6 +1,7 @@
 use super::*;
 use lash_protocol_types::SessionId;
 use lash_protocol_types::TurnId;
+use lash_protocol_types::llm::types::RetainedLlmRequest;
 
 impl TurnProtocol for UnitTurnProtocol {
     type IntentOutcome = ();
@@ -160,7 +161,7 @@ pub enum Effect<M: TurnProtocol = UnitTurnProtocol> {
     },
     LlmCall {
         id: EffectId,
-        request: Arc<LlmRequest>,
+        request: Arc<RetainedLlmRequest>,
     },
     ToolCalls {
         id: EffectId,
@@ -495,7 +496,7 @@ pub enum PendingWork<M: TurnProtocol = UnitTurnProtocol> {
     /// under. The machine requests this itself at each iteration boundary.
     SyncExecutionEnvironment,
     Llm {
-        request: Arc<LlmRequest>,
+        request: Arc<RetainedLlmRequest>,
         driver_state: Option<M::DriverState>,
     },
     WaitingForToolResults {
@@ -762,7 +763,7 @@ pub(super) enum AnsweredWork<M: TurnProtocol = UnitTurnProtocol> {
     },
     Llm {
         id: EffectId,
-        request: Arc<LlmRequest>,
+        request: Arc<RetainedLlmRequest>,
         driver_state: Option<M::DriverState>,
         result: Result<LlmResponse, LlmCallError>,
         text_streamed: bool,
@@ -787,6 +788,7 @@ pub(super) enum AnsweredWork<M: TurnProtocol = UnitTurnProtocol> {
 #[allow(clippy::large_enum_variant)]
 pub enum DriverAction<M: TurnProtocol = UnitTurnProtocol> {
     Emit(SessionStreamEvent),
+    ProjectionRefused(lash_protocol_types::allocation::ProjectionError),
     AppendEvents(Vec<SessionHistoryRecord<M::Event>>),
     /// Hand the host this work and wait for its answer.
     Start(PendingWork<M>),
@@ -842,6 +844,20 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
             environment: self.environment,
         })?;
         Ok(projected)
+    }
+
+    pub fn project_llm_request_retained(
+        &self,
+        use_tools: bool,
+    ) -> Result<Arc<RetainedLlmRequest>, lash_protocol_types::allocation::ProjectionError> {
+        self.config.projector.project_retained(ProjectorContext {
+            config: self.config,
+            messages: self.prompt_messages,
+            events: self.events,
+            protocol_iteration: self.protocol_iteration,
+            use_tools,
+            environment: self.environment,
+        })
     }
 
     pub fn protocol_iteration(&self) -> usize {
@@ -964,6 +980,19 @@ pub trait ContextProjector<M: TurnProtocol = UnitTurnProtocol>: Send + Sync {
         false
     }
 
+    fn project_retained(
+        &self,
+        ctx: ProjectorContext<'_, M>,
+    ) -> Result<Arc<RetainedLlmRequest>, lash_protocol_types::allocation::ProjectionError> {
+        let budget = ctx.config.allocation_budget.clone();
+        let request = self
+            .project(ctx)
+            .map_err(lash_protocol_types::allocation::ProjectionError::Stored)?;
+        RetainedLlmRequest::try_from_flat(&request, &budget)
+            .map(Arc::new)
+            .map_err(Into::into)
+    }
+
     fn project(
         &self,
         ctx: ProjectorContext<'_, M>,
@@ -986,12 +1015,33 @@ impl<M: TurnProtocol> ContextProjector<M> for ChatContextProjector {
         &self,
         ctx: ProjectorContext<'_, M>,
     ) -> Result<Arc<LlmRequest>, lash_protocol_types::StoredDataCorruption> {
-        let messages = ctx.messages.render_prompt(&self.history).messages;
+        self.project_retained(ctx)
+            .map(|request| Arc::new(request.materialize()))
+            .map_err(|error| lash_protocol_types::StoredDataCorruption {
+                record_kind: "request projection".into(),
+                message: error.to_string(),
+            })
+    }
 
-        Ok(Arc::new(LlmRequest {
+    fn project_retained(
+        &self,
+        ctx: ProjectorContext<'_, M>,
+    ) -> Result<Arc<RetainedLlmRequest>, lash_protocol_types::allocation::ProjectionError> {
+        let messages = ctx
+            .messages
+            .render_retained(&self.history, &ctx.config.allocation_budget)
+            .map_err(lash_protocol_types::allocation::ProjectionError::Allocation)?;
+
+        let bound = lash_protocol_types::allocation::payload_capacity(&ctx.config.model, 1024)
+            .saturating_add(lash_protocol_types::allocation::payload_capacity(
+                &ctx.config.generation,
+                ctx.config.session_id.len() + ctx.config.agent_frame_id.len(),
+            ));
+        let hold = ctx.config.allocation_budget.reserve(bound)?;
+        let request = LlmRequest {
             instructions: None,
             model: ctx.config.model.clone(),
-            messages,
+            messages: Vec::new(),
 
             tools: if ctx.use_tools {
                 Arc::clone(&ctx.environment.tool_specs)
@@ -1017,7 +1067,10 @@ impl<M: TurnProtocol> ContextProjector<M> for ChatContextProjector {
             stream_events: None,
             provider_trace: None,
             attempt_control: Default::default(),
-        }))
+        };
+        Ok(Arc::new(RetainedLlmRequest::admitted_envelope(
+            request, messages, hold,
+        )))
     }
 }
 
@@ -1077,6 +1130,25 @@ pub trait ProtocolDriverHandle<M: TurnProtocol = UnitTurnProtocol>: Send + Sync 
     /// `calls` names every tool call the response carries: a driver admits a
     /// call under `calls.id(content_index)`, the call's position in the
     /// response, counted before anything is refused (ADR 0117 §2).
+    fn handle_llm_success_retained(
+        &self,
+        ctx: DriverContextView<'_, M>,
+        request: Arc<RetainedLlmRequest>,
+        driver_state: Option<M::DriverState>,
+        response: LlmResponse,
+        calls: &ResponseToolCalls,
+        text_streamed: bool,
+    ) -> Vec<DriverAction<M>> {
+        self.handle_llm_success(
+            ctx,
+            Arc::new(request.materialize()),
+            driver_state,
+            response,
+            calls,
+            text_streamed,
+        )
+    }
+
     fn handle_llm_success(
         &self,
         ctx: DriverContextView<'_, M>,
@@ -1206,6 +1278,7 @@ impl ResponseToolCalls {
 
 /// Configuration for a `TurnMachine` instance.
 pub struct TurnMachineConfig<M: TurnProtocol = UnitTurnProtocol> {
+    pub allocation_budget: lash_protocol_types::allocation::AllocationBudget,
     /// Where this turn's model-issued tool calls are admitted.
     pub model_tool_calls: ModelToolCalls,
     pub protocol_driver: Arc<dyn ProtocolDriverHandle<M>>,

@@ -16,6 +16,7 @@
 //! snapshot until the call settles (FIG-5946). The records are version 1.
 //! None is ever read back to recompose a request.
 
+use lash_protocol_types::allocation::{AllocationBudget, AllocationError, AllocationHold};
 use std::num::NonZeroU32;
 
 use serde::{Deserialize, Serialize};
@@ -519,7 +520,7 @@ pub struct PromptSnapshot {
 pub const PROVIDER_BODY_CHUNK_BYTES: usize = 32 * 1024;
 
 /// A content-addressed fragment tree of the exact admitted wire template.
-/// Prefix subtrees are shared; an append replaces only the right index path.
+/// Complete prefix subtrees are shared and an ordered index roots the forest.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ChunkedRequestTemplate {
@@ -541,8 +542,8 @@ pub struct ChunkedRequestTemplate {
     pub inline: Vec<(BlobRef, String)>,
 }
 
-/// A stored wire fragment or a binary index node. Its encoded bytes have
-/// their own content address; each branch has exactly two edges.
+/// A stored wire fragment, complete binary subtree or ordered forest index.
+/// Its encoded bytes have their own content address.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "fragment", rename_all = "snake_case", deny_unknown_fields)]
 #[serde(bound(deserialize = "Text: Deserialize<'de>, Slot: Deserialize<'de>"))]
@@ -561,6 +562,13 @@ pub enum RequestFragment<Text = String, Slot = Box<lash_protocol_types::llm::typ
             serde(deserialize_with = "observe_fragment_decode")
         )]
         slot: Slot,
+    },
+    Index {
+        #[cfg_attr(
+            any(test, feature = "testing"),
+            serde(deserialize_with = "observe_fragment_decode")
+        )]
+        children: Vec<PromptTextRef>,
     },
     Branch {
         #[cfg_attr(
@@ -610,6 +618,10 @@ impl RequestFragment {
 impl<Text, Slot> RequestFragment<Text, Slot> {
     pub fn children(&self) -> Vec<String> {
         match self {
+            Self::Index { children } => children
+                .iter()
+                .map(|child| child.blob.as_str().to_owned())
+                .collect(),
             Self::Branch { left, right } => vec![
                 left.blob.as_str().to_owned(),
                 right.blob.as_str().to_owned(),
@@ -634,6 +646,55 @@ pub struct PromptText {
     pub children: Vec<String>,
 }
 
+#[derive(Clone, Debug)]
+struct AdmittedPromptText {
+    body: PromptText,
+    _hold: AllocationHold,
+}
+impl std::ops::Deref for AdmittedPromptText {
+    type Target = PromptText;
+    fn deref(&self) -> &PromptText {
+        &self.body
+    }
+}
+impl PartialEq for AdmittedPromptText {
+    fn eq(&self, other: &Self) -> bool {
+        self.body == other.body
+    }
+}
+impl Eq for AdmittedPromptText {}
+
+#[derive(Clone, Debug)]
+struct TextKey(std::sync::Arc<AdmittedPromptText>);
+impl std::borrow::Borrow<str> for TextKey {
+    fn borrow(&self) -> &str {
+        &self.0.hash
+    }
+}
+impl std::hash::Hash for TextKey {
+    fn hash<H: std::hash::Hasher>(&self, hasher: &mut H) {
+        std::hash::Hash::hash(self.0.hash.as_str(), hasher);
+    }
+}
+impl PartialEq for TextKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.hash == other.0.hash
+    }
+}
+impl Eq for TextKey {}
+
+#[derive(Clone, Debug)]
+struct TextUse {
+    text: std::sync::Arc<AdmittedPromptText>,
+    count: usize,
+}
+impl PartialEq for TextUse {
+    fn eq(&self, other: &Self) -> bool {
+        self.text == other.text
+    }
+}
+impl Eq for TextUse {}
+
 /// The texts a request references: the roots its record holds edges to, and
 /// every text under them, each once, ordered by content address.
 ///
@@ -644,8 +705,10 @@ pub struct PromptText {
 #[derive(Clone, Debug, Default)]
 pub struct RequestTexts {
     roots: Vec<String>,
-    texts: crate::persistent_map::PersistentMap<String, std::sync::Arc<PromptText>>,
+    texts: crate::persistent_map::PersistentMap<TextKey, TextUse>,
     len: usize,
+    delta: Option<std::sync::Arc<[std::sync::Arc<AdmittedPromptText>]>>,
+    _metadata: std::sync::Arc<[AllocationHold]>,
 }
 
 impl PartialEq for RequestTexts {
@@ -655,7 +718,7 @@ impl PartialEq for RequestTexts {
         }
         let mut equal = true;
         self.texts.for_each(|hash, text| {
-            equal &= other.texts.get(hash) == Some(text);
+            equal &= other.texts.get(hash.0.hash.as_str()) == Some(text);
         });
         equal
     }
@@ -669,7 +732,12 @@ impl RequestTexts {
     pub fn from_texts(texts: impl IntoIterator<Item = PromptText>) -> Self {
         let mut texts = texts
             .into_iter()
-            .map(std::sync::Arc::new)
+            .map(|body| {
+                std::sync::Arc::new(AdmittedPromptText {
+                    body,
+                    _hold: Default::default(),
+                })
+            })
             .collect::<Vec<_>>();
         texts.sort_by(|left, right| left.hash.cmp(&right.hash));
         texts.dedup_by(|later, earlier| later.hash == earlier.hash);
@@ -685,11 +753,28 @@ impl RequestTexts {
         Self {
             roots,
             len: texts.len(),
+            delta: None,
+            _metadata: Default::default(),
             texts: texts
                 .into_iter()
-                .map(|text| (text.hash.clone(), text))
+                .map(|text| (TextKey(text.clone()), TextUse { text, count: 1 }))
                 .collect(),
         }
+    }
+
+    pub fn retain_allocation(&mut self, hold: AllocationHold) {
+        let mut holds = Vec::with_capacity(self._metadata.len() + 1);
+        holds.extend(self._metadata.iter().cloned());
+        holds.push(hold);
+        self._metadata = holds.into();
+    }
+
+    /// Changed bodies supplied by an acknowledged persistent owner. Omitted
+    /// bodies are external references and must still exist under the writer.
+    pub fn supplied_delta(&self) -> Option<impl Iterator<Item = &PromptText>> {
+        self.delta
+            .as_ref()
+            .map(|delta| delta.iter().map(|text| &text.body))
     }
 
     /// The texts the record roots, in address order.
@@ -699,7 +784,7 @@ impl RequestTexts {
 
     /// The text stored under `hash`.
     pub fn get(&self, hash: &str) -> Option<&PromptText> {
-        self.texts.get(hash).map(std::sync::Arc::as_ref)
+        self.texts.get(hash).map(|entry| &entry.text.body)
     }
 
     /// Every text, in address order.
@@ -708,7 +793,7 @@ impl RequestTexts {
         // store lookups keep the shared index; only an enumerator needs its
         // addresses sorted into the public iteration order.
         let mut texts = Vec::with_capacity(self.len);
-        self.texts.for_each(|_, text| texts.push(text.as_ref()));
+        self.texts.for_each(|_, entry| texts.push(&entry.text.body));
         texts.sort_unstable_by(|left, right| left.hash.cmp(&right.hash));
         texts.into_iter()
     }
@@ -763,7 +848,7 @@ fn chunk_text(text: &str, texts: &mut Vec<(BlobRef, String)>) -> Vec<PromptTextR
     chunks
 }
 
-type Leaf = (PromptTextRef, std::sync::Arc<PromptText>);
+type Leaf = (PromptTextRef, std::sync::Arc<AdmittedPromptText>);
 
 /// Store a fragment by its exact encoding, never by re-rendered JSON.
 fn encode_fragment(
@@ -776,12 +861,83 @@ fn encode_fragment(
         text: body.into(),
         children: fragment.children(),
     };
-    (reference, std::sync::Arc::new(text))
+    (
+        reference,
+        std::sync::Arc::new(AdmittedPromptText {
+            body: text,
+            _hold: Default::default(),
+        }),
+    )
+}
+
+fn encode_fragment_owned(
+    fragment: &RequestFragment<&str, &lash_protocol_types::llm::types::AttachmentSlot>,
+    budget: &AllocationBudget,
+) -> Result<Leaf, AllocationError> {
+    let hold = budget.reserve(lash_protocol_types::allocation::payload_capacity(
+        fragment,
+        std::mem::size_of::<AdmittedPromptText>(),
+    ))?;
+    let (reference, mut text) = encode_fragment(fragment);
+    std::sync::Arc::get_mut(&mut text)
+        .expect("new fragment is private")
+        ._hold = hold;
+    Ok((reference, text))
+}
+
+fn encode_branch_owned(
+    left: &AdmittedPromptText,
+    right: &AdmittedPromptText,
+    budget: &AllocationBudget,
+) -> Result<std::sync::Arc<AdmittedPromptText>, AllocationError> {
+    #[derive(Serialize)]
+    struct Reference<'a> {
+        blob: &'a str,
+        bytes: u32,
+    }
+    #[derive(Serialize)]
+    struct Branch<'a> {
+        fragment: &'static str,
+        left: Reference<'a>,
+        right: Reference<'a>,
+    }
+    fn reference(text: &AdmittedPromptText) -> Reference<'_> {
+        Reference {
+            blob: text.hash.as_str(),
+            bytes: u32::try_from(text.text.len()).unwrap_or(u32::MAX),
+        }
+    }
+    let branch = Branch {
+        fragment: "branch",
+        left: reference(left),
+        right: reference(right),
+    };
+    let hold = budget.reserve(lash_protocol_types::allocation::payload_capacity(
+        &branch,
+        std::mem::size_of::<AdmittedPromptText>(),
+    ))?;
+    // Both references are minted by RequestFragment::reference: two fixed
+    // 64-byte digests and u32 lengths fit without a per-branch heap buffer.
+    let mut scratch = [0u8; 512];
+    let mut writer = std::io::Cursor::new(scratch.as_mut_slice());
+    serde_json::to_writer(&mut writer, &branch).expect("fixed-size branch references encode");
+    let len = writer.position() as usize;
+    let body = std::str::from_utf8(&scratch[..len]).expect("JSON encoding is UTF-8");
+    let hash = RequestFragment::reference(body).blob.0;
+    let body = PromptText {
+        hash,
+        text: body.into(),
+        children: vec![left.hash.clone(), right.hash.clone()],
+    };
+    Ok(std::sync::Arc::new(AdmittedPromptText {
+        body,
+        _hold: hold,
+    }))
 }
 
 fn keep_fragment(
     fragment: &RequestFragment<&str, &lash_protocol_types::llm::types::AttachmentSlot>,
-    texts: &mut Vec<(BlobRef, std::sync::Arc<PromptText>)>,
+    texts: &mut Vec<(BlobRef, std::sync::Arc<AdmittedPromptText>)>,
 ) -> PromptTextRef {
     let (reference, encoded) = encode_fragment(fragment);
     texts.push((reference.blob.clone(), encoded));
@@ -820,9 +976,18 @@ impl TextChunker {
         }
     }
 
-    fn literal(&mut self, text: &str, leaves: &mut Vec<Leaf>) {
+    fn literal_owned(
+        &mut self,
+        text: &str,
+        leaves: &mut Vec<Leaf>,
+        budget: &AllocationBudget,
+    ) -> Result<(), AllocationError> {
         let leaf = |text: &str, leaves: &mut Vec<Leaf>| {
-            leaves.push(encode_fragment(&RequestFragment::Literal { text }));
+            leaves.push(encode_fragment_owned(
+                &RequestFragment::Literal { text },
+                budget,
+            )?);
+            Ok::<(), AllocationError>(())
         };
         let mut start = 0;
         let mut string_start = 0;
@@ -830,7 +995,7 @@ impl TextChunker {
             // Oversize messages split from their own start, on UTF-8
             // boundaries, without shifting earlier chunks.
             if offset + ch.len_utf8() - start > PROVIDER_BODY_CHUNK_BYTES {
-                leaf(&text[start..offset], leaves);
+                leaf(&text[start..offset], leaves)?;
                 start = offset;
             }
             if self.quoted {
@@ -845,7 +1010,7 @@ impl TextChunker {
                             && offset + 1 - string_start >= 4096
                             && offset + 1 - start >= 4096
                         {
-                            leaf(&text[start..offset + 1], leaves);
+                            leaf(&text[start..offset + 1], leaves)?;
                             start = offset + 1;
                         }
                     }
@@ -867,7 +1032,7 @@ impl TextChunker {
             } else {
                 if ch == ']' && self.history_depth == Some(self.depth) {
                     if start < offset {
-                        leaf(&text[start..offset], leaves);
+                        leaf(&text[start..offset], leaves)?;
                     }
                     start = offset;
                     self.prefix_end = Some(leaves.len());
@@ -876,7 +1041,7 @@ impl TextChunker {
                     self.messages += 1;
                     if self.messages.is_multiple_of(8) && offset - start >= 8192 {
                         if start < offset {
-                            leaf(&text[start..offset], leaves);
+                            leaf(&text[start..offset], leaves)?;
                         }
                         // The comma belongs to the next group, so appending
                         // leaves completed groups unchanged.
@@ -898,54 +1063,50 @@ impl TextChunker {
             }
         }
         if start < text.len() {
-            leaf(&text[start..], leaves);
+            leaf(&text[start..], leaves)?;
         }
+        Ok(())
     }
 }
 
-/// An item's leaves, kept with the item: the first of a run, and one after
-/// another item, whose leading separator rides in its first leaf.
-struct ItemLeaves(Vec<Leaf>);
-struct SeparatedItemLeaves(Vec<Leaf>);
-
-fn item_leaves(
+fn item_leaves_owned(
     item: &lash_protocol_types::llm::types::RequestSegment,
     separated: bool,
-) -> Vec<Leaf> {
+    budget: &AllocationBudget,
+) -> Result<Vec<Leaf>, AllocationError> {
     use lash_protocol_types::llm::types::SegmentPart;
     let mut leaves = Vec::new();
     let mut separator = separated;
     for part in item.parts() {
-        // An item's literals each start outside any string: a slot is a
-        // whole value.
         match part {
             SegmentPart::Literal(text) => {
                 let mut chunker = TextChunker::new(false);
                 if std::mem::take(&mut separator) {
-                    chunker.literal(&format!(",{text}"), &mut leaves);
+                    chunker.literal_owned(&format!(",{text}"), &mut leaves, budget)?;
                 } else {
-                    chunker.literal(text, &mut leaves);
+                    chunker.literal_owned(text, &mut leaves, budget)?;
                 }
             }
             SegmentPart::Slot(slot) => {
                 if std::mem::take(&mut separator) {
-                    leaves.push(encode_fragment(&RequestFragment::Literal { text: "," }));
+                    leaves.push(encode_fragment_owned(
+                        &RequestFragment::Literal { text: "," },
+                        budget,
+                    )?);
                 }
-                leaves.push(encode_fragment(&RequestFragment::Attachment {
-                    slot: slot.as_ref(),
-                }));
+                leaves.push(encode_fragment_owned(
+                    &RequestFragment::Attachment { slot },
+                    budget,
+                )?);
             }
         }
     }
-    leaves
+    Ok(leaves)
 }
 
-/// A canonical append tree: the left subtree is the largest complete
-/// power-of-two prefix smaller than the sequence. Every completed subtree
-/// keeps its address when the sequence grows.
 fn fragment_tree(
     fragments: &[PromptTextRef],
-    texts: &mut Vec<(BlobRef, std::sync::Arc<PromptText>)>,
+    texts: &mut Vec<(BlobRef, std::sync::Arc<AdmittedPromptText>)>,
 ) -> PromptTextRef {
     if fragments.len() == 1 {
         return fragments[0].clone();
@@ -956,259 +1117,10 @@ fn fragment_tree(
     keep_fragment(&RequestFragment::Branch { left, right }, texts)
 }
 
-/// The active canonical tree and its distinct bodies. Reference counts keep
-/// duplicate leaves/subtrees alive when an append replaces the right path.
-#[derive(Default)]
-struct PreparedPrefix {
-    leaves: Vec<PromptTextRef>,
-    tree: Option<PreparedTree>,
-    uses: std::collections::BTreeMap<BlobRef, usize>,
-    texts: RequestTexts,
-}
-
-struct PreparedTree {
-    reference: PromptTextRef,
-    leaves: usize,
-    children: Option<Box<[Self; 2]>>,
-}
-
-impl PreparedTree {
-    /// A cold prefix is built once in postorder, without creating intermediate
-    /// append paths that would immediately be replaced.
-    fn build(leaves: &[&Leaf], prefix: &mut PreparedPrefix) -> Self {
-        if leaves.len() == 1 {
-            let (reference, encoded) = leaves[0];
-            prefix.keep(reference, encoded.clone());
-            prefix.leaves.push(reference.clone());
-            return Self {
-                reference: reference.clone(),
-                leaves: 1,
-                children: None,
-            };
-        }
-        let split = 1usize << (leaves.len() - 1).ilog2();
-        let left = Self::build(&leaves[..split], prefix);
-        let right = Self::build(&leaves[split..], prefix);
-        Self::branch(left, right, prefix)
-    }
-
-    fn branch(left: Self, right: Self, prefix: &mut PreparedPrefix) -> Self {
-        let (reference, encoded) = encode_fragment(&RequestFragment::Branch {
-            left: left.reference.clone(),
-            right: right.reference.clone(),
-        });
-        prefix.keep(&reference, encoded);
-        Self {
-            reference,
-            leaves: left.leaves + right.leaves,
-            children: Some(Box::new([left, right])),
-        }
-    }
-
-    fn append(self, leaf: Self, prefix: &mut PreparedPrefix) -> Self {
-        if self.leaves.is_power_of_two() {
-            return Self::branch(self, leaf, prefix);
-        }
-        prefix.remove(&self.reference.blob);
-        let [left, right] = *self.children.expect("an incomplete tree is a branch");
-        Self::branch(left, right.append(leaf, prefix), prefix)
-    }
-}
-
-impl PreparedPrefix {
-    fn snapshot(&self, root: &PromptTextRef) -> RequestTexts {
-        RequestTexts {
-            roots: vec![root.blob.as_str().to_owned()],
-            texts: self.texts.texts.clone(),
-            len: self.texts.len,
-        }
-    }
-
-    fn keep(&mut self, reference: &PromptTextRef, encoded: std::sync::Arc<PromptText>) {
-        let uses = self.uses.entry(reference.blob.clone()).or_default();
-        if *uses == 0 {
-            self.texts
-                .texts
-                .insert(reference.blob.as_str().to_owned(), encoded);
-            self.texts.len += 1;
-        }
-        *uses += 1;
-    }
-
-    fn remove(&mut self, hash: &BlobRef) {
-        if let Some(uses) = self.uses.get_mut(hash) {
-            *uses -= 1;
-            if *uses == 0 {
-                self.uses.remove(hash);
-                self.texts.texts.remove(hash.as_str());
-                self.texts.len -= 1;
-            }
-        }
-    }
-
-    /// A changed sequence (including a shortened compaction) invalidates the
-    /// carried tree. Only a verified append may retain its existing branches.
-    fn prepare<'a>(&mut self, leaves: impl Iterator<Item = &'a Leaf> + Clone) {
-        let shared = leaves
-            .clone()
-            .zip(&self.leaves)
-            .take_while(|((reference, _), held)| reference == *held)
-            .count();
-        if shared != self.leaves.len() {
-            *self = Self::default();
-        }
-        if self.leaves.is_empty() {
-            let leaves: Vec<_> = leaves.collect();
-            self.tree = Some(PreparedTree::build(&leaves, self));
-            return;
-        }
-        for (reference, encoded) in leaves.skip(self.leaves.len()) {
-            self.keep(reference, encoded.clone());
-            self.leaves.push(reference.clone());
-            let leaf = PreparedTree {
-                reference: reference.clone(),
-                leaves: 1,
-                children: None,
-            };
-            self.tree = Some(match self.tree.take() {
-                None => leaf,
-                Some(tree) => tree.append(leaf, self),
-            });
-        }
-    }
-}
-
-/// Own only encodings, never the segment that owns this memo: no cycle, and
-/// no process-global cache. A rewritten first item starts with an empty memo.
-#[derive(Default)]
-struct CarriedPrefix(std::sync::Mutex<PreparedPrefix>);
-
-enum SegmentLeaves {
-    Text(Vec<Leaf>),
-    Item(std::sync::Arc<ItemLeaves>),
-    Separated(std::sync::Arc<SeparatedItemLeaves>),
-}
-
-impl SegmentLeaves {
-    fn leaves(&self) -> &[Leaf] {
-        match self {
-            Self::Text(leaves) => leaves,
-            Self::Item(leaves) => &leaves.0,
-            Self::Separated(leaves) => &leaves.0,
-        }
-    }
-}
+mod owner;
+pub use owner::OwnerPromptState;
 
 impl ChunkedRequestTemplate {
-    /// Prepare the history prefix incrementally beside its first shared item.
-    /// A call supplies the complete distinct fragment set even on a cache hit:
-    /// reuse never assumes that a different call/session installed its bodies.
-    /// The set is the carried prefix tree's, rooted at that tree's root, and
-    /// shares every text with it.
-    pub fn chunk(
-        template: &lash_protocol_types::llm::types::RecordedRequestTemplate,
-    ) -> (Self, RequestTexts) {
-        use lash_protocol_types::sync::MutexExt;
-        let mut groups = Vec::with_capacity(template.segments().len());
-        let mut envelope = TextChunker::new(true);
-        let mut items_end = None;
-        let mut text_prefix_end = None;
-        let mut previous_item = false;
-        let mut count = 0;
-        let first_item = template.segments().iter().find(|segment| segment.is_item());
-        for segment in template.segments() {
-            let group = if segment.is_item() {
-                let group = if previous_item {
-                    SegmentLeaves::Separated(
-                        segment.derived(|item| SeparatedItemLeaves(item_leaves(item, true))),
-                    )
-                } else {
-                    SegmentLeaves::Item(
-                        segment.derived(|item| ItemLeaves(item_leaves(item, false))),
-                    )
-                };
-                items_end = Some(count + group.leaves().len());
-                previous_item = true;
-                group
-            } else {
-                previous_item = false;
-                let mut leaves = Vec::new();
-                envelope.prefix_end = None;
-                for part in segment.parts() {
-                    match part {
-                        lash_protocol_types::llm::types::SegmentPart::Literal(text) => {
-                            envelope.literal(text, &mut leaves);
-                        }
-                        lash_protocol_types::llm::types::SegmentPart::Slot(slot) => {
-                            leaves.push(encode_fragment(&RequestFragment::Attachment {
-                                slot: slot.as_ref(),
-                            }));
-                        }
-                    }
-                }
-                if let Some(end) = envelope.prefix_end {
-                    text_prefix_end = Some(count + end);
-                }
-                SegmentLeaves::Text(leaves)
-            };
-            count += group.leaves().len();
-            groups.push(group);
-        }
-        let prefix_end = items_end
-            .or(text_prefix_end)
-            .filter(|end| *end > 0 && *end < count);
-        let carried = first_item.map_or_else(
-            || std::sync::Arc::new(CarriedPrefix::default()),
-            |item| item.derived(|_| CarriedPrefix::default()),
-        );
-        let mut prepared = carried.0.lock_recover();
-        let leaves = groups.iter().flat_map(|group| group.leaves());
-        prepared.prepare(leaves.clone().take(prefix_end.unwrap_or(count)));
-        let tree = prepared.tree.as_ref().expect("a template has fragments");
-        let prefix = prefix_end.map(|_| tree.reference.clone());
-        let mut inline = Vec::new();
-        let root = if let Some(end) = prefix_end {
-            let mut fragments = Vec::new();
-            for (reference, encoded) in leaves.skip(end) {
-                fragments.push(reference.clone());
-                inline.push((reference.blob.clone(), encoded.clone()));
-            }
-            let right = fragment_tree(&fragments, &mut inline);
-            keep_fragment(
-                &RequestFragment::Branch {
-                    left: tree.reference.clone(),
-                    right,
-                },
-                &mut inline,
-            )
-        } else {
-            tree.reference.clone()
-        };
-        // Equal suffix fragments belong to the prefix, exactly as in a full
-        // rebuild's partition. Preserve the remaining inline nodes' wire order.
-        let inline = inline
-            .into_iter()
-            .filter(|(hash, _)| prepared.texts.get(hash.as_str()).is_none())
-            .map(|(hash, fragment)| (hash, fragment.text.to_string()))
-            .collect();
-        // The carried texts are exactly the prefix tree's nodes, each held
-        // by its parent, so the tree's root is the forest's one root.
-        let texts = prepared.snapshot(&tree.reference);
-        (
-            Self {
-                fetch_horizon: template.fetch_horizon,
-                route: template.route.clone(),
-                transport_stream: template.transport_stream(),
-                generation: template.generation,
-                wire_features: template.wire_features.clone(),
-                root,
-                prefix,
-                inline,
-            },
-            texts,
-        )
-    }
-
     /// Read the exact admitted fragments and slots, without any lowerer.
     pub fn assemble<'a>(
         &self,
@@ -1240,6 +1152,9 @@ impl ChunkedRequestTemplate {
                     reason: error.to_string(),
                 }
             })? {
+                RequestFragment::Index { children } => {
+                    stack.extend(children.into_iter().rev());
+                }
                 RequestFragment::Branch { left, right } => {
                     stack.push(right);
                     stack.push(left);

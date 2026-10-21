@@ -1952,7 +1952,7 @@ fn drive_rlm_to_second_llm_request(
                 machine.handle_response(Response::ExecutionEnvironmentSynced { id, result });
             }
             Effect::LlmCall { id, request } => {
-                requests.push((*request).clone());
+                requests.push(request.materialize());
                 if requests.len() == 2 {
                     break;
                 }
@@ -2121,7 +2121,7 @@ fn a_failed_cell_is_recorded_typed_and_its_guidance_is_rendered_at_projection() 
         delivery: sansio::CheckpointDelivery::default(),
     });
     let effects = drain_effects(&mut machine);
-    let request = serde_json::to_string(find_llm_request(&effects).expect("next request"))
+    let request = serde_json::to_string(&find_llm_request(&effects).expect("next request"))
         .expect("the request serializes");
     assert!(
         request.contains("unknown binding `missing_name`")

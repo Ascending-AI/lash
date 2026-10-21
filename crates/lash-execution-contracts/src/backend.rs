@@ -109,6 +109,7 @@ struct BackendInner {
     /// that serves no durable store is never asked for one.
     durable: std::sync::OnceLock<Arc<dyn DurableStore>>,
     config: DurableConfig,
+    memory: lash_durable::owner_memory::NodeMemory,
     engines: BTreeMap<String, Arc<dyn crate::ProcessEngine>>,
     /// How each engine that carries an earlier build's state forward does
     /// it, by engine kind ([`Backend::with_state_migration`]).
@@ -173,6 +174,11 @@ impl Backend {
     /// duplicate engines or providers.
     pub fn assemble(parts: BackendParts) -> Result<Self, DurableBuildError> {
         let config = parts.settings.validate()?;
+        let policy = parts
+            .settings
+            .owner_retention
+            .ok_or(DurableConfigError::MissingOwnerRetention)?;
+        let memory = lash_durable::owner_memory::NodeMemory::new(policy);
         let mut engines = BTreeMap::new();
         for engine in parts.engines {
             let kind = engine.kind().to_owned();
@@ -206,6 +212,7 @@ impl Backend {
                 stores: parts.stores,
                 durable: std::sync::OnceLock::new(),
                 config,
+                memory,
                 engines,
                 providers,
                 formats,
@@ -216,18 +223,24 @@ impl Backend {
         })
     }
 
-    /// A backend over `stores` with the default settings, no engines and no
-    /// projection providers.
+    /// A backend over `stores` with explicit fixture retention limits, the
+    /// other default settings, no engines and no projection providers.
     #[cfg(any(test, feature = "testing"))]
     #[expect(
         clippy::expect_used,
         reason = "the default settings validate and an empty registration has no duplicate"
     )]
     #[must_use]
-    pub fn for_testing(stores: Arc<dyn StoreSet>) -> Self {
+    pub fn for_testing(
+        stores: Arc<dyn StoreSet>,
+        owner_retention: lash_durable::OwnerRetentionSettings,
+    ) -> Self {
         Self::assemble(BackendParts {
             stores,
-            settings: DurableSettings::default(),
+            settings: DurableSettings {
+                owner_retention: Some(owner_retention),
+                ..DurableSettings::default()
+            },
             engines: Vec::new(),
             providers: Arc::new(crate::projection::NoProjectionProviders),
             formats: Vec::new(),
@@ -248,6 +261,7 @@ impl Backend {
                 stores,
                 durable: std::sync::OnceLock::new(),
                 config: self.inner.config,
+                memory: self.inner.memory.clone(),
                 engines: self.inner.engines.clone(),
                 providers: Arc::clone(&self.inner.providers),
                 formats: self.inner.formats.clone(),
@@ -282,6 +296,7 @@ impl Backend {
                 stores: Arc::clone(&self.inner.stores),
                 durable,
                 config: self.inner.config,
+                memory: self.inner.memory.clone(),
                 formats: crate::formats::BuildFormats::new(&engine_formats, &self.inner.surfaces)
                     .keeping(&self.inner.formats),
                 engines: held,
@@ -311,6 +326,11 @@ impl Backend {
         self.inner
             .durable
             .get_or_init(|| self.inner.stores.durable_store())
+    }
+
+    /// Node-wide owner allocation accounting, shared by derived backends.
+    pub fn owner_memory(&self) -> &lash_durable::owner_memory::NodeMemory {
+        &self.inner.memory
     }
 
     /// The substrate's parameters.
@@ -348,6 +368,7 @@ impl Backend {
                 stores: Arc::clone(&self.inner.stores),
                 durable,
                 config: self.inner.config,
+                memory: self.inner.memory.clone(),
                 formats,
                 engines: self.inner.engines.clone(),
                 migrations,
@@ -378,6 +399,7 @@ impl Backend {
                 stores: Arc::clone(&self.inner.stores),
                 durable,
                 config: self.inner.config,
+                memory: self.inner.memory.clone(),
                 formats: self.inner.formats.clone().retiring(format, previous, sweep),
                 engines: self.inner.engines.clone(),
                 migrations: self.inner.migrations.clone(),
@@ -426,6 +448,7 @@ impl Backend {
                 stores: Arc::clone(&self.inner.stores),
                 durable,
                 config: self.inner.config,
+                memory: self.inner.memory.clone(),
                 formats: self.inner.formats.clone(),
                 engines: self.inner.engines.clone(),
                 migrations: self.inner.migrations.clone(),

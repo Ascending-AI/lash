@@ -79,7 +79,13 @@ async fn an_open_empty_session_keeps_its_first_window_warm_after_idle_eviction()
         .expect("SQLite memory stores");
     let store = stores.session_store_factory();
     let settings = lash::durable::DurableSettings {
-        idle_evict: Duration::from_millis(1),
+        owner_retention: Some(lash::durable::OwnerRetentionSettings {
+            idle_evict: Duration::from_millis(1),
+            max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+            max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+            max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+            max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+        }),
         ..Default::default()
     };
     let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores))

@@ -47,6 +47,7 @@ pub fn build_turn<M: TurnProtocol>(input: SansIoTurnInput<M>) -> PreparedTurnMac
         .to_vec();
     let machine = TurnMachine::in_window(
         TurnMachineConfig {
+            allocation_budget: lash_protocol_types::allocation::AllocationBudget::unowned(),
             model_tool_calls: input.model_tool_calls,
             protocol_driver: input.turn_driver_preamble.config.protocol.clone(),
             projector: input.turn_driver_preamble.config.projector.clone(),

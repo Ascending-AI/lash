@@ -98,6 +98,10 @@ runtime_error_codes! {
     /// Codes serialize as the snake_case strings exposed in traces and host
     /// errors; callers match this type rather than parsing display text.
     pub enum RuntimeErrorCode {
+        /// Another owner or dirty draft must release capacity before retry.
+        OwnerMemoryPressure = "owner_memory_pressure" => Retryable,
+        /// A prompt allocation cannot fit the host's configured capacity.
+        OwnerCapacityExceeded = "owner_capacity_exceeded" => Terminal,
         // a permanent fence already ended the referrer.
         /// An artifact publish or acquire named a referrer that has a fence
         /// (ADR 0113 §2.7). Store implementors return this code instead of
@@ -945,6 +949,20 @@ pub struct RuntimeError {
     executable_generation_refusal: Option<Box<ExecutableGenerationRefusal>>,
 }
 impl RuntimeError {
+    pub fn allocation(error: lash_protocol_types::allocation::AllocationError) -> Self {
+        let code = match error.kind {
+            lash_protocol_types::allocation::ReserveError::Pressure => {
+                RuntimeErrorCode::OwnerMemoryPressure
+            }
+            lash_protocol_types::allocation::ReserveError::TooLarge => {
+                RuntimeErrorCode::OwnerCapacityExceeded
+            }
+        };
+        Self::new(code, error.to_string()).with_cause(RuntimeErrorCause::OwnerAllocation {
+            refusal: Box::new(error),
+        })
+    }
+
     /// The exhausted host resource carried by a worker's typed cause.
     /// Unrelated worker faults and errors without that cause return `None`.
     /// [`HostResource::is_retryable`] states whether redrive can succeed.
@@ -1115,7 +1133,8 @@ impl RuntimeError {
     pub fn deleted_session_id(&self) -> Option<&crate::SessionId> {
         match self.cause.as_ref()? {
             RuntimeErrorCause::SessionDeleted { session_id } => Some(session_id),
-            RuntimeErrorCause::ControlPhaseExpired { .. }
+            RuntimeErrorCause::OwnerAllocation { .. }
+            | RuntimeErrorCause::ControlPhaseExpired { .. }
             | RuntimeErrorCause::ToolRunCutRefused { .. }
             | RuntimeErrorCause::ToolRunIsolationRefused { .. }
             | RuntimeErrorCause::ToolRunControl { .. }

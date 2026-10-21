@@ -1150,3 +1150,211 @@ pub async fn lo_fence_preserves_a_composed_drafts_basis(store: &dyn DurableStore
     );
     Ok(())
 }
+
+/// LO-POSTIMAGE: every head write returns the exact result constructed in
+/// its transaction. Adopting it equals cold reopen; a later refusal rolls
+/// back the head and exposes no adoptable result. Receipt replay preserves
+/// the first result even after another head advances.
+///
+/// # Errors
+/// The first broken acknowledgement or atomicity rule.
+pub async fn lo_postimage_receipt_matches_reopen(
+    store: &dyn DurableStore,
+    sessions: &dyn lash_core_store::store::RuntimeStore,
+    explicit: bool,
+) -> LawOutcome {
+    use crate::DomainWrite;
+    use crate::domain::{SessionCommitWrite, TurnWrite};
+    use lash_core_store::session_state::{
+        RuntimeSessionAuthority, RuntimeSessionState, adopt_durable_head,
+    };
+    use lash_core_store::session_store_factory_types::{
+        SessionCreationHead, SessionStoreCreateRequest,
+    };
+    use lash_core_store::store::{RuntimeCommit, WindowSelector};
+    let stored = |error: lash_core_store::store::StoreError| LawBroken(error.to_string());
+    let policy = lash_core_store::session_policy::SessionPolicy::new(
+        lash_protocol_types::TurnBudget::Unbounded,
+        lash_protocol_types::MaxToolCalls::new(8),
+        lash_protocol_types::NoProgressBudget::bounded(12),
+    );
+    let id = lash_protocol_types::SessionId::try_from("lo-postimage-receipt".to_owned())
+        .map_err(|error| LawBroken(error.to_string()))?;
+    let mut state = RuntimeSessionState::new(
+        policy,
+        RuntimeSessionAuthority::new(Default::default(), Default::default()),
+    );
+    state.session_id = id.clone();
+    sessions
+        .admit_session(&SessionStoreCreateRequest {
+            session_id: id.clone(),
+            relation: lash_core_store::session_identity::SessionRelation::Root,
+            pending_observer_intents: Vec::new(),
+            config: lash_core_store::store::persisted_session_config_from_state(&state),
+            head: SessionCreationHead::Config,
+            owning_process_id: None,
+            retention: lash_core_store::store::Retention::UntilGc,
+        })
+        .await
+        .map_err(stored)?;
+    let actor = session(id.as_str())?;
+    if store.actor(&actor).await?.is_none() {
+        create(store, std::slice::from_ref(&actor)).await?;
+    }
+    append(store, &actor, "receipt-law").await?;
+    let formats = store
+        .actor(&actor)
+        .await?
+        .ok_or_else(|| LawBroken("session actor absent".into()))?
+        .formats;
+    let lease = store
+        .register_node(&NodeSpec {
+            node: NodeId::new("postimage-owner"),
+            decodes: vec![formats],
+            serves: Vec::new(),
+            capabilities: Default::default(),
+            ttl_millis: TTL_MILLIS,
+        })
+        .await?;
+    let epoch = store
+        .claim(&lease, 1)
+        .await?
+        .first()
+        .ok_or_else(|| LawBroken("session not claimed".into()))?
+        .epoch;
+    let fleet = sessions.fleet_format();
+    let mut first = None;
+    for ordinal in 0..3 {
+        state.ensure_agent_frame_initialized();
+        state
+            .session_graph
+            .append_plugin("postimage-law", serde_json::json!({"ordinal": ordinal}));
+        state.policy.generation.seed = Some(ordinal);
+        let operation = lash_core_store::store::OperationId::new(
+            lash_protocol_types::ExecutionScope::runtime_operation(format!("postimage-{ordinal}")),
+            "commit",
+        );
+        let (commit, _) = RuntimeCommit::persisted_state_with_operation_and_budget(
+            &mut state,
+            operation,
+            lash_core_store::store::CommitBudget::bounded(1 << 20, 512),
+            fleet,
+        )
+        .map_err(stored)?;
+        let encoded = lash_core_store::store::encode_session_commit(&commit).map_err(stored)?;
+        let mut tx = store.begin(&actor, epoch).await?;
+        tx.stage(encoded.namespace_nodes.clone().into_values());
+        tx.stage(encoded.descriptor.clone());
+        if explicit {
+            tx.release_root_lease(crate::domain::pages::RootLeaseId(9_000_000));
+        }
+        let write = DomainWrite::SessionCommit(SessionCommitWrite {
+            session: id.clone(),
+            expected_head: commit.expected_head_revision,
+            commit_json: encoded.json,
+            execution: encoded.execution,
+        });
+        tx.write(write.clone());
+        let receipt = store.commit(tx, LABEL).await?;
+        let [head] = receipt.session_heads.as_slice() else {
+            return Err(LawBroken(
+                "head write did not acknowledge exactly one result".into(),
+            ));
+        };
+        ensure!(head.session == id, "receipt names another session");
+        state
+            .adopt_retained_commit_result(&head.receipt)
+            .map_err(stored)?;
+        let read = sessions
+            .load_session_window(&id, WindowSelector::Current)
+            .await
+            .map_err(stored)?
+            .ok_or_else(|| LawBroken("committed head absent".into()))?;
+        let mut cold = state.clone();
+        adopt_durable_head(&mut cold, read, fleet).map_err(stored)?;
+        ensure!(
+            state.head_revision == cold.head_revision
+                && state.checkpoint_ref == cold.checkpoint_ref,
+            "receipt head/checkpoint differs from reopen"
+        );
+        ensure!(
+            serde_json::to_value(state.to_snapshot())
+                .map_err(|error| LawBroken(error.to_string()))?
+                == serde_json::to_value(cold.to_snapshot())
+                    .map_err(|error| LawBroken(error.to_string()))?,
+            "prepared state plus receipt differs from cold reopen at cut {ordinal}"
+        );
+        if ordinal == 0 {
+            first = Some((write, head.clone()));
+        }
+    }
+    let mut empty = store.begin(&actor, epoch).await?;
+    empty.ack_seen();
+    ensure!(
+        store.commit(empty, LABEL).await?.session_heads.is_empty(),
+        "metadata-only commit fabricated a head result"
+    );
+    let (write, first) = first.ok_or_else(|| LawBroken("first receipt absent".into()))?;
+    let mut replay = store.begin(&actor, epoch).await?;
+    replay.write(write);
+    let replay = store.commit(replay, LABEL).await?;
+    let [replayed] = replay.session_heads.as_slice() else {
+        return Err(LawBroken("replay lost its head result".into()));
+    };
+    let mut replayed = replayed.clone();
+    ensure!(
+        replayed.receipt.receipt_replayed,
+        "replay did not preserve its decision"
+    );
+    replayed.receipt.receipt_replayed = first.receipt.receipt_replayed;
+    ensure!(replayed == first, "replay changed the original receipt");
+    let before = store.actor(&actor).await?;
+    let operation = lash_core_store::store::OperationId::new(
+        lash_protocol_types::ExecutionScope::runtime_operation("refused-postimage"),
+        "commit",
+    );
+    let (commit, _) = RuntimeCommit::persisted_state_with_operation_and_budget(
+        &mut state,
+        operation,
+        lash_core_store::store::CommitBudget::bounded(1 << 20, 512),
+        fleet,
+    )
+    .map_err(stored)?;
+    let encoded = lash_core_store::store::encode_session_commit(&commit).map_err(stored)?;
+    let mut refused = store.begin(&actor, epoch).await?;
+    refused.stage(encoded.namespace_nodes.into_values());
+    refused.stage(encoded.descriptor);
+    refused.write(DomainWrite::SessionCommit(SessionCommitWrite {
+        session: id.clone(),
+        expected_head: state.head_revision,
+        commit_json: encoded.json,
+        execution: encoded.execution,
+    }));
+    refused.write(DomainWrite::Turn(TurnWrite::Advance {
+        session: id.clone(),
+        run: lash_protocol_types::TurnId::try_from("absent-run".to_owned())
+            .map_err(|error| LawBroken(error.to_string()))?,
+        phase: crate::domain::PhaseAdvance::Tools {
+            run: crate::domain::RunSeq(1),
+            checkpoint: tagged_node("absent").0,
+        },
+        iteration: 0,
+    }));
+    ensure!(
+        store.commit(refused, LABEL).await.is_err(),
+        "a refused member returned an adoptable result"
+    );
+    ensure!(
+        store.actor(&actor).await? == before,
+        "refusal advanced actor authority"
+    );
+    ensure!(
+        sessions
+            .load_session_head_meta(&id)
+            .await
+            .map_err(stored)?
+            .is_some_and(|head| head.head_revision == state.head_revision),
+        "refusal left a partial head"
+    );
+    Ok(())
+}

@@ -116,9 +116,19 @@ async fn a_waiting_admission_holds_no_history_or_referrer_lock(
     name: &'static str,
     admission: Admission,
 ) {
-    let (_database, storage) = storage(name, &PostgresHostConfig::default())
-        .await
-        .expect("hermetic PostgreSQL is available");
+    let (_database, storage) = storage(name, &{
+        let mut config = PostgresHostConfig::default();
+        config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+            idle_evict: std::time::Duration::from_secs(60),
+            max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+            max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+            max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+            max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+        });
+        config
+    })
+    .await
+    .expect("hermetic PostgreSQL is available");
     let session = lash_protocol_types::SessionId::from(name);
     admit(&storage, &session).await;
     let mut owner = crate::begin_guarded(storage.pool(), &storage.fence)

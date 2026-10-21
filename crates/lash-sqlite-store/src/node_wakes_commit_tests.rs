@@ -213,7 +213,16 @@ async fn rolled_back_capture_cannot_reach_a_committed_sibling() {
 /// which a [`quiet`] node never reaches, and these laws assert no startup
 /// latency.
 fn holding(poll: Duration, max_active: usize) -> DurableSettings {
-    let defaults = DurableSettings::default();
+    let defaults = DurableSettings {
+        owner_retention: Some(lash_durable::OwnerRetentionSettings {
+            idle_evict: std::time::Duration::from_secs(60),
+            max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+            max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+            max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+            max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+        }),
+        ..DurableSettings::default()
+    };
     DurableSettings {
         lease: LeaseSettings {
             claim_poll: poll,

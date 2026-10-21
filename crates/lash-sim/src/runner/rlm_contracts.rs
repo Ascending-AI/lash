@@ -670,6 +670,7 @@ fn rlm_contract_config_with_turn_options(
         lash_protocol_rlm::CellDialect::typescript(),
     ));
     Ok(lash_core::TurnMachineConfig {
+        allocation_budget: lash_protocol_types::allocation::AllocationBudget::unowned(),
         protocol_driver,
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         projector: Arc::new(lash_core::sansio::ChatContextProjector::default()),

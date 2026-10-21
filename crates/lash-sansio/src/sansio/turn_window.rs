@@ -125,18 +125,30 @@ impl<E: Clone> TurnWindow<E> {
             .count()
     }
 
-    /// How many of `rendered`'s leading model messages are the window's own
-    /// render.
-    pub(super) fn shared_render(&self, rendered: &[LlmMessage]) -> usize {
-        self.rendered.shared_prefix(rendered).unwrap_or_else(|| {
-            self.render(
-                &lash_protocol_types::session_model::message::HistoryPresentation::verbatim(),
-            )
-            .iter()
-            .zip(rendered)
-            .take_while(|(window, message)| window == message)
-            .count()
-        })
+    #[expect(
+        clippy::expect_used,
+        reason = "cold checkpoint reconstruction uses an unowned budget which cannot refuse"
+    )]
+    pub(super) fn shared_retained_render(
+        &self,
+        rendered: &lash_protocol_types::llm::types::RequestMessages,
+    ) -> usize {
+        self.rendered
+            .shared_retained_prefix(rendered)
+            .unwrap_or_else(|| {
+                self.rendered
+                    .rendered_retained(
+                        self.messages.as_slice(),
+                        &lash_protocol_types::session_model::message::HistoryPresentation::verbatim(
+                        ),
+                        &lash_protocol_types::allocation::AllocationBudget::unowned(),
+                    )
+                    .expect("cold checkpoint render")
+                    .iter()
+                    .zip(rendered.iter())
+                    .take_while(|(before, now)| before == now)
+                    .count()
+            })
     }
 
     /// The window's messages, rendered as a model prompt.

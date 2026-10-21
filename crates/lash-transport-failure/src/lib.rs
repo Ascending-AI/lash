@@ -40,6 +40,10 @@ impl TransportRetryVerdict {
 /// Operation-specific evidence independent of the rendered transport message.
 #[derive(Debug, Clone, Default)]
 pub enum HttpFailureContext {
+    /// A serving owner refused the allocation before request admission.
+    OwnerAllocation {
+        refusal: Box<lash_protocol_types::allocation::AllocationError>,
+    },
     /// No operation-specific evidence was supplied.
     #[default]
     Other,
@@ -93,6 +97,13 @@ pub struct LlmTransportError {
 }
 
 impl LlmTransportError {
+    pub fn allocation_refusal(&self) -> Option<&lash_protocol_types::allocation::AllocationError> {
+        match self.context.as_ref() {
+            HttpFailureContext::OwnerAllocation { refusal } => Some(refusal),
+            _ => None,
+        }
+    }
+
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             kind: ProviderFailureKind::Unknown,

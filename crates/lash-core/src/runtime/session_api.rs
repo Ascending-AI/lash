@@ -68,6 +68,38 @@ impl LashRuntime {
         self.publish_resident_authority()
     }
 
+    /// Transfer the acknowledged owner state into the runtime without reading
+    /// back a head that this owner just committed.
+    pub(in crate::runtime) async fn adopt_owner_state(
+        &mut self,
+        owner: &ActorContext,
+    ) -> Result<(), RuntimeError> {
+        let projection = owner
+            .session_projection()
+            .await
+            .map_err(|error| {
+                RuntimeError::new(
+                    RuntimeErrorCode::ResidentSessionReloadFailed,
+                    error.to_string(),
+                )
+            })?
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::ResidentSessionReloadFailed,
+                    "owner has no acknowledged session state",
+                )
+            })?;
+        self.install_resident_state(projection.head.as_ref().clone())
+            .map_err(|error| {
+                RuntimeError::new(
+                    RuntimeErrorCode::ResidentSessionReloadFailed,
+                    error.to_string(),
+                )
+            })?;
+        self.resident_session.mark_adopted();
+        Ok(())
+    }
+
     /// Install a run's recorded [`ResolvedRun`](crate::ResolvedRun) as the
     /// resident execution view. The view's config carries its own authority,
     /// which can differ from the resident one (a replay after a config
@@ -1110,14 +1142,16 @@ impl LashRuntime {
             Some((_, owner)) => Some(self.open_head_attempt(owner).await?),
             None => None,
         };
-        self.refresh_session_graph_from_store()
-            .await
-            .map_err(|err| {
-                RuntimeError::new(
-                    crate::RuntimeErrorCode::SessionCommandRefresh,
-                    err.to_string(),
-                )
-            })?;
+        if applied.is_none() {
+            self.refresh_session_graph_from_store()
+                .await
+                .map_err(|err| {
+                    RuntimeError::new(
+                        crate::RuntimeErrorCode::SessionCommandRefresh,
+                        err.to_string(),
+                    )
+                })?;
+        }
         debug_assert_eq!(commands.len(), 1, "session commands apply alone");
         for command in commands {
             match command {
@@ -1199,15 +1233,18 @@ impl LashRuntime {
             tx,
             self.code_executor().as_ref(),
             commit,
+            self.state.clone(),
             lash_durable::CommitLabel::SESSION_COMMAND,
             self.host.core.tracing.metrics(),
         )
         .await;
-        // The resident session gives way to the durable head, which a landed
-        // commit moved.
-        self.invalidate_resident_session_state();
+        if committed.is_err() {
+            self.invalidate_resident_session_state();
+        }
         match committed {
-            Ok(()) => {}
+            Ok(_) => {
+                self.adopt_owner_state(owner).await?;
+            }
             // A host withdrew a command since the lane was read: the commit
             // applied nothing, and the lane is read again (FIG-3927 §2.7).
             Err(super::durable::head_commit::HeadCommitError::Store(
@@ -1215,7 +1252,6 @@ impl LashRuntime {
             )) => return Ok(false),
             Err(error) => return Err(error.into_runtime_error()),
         }
-        self.reload_invalidated_resident_session_state().await?;
         Ok(true)
     }
 }

@@ -200,7 +200,7 @@ pub struct ProviderRouteIdentity {
 pub use super::attempt_control::{AttemptEndReason, ProviderAttemptControl};
 pub use super::provider_body::{
     AttachmentSlot, BodyPart, LiveRequestBody, LoweredItem, LoweredUnit, RecordedRequestTemplate,
-    RequestSegment, RequestTemplateBuilder, SEGMENT_CACHE_BUDGET_BYTES, SegmentCache,
+    RequestItems, RequestSegment, RequestTemplateBuilder, SEGMENT_CACHE_BUDGET_BYTES, SegmentCache,
     SegmentCacheStats, SegmentContext, SegmentContextKey, SegmentKey, SegmentKind, SegmentPart,
     SlotCodec, TemplateError, TemplateJson, TransientJson, WireChunk,
 };
@@ -967,6 +967,10 @@ pub struct LlmRequest {
     #[serde(skip)]
     pub attempt_control: ProviderAttemptControl,
 }
+
+mod retained_request;
+pub(crate) use retained_request::AdmittedMessage;
+pub use retained_request::{RequestMessages, RetainedLlmRequest};
 
 impl LlmRequest {
     /// Attachment refs in message order, derived from their owning blocks,

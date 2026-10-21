@@ -392,7 +392,24 @@ impl LashRuntime {
             .session
             .take()
             .expect("lash runtime session must be available");
+        let projection = controller
+            .session_projection()
+            .await
+            .map_err(|error| {
+                RuntimeError::new(RuntimeErrorCode::PluginSessionManager, error.to_string())
+            })?
+            .ok_or_else(|| {
+                RuntimeError::new(
+                    RuntimeErrorCode::PluginSessionManager,
+                    "serving turn has no acknowledged projection",
+                )
+            })?;
         let driver = Box::new(RuntimeTurnDriver {
+            prompt_state: projection
+                .prompt
+                .draft(&projection.allocation_budget)
+                .map_err(RuntimeError::allocation)?,
+            allocation_budget: projection.allocation_budget,
             run: std::marker::PhantomData,
             session,
             policy: resolved_turn_policy,

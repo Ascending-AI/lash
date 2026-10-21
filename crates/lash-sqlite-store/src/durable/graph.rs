@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS blob_edges (
     child_hash BLOB NOT NULL REFERENCES blobs(hash) ON DELETE RESTRICT,
     PRIMARY KEY (child_hash, parent_hash)
 ) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS idx_blob_edges_parent ON blob_edges(parent_hash);
 
 -- An execution's admitted effect, by its canonical binary identity, to its
 -- Admission node, while a live kernel or a released member needs the lookup.
@@ -189,6 +190,34 @@ lash_store_sql::statements! {
         insert_edges = "INSERT INTO blob_edges (parent_hash, child_hash)
              SELECT unhex(value ->> 0), unhex(value ->> 1) FROM json_each(?1)";
 
+        /// Discover one bounded changed-path set, stopping at live/shared
+        /// boundaries. Outside edges and catalog roots seed protection. Cast
+        /// the integer limit so SQLite does not expire this large cached
+        /// program when the batch rebinds its limit for execution.
+        retirement_candidates = "WITH RECURSIVE candidates AS (
+             SELECT unhex(value) AS hash FROM json_each(?1)
+             UNION
+             SELECT edge.child_hash AS hash FROM candidates
+               JOIN blob_edges AS edge ON edge.parent_hash = candidates.hash
+              WHERE NOT EXISTS (SELECT 1 FROM graph_root_catalog WHERE root_ref = candidates.hash)
+                AND (SELECT count(*) FROM (SELECT 1 FROM blob_edges WHERE child_hash = candidates.hash LIMIT 2)) <= 1
+             LIMIT CAST(?2 AS INTEGER)
+         ), protected AS (
+             SELECT hash FROM candidates
+              WHERE EXISTS (SELECT 1 FROM graph_root_catalog WHERE root_ref = candidates.hash)
+                 OR EXISTS (SELECT 1 FROM blob_edges AS edge WHERE edge.child_hash = candidates.hash
+                     AND edge.parent_hash NOT IN (SELECT hash FROM candidates))
+             UNION
+             SELECT edge.child_hash AS hash FROM protected JOIN blob_edges AS edge ON edge.parent_hash = protected.hash
+              WHERE edge.child_hash IN (SELECT hash FROM candidates)
+         ) SELECT candidates.hash, candidates.hash NOT IN (SELECT hash FROM protected) FROM candidates";
+
+        /// Outgoing edges of the proven unprotected set, removed together.
+        retire_edges = "DELETE FROM blob_edges WHERE parent_hash IN (SELECT unhex(value) FROM json_each(?1)) RETURNING child_hash";
+
+        /// Delete exactly the set proved under the same writer transaction.
+        retire_nodes = "DELETE FROM blobs WHERE hash IN (SELECT unhex(value) FROM json_each(?1)) RETURNING hash";
+
         /// One level of a peel: delete every blob in JSON `?1` no root names
         /// and no edge reaches, and return each one deleted with its bytes
         /// and encoding, which name the children its edges reach.
@@ -220,14 +249,6 @@ lash_store_sql::statements! {
 /// measurements select 32 rows to amortize statement entry without making
 /// small graphs allocate a full graph-sized parameter list.
 pub(super) const BLOB_BATCH_ROWS: usize = 32;
-
-/// SQLite's multi-row VALUES program yields through a coroutine for each
-/// body. Keep small installs on the one-row shape; only a large install
-/// amortizes that work. Measured (FIG-7047): 32-row batches for small
-/// installs cost more VM steps (a 60-row install 4,391 to 5,073) though
-/// they saved 0.17% of a no-tool replay's user instructions, so the
-/// one-row shape stays until both agree.
-const SMALL_INSTALL_ROWS: usize = 64;
 
 struct Sql {
     blob_batches: [String; BLOB_BATCH_ROWS],
@@ -773,7 +794,7 @@ pub(crate) fn peel(tx: &Connection, frontier: BTreeSet<String>) -> rusqlite::Res
     let mut frontier = frontier;
     let mut deleted = 0;
     while !frontier.is_empty() {
-        let (gone, children) = peel_level(tx, &frontier)?;
+        let (_, gone, children) = peel_batch(tx, &frontier, 4096)?;
         deleted += gone;
         frontier = children;
     }
@@ -784,6 +805,49 @@ pub(crate) fn peel(tx: &Connection, frontier: BTreeSet<String>) -> rusqlite::Res
 pub(super) fn json_array(values: &impl serde::Serialize) -> String {
     #[expect(clippy::expect_used, reason = "strings always encode as JSON")]
     serde_json::to_string(values).expect("a list of digests encodes")
+}
+
+/// Set-based closure retirement. Candidate hints never authorize deletion:
+/// live roots and all outside incoming edges are checked under this writer.
+pub(super) fn peel_batch(
+    tx: &Connection,
+    frontier: &BTreeSet<String>,
+    limit: usize,
+) -> rusqlite::Result<(usize, usize, BTreeSet<String>)> {
+    let candidates = tx
+        .prepare_cached(SQL.sqlite.retirement_candidates.sql())?
+        .query_map(
+            rusqlite::params![
+                json_array(frontier),
+                i64::try_from(limit.max(1)).unwrap_or(i64::MAX)
+            ],
+            |row| Ok((crate::codec::hash_column(row, 0)?, row.get::<_, bool>(1)?)),
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let examined: BTreeSet<_> = candidates.iter().map(|(hash, _)| hash.clone()).collect();
+    let gone: BTreeSet<_> = candidates
+        .iter()
+        .filter(|(_, unprotected)| *unprotected)
+        .map(|(hash, _)| hash.clone())
+        .collect();
+    let mut next: BTreeSet<_> = frontier.difference(&examined).cloned().collect();
+    if gone.is_empty() {
+        return Ok((examined.len(), 0, next));
+    }
+    let batch = json_array(&gone);
+    next.extend(
+        tx.prepare_cached(SQL.sqlite.retire_edges.sql())?
+            .query_map([&batch], |row| crate::codec::hash_column(row, 0))?
+            .collect::<rusqlite::Result<BTreeSet<_>>>()?
+            .difference(&examined)
+            .cloned(),
+    );
+    let deleted = tx
+        .prepare_cached(SQL.sqlite.retire_nodes.sql())?
+        .query_map([&batch], |_| Ok(()))?
+        .collect::<rusqlite::Result<Vec<_>>>()?
+        .len();
+    Ok((examined.len(), deleted, next))
 }
 
 /// One level of [`peel`]: deletes every node of `frontier` nothing names or
@@ -1106,11 +1170,7 @@ pub(super) fn install(
     if absent == 0 {
         return Ok(Ok(installed));
     }
-    let chunk_rows = if absent <= SMALL_INSTALL_ROWS {
-        1
-    } else {
-        BLOB_BATCH_ROWS
-    };
+    let chunk_rows = absent.min(BLOB_BATCH_ROWS);
     let mut fresh = staged
         .iter()
         .zip(present)
@@ -1241,6 +1301,120 @@ impl SqliteDurableStore {
 
 #[cfg(test)]
 mod tests {
+    /// LO-ROOT-PREPARE: rebinding a cached retirement batch must not reparse
+    /// the catalog and recursive walk on every execution.
+    #[tokio::test]
+    async fn lo_root_cached_retirement_does_not_reparse_each_batch() {
+        let set = crate::SqliteStoreSet::memory().await.unwrap();
+        let store = set.session_store_factory();
+        let reprepares = store
+            .conn
+            .call(|connection| {
+                let mut all = Vec::new();
+                for (name, sql, graph) in [
+                    ("graph", super::SQL.sqlite.retirement_candidates.sql(), true),
+                    (
+                        "prompt",
+                        super::super::prompts::retirement_sql_for_testing(),
+                        false,
+                    ),
+                ] {
+                    let mut reparses = Vec::new();
+                    for _ in 0..3 {
+                        let mut statement = connection.prepare_cached(sql)?;
+                        let rows = if graph {
+                            statement
+                                .query_map(rusqlite::params!["[]", 256], |_| Ok(()))?
+                                .collect::<rusqlite::Result<Vec<_>>>()?
+                        } else {
+                            statement
+                                .query_map([256], |_| Ok(()))?
+                                .collect::<rusqlite::Result<Vec<_>>>()?
+                        };
+                        assert!(rows.is_empty());
+                        reparses.push(statement.reset_status(rusqlite::StatementStatus::RePrepare));
+                    }
+                    eprintln!("LO-ROOT-PREPARE {name} reparses={reparses:?}");
+                    all.extend_from_slice(&reparses[1..]);
+                }
+                Ok(all)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            reprepares,
+            [0, 0, 0, 0],
+            "a cached batch must reuse its program"
+        );
+    }
+
+    /// LO-ROOT-WORK: retiring one leaf must not scan unrelated graph edges.
+    #[tokio::test]
+    async fn lo_root_retirement_work_ignores_unrelated_edges() {
+        use lash_core_store::checkpoint_graph::{
+            EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TokenWriter, TypedBody,
+        };
+        let mut work = Vec::new();
+        for size in [32, 4096] {
+            let set = crate::SqliteStoreSet::memory().await.unwrap();
+            let store = set.session_store_factory();
+            let steps = store
+                .conn
+                .call(move |connection| {
+                    let mut staging =
+                        GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(4 * 1024 * 1024)));
+                    let mut body = TokenWriter::new();
+                    body.text("unrelated child");
+                    let child = staging
+                        .encode(NodeKind::PAYLOAD_LEAF, TypedBody::logical(body.as_bytes()))
+                        .unwrap();
+                    for ordinal in 0..size {
+                        let mut body = TokenWriter::new();
+                        body.seq(2);
+                        body.text(&format!("unrelated parent {ordinal}"));
+                        body.child(child.child_ref());
+                        staging
+                            .encode(NodeKind::KEYED_INDEX, TypedBody::logical(body.as_bytes()))
+                            .unwrap();
+                    }
+                    for (id, node) in staging.nodes() {
+                        connection.execute(
+                            "INSERT INTO blobs(hash, content, encoding) VALUES (?1, ?2, 1)",
+                            rusqlite::params![id.0.as_slice(), node.bytes.as_ref()],
+                        )?;
+                    }
+                    for (id, _) in staging.nodes().iter().filter(|(id, _)| **id != child) {
+                        connection.execute(
+                            "INSERT INTO blob_edges(parent_hash, child_hash) VALUES (?1, ?2)",
+                            rusqlite::params![id.0.as_slice(), child.0.as_slice()],
+                        )?;
+                    }
+                    let root = lash_core_store::store::BlobRef::for_content(b"retired leaf");
+                    connection.execute(
+                        "INSERT INTO blobs(hash, content, encoding) VALUES (?1, ?2, 0)",
+                        rusqlite::params![crate::codec::SqlHash(root.as_str()), b"retired leaf"],
+                    )?;
+                    let result = super::peel_batch(
+                        connection,
+                        &std::collections::BTreeSet::from([root.0]),
+                        256,
+                    )?;
+                    assert_eq!(result, (1, 1, Default::default()));
+                    let statement =
+                        connection.prepare_cached(super::SQL.sqlite.retirement_candidates.sql())?;
+                    Ok(statement.get_status(rusqlite::StatementStatus::VmStep))
+                })
+                .await
+                .unwrap();
+            eprintln!("LO-ROOT-WORK unrelated_edges={size} vm_steps={steps}");
+            work.push(steps);
+        }
+        assert!(
+            work[1] <= work[0] * 2,
+            "unrelated graph edges must not multiply retirement work: {work:?}"
+        );
+    }
+
     /// HASH-PUBLICATION-ATOMIC (FIG-6957): a binary root's foreign-key
     /// refusal rolls back its preceding blob insert, preserving a rooted
     /// control. Exactly-once recovery relies on this one transaction boundary.

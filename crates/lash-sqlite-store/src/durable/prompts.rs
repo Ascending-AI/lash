@@ -36,11 +36,15 @@ lash_store_sql::statements! {
         held_texts = "SELECT hash FROM prompt_texts
              WHERE hash IN (SELECT unhex(value) FROM json_each(?1))";
 
-        /// Store one fresh immutable text, binding its body directly rather
-        /// than escaping it into JSON and parsing it again inside SQLite.
-        /// Children retain their canonical JSON-array spelling; returned
-        /// addresses retain the original decoding and width validation.
-        insert_texts = "INSERT INTO prompt_texts (hash, text, children) VALUES (unhex(?1), ?2, ?3) RETURNING hash";
+        /// Store each `[hash, text]` leaf and `[hash, text, children]`
+        /// index node of the JSON array `?1`, returning each address
+        /// stored. The caller binds only addresses it found unstored under
+        /// the one writer, so every element is a new row.
+        insert_texts = "INSERT INTO prompt_texts (hash, text, children)
+             SELECT unhex(json_extract(value, '$[0]')), json_extract(value, '$[1]'),
+                    json_extract(value, '$[2]')
+               FROM json_each(?1)
+             RETURNING hash";
 
         /// Root each text of the `[part, hash]` pairs of the JSON array `?4`
         /// under that part of call `?3` of owner `?2` in session `?1`.
@@ -100,22 +104,56 @@ lash_store_sql::statements! {
         /// The reusable prefix currently owned by this session.
         read_prefix = "SELECT hash FROM prompt_prefixes WHERE session_id = ?1";
 
-        /// Reclaim every text in the JSON array `?1` no root references any
-        /// more, returning each with its children.
-        reclaim_texts = "DELETE FROM prompt_texts AS stored
-             WHERE stored.hash IN (SELECT unhex(value) FROM json_each(?1))
-               AND NOT EXISTS (
-                   SELECT 1 FROM prompt_snapshot_texts AS edge WHERE edge.hash = stored.hash
-               ) AND NOT EXISTS (
-                   SELECT 1 FROM prompt_prefixes AS prefix WHERE prefix.hash = stored.hash
-               ) AND NOT EXISTS (
-                   SELECT 1 FROM prompt_text_edges AS edge WHERE edge.child = stored.hash
-               ) RETURNING hash, children";
+        /// Persist cleanup before releasing the transaction's root ownership.
+        retirement_put = "INSERT INTO prompt_retirement_frontier(hash)
+             SELECT unhex(value) FROM json_each(?1) WHERE true ON CONFLICT DO NOTHING";
+
+        /// One bounded candidate set. Shared/live boundaries stop discovery;
+        /// outside incoming edges seed protection, propagated through the DAG.
+        /// Casting the integer limit keeps rebinding from expiring the cached
+        /// recursive program for compile-time limit specialization.
+        retirement_candidates = "WITH RECURSIVE candidates AS (
+             SELECT hash FROM (SELECT hash FROM prompt_retirement_frontier ORDER BY hash LIMIT CAST(?1 AS INTEGER))
+             UNION
+             SELECT edge.child FROM candidates
+               JOIN prompt_text_edges AS edge ON edge.parent = candidates.hash
+              WHERE NOT EXISTS (SELECT 1 FROM prompt_snapshot_texts WHERE hash = candidates.hash)
+                AND NOT EXISTS (SELECT 1 FROM prompt_prefixes WHERE hash = candidates.hash)
+                AND (SELECT count(*) FROM (SELECT 1 FROM prompt_text_edges WHERE child = candidates.hash LIMIT 2)) <= 1
+             LIMIT CAST(?1 AS INTEGER)
+         ), protected AS (
+             SELECT hash FROM candidates
+              WHERE EXISTS (SELECT 1 FROM prompt_snapshot_texts WHERE hash = candidates.hash)
+                 OR EXISTS (SELECT 1 FROM prompt_prefixes WHERE hash = candidates.hash)
+                 OR EXISTS (SELECT 1 FROM prompt_text_edges AS edge WHERE edge.child = candidates.hash
+                     AND edge.parent NOT IN (SELECT hash FROM candidates))
+             UNION
+             SELECT edge.child FROM protected JOIN prompt_text_edges AS edge ON edge.parent = protected.hash
+              WHERE edge.child IN (SELECT hash FROM candidates)
+         ) SELECT candidates.hash, stored.children,
+                  candidates.hash NOT IN (SELECT hash FROM protected), length(CAST(stored.text AS BLOB))
+             FROM candidates LEFT JOIN prompt_texts AS stored ON stored.hash = candidates.hash";
+
+        /// Remove processed queue positions, including candidates still held.
+        retirement_take = "DELETE FROM prompt_retirement_frontier WHERE hash IN (SELECT unhex(value) FROM json_each(?1))";
+
+        /// Delete outgoing edges of the transaction's proven unprotected set.
+        delete_retired_edges = "DELETE FROM prompt_text_edges WHERE parent IN (SELECT unhex(value) FROM json_each(?1))";
+
+        /// The same synchronization owner proved this exact set unprotected.
+        delete_retired_texts = "DELETE FROM prompt_texts WHERE hash IN (SELECT unhex(value) FROM json_each(?1))";
+
+
     }
 }
 
 static SQLITE_SQL: LazyLock<SqlitePromptStatements> =
     LazyLock::new(|| SqlitePromptStatements::render(crate::schema_layout::MAIN));
+
+#[cfg(test)]
+pub(super) fn retirement_sql_for_testing() -> &'static str {
+    SQLITE_SQL.retirement_candidates.sql()
+}
 
 /// `prompt_snapshots`: P2's (FIG-5256) roots, one per admitted model call,
 /// keyed by its owner (`turn:<run>` or `owned:<scope>`) and its call there
@@ -170,10 +208,13 @@ CREATE TABLE IF NOT EXISTS prompt_text_edges (
     child BLOB NOT NULL REFERENCES prompt_texts(hash),
     PRIMARY KEY (child, parent)
 ) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS idx_prompt_text_edges_parent ON prompt_text_edges(parent);
+CREATE TABLE IF NOT EXISTS prompt_retirement_frontier (hash BLOB PRIMARY KEY) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS prompt_prefixes (
     session_id TEXT PRIMARY KEY,
     hash BLOB NOT NULL REFERENCES prompt_texts(hash)
 ) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS idx_prompt_prefixes_hash ON prompt_prefixes(hash);
 ";
 
 fn call_params(call: &PromptCallKey) -> (String, String, String) {
@@ -223,51 +264,62 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &PromptWrit
                 .chain(prefix.as_deref())
                 .collect();
             let mut unheld = BTreeMap::new();
-            // Probe only new index paths: an existing immutable node owns
-            // its complete closure, so no child metadata is resubmitted.
-            while !frontier.is_empty() {
+            if let Some(delta) = request_texts.supplied_delta() {
+                // One set read validates the complete direct frontier. A
+                // remembered digest never resurrects a missing old body.
+                let supplied: BTreeMap<_, _> = delta
+                    .map(|text| (text.hash.as_str(), text))
+                    .chain(snapshot_by_hash.iter().map(|(hash, text)| (*hash, *text)))
+                    .collect();
+                frontier.extend(
+                    supplied
+                        .values()
+                        .flat_map(|text| text.children.iter().map(String::as_str)),
+                );
+                frontier.extend(supplied.keys().copied());
                 let held = hash_set(tx, SQLITE_SQL.held_texts.sql(), [encode(&frontier)?])?;
-                let mut next = BTreeSet::new();
                 for hash in frontier {
-                    if held.contains(hash) || unheld.contains_key(hash) {
+                    if held.contains(hash) {
                         continue;
                     }
-                    let Some(text) = text(hash) else {
+                    let Some(text) = supplied.get(hash) else {
                         return Ok(Err(DurableError::Domain(
                             DomainRefusal::PromptFragmentMissing {
                                 hash: hash.to_owned(),
                             },
                         )));
                     };
-                    next.extend(text.children.iter().map(String::as_str));
-                    unheld.insert(hash, text);
+                    unheld.insert(hash, *text);
                 }
-                frontier = next;
+            } else {
+                // Probe only new index paths: an existing immutable node owns
+                // its complete closure, so no child metadata is resubmitted.
+                while !frontier.is_empty() {
+                    let held = hash_set(tx, SQLITE_SQL.held_texts.sql(), [encode(&frontier)?])?;
+                    let mut next = BTreeSet::new();
+                    for hash in frontier {
+                        if held.contains(hash) || unheld.contains_key(hash) {
+                            continue;
+                        }
+                        let Some(text) = text(hash) else {
+                            return Ok(Err(DurableError::Domain(
+                                DomainRefusal::PromptFragmentMissing {
+                                    hash: hash.to_owned(),
+                                },
+                            )));
+                        };
+                        next.extend(text.children.iter().map(String::as_str));
+                        unheld.insert(hash, text);
+                    }
+                    frontier = next;
+                }
             }
             if !unheld.is_empty() {
-                let mut insert = tx.prepare_cached(SQLITE_SQL.insert_texts.sql())?;
-                let mut address_error = None;
-                for (hash, text) in &unheld {
-                    let children: BTreeSet<&str> =
-                        text.children.iter().map(String::as_str).collect();
-                    let children = (!children.is_empty())
-                        .then(|| encode(&children))
-                        .transpose()?;
-                    let mut inserted =
-                        insert.query(rusqlite::params![hash, &*text.text, children])?;
-                    while let Some(row) = inserted.next()? {
-                        if address_error.is_none()
-                            && let Err(error) = crate::codec::hash_column(row, 0)
-                        {
-                            address_error = Some(error);
-                        }
-                    }
-                }
-                // The original INSERT completed all rows before validating
-                // RETURNING addresses. SQL refusals still take precedence.
-                if let Some(error) = address_error {
-                    return Err(error);
-                }
+                let bodies: Vec<_> = unheld
+                    .iter()
+                    .map(|(hash, text)| stored_text(hash, text))
+                    .collect();
+                hash_set(tx, SQLITE_SQL.insert_texts.sql(), [encode(&bodies)?])?;
                 let paths: BTreeSet<_> = unheld
                     .iter()
                     .flat_map(|(hash, text)| {
@@ -440,37 +492,82 @@ fn edges<'a>(
         .collect()
 }
 
-/// Reclaim every text among `released` no remaining edge references.
+/// A root handoff records cleanup atomically; one bounded set handles the
+/// changed append path. Large resets leave their remaining work durably queued.
 fn reclaim(tx: &Connection, released: &BTreeSet<String>) -> rusqlite::Result<()> {
-    let mut frontier = released.clone();
-    while !frontier.is_empty() {
-        // Reclassify and delete under the one writer in the same statement.
-        // Retained candidates return nothing; removed parents answer their
-        // own children, without first reading and discarding the same rows.
-        // A reclaimed parent's edges go with it, which may leave its
-        // children unreferenced on the next level.
-        let reclaimed = tx
-            .prepare_cached(SQLITE_SQL.reclaim_texts.sql())?
-            .query_map([encode(&frontier)?], |row| {
-                Ok((
-                    crate::codec::hash_column(row, 0)?,
-                    row.get::<_, Option<String>>(1)?,
-                ))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        let mut edges = Vec::new();
-        frontier = BTreeSet::new();
-        for (parent, children) in reclaimed {
-            for child in read_children(children.as_deref())? {
-                edges.push([child.clone(), parent.clone()]);
-                frontier.insert(child);
-            }
-        }
-        if !edges.is_empty() {
-            cached_execute(tx, SQLITE_SQL.delete_index_edges.sql(), [encode(&edges)?])?;
+    if released.is_empty() {
+        return Ok(());
+    }
+    cached_execute(tx, SQLITE_SQL.retirement_put.sql(), [encode(released)?])?;
+    drain_retired(tx, 4096).map(drop)
+}
+
+pub(crate) fn retirement_backlog(tx: &Connection) -> rusqlite::Result<u64> {
+    tx.prepare_cached(SQL.retirement_count.sql())?
+        .query_row([], |row| row.get(0))
+}
+
+/// Answers examined nodes, reclaimed nodes and reclaimed payload bytes.
+/// Prompt bytes are separate from graph blob accounting.
+pub(crate) fn drain_retired(
+    tx: &Connection,
+    limit: usize,
+) -> rusqlite::Result<(usize, usize, u64)> {
+    let candidates = tx
+        .prepare_cached(SQLITE_SQL.retirement_candidates.sql())?
+        .query_map([i64::try_from(limit.max(1)).unwrap_or(i64::MAX)], |row| {
+            Ok((
+                crate::codec::hash_column(row, 0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, bool>(2)?,
+                row.get::<_, Option<u64>>(3)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    if candidates.is_empty() {
+        return Ok((0, 0, 0));
+    }
+    let examined: BTreeSet<_> = candidates
+        .iter()
+        .map(|(hash, _, _, _)| hash.clone())
+        .collect();
+    let gone: BTreeSet<_> = candidates
+        .iter()
+        .filter(|(_, _, unprotected, bytes)| *unprotected && bytes.is_some())
+        .map(|(hash, _, _, _)| hash.clone())
+        .collect();
+    let mut next = BTreeSet::new();
+    let mut bytes = 0;
+    for (hash, children, _, size) in &candidates {
+        if gone.contains(hash) {
+            next.extend(
+                read_children(children.as_deref())?
+                    .into_iter()
+                    .filter(|child| !examined.contains(child)),
+            );
+            bytes += size.unwrap_or(0);
         }
     }
-    Ok(())
+    cached_execute(tx, SQLITE_SQL.retirement_take.sql(), [encode(&examined)?])?;
+    if !gone.is_empty() {
+        let batch = encode(&gone)?;
+        cached_execute(tx, SQLITE_SQL.delete_retired_edges.sql(), [&batch])?;
+        cached_execute(tx, SQLITE_SQL.delete_retired_texts.sql(), [&batch])?;
+    }
+    if !next.is_empty() {
+        cached_execute(tx, SQLITE_SQL.retirement_put.sql(), [encode(&next)?])?;
+    }
+    Ok((examined.len(), gone.len(), bytes))
+}
+
+/// Canonical rows for a set install; immutable child edges keep set semantics.
+fn stored_text(hash: &str, text: &PromptText) -> serde_json::Value {
+    let children: BTreeSet<&str> = text.children.iter().map(String::as_str).collect();
+    if children.is_empty() {
+        serde_json::json!([hash, &*text.text])
+    } else {
+        serde_json::json!([hash, &*text.text, children])
+    }
 }
 
 /// The children a text's row stores.
@@ -596,6 +693,63 @@ mod tests {
     use lash_core_store::store::SessionCatalogStore as _;
     use lash_core_store::store::Target;
     use lash_durable::{ActorKey, CommitLabel, DomainWrite, DurableReads, DurableStore};
+
+    /// LO-ROOT-WORK: an unrelated session's live prefix cannot add work to
+    /// deciding whether the one retired prompt leaf is protected.
+    #[tokio::test]
+    async fn lo_root_prompt_retirement_ignores_unrelated_sessions() {
+        let mut work = Vec::new();
+        for size in [32_usize, 4096] {
+            let set = crate::SqliteStoreSet::memory().await.unwrap();
+            let store = set.session_store_factory();
+            let steps = store
+                .conn
+                .call(move |connection| {
+                    let shared =
+                        lash_core_store::store::BlobRef::for_content(b"shared live prompt");
+                    let retired = lash_core_store::store::BlobRef::for_content(b"retired prompt");
+                    for hash in [&shared, &retired] {
+                        connection.execute(
+                        "INSERT INTO prompt_texts(hash, text, children) VALUES (?1, 'leaf', '[]')",
+                        [crate::codec::SqlHash(hash.as_str())],
+                    )?;
+                    }
+                    for session in 0..size {
+                        connection.execute(
+                            "INSERT INTO prompt_prefixes(session_id, hash) VALUES (?1, ?2)",
+                            rusqlite::params![
+                                format!("unrelated-{session}"),
+                                crate::codec::SqlHash(shared.as_str())
+                            ],
+                        )?;
+                    }
+                    connection.execute(
+                        "INSERT INTO prompt_retirement_frontier(hash) VALUES (?1)",
+                        [crate::codec::SqlHash(retired.as_str())],
+                    )?;
+                    assert_eq!(super::drain_retired(connection, 256)?, (1, 1, 4));
+                    assert_eq!(
+                        connection.query_row(
+                            "SELECT count(*) FROM prompt_prefixes",
+                            [],
+                            |row| row.get::<_, usize>(0)
+                        )?,
+                        size
+                    );
+                    let statement =
+                        connection.prepare_cached(super::SQLITE_SQL.retirement_candidates.sql())?;
+                    Ok(statement.get_status(rusqlite::StatementStatus::VmStep))
+                })
+                .await
+                .unwrap();
+            eprintln!("LO-ROOT-WORK unrelated_sessions={size} vm_steps={steps}");
+            work.push(steps);
+        }
+        assert!(
+            work[1] <= work[0] * 2,
+            "unrelated session prefixes must not multiply retirement work: {work:?}"
+        );
+    }
 
     /// PROMPT-AUDIT-RETENTION: revision expiry releases settled audit plans
     /// and last-reference texts, retaining pending requests and the prefix.

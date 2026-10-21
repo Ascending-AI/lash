@@ -19,40 +19,61 @@ pub(crate) async fn peel(tx: &mut PgConnection, frontier: BTreeSet<String>) -> A
     let mut frontier = frontier;
     let mut deleted = 0;
     while !frontier.is_empty() {
-        let (gone, children) = peel_level(tx, &frontier).await?;
+        let (_, gone, children, _) = peel_set(tx, &frontier, 4096).await.map_err(db)?;
         deleted += gone;
         frontier = children;
     }
     Ok(deleted)
 }
 
-/// One level of [`peel`]: locks what of `frontier` no other transaction
-/// holds, then deletes in a statement of its own every locked node nothing
-/// names or reaches; answers how many with the children their edges
-/// reached.
-async fn peel_level(
+/// One bounded set, claimed in digest order without waiting. A skipped
+/// parent is outside the locked set and protects every descendant it reaches.
+pub(crate) async fn peel_set(
     tx: &mut PgConnection,
     frontier: &BTreeSet<String>,
-) -> Answer<(usize, BTreeSet<String>)> {
-    let level: Vec<&str> = frontier.iter().map(String::as_str).collect();
-    let level: Vec<String> = crate::keys::query_scalar(SQL.postgres.peel_lock.sql())
-        .bind(crate::keys::keys(&level))
-        .fetch_one(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(db)?;
-    if level.is_empty() {
-        return Ok((0, BTreeSet::new()));
-    }
-    let (gone, children): (i64, Vec<crate::keys::Key>) =
-        crate::observed_sql::query_as(SQL.postgres.peel_level.sql())
-            .bind(crate::keys::keys(&level))
+    limit: usize,
+) -> Result<(usize, usize, BTreeSet<String>, BTreeSet<String>), sqlx::Error> {
+    let candidates: BTreeSet<String> =
+        crate::keys::query_scalar(SQL.postgres.retirement_candidates.sql())
+            .bind(crate::keys::keys(frontier))
+            .bind(i64::try_from(limit.max(1)).unwrap_or(i64::MAX))
+            .fetch_all(crate::observed_sql::executor(&mut *tx))
+            .await?
+            .into_iter()
+            .collect();
+    let locked: BTreeSet<String> =
+        crate::keys::query_scalar::<Vec<String>>(SQL.postgres.peel_lock.sql())
+            .bind(crate::keys::keys(&candidates))
             .fetch_one(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(db)?;
-    Ok((
-        usize::try_from(gone).unwrap_or_default(),
-        children.into_iter().map(|key| key.0).collect(),
-    ))
+            .await?
+            .into_iter()
+            .collect();
+    let skipped = candidates.difference(&locked).cloned().collect();
+    let mut next: BTreeSet<_> = frontier.difference(&candidates).cloned().collect();
+    if locked.is_empty() {
+        return Ok((candidates.len(), 0, next, skipped));
+    }
+    let gone: Vec<String> = crate::keys::query_scalar(SQL.postgres.retirement_unprotected.sql())
+        .bind(crate::keys::keys(&locked))
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
+        .await?;
+    if gone.is_empty() {
+        return Ok((candidates.len(), 0, next, skipped));
+    }
+    let children: Vec<String> = crate::keys::query_scalar(SQL.postgres.retirement_edges.sql())
+        .bind(crate::keys::keys(&gone))
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
+        .await?;
+    next.extend(
+        children
+            .into_iter()
+            .filter(|child| !candidates.contains(child)),
+    );
+    let deleted: Vec<String> = crate::keys::query_scalar(SQL.postgres.retirement_nodes.sql())
+        .bind(crate::keys::keys(&gone))
+        .fetch_all(crate::observed_sql::executor(tx))
+        .await?;
+    Ok((candidates.len(), deleted.len(), next, skipped))
 }
 
 /// How many roots the catalog names and how many blobs are stored.

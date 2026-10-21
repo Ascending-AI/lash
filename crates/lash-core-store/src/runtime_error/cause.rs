@@ -27,6 +27,9 @@ pub struct OwnerRevisionConflict {
 pub enum RuntimeErrorCause {
     /// The owner still holds its epoch, but its draft has an older revision.
     OwnerRevisionConflict(Box<OwnerRevisionConflict>),
+    OwnerAllocation {
+        refusal: Box<lash_protocol_types::allocation::AllocationError>,
+    },
     /// The deployment retired a registry entry a session still needs.
     PluginRetired {
         refusal: Box<crate::obligations::RetirementRefusal>,

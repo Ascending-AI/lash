@@ -29,7 +29,9 @@ use super::checkpoint_content::{
 use super::machine_state::outside_window;
 use super::{SavedTurn, TurnCheckpointRestoreError, TurnProtocol, TurnWindow};
 use lash_protocol_types::session_model::message::message_content_equal;
-use lash_protocol_types::{llm::types::LlmMessage, llm::types::LlmRequest};
+use lash_protocol_types::{
+    llm::types::LlmMessage, llm::types::LlmRequest, llm::types::RetainedLlmRequest,
+};
 use lash_protocol_types::{session_model::Message, session_model::MessageSequence};
 
 /// How many leading items of each of the machine's sequences are unchanged
@@ -75,7 +77,7 @@ impl Floors {
 /// of its other messages.
 #[derive(Clone, Debug)]
 pub(super) struct StoredRequest {
-    pub(super) request: Arc<LlmRequest>,
+    pub(super) request: Arc<RetainedLlmRequest>,
     pub(super) rendered_from_window: usize,
     pub(super) frame: CheckpointContentRef,
     pub(super) messages: Chain,
@@ -85,24 +87,25 @@ impl StoredRequest {
     /// Store `request` past the `window`'s render, building on `base`, the
     /// request an earlier checkpoint of the turn stored.
     pub(super) fn record<E: Clone>(
-        request: &Arc<LlmRequest>,
+        request: &Arc<RetainedLlmRequest>,
         window: Option<&TurnWindow<E>>,
         base: Option<&StoredRequest>,
         content: &mut TurnCheckpointContent,
         encoded: &mut usize,
     ) -> Self {
-        let shared = window.map_or(0, |window| window.shared_render(&request.messages));
-        let own = &request.messages[shared..];
+        let shared = window.map_or(0, |window| window.shared_retained_render(&request.messages));
+        let own: Vec<_> = request.messages.iter_from(shared).collect();
         let base = base.filter(|base| base.rendered_from_window == shared);
         let stable = base.map_or(0, |base| {
-            base.request.messages[shared..]
-                .iter()
-                .zip(own)
+            base.request
+                .messages
+                .iter_from(shared)
+                .zip(own.iter().copied())
                 .take_while(|(before, now)| before == now)
                 .count()
         });
         let messages = Chain::of(
-            own.iter(),
+            own.iter().copied(),
             own.len(),
             base.map(|base| &base.messages),
             stable,
@@ -151,7 +154,7 @@ impl StoredRequest {
         }
         request.messages.extend(own);
         Ok(Self {
-            request: Arc::new(request),
+            request: Arc::new(RetainedLlmRequest::from_request(request)),
             rendered_from_window,
             frame: frame.clone(),
             messages: chain,

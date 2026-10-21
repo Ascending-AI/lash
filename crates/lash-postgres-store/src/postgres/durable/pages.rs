@@ -85,6 +85,9 @@ lash_store_sql::statements! {
     /// Page statements only PostgreSQL issues: the array binding of a node
     /// list, its boolean holds and the row locks a lease and a step take.
     pub(crate) struct PagePostgresStatements @ "durable_pages_postgres" {
+        /// Prompt cleanup positions participate in the same policy backlog.
+        backlog_with_prompts = "SELECT (SELECT count(*) FROM retirement_holds) + (SELECT count(*) FROM retirement_frontier) + (SELECT count(*) FROM prompt_retirement_frontier), (SELECT min(queued_at_ms) FROM retirement_holds)";
+
         /// Key-share lock every stored node of `?1` and `?2`, in digest
         /// order, and answer them: what a hold may name, locked against a
         /// peel before any hold row is written.
@@ -590,7 +593,13 @@ async fn retire_step_in(
     .execute(crate::observed_sql::executor(&mut *tx))
     .await?;
     let mut progress = RetirementProgress::default();
-    let limit = budget.nodes.max(1);
+    let (examined, deleted, _) = super::prompts::drain_retired(tx, budget.nodes).await?;
+    progress.holds_advanced += examined.cast_unsigned();
+    progress.nodes_deleted += deleted.cast_unsigned();
+    if deleted.cast_unsigned() >= budget.nodes.max(1) {
+        return Ok(progress);
+    }
+    let limit = budget.nodes.saturating_sub(deleted.cast_unsigned()).max(1);
     let expired: Vec<i64> = crate::observed_sql::query_scalar(SQL.postgres.leases_expired.sql())
         .bind(now.0)
         .bind(i64::try_from(limit).unwrap_or(i64::MAX))
@@ -643,8 +652,9 @@ async fn retire_step_in(
         for node in &level {
             frontier.remove(node);
         }
-        examinable -= level.len() as u64;
-        let (gone, children, missed) = peel(tx, &level).await?;
+        let (examined, gone, children, missed) = graph::peel_set(tx, &level, take).await?;
+        let gone = gone as u64;
+        examinable = examinable.saturating_sub(examined as u64);
         progress.nodes_deleted += gone;
         remaining = remaining.saturating_sub(gone);
         skipped.extend(missed);
@@ -907,7 +917,7 @@ impl PageStore for PostgresDurableStore {
         let (holds, oldest): (i64, Option<i64>) = self
             .read(|connection| {
                 Box::pin(async move {
-                    crate::observed_sql::query_as(SQL.pages.backlog.sql())
+                    crate::observed_sql::query_as(SQL.postgres.backlog_with_prompts.sql())
                         .fetch_one(crate::observed_sql::executor(&mut **connection))
                         .await
                         .map_err(sqlx_failure)

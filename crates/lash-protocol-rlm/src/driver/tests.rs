@@ -245,6 +245,7 @@ pub(super) fn projection_test_config(
     max_context_tokens: Option<usize>,
 ) -> lash_core::TurnMachineConfig {
     lash_core::TurnMachineConfig {
+        allocation_budget: lash_protocol_types::allocation::AllocationBudget::unowned(),
         model_tool_calls: lash_core::sansio::ModelToolCalls::fixture(),
         protocol_driver: Arc::new(crate::protocol::RlmDriver::new(
             crate::dialect::CellDialect::typescript(),

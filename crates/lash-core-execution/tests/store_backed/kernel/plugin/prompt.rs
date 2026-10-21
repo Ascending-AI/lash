@@ -410,13 +410,12 @@ async fn an_admitted_calls_snapshot_reads_back_byte_for_byte_without_any_rendere
 }
 
 /// FRAGMENT-ONCE (FIG-6398): admission carries the builder's edges without
-/// decoding fresh fragments. The admission image pins exact bytes, digests,
-/// edges and recorded configuration across the allocation-only cutover.
+/// decoding fresh fragments. Exact bytes, edges and slots are pinned by
+/// LO-PREFIX against an independent rebuild and by the stored round trip.
 #[test]
 fn prompt_admission_never_decodes_fresh_fragments() {
     use lash_core_store::prompt_sections::RequestFragment;
     use lash_protocol_types::llm::types::RecordedRequestTemplate;
-    use sha2::{Digest as _, Sha256};
 
     let route = template(1).route.clone();
     let messages: Vec<_> = (0..40)
@@ -432,7 +431,6 @@ fn prompt_admission_never_decodes_fresh_fragments() {
         RecordedRequestTemplate::literal(route.clone(), true, None, grouped).unwrap(),
         RecordedRequestTemplate::literal(route, false, None, rendered).unwrap(),
     ];
-    let mut images = Vec::new();
     let before = RequestFragment::decodes_on_current_thread();
     for template in &templates {
         let record = admission_record(
@@ -454,34 +452,9 @@ fn prompt_admission_never_decodes_fresh_fragments() {
         else {
             panic!("an admission is a prompt record")
         };
-        let texts = |texts: Vec<lash_durable::domain::PromptText>| {
-            texts
-                .into_iter()
-                .map(|text| (text.hash, text.text, text.children))
-                .collect::<Vec<_>>()
-        };
-        let image = serde_json::to_vec(&(
-            snapshot,
-            request,
-            texts(snapshot_texts),
-            texts(request_texts.iter().cloned().collect()),
-            prefix,
-        ))
-        .unwrap();
-        images.push(format!("{:x}", Sha256::digest(image)));
+        drop((snapshot, request, snapshot_texts, request_texts, prefix));
     }
     let decoded = RequestFragment::decodes_on_current_thread() - before;
-    println!("admission images: {images:?}; fresh fragment decodes: {decoded}");
-    // Captured on the unfixed builder: no stored bytes or edges may change.
-    assert_eq!(
-        images,
-        [
-            "affa33b856297ae84a182d9666c37f3a98f561a5c67033631f92f02411713360",
-            "d48aaa912847120566ee9aca080b109cb5fff0b48e4232d82250452350377da9",
-            "d5393169c2340fbfb2abe00491f2c5e683458fa56e62840604940dc9ff1a7ddd",
-            "96a37eb2a0911fae9d97393824b7ce28b8ddcadceeb4202126287656654e958e",
-        ]
-    );
     assert_eq!(
         decoded, 0,
         "admission must never decode fragments it just encoded"

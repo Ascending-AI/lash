@@ -97,7 +97,11 @@ pub(super) async fn worker(job_path: &Path, phase: &str, fixture: bool) -> Resul
     );
     let job: Job = serde_json::from_slice(&std::fs::read(job_path)?)?;
     let stores = crate::WorkbenchStores::open_sqlite(&job.directory).await?;
-    let backend = lash::durable::DurableBackendBuilder::new(stores.stores).build()?;
+    let backend = lash::durable::DurableBackendBuilder::new(stores.stores).config(lash::durable::DurableSettings { owner_retention: Some(lash::durable::OwnerRetentionSettings { idle_evict: std::time::Duration::from_secs(60),
+ max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+ max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+ max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+ max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() }, }), ..lash::durable::DurableSettings::standard() }).build()?;
     let provider = provider(fixture)?;
     let profile = lash::RegisteredLlmProfile::new(
         lash::LlmProfileMetadata::builder(&job.model.model)

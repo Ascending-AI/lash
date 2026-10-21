@@ -13,14 +13,34 @@ pub(super) fn booted(
     boot: &str,
     build: impl FnOnce(&lash::Backend) -> lash::LashCoreBuilder,
 ) -> (lash::Backend, lash::LashCore) {
-    let backend = engines
-        .into_iter()
-        .fold(
-            lash::durable::DurableBackendBuilder::new(Arc::clone(stores)),
-            lash::durable::DurableBackendBuilder::process_engine,
-        )
-        .build()
-        .expect("the backend assembles");
+    let backend =
+        engines
+            .into_iter()
+            .fold(
+                lash::durable::DurableBackendBuilder::new(Arc::clone(stores)).config(
+                    lash_durable::DurableSettings {
+                        owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                            idle_evict: std::time::Duration::from_secs(60),
+                            max_owner_bytes: const {
+                                std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap()
+                            },
+                            max_node_bytes: const {
+                                std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap()
+                            },
+                            max_owner_dirty_bytes: const {
+                                std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap()
+                            },
+                            max_node_dirty_bytes: const {
+                                std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap()
+                            },
+                        }),
+                        ..lash_durable::DurableSettings::standard()
+                    },
+                ),
+                lash::durable::DurableBackendBuilder::process_engine,
+            )
+            .build()
+            .expect("the backend assembles");
     let core = build(&backend)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())

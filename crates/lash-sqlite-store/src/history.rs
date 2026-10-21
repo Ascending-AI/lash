@@ -567,6 +567,9 @@ impl SessionHistoryStore for SqliteStore {
         session_id: &SessionId,
         selector: WindowSelector,
     ) -> Result<Option<SessionWindowRead>, StoreError> {
+        lash_core_ids::operational_metrics::sql::owner_state_read(
+            lash_core_ids::operational_metrics::sql::OwnerStateRead::Head,
+        );
         let session = session_id.clone();
         let fleet = self.conn.fleet();
         let read = WindowReadContext {

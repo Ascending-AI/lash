@@ -262,6 +262,25 @@ pub(crate) async fn lower(
     endpoint: CompletionEndpoint,
     cache: &SegmentCache,
 ) -> Result<RecordedRequestTemplate, LlmTransportError> {
+    lower_at(
+        provider,
+        req,
+        endpoint,
+        cache,
+        0,
+        &lash_protocol_types::allocation::AllocationBudget::unowned(),
+    )
+    .await
+}
+
+async fn lower_at(
+    provider: &OpenAiCompatibleProvider,
+    req: &LlmRequest,
+    endpoint: CompletionEndpoint,
+    cache: &SegmentCache,
+    source_offset: usize,
+    budget: &lash_protocol_types::allocation::AllocationBudget,
+) -> Result<RecordedRequestTemplate, LlmTransportError> {
     let route = ProviderRouteIdentity::for_endpoint(
         endpoint.provider_kind(),
         &provider.base_url,
@@ -311,6 +330,7 @@ pub(crate) async fn lower(
         .json(&scope)
         .str(safe.model.metadata().capability.instruction_role.as_str())
         .finish();
+    let budget = budget.clone();
     let build_route = route.clone();
     let build_scope = scope.clone();
     let build_cache = cache.clone();
@@ -326,7 +346,9 @@ pub(crate) async fn lower(
                 &safe,
                 endpoint.provider_kind(),
                 codec,
-            );
+            )
+            .at_source_offset(source_offset)
+            .with_budget(&budget);
             build_request_body(&builder, &safe, endpoint, stream, &build_route, &mut units)
         })
         .await??;
@@ -340,6 +362,50 @@ pub(crate) async fn lower(
         &body,
         codec,
     )
+}
+
+pub(crate) async fn lower_retained(
+    provider: &OpenAiCompatibleProvider,
+    request: &lash_protocol_types::llm::types::RetainedLlmRequest,
+    endpoint: CompletionEndpoint,
+    cache: &SegmentCache,
+    budget: &lash_protocol_types::allocation::AllocationBudget,
+) -> Result<RecordedRequestTemplate, LlmTransportError> {
+    lash_core::provider::attachment_wire::retained_groups(
+        request,
+        cache,
+        budget,
+        match endpoint {
+            CompletionEndpoint::Responses => "openai.responses.retained/1",
+            CompletionEndpoint::ChatCompletions => "openai.chat.retained/1",
+        },
+        &serde_json::json!([
+            provider.serialize_config(),
+            provider.attachment_credential_scope
+        ]),
+        |messages| {
+            if endpoint == CompletionEndpoint::Responses {
+                return crate::responses_shared::retained_group_start(messages);
+            }
+            let mut starts = 0;
+            for index in (0..messages.len()).rev() {
+                if messages
+                    .get(index)
+                    .is_some_and(|message| message.role == LlmRole::Assistant)
+                {
+                    starts += 1;
+                    if starts == 2 {
+                        return index;
+                    }
+                }
+            }
+            0
+        },
+        |request, offset| async move {
+            lower_at(provider, &request, endpoint, cache, offset, budget).await
+        },
+    )
+    .await
 }
 
 /// Lower `req` and send its body, as one call of a test that scripts the

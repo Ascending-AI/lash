@@ -569,10 +569,17 @@ async fn worker_open_needs_no_ddl_privilege() {
         .connect(&reader_url)
         .await
         .expect("connect as the read-only role");
-    let storage = lash_postgres_store::testing::from_pool(
-        reader_pool.clone(),
-        &lash_postgres_store::PostgresHostConfig::default(),
-    )
+    let storage = lash_postgres_store::testing::from_pool(reader_pool.clone(), &{
+        let mut config = lash_postgres_store::PostgresHostConfig::default();
+        config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+            idle_evict: std::time::Duration::from_secs(60),
+            max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+            max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+            max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+            max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+        });
+        config
+    })
     .await
     .unwrap_or_else(|error| panic!("worker open must need no privilege beyond SELECT: {error}"));
     assert!(
@@ -621,10 +628,17 @@ async fn worker_open_rejects_an_unprovisioned_database() {
         .connect(&database_url)
         .await
         .expect("build empty-schema pool");
-    let error = lash_postgres_store::testing::from_pool(
-        pool.clone(),
-        &lash_postgres_store::PostgresHostConfig::default(),
-    )
+    let error = lash_postgres_store::testing::from_pool(pool.clone(), &{
+        let mut config = lash_postgres_store::PostgresHostConfig::default();
+        config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+            idle_evict: std::time::Duration::from_secs(60),
+            max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+            max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+            max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+            max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+        });
+        config
+    })
     .await
     .err()
     .expect("an unprovisioned database must not open");
@@ -707,10 +721,17 @@ async fn a_partial_installation_fronting_a_complete_one_is_rejected() {
          next schema on the search_path: {:?}",
         report.findings
     );
-    let error = lash_postgres_store::testing::from_pool(
-        pool.clone(),
-        &lash_postgres_store::PostgresHostConfig::default(),
-    )
+    let error = lash_postgres_store::testing::from_pool(pool.clone(), &{
+        let mut config = lash_postgres_store::PostgresHostConfig::default();
+        config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+            idle_evict: std::time::Duration::from_secs(60),
+            max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+            max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+            max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+            max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+        });
+        config
+    })
     .await
     .err()
     .expect("a mixed installation must not open");
@@ -774,10 +795,17 @@ async fn a_lash_table_shadowing_the_anchored_installation_is_reported() {
         "a lash table resolving outside the anchored namespace must be reported: {:?}",
         report.findings
     );
-    let error = lash_postgres_store::testing::from_pool(
-        pool.clone(),
-        &lash_postgres_store::PostgresHostConfig::default(),
-    )
+    let error = lash_postgres_store::testing::from_pool(pool.clone(), &{
+        let mut config = lash_postgres_store::PostgresHostConfig::default();
+        config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+            idle_evict: std::time::Duration::from_secs(60),
+            max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+            max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+            max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+            max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+        });
+        config
+    })
     .await
     .err()
     .expect("a shadowed installation must not open");
@@ -807,16 +835,35 @@ async fn a_raised_reader_floor_is_fatal_in_every_mode() {
         ))
         .await;
     for check in [SchemaCheck::Enforce, SchemaCheck::WarnOnly] {
-        let error = lash_postgres_store::testing::from_pool(
-            scratch.pool.clone(),
-            &lash_postgres_store::PostgresHostConfig {
-                schema_check: check,
-                ..lash_postgres_store::PostgresHostConfig::default()
-            },
-        )
-        .await
-        .err()
-        .unwrap_or_else(|| panic!("{check:?} must reject a raised reader floor"));
+        let error =
+            lash_postgres_store::testing::from_pool(
+                scratch.pool.clone(),
+                &lash_postgres_store::PostgresHostConfig {
+                    schema_check: check,
+                    ..{
+                        let mut config = lash_postgres_store::PostgresHostConfig::default();
+                        config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+                            idle_evict: std::time::Duration::from_secs(60),
+                            max_owner_bytes: const {
+                                std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap()
+                            },
+                            max_node_bytes: const {
+                                std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap()
+                            },
+                            max_owner_dirty_bytes: const {
+                                std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap()
+                            },
+                            max_node_dirty_bytes: const {
+                                std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap()
+                            },
+                        });
+                        config
+                    }
+                },
+            )
+            .await
+            .err()
+            .unwrap_or_else(|| panic!("{check:?} must reject a raised reader floor"));
         assert!(
             matches!(
                 error,
@@ -858,16 +905,35 @@ async fn a_raised_reader_floor_is_rejected_without_adding_check_constraints() {
         .await;
 
     for check in [SchemaCheck::Enforce, SchemaCheck::WarnOnly] {
-        let error = lash_postgres_store::testing::from_pool(
-            scratch.pool.clone(),
-            &lash_postgres_store::PostgresHostConfig {
-                schema_check: check,
-                ..lash_postgres_store::PostgresHostConfig::default()
-            },
-        )
-        .await
-        .err()
-        .unwrap_or_else(|| panic!("{check:?} must refuse the raised floor"));
+        let error =
+            lash_postgres_store::testing::from_pool(
+                scratch.pool.clone(),
+                &lash_postgres_store::PostgresHostConfig {
+                    schema_check: check,
+                    ..{
+                        let mut config = lash_postgres_store::PostgresHostConfig::default();
+                        config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+                            idle_evict: std::time::Duration::from_secs(60),
+                            max_owner_bytes: const {
+                                std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap()
+                            },
+                            max_node_bytes: const {
+                                std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap()
+                            },
+                            max_owner_dirty_bytes: const {
+                                std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap()
+                            },
+                            max_node_dirty_bytes: const {
+                                std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap()
+                            },
+                        });
+                        config
+                    }
+                },
+            )
+            .await
+            .err()
+            .unwrap_or_else(|| panic!("{check:?} must refuse the raised floor"));
         assert!(
             matches!(
                 error,

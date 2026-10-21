@@ -281,6 +281,9 @@ impl SqliteStore {
         &self,
         session_id: &SessionId,
     ) -> Result<Option<SessionHeadMeta>, StoreError> {
+        lash_core_ids::operational_metrics::sql::owner_state_read(
+            lash_core_ids::operational_metrics::sql::OwnerStateRead::Head,
+        );
         let session_id = session_id.clone();
         let fleet = self.fleet_format();
         let configs = Arc::clone(&self.configs);

@@ -94,36 +94,43 @@ impl Provider for AnthropicProvider {
         req: &LlmRequest,
         cache: &SegmentCache,
     ) -> Result<RecordedRequestTemplate, LlmTransportError> {
-        self.validate_route_and_headers(req.model.wire_model())?;
-        let route = self.route_identity(req.model.wire_model());
-        let accepts = |mime: &lash_protocol_types::MediaType, position| {
-            self.attachment_accepts("", mime, position)
-        };
-        // A wire message reads, besides its own messages, the route, the
-        // host's acceptance and this provider's file scope (its slots).
-        let context = segment_context("lash.anthropic.message/1", req, &route)
-            .json(&self.file_scope())
-            .finish();
-        let mut units = UnitWriter::cached(
+        self.lower_budgeted(
+            req,
             cache,
-            context,
-            accepts,
-            req,
-            ANTHROPIC_PROVIDER_KIND,
-            crate::attachment_delivery::CODEC,
-        );
-        let (body, receipt) = self.build_request_tree(req, &mut units)?;
-        drop(units);
-        let mut template = lower_attachment_json(
-            accepts,
-            req,
-            route,
-            (true, Some(receipt)),
-            &body,
-            crate::attachment_delivery::CODEC,
-        )?;
-        template.wire_features = body_betas(&body);
-        Ok(template)
+            &lash_protocol_types::allocation::AllocationBudget::unowned(),
+            0,
+        )
+        .await
+    }
+
+    async fn lower_retained(
+        &mut self,
+        request: &lash_protocol_types::llm::types::RetainedLlmRequest,
+        cache: &SegmentCache,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<RecordedRequestTemplate, LlmTransportError> {
+        let provider = self.clone();
+        lash_core::provider::attachment_wire::retained_groups(
+            request,
+            cache,
+            budget,
+            "anthropic.retained/1",
+            &serde_json::json!([
+                provider.serialize_config(),
+                provider.attachment_file_scope()
+            ]),
+            Self::retained_group_start,
+            |request, offset| {
+                let mut provider = provider.clone();
+                let cache = cache.clone();
+                async move {
+                    provider
+                        .lower_budgeted(&request, &cache, budget, offset)
+                        .await
+                }
+            },
+        )
+        .await
     }
 
     async fn send(
@@ -503,5 +510,48 @@ impl AnthropicProvider {
             response_metadata: Default::default(),
             expose_thinking: Some(expose_thinking),
         }
+    }
+}
+
+impl AnthropicProvider {
+    async fn lower_budgeted(
+        &mut self,
+        req: &LlmRequest,
+        cache: &SegmentCache,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+        source_offset: usize,
+    ) -> Result<RecordedRequestTemplate, LlmTransportError> {
+        self.validate_route_and_headers(req.model.wire_model())?;
+        let route = self.route_identity(req.model.wire_model());
+        let accepts = |mime: &lash_protocol_types::MediaType, position| {
+            self.attachment_accepts("", mime, position)
+        };
+        // A wire message reads, besides its own messages, the route, the
+        // host's acceptance and this provider's file scope (its slots).
+        let context = segment_context("lash.anthropic.message/1", req, &route)
+            .json(&self.file_scope())
+            .finish();
+        let mut units = UnitWriter::cached(
+            cache,
+            context,
+            accepts,
+            req,
+            ANTHROPIC_PROVIDER_KIND,
+            crate::attachment_delivery::CODEC,
+        )
+        .with_budget(budget)
+        .at_source_offset(source_offset);
+        let (body, receipt) = self.build_request_tree(req, &mut units)?;
+        drop(units);
+        let mut template = lower_attachment_json(
+            accepts,
+            req,
+            route,
+            (true, Some(receipt)),
+            &body,
+            crate::attachment_delivery::CODEC,
+        )?;
+        template.wire_features = body_betas(&body);
+        Ok(template)
     }
 }

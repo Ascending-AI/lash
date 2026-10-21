@@ -266,6 +266,22 @@ impl Provider for OpenAiCompatibleProvider {
         lower(self, req, CompletionEndpoint::ChatCompletions, cache).await
     }
 
+    async fn lower_retained(
+        &mut self,
+        request: &lash_protocol_types::llm::types::RetainedLlmRequest,
+        cache: &SegmentCache,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<RecordedRequestTemplate, LlmTransportError> {
+        crate::driver::lower_retained(
+            self,
+            request,
+            CompletionEndpoint::ChatCompletions,
+            cache,
+            budget,
+        )
+        .await
+    }
+
     async fn send(
         &mut self,
         body: &LiveRequestBody,
@@ -343,6 +359,22 @@ impl Provider for OpenAiProvider {
         cache: &SegmentCache,
     ) -> Result<RecordedRequestTemplate, LlmTransportError> {
         lower(&self.inner, req, CompletionEndpoint::Responses, cache).await
+    }
+
+    async fn lower_retained(
+        &mut self,
+        request: &lash_protocol_types::llm::types::RetainedLlmRequest,
+        cache: &SegmentCache,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Result<RecordedRequestTemplate, LlmTransportError> {
+        crate::driver::lower_retained(
+            &self.inner,
+            request,
+            CompletionEndpoint::Responses,
+            cache,
+            budget,
+        )
+        .await
     }
 
     async fn send(

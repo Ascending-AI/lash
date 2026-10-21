@@ -93,7 +93,7 @@ impl lash_sansio::ProtocolDriverHandle<lash_core::HostTurnProtocol> for ModelDri
         vec![lash_core::DriverAction::Start(
             lash_core::sansio::PendingWork::Llm {
                 request: ctx
-                    .project_llm_request(false)
+                    .project_llm_request_retained(false)
                     .expect("the request projects"),
                 driver_state: None,
             },

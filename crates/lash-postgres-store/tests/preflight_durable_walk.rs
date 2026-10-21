@@ -100,10 +100,17 @@ async fn module_artifact_surface_reads_the_persisted_json() {
         return;
     };
     let scratch = ScratchSchema::provision(&database_url).await;
-    let storage = lash_postgres_store::testing::from_pool(
-        scratch.pool.clone(),
-        &lash_postgres_store::PostgresHostConfig::default(),
-    )
+    let storage = lash_postgres_store::testing::from_pool(scratch.pool.clone(), &{
+        let mut config = lash_postgres_store::PostgresHostConfig::default();
+        config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+            idle_evict: std::time::Duration::from_secs(60),
+            max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+            max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+            max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+            max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+        });
+        config
+    })
     .await
     .expect("open provisioned Postgres storage");
     let document =

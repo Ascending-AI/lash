@@ -115,7 +115,11 @@ async fn workbench_plugin_observes_session_config_policy_transition() {
             .await
             .expect("open a SQLite memory store set"),
     );
-    let backend = lash::durable::DurableBackendBuilder::new(stores)
+    let backend = lash::durable::DurableBackendBuilder::new(stores).config(lash::durable::DurableSettings { owner_retention: Some(lash::durable::OwnerRetentionSettings { idle_evict: std::time::Duration::from_secs(60),
+ max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+ max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+ max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+ max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() }, }), ..lash::durable::DurableSettings::standard() })
         .build()
         .expect("the durable backend builds");
     let plugin = WorkbenchPluginFactory::new();

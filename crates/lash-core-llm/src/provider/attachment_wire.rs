@@ -23,6 +23,28 @@ pub fn template_error(error: impl std::fmt::Display) -> LlmTransportError {
         .with_retry_verdict(TransportRetryVerdict::Forbidden)
 }
 
+pub fn allocation_error(
+    error: lash_protocol_types::allocation::AllocationError,
+) -> LlmTransportError {
+    let mut failure = template_error(&error);
+    failure.context = Box::new(
+        lash_transport_failure::HttpFailureContext::OwnerAllocation {
+            refusal: Box::new(error),
+        },
+    );
+    failure
+}
+pub fn retained_template_error(
+    error: lash_protocol_types::llm::types::TemplateError,
+) -> LlmTransportError {
+    match error {
+        lash_protocol_types::llm::types::TemplateError::Allocation(error) => {
+            allocation_error(error)
+        }
+        error => template_error(error),
+    }
+}
+
 /// Mark the slots `body` delivered as provider files rejected, when
 /// `error` is a refusal before any output whose decoded error body
 /// `names_missing_file`. A body that delivered no provider file marks
@@ -160,6 +182,8 @@ pub enum UnitWriter<'a> {
         cache: &'a SegmentCache,
         context: SegmentContextKey,
         pin: Box<SlotPin<'a>>,
+        source_offset: usize,
+        budget: lash_protocol_types::allocation::AllocationBudget,
     },
 }
 
@@ -186,6 +210,82 @@ impl<'a> UnitWriter<'a> {
             cache,
             context,
             pin: Box::new(slot_pinner(accepts, request, provider, codec)),
+            source_offset: 0,
+            budget: lash_protocol_types::allocation::AllocationBudget::unowned(),
+        }
+    }
+
+    pub fn with_budget(
+        mut self,
+        budget: &lash_protocol_types::allocation::AllocationBudget,
+    ) -> Self {
+        if let Self::Cached { budget: target, .. } = &mut self {
+            *target = budget.clone();
+        }
+        self
+    }
+
+    /// Admit a changed provider group before building its JSON. Its source
+    /// range remains attached to each item, including reused cache entries.
+    pub fn unit_at<'m>(
+        &mut self,
+        messages: &[lash_protocol_types::llm::types::LlmMessage],
+        range: std::ops::Range<usize>,
+        key: impl FnOnce(SegmentKey<'m>) -> SegmentKey<'m>,
+        build: impl FnOnce() -> Result<Vec<TemplateJson>, LlmTransportError>,
+    ) -> Result<Vec<TemplateJson>, LlmTransportError> {
+        let Self::Cached {
+            cache,
+            context,
+            pin,
+            source_offset,
+            budget,
+        } = self
+        else {
+            return build();
+        };
+        let global = range.start + *source_offset..range.end + *source_offset;
+        let segments = cache.segments(
+            key(SegmentKey::new(context))
+                .u64(budget.identity() as u64)
+                .u64(global.start as u64),
+            || {
+                let bound = lash_protocol_types::allocation::payload_capacity(
+                    &&messages[range.clone()],
+                    1024,
+                );
+                let hold = budget.reserve(bound).map_err(allocation_error)?;
+                build()?
+                    .iter()
+                    .map(|json| {
+                        RequestSegment::item(json, &mut |reference, position| {
+                            pin(reference, position)
+                        })
+                        .map(|segment| segment.with_allocation(hold.clone()))
+                    })
+                    .collect::<Result<Vec<_>, LlmTransportError>>()
+            },
+        )?;
+        segments
+            .iter()
+            .map(|segment| {
+                LoweredItem::new(segment.clone().with_source_range(global.clone()))
+                    .map(TemplateJson::Lowered)
+                    .map_err(template_error)
+            })
+            .collect()
+    }
+
+    pub fn at_source_offset(mut self, offset: usize) -> Self {
+        if let Self::Cached { source_offset, .. } = &mut self {
+            *source_offset = offset;
+        }
+        self
+    }
+    pub fn source_offset(&self) -> usize {
+        match self {
+            Self::Plain => 0,
+            Self::Cached { source_offset, .. } => *source_offset,
         }
     }
 
@@ -208,6 +308,7 @@ impl<'a> UnitWriter<'a> {
                 cache,
                 context,
                 pin,
+                ..
             } => {
                 let segments = cache.segments(key(SegmentKey::new(context)), || {
                     build()?
@@ -386,4 +487,196 @@ pub(super) fn canonical_deliveries(
         values,
         policy,
     })
+}
+
+/// A provider's immutable item run and its last complete group boundary.
+#[derive(Default)]
+struct ProviderHistory {
+    source: lash_protocol_types::llm::types::RequestMessages,
+    items: lash_protocol_types::llm::types::RequestItems,
+    stable_source: usize,
+    stable_items: usize,
+    _hold: lash_protocol_types::allocation::AllocationHold,
+}
+impl lash_protocol_types::llm::types::LoweredUnit for ProviderHistory {
+    fn retained_bytes(&self) -> usize {
+        self.items.literal_len()
+    }
+}
+
+/// Carry the unchanged provider groups as a persistent run. The builder gets
+/// only the changed suffix and its original source ordinal. A configuration
+/// change or a context-wide history policy deliberately starts a cold run.
+pub async fn retained_groups<F, Fut, G>(
+    request: &lash_protocol_types::llm::types::RetainedLlmRequest,
+    cache: &SegmentCache,
+    budget: &lash_protocol_types::allocation::AllocationBudget,
+    namespace: &str,
+    configuration: &Value,
+    group_start: G,
+    build: F,
+) -> Result<RecordedRequestTemplate, LlmTransportError>
+where
+    F: Fn(LlmRequest, usize) -> Fut + Send + Sync,
+    Fut: std::future::Future<Output = Result<RecordedRequestTemplate, LlmTransportError>> + Send,
+    G: Fn(&lash_protocol_types::llm::types::RequestMessages) -> usize + Send + Sync,
+{
+    use lash_protocol_types::llm::types::{RequestItems, SegmentKey};
+    let envelope_hold = budget
+        .reserve(lash_protocol_types::allocation::payload_capacity(
+            request.envelope(),
+            4096,
+        ))
+        .map_err(allocation_error)?;
+    let context = SegmentContext::new(namespace)
+        .json(configuration)
+        .u64(budget.identity() as u64)
+        .json(&request.model)
+        .json(&request.generation)
+        .json(request.attachment_acceptance.as_ref())
+        .json(request.tools.as_ref())
+        .json(&request.tool_choice)
+        .json(&request.output_spec)
+        .json(&request.instructions)
+        .finish();
+    let Some(first) = request.messages().first() else {
+        return build(request.materialize(), 0)
+            .await
+            .map(|template| template.with_allocation(envelope_hold));
+    };
+    let mut fresh_template = None;
+    let history = cache
+        .carried_async(
+            SegmentKey::new(&context).message(first),
+            |prior: Option<std::sync::Arc<ProviderHistory>>| async {
+                let prior = prior.filter(|prior| {
+                    !request.has_history_dependencies()
+                        && prior.source.shared_prefix(request.messages()) >= prior.stable_source
+                });
+                let start = prior.as_ref().map_or(0, |prior| prior.stable_source);
+                let suffix_bytes =
+                    request
+                        .messages()
+                        .iter_from(start)
+                        .fold(0u64, |bytes, message| {
+                            bytes.saturating_add(lash_protocol_types::allocation::payload_capacity(
+                                message, 1024,
+                            ))
+                        });
+                let hold = budget
+                    .reserve(suffix_bytes.saturating_add(4096))
+                    .map_err(allocation_error)?;
+                let mut suffix = request.envelope().clone();
+                suffix.messages = request.messages().iter_from(start).cloned().collect();
+                let template = build(suffix, start).await?;
+                let (_, tail, _) = split_item_run(&template, budget)?;
+                let base = match &prior {
+                    Some(prior) => prior
+                        .items
+                        .prefix(prior.stable_items, budget)
+                        .map_err(retained_template_error)?,
+                    None => RequestItems::default(),
+                };
+                let tail: Vec<_> = tail.iter().cloned().collect();
+                let items = base
+                    .append(&tail, budget)
+                    .map_err(retained_template_error)?;
+                let stable_source = if request.has_history_dependencies() {
+                    0
+                } else {
+                    group_start(request.messages())
+                };
+                // The first item whose source overlaps the mutable suffix. Ranges
+                // are ordered, so this reads logarithmically many retained items.
+                let mut lo = 0;
+                let mut hi = items.len();
+                while lo < hi {
+                    let mid = lo + (hi - lo) / 2;
+                    if items
+                        .get(mid)
+                        .and_then(RequestSegment::source_range)
+                        .is_some_and(|range| range.end <= stable_source)
+                    {
+                        lo = mid + 1;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                let stable_items = lo;
+                fresh_template = Some(template);
+                Ok::<_, LlmTransportError>(std::sync::Arc::new(ProviderHistory {
+                    source: request.messages().clone(),
+                    items,
+                    stable_source,
+                    stable_items,
+                    _hold: hold,
+                }))
+            },
+        )
+        .await?;
+    let Some(template) = fresh_template else {
+        return Err(template_error(
+            "a carried update did not build its envelope",
+        ));
+    };
+    let (before, _, after) = split_item_run(&template, budget)?;
+    if history.items.is_empty() {
+        return Ok(template);
+    }
+    let mut out = RecordedRequestTemplate::from_item_run(
+        template.route.clone(),
+        template.stream(),
+        template.generation,
+        before,
+        history.items.clone(),
+        after,
+        budget,
+    )
+    .map_err(retained_template_error)?;
+    out.fetch_horizon = template.fetch_horizon;
+    out.wire_features = template.wire_features;
+    Ok(out.with_allocation(envelope_hold))
+}
+
+fn split_item_run(
+    template: &RecordedRequestTemplate,
+    budget: &lash_protocol_types::allocation::AllocationBudget,
+) -> Result<
+    (
+        String,
+        lash_protocol_types::llm::types::RequestItems,
+        String,
+    ),
+    LlmTransportError,
+> {
+    use lash_protocol_types::llm::types::{RequestItems, SegmentPart};
+    let mut before = String::new();
+    let mut after = String::new();
+    let mut items = Vec::new();
+    let mut seen = false;
+    for segment in template.segment_iter() {
+        if segment.is_item() {
+            seen = true;
+            items.push(segment.clone());
+        } else {
+            let target = if seen { &mut after } else { &mut before };
+            for part in segment.parts() {
+                match part {
+                    SegmentPart::Literal(text) => target.push_str(text),
+                    SegmentPart::Slot(_) => {
+                        return Err(template_error(
+                            "a provider envelope contains an attachment outside its item run",
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    Ok((
+        before,
+        RequestItems::default()
+            .append(&items, budget)
+            .map_err(retained_template_error)?,
+        after,
+    ))
 }

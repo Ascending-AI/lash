@@ -524,6 +524,7 @@ impl<M: TurnProtocol> MachineState<M> {
 
 /// Sans-IO state machine for a single session run (multi-turn).
 pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
+    pub(super) projection_refusal: Option<lash_protocol_types::allocation::ProjectionError>,
     pub(super) config: TurnMachineConfig<M>,
     pub(super) state: MachineState<M>,
     pub(super) side_effect_outbox: VecDeque<Effect<M>>,

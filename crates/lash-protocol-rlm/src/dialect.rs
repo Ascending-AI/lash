@@ -1199,16 +1199,15 @@ mod tests {
             let mut session = DialectSession::new(extension_fixture(), services);
             let handler =
                 crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
-            let response = session
-                .execute(
-                    lash_core::testing::code_execution_context(handler.ports()),
-                    ExecRequest {
-                        code: "const payload = `".to_string(),
-                    },
-                    crate::projection::CodeModeProjectedBindings::default(),
-                )
-                .await
-                .expect("report the extension's parse failure");
+            let response = Box::pin(session.execute(
+                lash_core::testing::code_execution_context(handler.ports()),
+                ExecRequest {
+                    code: "const payload = `".to_string(),
+                },
+                crate::projection::CodeModeProjectedBindings::default(),
+            ))
+            .await
+            .expect("report the extension's parse failure");
             let feedback = response
                 .error()
                 .expect("the fixture refuses the source")
@@ -1241,16 +1240,15 @@ mod tests {
                 DialectSession::new(crate::dialect::CellDialect::typescript(), services);
             let handler =
                 crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
-            let response = session
-                .execute(
-                    lash_core::testing::code_execution_context(handler.ports()),
-                    ExecRequest {
-                        code: "const payload = `".to_string(),
-                    },
-                    crate::projection::CodeModeProjectedBindings::default(),
-                )
-                .await
-                .expect("the cell runs and reports its own failure");
+            let response = Box::pin(session.execute(
+                lash_core::testing::code_execution_context(handler.ports()),
+                ExecRequest {
+                    code: "const payload = `".to_string(),
+                },
+                crate::projection::CodeModeProjectedBindings::default(),
+            ))
+            .await
+            .expect("the cell runs and reports its own failure");
             response
                 .error()
                 .expect("an unterminated template literal fails to parse")

@@ -227,6 +227,7 @@ fn read_checkpoint(text: &str, pin: Option<serde_json::Value>) -> Result<PhaseRe
 /// the phase to install with it.
 pub(super) struct StagedPhase {
     root: NodeId,
+    surface: Option<std::sync::Arc<crate::RecordedSurface>>,
     staging: GraphStaging,
     held: Vec<NodeId>,
     stored: PhaseStored,
@@ -330,6 +331,10 @@ impl StagedPhase {
         }
         Ok(Self {
             root,
+            surface: checkpoint
+                .config
+                .as_ref()
+                .and_then(|config| config.surface().cloned()),
             staging,
             held: held_nodes,
             stored: PhaseStored {
@@ -346,6 +351,7 @@ impl StagedPhase {
             tx.require(node);
         }
         tx.stage_all(self.staging);
+        tx.phase_surface(self.root, self.surface);
         (self.root, self.stored)
     }
 }
@@ -516,6 +522,9 @@ async fn read_phase(
     session: &crate::SessionId,
     run: &crate::TurnId,
 ) -> Result<Option<PhaseCheckpoint>, lash_durable::DurableError> {
+    lash_core_ids::operational_metrics::sql::owner_state_read(
+        lash_core_ids::operational_metrics::sql::OwnerStateRead::Phase,
+    );
     let limits = lash_core_store::checkpoint_graph::DecodeLimits::within_total(16 * 1024 * 1024);
     let graph = match reads
         .hydrate(

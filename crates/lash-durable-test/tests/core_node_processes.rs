@@ -135,7 +135,11 @@ async fn deploy_with(
 ) -> Deployment {
     deploy_configured(
         tier,
-        lash_core_execution::DurableSettings::default(),
+        lash_core_execution::DurableSettings { owner_retention: Some(lash_durable::OwnerRetentionSettings { idle_evict: std::time::Duration::from_secs(60),
+ max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+ max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+ max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+ max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() }, }), ..lash_core_execution::DurableSettings::default() },
         engines,
         build,
     )
@@ -2142,7 +2146,16 @@ async fn a_node_without_an_isolated_tools_engine_leaves_the_turn_to_one_that_reg
     });
     let settings = lash_core_execution::DurableSettings {
         activation_loop_budget: 2,
-        ..lash_core_execution::DurableSettings::default()
+        ..lash_core_execution::DurableSettings {
+            owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                idle_evict: std::time::Duration::from_secs(60),
+                max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+                max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+                max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+                max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+            }),
+            ..lash_core_execution::DurableSettings::default()
+        }
     };
     let session_id = SessionId::try_from("isolated-capability".to_owned()).unwrap();
 

@@ -12,7 +12,7 @@
 //! head has moved since.
 //!
 //! The session actor keeps the head it loaded in its owner cache
-//! ([`HeadCache`], FIG-5207), so a turn reads its session's window from the
+//! ([`SessionOwner`], FIG-5207), so a turn reads its session's window from the
 //! store at most once: the start or the restore loads it, and the turn's
 //! head commit is built over the same head, never read again. The turn's
 //! prelude takes its base window from that head when it names it, and every
@@ -41,7 +41,7 @@ pub type TurnWindow = lash_sansio::TurnWindow<crate::ProtocolEvent>;
 /// A session's committed head.
 #[derive(Clone)]
 pub struct SessionHead {
-    state: RuntimeSessionState,
+    state: Arc<RuntimeSessionState>,
     fleet: crate::FleetFormat,
     clock: Arc<dyn Clock>,
 }
@@ -67,7 +67,7 @@ impl SessionHead {
         let store = session_store(backend, session).await?;
         let state = load_state(&store, session, WindowSelector::Current).await?;
         Ok(Self {
-            state,
+            state: Arc::new(state),
             fleet: store.fleet_format(),
             clock: backend.clock(),
         })
@@ -141,7 +141,7 @@ impl SessionHead {
             .outcome
             .unwrap_or(TurnOutcome::Stopped(crate::TurnStop::Incomplete));
         let mut boundary = TurnBoundary::from_state_with_clock(
-            self.state.clone(),
+            self.state.as_ref().clone(),
             Arc::clone(&self.clock),
             crate::ExecutionScope::turn(self.state.session_id.clone(), run.clone()),
             budget,
@@ -152,6 +152,7 @@ impl SessionHead {
             .await
             .map_err(|error| TurnError::Exec(format!("the turn's head commit: {error}")))?;
         Ok(TurnCommit {
+            postimage: boundary.state().clone(),
             expected_head: commit.expected_head_revision,
             commit: crate::store::encode_session_commit(&commit)
                 .map_err(|error| TurnError::Exec(error.to_string()))?,
@@ -166,15 +167,12 @@ impl SessionHead {
 ///
 /// It is never a grant. Every write still commits in a fenced transaction,
 /// and the head commit is the store's compare-and-set against this head's
-/// revision. Only the owner moves the head through its own `turn.commit`,
-/// after which the head is evicted; a pass that fails for any reason, a
-/// failed fence or a refused compare-and-set among them, evicts it too, and
-/// the next pass reloads it from rows. It is never patched. A context-pressure
-/// frame the turn's preparation opens (`pressure.frame`) moves the head
-/// inside the turn: the runtime's turn commits over the head it left, and a
-/// restore whose checkpoint pins that head reads its window at the pin.
+/// revision. The context owns the acknowledged projection; this handle borrows
+/// its immutable head for preparation and publication. Every successful write
+/// adopts its exact postimage. Errors invalidate the whole projection, and a
+/// new claim or recovery loads it coherently from durable rows.
 #[derive(Default)]
-pub struct HeadCache {
+pub struct SessionOwner {
     held: Option<CachedHead>,
 }
 
@@ -184,35 +182,108 @@ struct CachedHead {
     head: SessionHead,
 }
 
-impl std::fmt::Debug for HeadCache {
+impl std::fmt::Debug for SessionOwner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HeadCache")
+        f.debug_struct("SessionOwner")
             .field("head", &self.held.as_ref().map(|held| &held.head))
             .finish()
     }
 }
 
-impl HeadCache {
+impl SessionOwner {
     /// `session`'s head as `cx`'s owner loaded it, loading it when nothing
     /// is held under `cx`'s actor and epoch.
     ///
     /// # Errors
     ///
     /// [`SessionHead::load`]'s.
-    pub async fn head(
-        &mut self,
-        cx: &ActorContext,
-        session: &SessionId,
-    ) -> Result<&SessionHead, TurnError> {
-        let held = match self.held.take() {
-            Some(held) if held.actor == *cx.actor() && held.epoch == cx.epoch() => held,
-            _ => CachedHead {
-                actor: cx.actor().clone(),
-                epoch: cx.epoch(),
-                head: SessionHead::load(cx.backend(), session).await?,
-            },
-        };
-        Ok(&self.held.insert(held).head)
+    pub fn head<'a>(
+        &'a mut self,
+        cx: &'a ActorContext,
+        session: &'a SessionId,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<&'a SessionHead, TurnError>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            if let Some(projection) = cx.session_projection().await? {
+                let head = SessionHead {
+                    state: projection.head,
+                    fleet: projection.fleet,
+                    clock: cx.backend().clock(),
+                };
+                self.held = Some(CachedHead {
+                    actor: cx.actor().clone(),
+                    epoch: cx.epoch(),
+                    head,
+                });
+            } else {
+                let head = lash_core_ids::operational_metrics::sql::classify_owner_reads(
+                    lash_core_ids::operational_metrics::sql::OwnerReadClass::Recovery,
+                    async {
+                        let basis = cx.begin().await?;
+                        cx.probe().owner_read(
+                            cx.actor(),
+                            cx.epoch(),
+                            lash_durable::OwnerRead::RecoveryLoads,
+                            1,
+                        );
+                        let memory = cx.owner_memory().cloned().ok_or_else(|| TurnError::Exec("session claim has no allocation ledger".into()))?;
+                        let (allocation_budget, allocations) = lash_core_execution::runtime::actor::owner_allocation::OwnerAllocation::budget(memory, cx.actor().to_string());
+                        let mut head = SessionHead::load(cx.backend(), session).await?;
+                        Arc::make_mut(&mut head.state).session_graph.detach_owner_prompt_rendering();
+                        let turn = cx.durable_reads()?.turn(session).await?;
+                        let phase_surface = match turn
+                            .as_ref()
+                            .and_then(|turn| turn.phase.checkpoint().map(|root| (turn, root)))
+                        {
+                            Some((turn, root)) => Some((
+                                root,
+                                super::phase_root::read_plugin_phase(
+                                    cx.durable_reads()?,
+                                    session,
+                                    &turn.run,
+                                )
+                                .await?
+                                .and_then(|phase| phase.surface)
+                                .map(Arc::new),
+                            )),
+                            None => None,
+                        };
+                        let checked = cx.begin().await?;
+                        if checked.revision() != basis.revision() {
+                            return Err(TurnError::Exec(
+                                "session changed during coherent hydration".into(),
+                            ));
+                        }
+                        cx.load_session_projection(
+                            &basis,
+                            lash_core_execution::runtime::actor::owner_state::SessionProjection {
+                                prompt: Default::default(),
+                                allocation_budget,
+                                allocations,
+                                composition: None,
+                                phase_surface,
+                                head: Arc::clone(&head.state),
+                                fleet: head.fleet,
+                                turn,
+                            },
+                        )
+                        .await?;
+                        Ok::<_, TurnError>(head)
+                    },
+                )
+                .await?;
+                self.held = Some(CachedHead {
+                    actor: cx.actor().clone(),
+                    epoch: cx.epoch(),
+                    head,
+                });
+            }
+            self.held
+                .as_ref()
+                .map(|held| &held.head)
+                .ok_or_else(|| TurnError::Exec("session projection was not installed".into()))
+        })
     }
 
     /// The head held under `cx`'s actor and epoch, without loading one.
@@ -237,11 +308,48 @@ impl HeadCache {
         session: &SessionId,
         pin: &TurnWindowPin,
     ) -> Result<TurnWindow, TurnError> {
-        let head = self.head(cx, session).await?;
-        if head.pin()? == *pin {
-            return head.window();
+        // An explicit pin can be read independently of a serving claim.
+        // Only an acknowledged current projection is an owner cache hit.
+        if cx.session_projection().await?.is_some() {
+            let head = self.head(cx, session).await?;
+            if head.pin()? == *pin {
+                return head.window();
+            }
         }
-        load_window(cx.backend(), session, pin).await
+        cx.probe().owner_read(
+            cx.actor(),
+            cx.epoch(),
+            lash_durable::OwnerRead::HistoricalPinReads,
+            1,
+        );
+        lash_core_ids::operational_metrics::sql::classify_owner_reads(
+            lash_core_ids::operational_metrics::sql::OwnerReadClass::Historical,
+            load_window(cx.backend(), session, pin),
+        )
+        .await
+    }
+
+    pub(crate) async fn acknowledged(
+        &mut self,
+        cx: &ActorContext,
+        session: &SessionId,
+    ) -> Result<(), TurnError> {
+        if let Some(projection) = cx.session_projection().await? {
+            let fleet = projection.fleet;
+            self.held = Some(CachedHead {
+                actor: cx.actor().clone(),
+                epoch: cx.epoch(),
+                head: SessionHead {
+                    state: projection.head,
+                    fleet,
+                    clock: cx.backend().clock(),
+                },
+            });
+        } else {
+            self.evict();
+        }
+        let _ = session;
+        Ok(())
     }
 
     /// Drop the held head: the next [`Self::head`] reloads it.

@@ -418,7 +418,11 @@ impl Scenario for StepProof {
         let stores = sim::memory(clock).await;
         let database: Arc<dyn DurableStore> = Arc::new(stores.durable_store());
         let stores: Arc<dyn StoreSet> = Arc::new(stores);
-        let backend = lash::durable::DurableBackendBuilder::new(stores)
+        let backend = lash::durable::DurableBackendBuilder::new(stores).config(lash_durable::DurableSettings { owner_retention: Some(lash_durable::OwnerRetentionSettings { idle_evict: std::time::Duration::from_secs(60),
+ max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+ max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+ max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+ max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() }, }), ..lash_durable::DurableSettings::standard() })
             .process_engine(Arc::new(WriteEngine))
             .build()
             .expect("the backend assembles");

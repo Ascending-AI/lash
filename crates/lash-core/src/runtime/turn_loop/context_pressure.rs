@@ -355,31 +355,19 @@ impl LashRuntime {
         )
         .await
         .map_err(super::runtime_error_from_store_commit)?;
-        crate::runtime::durable::head_commit::commit(
+        let result = crate::runtime::durable::head_commit::commit(
             committing,
             tx,
             self.code_executor().as_ref(),
             commit.clone(),
+            self.state.clone(),
             lash_durable::CommitLabel::PRESSURE_FRAME,
             self.host.core.tracing.metrics(),
         )
         .await
         .map_err(crate::runtime::durable::head_commit::HeadCommitError::into_runtime_error)?;
-        // The resident session adopts the landed commit's receipt, which
-        // its idempotent replay reads back and writes nothing for.
-        let result = store
-            .store()
-            .commit_runtime_state(commit)
-            .await
-            .map_err(super::runtime_error_from_store_commit)?;
-        if !result.receipt_replayed {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::StoreCommitFailed,
-                "the pressure frame's receipt read committed it anew",
-            ));
-        }
-        self.state.apply_persisted_commit_result(result);
-        self.state.mark_node_ids_persisted(persisted_node_ids);
+        self.adopt_owner_state(committing).await?;
+        let _ = (result, persisted_node_ids, store);
         Ok(())
     }
 }

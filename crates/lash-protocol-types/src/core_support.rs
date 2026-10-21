@@ -28,6 +28,7 @@ use crate::{
 /// This is an internal cross-crate seam. Durable identity owners still own the
 /// bytes written after the tag and must version their domain when that format
 /// changes.
+#[derive(Clone, Debug)]
 pub struct Blake3DomainHasher(blake3::Hasher);
 
 impl Blake3DomainHasher {

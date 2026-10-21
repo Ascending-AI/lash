@@ -45,7 +45,8 @@ pub struct DurableBackendBuilder {
 
 impl DurableBackendBuilder {
     /// A builder of the durable backend over `stores`, with the default
-    /// settings, no engines and no providers.
+    /// settings, no engines and no providers. Supply `owner_retention` through
+    /// `config` before `build`; presets leave it unconfigured.
     pub fn new(stores: Arc<dyn StoreSet>) -> Self {
         Self {
             stores,
@@ -249,7 +250,16 @@ mod tests {
                 .await
                 .expect("SQLite"),
         );
-        let mut settings = DurableSettings::development();
+        let mut settings = DurableSettings {
+            owner_retention: Some(crate::durable::OwnerRetentionSettings {
+                idle_evict: std::time::Duration::from_secs(60),
+                max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+                max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+                max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+                max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+            }),
+            ..DurableSettings::development()
+        };
         settings.claim_batch = 3;
         settings.max_active = 11;
         settings.group_commit.max_members = 7;
@@ -271,7 +281,17 @@ mod tests {
     #[tokio::test]
     async fn postgres_operational_policy_reaches_pool_and_transaction() {
         use crate::postgres::*;
-        let mut config = PostgresHostConfig::development();
+        let mut config = {
+            let mut config = PostgresHostConfig::development();
+            config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+                idle_evict: std::time::Duration::from_secs(60),
+                max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+                max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+                max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+                max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+            });
+            config
+        };
         config.roles.work.max_connections = 6;
         config.roles.work.acquire_timeout = Duration::from_millis(73);
         config.guards.durable.lock = ServerTimeout::Limit(Duration::from_millis(67));
@@ -299,8 +319,15 @@ mod tests {
         assert_eq!(prelude.deadline(), config.guards.durable.operation_deadline);
         let omitted: PostgresHostConfig =
             serde_json::from_str("{}").expect("omitted optional settings");
-        assert_eq!(omitted, PostgresHostConfig::standard());
-        PostgresHostConfig::standard().validate().expect("standard");
+        assert!(omitted.node.owner_retention.is_none());
+        assert!(omitted.validate().is_err());
+        { let mut config = PostgresHostConfig::standard(); config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+ idle_evict: std::time::Duration::from_secs(60),
+ max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+ max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+ max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+ max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+}); config }.validate().expect("standard");
     }
 }
 

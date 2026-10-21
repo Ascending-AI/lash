@@ -1046,3 +1046,6 @@ pub use tool_live::{
 use lash_execution_contracts::process::Durable;
 
 use lash_execution_contracts::*;
+
+/// Host-selected working-copy limits for durable owners.
+pub use lash_durable::OwnerRetentionSettings;

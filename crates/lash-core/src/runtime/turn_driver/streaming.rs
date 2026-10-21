@@ -72,7 +72,7 @@ impl RuntimeTurnDriver<'_> {
         &mut self,
         machine: &mut TurnMachine,
         id: crate::sansio::EffectId,
-        request: Arc<LlmRequest>,
+        request: Arc<lash_protocol_types::llm::types::RetainedLlmRequest>,
         event_tx: &TurnObserver,
     ) -> Result<RuntimeLlmCallOutcome, RuntimeEffectControllerError> {
         let invocation = self.turn_effect_invocation(machine, id, RuntimeEffectKind::LlmCall)?;
@@ -82,7 +82,7 @@ impl RuntimeTurnDriver<'_> {
             RuntimeEffectEnvelope::new(
                 invocation,
                 RuntimeEffectCommand::LlmCall {
-                    request: Box::new(LlmRequestSpec::from_request(&request)),
+                    request: Box::new(LlmRequestSpec::from_retained(&request)),
                 },
             ),
             RuntimeEffectOutcome::into_llm_call,
@@ -225,7 +225,7 @@ impl RuntimeTurnDriver<'_> {
     )]
     pub(in crate::runtime) async fn run_llm_call(
         &mut self,
-        request: Arc<LlmRequest>,
+        request: Arc<lash_protocol_types::llm::types::RetainedLlmRequest>,
         admitted: &lash_protocol_types::llm::types::AdmittedSend,
         protocol_iteration: usize,
         invocation: crate::RuntimeInvocation,
@@ -249,7 +249,17 @@ impl RuntimeTurnDriver<'_> {
         self.reset_assistant_stream_hooks(&address).await;
         let LlmCallDispatch { provider } = dispatch;
         let (llm_stream_tx, mut llm_stream_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut request = (*request).clone();
+        let mut request = if request.has_replay()
+            || (self.trace.is_observed()
+                && self
+                    .trace
+                    .content()
+                    .captures(lash_trace::ContentCategory::InputMessages))
+        {
+            request.materialize()
+        } else {
+            request.envelope().clone()
+        };
         request.stream_events = Some(
             crate::llm::types::LlmEventSender::new_scoped(move |event, scope| {
                 let _ = llm_stream_tx.send((event, scope.and_then(|scope| scope.attempt)));

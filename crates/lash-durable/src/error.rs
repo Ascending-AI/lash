@@ -40,6 +40,14 @@ pub use lash_core_store::store_failure::{StoreFailure, StoreFailureKind};
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum DurableError {
+    /// A necessary unpageable owner allocation cannot fit the host policy.
+    /// Nothing was admitted; another claim cannot make this allocation fit.
+    #[error("owner {actor} needs {requested} bytes but its capacity is {capacity}")]
+    OwnerCapacityExceeded {
+        actor: ActorKey,
+        requested: u64,
+        capacity: u64,
+    },
     /// The caller's epoch is stale: it is no longer the owner.
     #[error(transparent)]
     OwnershipLost(Fenced),

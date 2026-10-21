@@ -62,6 +62,7 @@ use super::steps::{self, Entry, Shape, Step, Ty, Value};
 use super::{Committing, PostgresDurableStore, Tx, integer, sqlx_failure};
 
 mod reclaim;
+pub(super) use reclaim::peel_set;
 pub(crate) use reclaim::{audit_page, graph_counts, peel};
 
 lash_store_sql::statements! {
@@ -162,6 +163,22 @@ lash_store_sql::statements! {
         /// leaves is the orphan audit's.
         peel_lock = "SELECT ARRAY(SELECT hash FROM blobs WHERE hash = ANY(?1::bytea[])
              ORDER BY hash FOR UPDATE SKIP LOCKED)";
+
+        /// Discover at most the changed-path batch, stopping at held or shared boundaries.
+        retirement_candidates = "WITH RECURSIVE candidates AS (
+             SELECT unnest(?1::BYTEA[]) AS hash UNION
+             SELECT edge.child_hash AS hash FROM candidates JOIN blob_edges AS edge ON edge.parent_hash = candidates.hash
+              WHERE NOT EXISTS (SELECT 1 FROM graph_root_catalog WHERE root_ref = candidates.hash)
+                AND (SELECT count(*) FROM (SELECT 1 FROM blob_edges WHERE child_hash = candidates.hash LIMIT 2) AS incoming) <= 1
+         ) SELECT hash FROM candidates LIMIT ?2";
+        /// Reclassify liveness under the exact set of row locks acquired.
+        retirement_unprotected = "WITH RECURSIVE candidates AS (SELECT unnest(?1::BYTEA[]) AS hash), protected AS (
+             SELECT hash FROM candidates WHERE EXISTS (SELECT 1 FROM graph_root_catalog WHERE root_ref = candidates.hash)
+                OR EXISTS (SELECT 1 FROM blob_edges AS edge WHERE edge.child_hash = candidates.hash AND NOT (edge.parent_hash = ANY(?1::BYTEA[])))
+             UNION SELECT edge.child_hash AS hash FROM protected JOIN blob_edges AS edge ON edge.parent_hash = protected.hash WHERE edge.child_hash = ANY(?1::BYTEA[])
+         ) SELECT hash FROM candidates WHERE hash NOT IN (SELECT hash FROM protected)";
+        retirement_edges = "DELETE FROM blob_edges WHERE parent_hash = ANY(?1::BYTEA[]) RETURNING child_hash";
+        retirement_nodes = "DELETE FROM blobs WHERE hash = ANY(?1::BYTEA[]) RETURNING hash";
 
         /// One level of a peel: delete every blob in `?1` no root names and
         /// no edge reaches, and answer how many it deleted with the

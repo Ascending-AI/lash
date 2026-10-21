@@ -861,133 +861,176 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
     );
 }
 
-/// PROMPT-RECLAIM-WORK: releasing an index deletes its outgoing edges once
-/// per level, rather than once per node, and reads none: each reclaimed text
-/// answers its own children (FIG-6939). A subtree another call roots stays
-/// stored until that call releases it.
-#[tokio::test]
-async fn prompt_reclamation_reads_one_edge_batch_per_level() {
-    use lash_durable::domain::{ModelCallId, PromptCallKey, PromptText, PromptWrite};
-    use lash_durable::{ActorKey, CommitLabel, DomainWrite, DurableReads, DurableStore};
+/// LO-ROOT: releasing a tree deletes one protected candidate set, regardless
+/// of its depth. A subtree another call roots survives until its final release.
+mod lo_root_retirement_sql_is_depth_independent {
+    use super::*;
+    #[tokio::test]
+    async fn memory() {
+        law(false).await;
+    }
+    #[tokio::test]
+    async fn file() {
+        law(true).await;
+    }
+    async fn law(file: bool) {
+        use lash_durable::domain::{ModelCallId, PromptCallKey, PromptWrite};
+        use lash_durable::{ActorKey, CommitLabel, DomainWrite, DurableReads, DurableStore};
 
-    let (_root, set, _clock) = world(false).await;
-    let store = set.durable_store();
-    let identity = lash_core_execution::testing::sql_work::owner_commit(&set).await;
-    let actor = ActorKey::session("sql-work-owner").unwrap();
-    let session = lash_protocol_types::SessionId::from("sql-work-owner");
-    let mut texts: Vec<_> = (0..16)
-        .map(|leaf| PromptText {
-            hash: BlobRef::for_content(format!("leaf-{leaf}").as_bytes()).0,
-            text: format!("leaf {leaf}").into(),
-            children: Vec::new(),
-        })
-        .collect();
-    let mut frontier: Vec<_> = texts.iter().map(|text| text.hash.clone()).collect();
-    let mut level = 0;
-    while frontier.len() > 1 {
-        let mut next = Vec::new();
-        for (index, pair) in frontier.as_chunks::<2>().0.iter().enumerate() {
-            let hash = BlobRef::for_content(format!("branch-{level}-{index}").as_bytes()).0;
-            texts.push(PromptText {
-                hash: hash.clone(),
-                text: format!("branch {level} {index}").into(),
-                children: pair.to_vec(),
-            });
-            next.push(hash);
-        }
-        frontier = next;
-        level += 1;
-    }
-    let root = texts.last().unwrap();
-    let held = texts
-        .iter()
-        .find(|text| text.hash == root.children[0])
-        .unwrap()
-        .clone();
-    let mut survivors = std::collections::BTreeSet::new();
-    let mut pending = vec![held.hash.clone()];
-    while let Some(hash) = pending.pop() {
-        let text = texts.iter().find(|text| text.hash == hash).unwrap();
-        pending.extend(text.children.iter().cloned());
-        survivors.insert(hash);
-    }
-    let call = |run: &'static str| PromptCallKey {
-        session: session.clone(),
-        call: ModelCallId::Turn {
-            run: lash_protocol_types::TurnId::from(run),
-            ordinal: 1,
-        },
-    };
-    let mut tx = store
-        .begin(&actor, lash_durable::Epoch(identity.epoch))
-        .await
-        .unwrap();
-    for (run, request_texts) in [("whole", texts.clone()), ("held", vec![held])] {
-        tx.write(DomainWrite::Prompt(PromptWrite::Record {
-            call: call(run),
-            snapshot: None,
-            request: run.to_owned(),
-            snapshot_texts: Vec::new(),
-            request_texts: request_texts.into(),
-            prefix: None,
-        }));
-    }
-    store
-        .commit(tx, CommitLabel::new("model.start"))
-        .await
-        .unwrap();
-    let hashes: Vec<_> = texts.iter().map(|text| text.hash.clone()).collect();
-    for (run, levels) in [("whole", 4), ("held", 3)] {
-        let mut tx = store
-            .begin(&actor, lash_durable::Epoch(identity.epoch))
-            .await
+        let mut counts = Vec::new();
+        for depth in [10, 100, 1000] {
+            let (_root, set, _clock) = world(file).await;
+            let store = set.durable_store();
+            let identity = lash_core_execution::testing::sql_work::owner_commit(&set).await;
+            let actor = ActorKey::session("sql-work-owner").unwrap();
+            let session = lash_protocol_types::SessionId::from("sql-work-owner");
+            let budget = lash_protocol_types::allocation::AllocationBudget::unowned();
+            let segments: Vec<_> = (0..depth)
+                .map(|index| {
+                    lash_protocol_types::llm::types::RequestSegment::item_json(
+                        &serde_json::json!({"body":format!("leaf {index:04}")}),
+                    )
+                    .unwrap()
+                })
+                .collect();
+            let items = lash_protocol_types::llm::types::RequestItems::default()
+                .append(&segments, &budget)
+                .unwrap();
+            let template = lash_protocol_types::llm::types::RecordedRequestTemplate::from_item_run(
+                lash_protocol_types::llm::types::ProviderRouteIdentity::new(
+                    "fixture", "fixture", "fixture",
+                ),
+                true,
+                None,
+                "{\"messages\":[".into(),
+                items,
+                "]}".into(),
+                &budget,
+            )
             .unwrap();
-        tx.write(DomainWrite::Prompt(PromptWrite::Release {
-            session: session.clone(),
-            run: Some(lash_protocol_types::TurnId::from(run)),
-        }));
-        let (answer, receipt) = lash_core_ids::operational_metrics::sql::collect(
-            "prompt.release",
-            "sqlite",
-            store.commit(tx, CommitLabel::new("prompt.release")),
-        )
-        .await;
-        answer.unwrap();
-        // A level's reclaimed texts answer their own children; their
-        // edges go in one statement per level above the leaves.
-        let edge_batches: u64 = receipt
-            .shapes
-            .iter()
-            .filter(|(sql, _)| sql.starts_with("delete from main.prompt_text_edges"))
-            .map(|(_, shape)| shape.statements)
-            .sum();
-        eprintln!(
-            "PROMPT-RECLAIM SQL {run}: {}",
-            serde_json::to_string(&receipt).unwrap()
-        );
-        assert_eq!(
-            edge_batches, levels,
-            "edge deletes must follow levels, not nodes"
-        );
-        assert!(
-            !receipt
+            let (_, request_texts) = lash_core_store::prompt_sections::OwnerPromptState::default()
+                .chunk(&template, &budget)
+                .unwrap();
+            let texts: Vec<_> = request_texts.iter().cloned().collect();
+            let root = texts
+                .iter()
+                .find(|text| Some(&text.hash) == request_texts.roots().first())
+                .unwrap();
+            let held = texts
+                .iter()
+                .find(|text| text.hash == root.children[0])
+                .unwrap()
+                .clone();
+            let mut survivors = std::collections::BTreeSet::new();
+            let mut pending = vec![held.hash.clone()];
+            while let Some(hash) = pending.pop() {
+                let text = texts.iter().find(|text| text.hash == hash).unwrap();
+                pending.extend(text.children.iter().cloned());
+                survivors.insert(hash);
+            }
+            let call = |run: &'static str| PromptCallKey {
+                session: session.clone(),
+                call: ModelCallId::Turn {
+                    run: lash_protocol_types::TurnId::from(run),
+                    ordinal: 1,
+                },
+            };
+            let mut tx = store
+                .begin(&actor, lash_durable::Epoch(identity.epoch))
+                .await
+                .unwrap();
+            for (run, request_texts) in [("whole", request_texts), ("held", vec![held].into())] {
+                tx.write(DomainWrite::Prompt(PromptWrite::Record {
+                    call: call(run),
+                    snapshot: None,
+                    request: run.to_owned(),
+                    snapshot_texts: Vec::new(),
+                    request_texts,
+                    prefix: None,
+                }));
+            }
+            let (answer, published) = lash_core_ids::operational_metrics::sql::collect(
+                "prompt.publish",
+                "sqlite",
+                store.commit(tx, CommitLabel::new("model.start")),
+            )
+            .await;
+            answer.unwrap();
+            let mut total: u64 = published
                 .shapes
-                .keys()
-                .any(|sql| sql.starts_with("select parent") || sql.starts_with("select child")),
-            "no level reads its edges"
-        );
-        let remaining: std::collections::BTreeSet<_> = store
-            .prompt_texts(&hashes)
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|text| text.hash)
-            .collect();
-        if run == "whole" {
-            assert_eq!(remaining, survivors);
-        } else {
-            assert!(remaining.is_empty());
+                .values()
+                .map(|shape| shape.statements)
+                .sum();
+            let hashes: Vec<_> = texts.iter().map(|text| text.hash.clone()).collect();
+            for run in ["whole", "held"] {
+                let mut tx = store
+                    .begin(&actor, lash_durable::Epoch(identity.epoch))
+                    .await
+                    .unwrap();
+                tx.write(DomainWrite::Prompt(PromptWrite::Release {
+                    session: session.clone(),
+                    run: Some(lash_protocol_types::TurnId::from(run)),
+                }));
+                let (answer, receipt) = lash_core_ids::operational_metrics::sql::collect(
+                    "prompt.release",
+                    "sqlite",
+                    store.commit(tx, CommitLabel::new("prompt.release")),
+                )
+                .await;
+                answer.unwrap();
+                total += receipt
+                    .shapes
+                    .values()
+                    .map(|shape| shape.statements)
+                    .sum::<u64>();
+                // A level's reclaimed texts answer their own children; their
+                // edges go in one statement per level above the leaves.
+                let edge_batches: u64 = receipt
+                    .shapes
+                    .iter()
+                    .filter(|(sql, _)| sql.starts_with("delete from main.prompt_text_edges"))
+                    .map(|(_, shape)| shape.statements)
+                    .sum();
+                eprintln!(
+                    "PROMPT-RECLAIM SQL {run}: {}",
+                    serde_json::to_string(&receipt).unwrap()
+                );
+                assert_eq!(
+                    edge_batches, 1,
+                    "retirement must delete one protected candidate set, independently of depth"
+                );
+                assert!(
+                    !receipt
+                        .shapes
+                        .keys()
+                        .any(|sql| sql.starts_with("select parent")
+                            || sql.starts_with("select child")),
+                    "no level reads its edges"
+                );
+                use lash_durable::domain::pages::PageStore as _;
+                assert_eq!(
+                    store.retirement_backlog().await.unwrap().holds,
+                    0,
+                    "the measured cleanup is fully drained"
+                );
+                let remaining: std::collections::BTreeSet<_> = store
+                    .prompt_texts(&hashes)
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|text| text.hash)
+                    .collect();
+                if run == "whole" {
+                    assert_eq!(remaining, survivors);
+                } else {
+                    assert!(remaining.is_empty());
+                }
+            }
+            counts.push(total);
         }
+        eprintln!("LO-ROOT publication plus drained retirement SQL at 10/100/1000: {counts:?}");
+        assert_eq!(counts[0], counts[1]);
+        assert_eq!(counts[1], counts[2]);
     }
 }
 
@@ -1686,3 +1729,25 @@ law!(
     lo_fence_preserves_a_composed_drafts_basis,
     |store, _advance| { laws::lo_fence_preserves_a_composed_drafts_basis(store) }
 );
+
+mod lo_postimage_receipt_matches_reopen {
+    use super::*;
+    async fn run(file: bool) {
+        let (_root, set, _clock) = world(file).await;
+        laws::lo_postimage_receipt_matches_reopen(
+            &set.durable_store(),
+            set.session_store_factory().as_ref(),
+            false,
+        )
+        .await
+        .unwrap();
+    }
+    #[tokio::test]
+    async fn memory() {
+        run(false).await;
+    }
+    #[tokio::test]
+    async fn file() {
+        run(true).await;
+    }
+}

@@ -4,6 +4,7 @@
 //! The shape is I0's (FIG-5194); each field's owning lane tunes its value
 //! and never the shape.
 
+use std::num::NonZeroU64;
 use std::time::Duration;
 
 use crate::config::{LeaseConfig, LeaseConfigError, LeaseSettings};
@@ -78,6 +79,70 @@ impl RetirementSettings {
     }
 }
 
+/// Host-selected limits for the working copies of claimed actors.
+/// No preset supplies these values. Bytes include heap capacity, indexes and
+/// draft reservations; they do not promise a bound on process RSS.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OwnerRetentionSettings {
+    /// Release an idle owner after this interval; zero releases immediately.
+    pub idle_evict: Duration,
+    /// Total retained and reserved bytes attributed to one owner.
+    pub max_owner_bytes: NonZeroU64,
+    /// Unique retained and reserved allocation bytes across the node.
+    pub max_node_bytes: NonZeroU64,
+    /// Uncommitted allocation bytes admitted by one owner.
+    pub max_owner_dirty_bytes: NonZeroU64,
+    /// Uncommitted allocation bytes admitted across the node.
+    pub max_node_dirty_bytes: NonZeroU64,
+}
+
+impl OwnerRetentionSettings {
+    /// Check representable idle time and the nesting of all four limits.
+    pub fn validate(self) -> Result<Self, DurableConfigError> {
+        if self.idle_evict.as_millis() > i64::MAX as u128 {
+            return Err(DurableConfigError::AboveMaximum {
+                field: "owner_retention.idle_evict_ms",
+                maximum: i64::MAX as u64,
+            });
+        }
+        if !self.idle_evict.is_zero() && self.idle_evict.as_millis() == 0 {
+            return Err(DurableConfigError::BelowResolution {
+                field: "owner_retention.idle_evict",
+            });
+        }
+        for (field, value, maximum) in [
+            (
+                "owner_retention.max_owner_bytes",
+                self.max_owner_bytes,
+                self.max_node_bytes,
+            ),
+            (
+                "owner_retention.max_owner_dirty_bytes",
+                self.max_owner_dirty_bytes,
+                self.max_owner_bytes,
+            ),
+            (
+                "owner_retention.max_node_dirty_bytes",
+                self.max_node_dirty_bytes,
+                self.max_node_bytes,
+            ),
+            (
+                "owner_retention.max_owner_dirty_bytes",
+                self.max_owner_dirty_bytes,
+                self.max_node_dirty_bytes,
+            ),
+        ] {
+            if value > maximum {
+                return Err(DurableConfigError::AboveMaximum {
+                    field,
+                    maximum: maximum.get(),
+                });
+            }
+        }
+        Ok(self)
+    }
+}
+
 /// The substrate's parameters as a host configures them. Plain data; it
 /// takes effect only through [`DurableSettings::validate`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -91,8 +156,8 @@ pub struct DurableSettings {
     pub claim_batch: usize,
     /// L3: the most actors a node runs at once.
     pub max_active: usize,
-    /// L3: how long an owner keeps an idle actor hot before it releases it.
-    pub idle_evict: Duration,
+    /// Required host policy before building a backend. `None` is unconfigured.
+    pub owner_retention: Option<OwnerRetentionSettings>,
     /// L6: consecutive claims without progress before an actor parks with
     /// `ActivationLoop`.
     pub activation_loop_budget: u32,
@@ -118,7 +183,7 @@ impl Default for DurableSettings {
 
 impl DurableSettings {
     /// Standard production: standard leases, claims of 16 / 256 active,
-    /// idle eviction 60 s, activation loop budget 8, groups of 64 / 5 ms,
+    /// unconfigured owner retention, activation loop budget 8, groups of 64 / 5 ms,
     /// snapshot every 1,000,000 fuel, cascades of 256, after-commit wakes,
     /// standard retirement ([`RetirementSettings::standard`]).
     /// Lease timing evidence is documented by `LeaseSettings::standard`;
@@ -129,7 +194,7 @@ impl DurableSettings {
             lease: LeaseSettings::default(),
             claim_batch: 16,
             max_active: 256,
-            idle_evict: Duration::from_secs(60),
+            owner_retention: None,
             activation_loop_budget: 8,
             group_commit: GroupCommit {
                 max_members: 64,
@@ -146,6 +211,9 @@ impl DurableSettings {
 /// Refused [`DurableSettings`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum DurableConfigError {
+    /// The host did not choose owner memory and idle limits.
+    #[error("owner_retention must be supplied by the host")]
+    MissingOwnerRetention,
     /// The lease timings are refused.
     #[error(transparent)]
     Lease(#[from] LeaseConfigError),
@@ -254,10 +322,10 @@ impl DurableSettings {
                 field: "snapshot_every_fuel",
             });
         }
-        for (field, value) in [
-            ("idle_evict", self.idle_evict),
-            ("retirement.every", self.retirement.every),
-        ] {
+        if let Some(policy) = self.owner_retention {
+            policy.validate()?;
+        }
+        for (field, value) in [("retirement.every", self.retirement.every)] {
             if value.as_millis() == 0 {
                 return Err(DurableConfigError::BelowResolution { field });
             }
@@ -458,15 +526,6 @@ mod tests {
             }),
             DurableConfigError::Zero {
                 field: "activation_loop_budget"
-            }
-        );
-        assert_eq!(
-            refused(DurableSettings {
-                idle_evict: Duration::from_micros(10),
-                ..base
-            }),
-            DurableConfigError::BelowResolution {
-                field: "idle_evict"
             }
         );
         assert!(matches!(

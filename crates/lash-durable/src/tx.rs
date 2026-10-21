@@ -83,6 +83,12 @@ pub enum Release {
 /// when a referenced node is neither staged nor stored.
 #[derive(Clone, Debug)]
 pub struct ActorTx {
+    // Prepared in process, never encoded or interpreted by storage adapters.
+    session_postimage: Option<Box<lash_core_store::session_state::RuntimeSessionState>>,
+    phase_surface: Option<(
+        NodeId,
+        Option<std::sync::Arc<lash_core_store::tool_surface::RecordedSurface>>,
+    )>,
     actor: ActorKey,
     epoch: Epoch,
     revision: StateRevision,
@@ -91,6 +97,7 @@ pub struct ActorTx {
     mail: Vec<Mail>,
     opened_at: DurableInstant,
     turn_cancel: Option<TurnCancelRequest>,
+    prompt_postimage: Option<lash_core_store::prompt_sections::OwnerPromptState>,
     domain: Vec<DomainWrite>,
     root_leases: Vec<RootLeaseRequest>,
     release_root_leases: BTreeSet<RootLeaseId>,
@@ -134,6 +141,8 @@ impl ActorTx {
     #[must_use]
     pub fn opened(read: OpenedActor) -> Self {
         Self {
+            session_postimage: None,
+            phase_surface: None,
             actor: read.actor,
             epoch: read.epoch,
             revision: read.revision,
@@ -142,6 +151,7 @@ impl ActorTx {
             mail: read.mail,
             opened_at: read.at,
             turn_cancel: read.turn_cancel,
+            prompt_postimage: None,
             domain: Vec::new(),
             root_leases: Vec::new(),
             release_root_leases: BTreeSet::new(),
@@ -154,6 +164,45 @@ impl ActorTx {
             budget: None,
             owed: BTreeMap::new(),
         }
+    }
+
+    /// Attach the complete prepared session state to this draft. The owner
+    /// coordinator consumes it; it is never a persisted owner snapshot.
+    #[doc(hidden)]
+    pub fn session_postimage(
+        &mut self,
+        state: lash_core_store::session_state::RuntimeSessionState,
+    ) {
+        self.session_postimage = Some(Box::new(state));
+    }
+
+    /// Transfer the prepared state into the owner adoption boundary.
+    #[doc(hidden)]
+    pub fn take_session_postimage(
+        &mut self,
+    ) -> Option<lash_core_store::session_state::RuntimeSessionState> {
+        self.session_postimage.take().map(|state| *state)
+    }
+
+    /// Retain the prepared surface with the exact phase root it belongs to.
+    #[doc(hidden)]
+    pub fn phase_surface(
+        &mut self,
+        root: NodeId,
+        surface: Option<std::sync::Arc<lash_core_store::tool_surface::RecordedSurface>>,
+    ) {
+        self.phase_surface = Some((root, surface));
+    }
+
+    /// The phase surface this draft will acknowledge, without decoding its graph.
+    #[doc(hidden)]
+    pub fn prepared_phase_surface(
+        &self,
+    ) -> Option<&(
+        NodeId,
+        Option<std::sync::Arc<lash_core_store::tool_surface::RecordedSurface>>,
+    )> {
+        self.phase_surface.as_ref()
     }
 
     /// The actor.
@@ -221,6 +270,20 @@ impl ActorTx {
             })
         };
         immediate(fenced) && !immediate(self.turn_cancel())
+    }
+
+    /// The private prompt draft, transferred only through a committed owner
+    /// acknowledgement. It is never encoded or treated as a durable root.
+    pub fn stage_prompt_postimage(
+        &mut self,
+        prompt: lash_core_store::prompt_sections::OwnerPromptState,
+    ) {
+        self.prompt_postimage = Some(prompt);
+    }
+    pub fn take_prompt_postimage(
+        &mut self,
+    ) -> Option<lash_core_store::prompt_sections::OwnerPromptState> {
+        self.prompt_postimage.take()
     }
 
     /// Lease the exact root after this transaction's domain writes, under
@@ -350,7 +413,16 @@ impl ActorTx {
                 actual: self.revision,
             });
         }
+        if held.prompt_postimage.is_some() {
+            self.prompt_postimage = held.prompt_postimage;
+        }
         self.domain.extend(held.domain);
+        if held.session_postimage.is_some() {
+            self.session_postimage = held.session_postimage;
+        }
+        if held.phase_surface.is_some() {
+            self.phase_surface = held.phase_surface;
+        }
         for (id, node) in held.graph {
             self.graph.entry(id).or_insert(node);
         }

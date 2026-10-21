@@ -160,19 +160,21 @@ impl<'a> SegmentKey<'a> {
 pub struct SegmentCache(Option<Arc<Shared>>);
 
 struct Shared {
+    _metadata: crate::allocation::AllocationHold,
     budget: usize,
     entries: Mutex<Entries>,
     hits: AtomicU64,
     misses: AtomicU64,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Entries {
     map: HashMap<[u8; 32], Entry>,
     bytes: usize,
     clock: u64,
 }
 
+#[derive(Clone)]
 struct Entry {
     sources: Box<[Arc<Vec<LlmContentBlock>>]>,
     value: Arc<dyn Any + Send + Sync>,
@@ -215,11 +217,40 @@ impl SegmentCache {
     /// A cache keeping `budget` bytes of segment text.
     pub fn with_budget(budget: usize) -> Self {
         Self(Some(Arc::new(Shared {
+            _metadata: Default::default(),
             budget,
             entries: Mutex::new(Entries::default()),
             hits: AtomicU64::new(0),
             misses: AtomicU64::new(0),
         })))
+    }
+
+    /// A private candidate cache sharing immutable lowered units. Preparing a
+    /// request cannot replace the acknowledged owner's source identity.
+    pub fn draft(
+        &self,
+        budget: &crate::allocation::AllocationBudget,
+    ) -> Result<Self, crate::allocation::AllocationError> {
+        let Some(shared) = &self.0 else {
+            return Ok(Self::disabled());
+        };
+        let entries = shared.lock();
+        let bytes = std::mem::size_of::<Shared>()
+            + 16
+            + entries.map.capacity().max(4) * (std::mem::size_of::<Entry>() + 32 + 24)
+            + entries
+                .map
+                .values()
+                .map(|entry| entry.sources.len() * std::mem::size_of::<Arc<Vec<LlmContentBlock>>>())
+                .sum::<usize>();
+        let metadata = budget.reserve(bytes as u64)?;
+        Ok(Self(Some(Arc::new(Shared {
+            _metadata: metadata,
+            budget: shared.budget,
+            entries: Mutex::new(entries.clone()),
+            hits: AtomicU64::new(0),
+            misses: AtomicU64::new(0),
+        }))))
     }
 
     /// A cache that keeps nothing: every unit lowers afresh. For a call
@@ -296,6 +327,26 @@ impl SegmentCache {
         {
             shared.insert(digest, messages, &value);
         }
+        Ok(value)
+    }
+    /// An asynchronous provider's carried history; no cache lock spans I/O.
+    pub async fn carried_async<
+        T: LoweredUnit,
+        E,
+        F: std::future::Future<Output = Result<Arc<T>, E>>,
+    >(
+        &self,
+        key: SegmentKey<'_>,
+        update: impl FnOnce(Option<Arc<T>>) -> F,
+    ) -> Result<Arc<T>, E> {
+        let Some(shared) = &self.0 else {
+            return update(None).await;
+        };
+        let SegmentKey { hasher, messages } = key;
+        let digest = hasher.finalize().into();
+        let prior = shared.get(&digest, &messages);
+        let value = update(prior).await?;
+        shared.insert(digest, messages, &value);
         Ok(value)
     }
 }

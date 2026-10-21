@@ -30,11 +30,11 @@ use super::{RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectInvocation
 /// model request's content is replaced by its digest.
 /// The two request types share every journaled field's name and type.
 macro_rules! journaled_request {
-    ($request:expr) => {
+    ($request:expr, $messages:expr) => {
         JournaledLlmRequest {
             instructions: $request.instructions.as_ref().map(digest_instructions),
             model: &$request.model,
-            messages: ContentDigest::of_items(&$request.messages)?,
+            messages: $messages,
             tools: ContentDigest::of_items(&$request.tools)?,
             tool_choice: &$request.tool_choice,
             attachment_acceptance: $request.attachment_acceptance.as_ref(),
@@ -50,10 +50,22 @@ pub(super) fn journaled_envelope_json(
 ) -> Result<String, serde_json::Error> {
     let command = match &envelope.command {
         RuntimeEffectCommand::BeforeLlmCall { request } => JournaledLlmCommand::BeforeLlmCall {
-            request: journaled_request!(request),
+            request: journaled_request!(
+                request,
+                ContentDigest {
+                    len: request.messages.len(),
+                    blake3: request.messages.content_digest()
+                }
+            ),
         },
         RuntimeEffectCommand::LlmCall { request } => JournaledLlmCommand::LlmCall {
-            request: journaled_request!(request),
+            request: journaled_request!(
+                request,
+                ContentDigest {
+                    len: request.messages.len(),
+                    blake3: request.messages.content_digest()
+                }
+            ),
         },
         // Trace provenance rides the command beside its business payload
         // and takes no part in the envelope's identity: a command that
@@ -201,7 +213,11 @@ mod tests {
                 ),
             )
             .with_reasoning(Default::default()),
-            messages,
+            messages: lash_protocol_types::llm::types::RequestMessages::from_messages(
+                messages,
+                &lash_protocol_types::allocation::AllocationBudget::unowned(),
+            )
+            .unwrap(),
             tools: Arc::new(Vec::new()),
             tool_choice: LlmToolChoice::None,
             attachment_acceptance: Default::default(),
@@ -378,7 +394,7 @@ mod tests {
                 let mut envelope = llm_call(transcript("same"));
                 envelope.command = if before_call {
                     RuntimeEffectCommand::BeforeLlmCall {
-                        request: Box::new(spec.into_request(None, None)),
+                        request: Box::new(spec.into_retained()),
                     }
                 } else {
                     RuntimeEffectCommand::LlmCall {

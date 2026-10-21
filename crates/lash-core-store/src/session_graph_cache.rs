@@ -50,6 +50,7 @@ struct ActiveReadModel {
     active_events: AppendVec<SessionHistoryRecord>,
     active_messages: AppendVec<Message>,
     assistant_ids: PersistentMap<String, usize>,
+    attachments: PersistentMap<crate::AttachmentId, usize>,
     prompt_render_cache: Arc<BaseRenderCache>,
     pending_events: Vec<SessionHistoryRecord>,
     pending_messages: Vec<Message>,
@@ -149,6 +150,7 @@ impl SessionGraphCache {
                 active_events: AppendVec::new(),
                 active_messages: AppendVec::new(),
                 assistant_ids: PersistentMap::default(),
+                attachments: PersistentMap::default(),
                 prompt_render_cache: Arc::new(BaseRenderCache::new()),
                 pending_events: Vec::new(),
                 pending_messages: Vec::new(),
@@ -203,6 +205,7 @@ impl SessionGraphCache {
         let mut active_messages = Vec::with_capacity(frame_path.len());
         let mut active_events = Vec::with_capacity(frame_path.len());
         let mut assistant_ids = PersistentMap::default();
+        let mut attachments = PersistentMap::default();
         for idx in frame_path {
             let node = &graph.nodes[*idx];
             if let Some(event) = node.event() {
@@ -220,6 +223,7 @@ impl SessionGraphCache {
                         },
                     );
                 }
+                count_attachments(&mut attachments, &message);
                 active_messages.push(message);
             }
         }
@@ -230,6 +234,7 @@ impl SessionGraphCache {
             active_events: AppendVec::from(active_events),
             active_messages: AppendVec::from(active_messages),
             assistant_ids,
+            attachments,
             prompt_render_cache: Arc::new(BaseRenderCache::new()),
             pending_events: Vec::new(),
             pending_messages: Vec::new(),
@@ -301,6 +306,9 @@ impl SessionGraphCache {
             .iter()
             .rposition(|existing| existing.id == message.id)
         {
+            let old = read.active_messages[index].clone();
+            uncount_attachments(&mut read.attachments, &old);
+            count_attachments(&mut read.attachments, &message);
             let mut tail = read.active_messages[index..].to_vec();
             tail[0] = message.clone();
             read.active_messages.replace_from(index, tail);
@@ -311,8 +319,15 @@ impl SessionGraphCache {
                 *pending = event.clone();
             }
         }
-        for pending in &mut read.pending_messages {
+        let ActiveReadModel {
+            pending_messages,
+            attachments,
+            ..
+        } = read;
+        for pending in pending_messages {
             if pending.id == message.id {
+                uncount_attachments(attachments, pending);
+                count_attachments(attachments, &message);
                 *pending = message.clone();
             }
         }
@@ -353,6 +368,7 @@ impl SessionGraphCache {
                 active_events: AppendVec::new(),
                 active_messages: AppendVec::new(),
                 assistant_ids: PersistentMap::default(),
+                attachments: PersistentMap::default(),
                 prompt_render_cache: Arc::new(BaseRenderCache::new()),
                 pending_events: Vec::new(),
                 pending_messages: Vec::new(),
@@ -371,8 +387,27 @@ impl SessionGraphCache {
                         *first = (*first).min(index);
                     });
             }
+            count_attachments(&mut read.attachments, &message);
             read.pending_messages.push(message);
         }
+    }
+
+    pub(crate) fn detach_prompt_render_cache(&mut self) {
+        self.active_read
+            .get_mut()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .prompt_render_cache = Arc::new(BaseRenderCache::new());
+    }
+
+    pub(crate) fn attachment_ids(&self) -> Vec<crate::AttachmentId> {
+        let read = self
+            .active_read
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut ids = Vec::new();
+        read.attachments.for_each(|id, _| ids.push(id.clone()));
+        ids.sort();
+        ids
     }
 
     pub(crate) fn children_of(&self, node_index: usize) -> Vec<usize> {
@@ -391,6 +426,36 @@ impl SessionGraphCache {
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .pending_messages
                 .reserve(additional_messages);
+        }
+    }
+}
+
+fn count_attachments(counts: &mut PersistentMap<crate::AttachmentId, usize>, message: &Message) {
+    for part in message.parts.iter() {
+        for reference in part
+            .attachments()
+            .chain(part.retained_outputs().map(|retained| &retained.reference))
+        {
+            counts.upsert(reference.id.clone(), 1, |count, added| *count += added);
+        }
+    }
+}
+
+fn uncount_attachments(counts: &mut PersistentMap<crate::AttachmentId, usize>, message: &Message) {
+    for part in message.parts.iter() {
+        for reference in part
+            .attachments()
+            .chain(part.retained_outputs().map(|retained| &retained.reference))
+        {
+            match counts.get(&reference.id).copied() {
+                Some(1) => {
+                    counts.remove(&reference.id);
+                }
+                Some(count) => {
+                    counts.insert(reference.id.clone(), count - 1);
+                }
+                None => unreachable!("a projected message owns its attachment occurrences"),
+            }
         }
     }
 }

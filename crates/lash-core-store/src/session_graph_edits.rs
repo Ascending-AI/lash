@@ -191,6 +191,19 @@ impl SessionGraph {
         self.cache = Arc::new(lock);
     }
 
+    /// Isolate claim-owned rendering from the store's independent window
+    /// cache. Immutable source nodes and indexes stay shared; only the memoized
+    /// render starts empty, so store readers cannot pin an owner's allocations.
+    #[doc(hidden)]
+    pub fn detach_owner_prompt_rendering(&mut self) {
+        self.detach_initialized_cache_for_append();
+        if let Some(lock) = Arc::get_mut(&mut self.cache)
+            && let Some(cache) = lock.get_mut()
+        {
+            cache.detach_prompt_render_cache();
+        }
+    }
+
     /// Rewrites the current frame's readable tail and moves the resident leaf
     /// while retaining historical branches and excluding transient
     /// replacement messages.

@@ -15,6 +15,7 @@
 //! one User message after the conversation, outside its history. A resend
 //! sends the admitted body and composes nothing.
 
+use lash_protocol_types::llm::types::RetainedLlmRequest;
 use std::sync::Arc;
 
 use super::RuntimeTurnDriver;
@@ -25,9 +26,7 @@ use crate::plugin::prompt::{
 };
 use crate::prompt_sections::{PromptPlan, PromptPurpose};
 use crate::sansio::ExecutionEnvironmentSyncFailureKind as SyncFailureKind;
-use crate::{
-    FailureCode, LlmCallError, LlmRequest, RuntimeError, RuntimeErrorCode, TurnFailureCode,
-};
+use crate::{FailureCode, LlmCallError, RuntimeError, RuntimeErrorCode, TurnFailureCode};
 use lash_core_execution::core_internal::{compose_prompt, prompt_cut};
 
 impl RuntimeTurnDriver<'static> {
@@ -43,9 +42,10 @@ impl RuntimeTurnDriver<'static> {
         iteration: usize,
         call: u32,
         messages: crate::MessageSequence,
-        request: Arc<LlmRequest>,
+        request: Arc<RetainedLlmRequest>,
         has_current_context_prefix: bool,
-    ) -> Result<Result<(Arc<LlmRequest>, Option<ComposedPrompt>), LlmCallError>, RuntimeError> {
+    ) -> Result<Result<(Arc<RetainedLlmRequest>, Option<ComposedPrompt>), LlmCallError>, RuntimeError>
+    {
         let plugins = Arc::clone(self.session.plugins());
         let catalog = plugins.prompt_catalog();
         if catalog.sections().is_empty() {
@@ -53,7 +53,7 @@ impl RuntimeTurnDriver<'static> {
         }
         // The turn's prompt view at this call: the last commit, with the
         // previous round's outcomes and the checkpoint deliveries after it.
-        let history = u32::try_from(<[crate::Message]>::len(&messages)).unwrap_or(u32::MAX);
+        let history = u32::try_from(messages.len()).unwrap_or(u32::MAX);
         let view = self.checkpoint_state_view(messages, iteration);
         let protocol_facts = match self.protocol_prompt_facts(&view).await {
             Ok(facts) => facts,
@@ -147,7 +147,13 @@ impl RuntimeTurnDriver<'static> {
         };
         self.trace_prompt_built(iteration, &composed);
         Ok(Ok((
-            lower(request, &composed, has_current_context_prefix),
+            lower(
+                request,
+                &composed,
+                has_current_context_prefix,
+                &self.allocation_budget,
+            )
+            .map_err(RuntimeError::allocation)?,
             Some(composed),
         )))
     }
@@ -287,19 +293,39 @@ pub(super) fn refused(code: FailureCode, message: String, raw: Option<String>) -
 /// `request` with `composed` lowered onto it ([`crate::sansio::place_prompt`]).
 /// An empty composition leaves `request` as it is.
 pub(in crate::runtime) fn lower(
-    request: Arc<LlmRequest>,
+    request: Arc<RetainedLlmRequest>,
     composed: &ComposedPrompt,
     has_current_context_prefix: bool,
-) -> Arc<LlmRequest> {
+    budget: &lash_protocol_types::allocation::AllocationBudget,
+) -> Result<Arc<RetainedLlmRequest>, lash_protocol_types::allocation::AllocationError> {
     if composed.initial_instructions.is_none() && composed.current_context.is_none() {
-        return request;
+        return Ok(request);
     }
-    let mut request = LlmRequest::clone(&request);
+    let mut request = (*request).clone();
+    let prefix_len = if has_current_context_prefix && !request.messages.is_empty() {
+        request.messages.len() - 1
+    } else {
+        request.messages.len()
+    };
+    let mut tail = request.envelope().clone();
+    tail.messages = request.messages.iter_from(prefix_len).cloned().collect();
     crate::sansio::place_prompt(
-        &mut request,
+        &mut tail,
         composed.initial_instructions.as_deref().map(Arc::from),
         composed.current_context.as_deref().map(Arc::from),
         has_current_context_prefix,
     );
-    Arc::new(request)
+    request.edit_envelope(
+        budget,
+        composed
+            .initial_instructions
+            .as_ref()
+            .map_or(0, |text| text.capacity()) as u64,
+        |request| request.instructions = tail.instructions,
+    )?;
+    request.messages = request
+        .messages
+        .prefix(prefix_len, budget)?
+        .append(&tail.messages, budget)?;
+    Ok(Arc::new(request))
 }

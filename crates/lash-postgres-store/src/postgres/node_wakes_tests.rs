@@ -170,7 +170,16 @@ async fn a_saturated_shared_pool_cannot_starve_the_heartbeat() {
         "busy",
         DurableSettings {
             lease,
-            ..DurableSettings::default()
+            ..DurableSettings {
+                owner_retention: Some(lash_durable::OwnerRetentionSettings {
+                    idle_evict: std::time::Duration::from_secs(60),
+                    max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+                    max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+                    max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+                    max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+                }),
+                ..DurableSettings::default()
+            }
         },
     );
     let started = Instant::now();
@@ -384,7 +393,11 @@ async fn a_created_registration_reaches_the_serving_node_through_its_hint() {
             startup: WATCHDOG,
             ..LeaseSettings::default()
         },
-        ..DurableSettings::default()
+        ..DurableSettings { owner_retention: Some(lash_durable::OwnerRetentionSettings { idle_evict: std::time::Duration::from_secs(60),
+ max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+ max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+ max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+ max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() }, }), ..DurableSettings::default() }
     }
     .validate()
     .expect("the law's settings validate");

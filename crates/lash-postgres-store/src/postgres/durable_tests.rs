@@ -848,3 +848,194 @@ async fn lo_idle_writer_close_and_redrive_when_configured() {
         revision
     );
 }
+
+async fn lo_postimage_receipt_path(explicit: bool) {
+    let url = crate::testing::required_database_url();
+    let database = IsolatedDatabase::create(&url).await;
+    let storage = crate::testing::connect(database.url()).await.unwrap();
+    let durable = storage.durable_store();
+    let (answer, evidence) = Box::pin(lash_core_ids::operational_metrics::sql::collect(
+        "lo-postimage",
+        "postgres",
+        laws::lo_postimage_receipt_matches_reopen(
+            &durable,
+            &storage.session_store_factory(),
+            explicit,
+        ),
+    ))
+    .await;
+    answer.unwrap();
+    let calls: u64 = evidence
+        .shapes
+        .iter()
+        .filter(|(shape, _)| shape.contains("lash_owner_commit("))
+        .map(|(_, shape)| shape.statements)
+        .sum();
+    assert!(
+        explicit || calls > 0,
+        "function twin never called the generated function: {evidence:?}"
+    );
+    eprintln!("LO-POSTIMAGE explicit={explicit} function_calls={calls} {evidence:?}");
+}
+
+#[tokio::test]
+#[ignore = "requires a private PostgreSQL service"]
+async fn lo_postimage_explicit_when_configured() {
+    Box::pin(lo_postimage_receipt_path(true)).await;
+}
+#[tokio::test]
+#[ignore = "requires a private PostgreSQL service"]
+async fn lo_postimage_function_when_configured() {
+    Box::pin(lo_postimage_receipt_path(false)).await;
+}
+
+#[tokio::test]
+#[ignore = "requires a private PostgreSQL service"]
+async fn lo_root_prompt_retirement_when_configured() {
+    use lash_durable::domain::{ModelCallId, PromptCallKey, PromptWrite};
+    use lash_durable::{ActorKey, CommitLabel, DomainWrite, DurableReads, DurableStore};
+
+    let mut counts = Vec::new();
+    for depth in [10, 100, 1000] {
+        let database_url = crate::testing::required_database_url();
+        let database = IsolatedDatabase::create(&database_url).await;
+        let storage = crate::testing::connect(database.url())
+            .await
+            .expect("open the isolated store");
+        let set = crate::PostgresStoreSet::new(
+            &storage,
+            Arc::new(lash_core_store::attachments::UnavailableAttachmentStore),
+        );
+        let store = storage.durable_store();
+        let identity = lash_core_execution::testing::sql_work::owner_commit(&set).await;
+        let actor = ActorKey::session("sql-work-owner").unwrap();
+        let session = lash_protocol_types::SessionId::from("sql-work-owner");
+        let budget = lash_protocol_types::allocation::AllocationBudget::unowned();
+        let segments: Vec<_> = (0..depth)
+            .map(|index| {
+                lash_protocol_types::llm::types::RequestSegment::item_json(
+                    &serde_json::json!({"body":format!("leaf {index:04}")}),
+                )
+                .unwrap()
+            })
+            .collect();
+        let items = lash_protocol_types::llm::types::RequestItems::default()
+            .append(&segments, &budget)
+            .unwrap();
+        let template = lash_protocol_types::llm::types::RecordedRequestTemplate::from_item_run(
+            lash_protocol_types::llm::types::ProviderRouteIdentity::new(
+                "fixture", "fixture", "fixture",
+            ),
+            true,
+            None,
+            "{\"messages\":[".into(),
+            items,
+            "]}".into(),
+            &budget,
+        )
+        .unwrap();
+        let (_, request_texts) = lash_core_store::prompt_sections::OwnerPromptState::default()
+            .chunk(&template, &budget)
+            .unwrap();
+        let texts: Vec<_> = request_texts.iter().cloned().collect();
+        let root = texts
+            .iter()
+            .find(|text| Some(&text.hash) == request_texts.roots().first())
+            .unwrap();
+        let held = texts
+            .iter()
+            .find(|text| text.hash == root.children[0])
+            .unwrap()
+            .clone();
+        let mut survivors = std::collections::BTreeSet::new();
+        let mut pending = vec![held.hash.clone()];
+        while let Some(hash) = pending.pop() {
+            let text = texts.iter().find(|text| text.hash == hash).unwrap();
+            pending.extend(text.children.iter().cloned());
+            survivors.insert(hash);
+        }
+        let call = |run: &'static str| PromptCallKey {
+            session: session.clone(),
+            call: ModelCallId::Turn {
+                run: lash_protocol_types::TurnId::from(run),
+                ordinal: 1,
+            },
+        };
+        let mut tx = store
+            .begin(&actor, lash_durable::Epoch(identity.epoch))
+            .await
+            .unwrap();
+        for (run, request_texts) in [("whole", request_texts), ("held", vec![held].into())] {
+            tx.write(DomainWrite::Prompt(PromptWrite::Record {
+                call: call(run),
+                snapshot: None,
+                request: run.to_owned(),
+                snapshot_texts: Vec::new(),
+                request_texts,
+                prefix: None,
+            }));
+        }
+        let (answer, published) = lash_core_ids::operational_metrics::sql::collect(
+            "prompt.publish",
+            "postgres",
+            store.commit(tx, CommitLabel::new("model.start")),
+        )
+        .await;
+        answer.unwrap();
+        let mut total: u64 = published
+            .shapes
+            .values()
+            .map(|shape| shape.statements)
+            .sum();
+        let hashes: Vec<_> = texts.iter().map(|text| text.hash.clone()).collect();
+        for run in ["whole", "held"] {
+            let mut tx = store
+                .begin(&actor, lash_durable::Epoch(identity.epoch))
+                .await
+                .unwrap();
+            tx.write(DomainWrite::Prompt(PromptWrite::Release {
+                session: session.clone(),
+                run: Some(lash_protocol_types::TurnId::from(run)),
+            }));
+            let (answer, receipt) = lash_core_ids::operational_metrics::sql::collect(
+                "prompt.release",
+                "postgres",
+                store.commit(tx, CommitLabel::new("prompt.release")),
+            )
+            .await;
+            answer.unwrap();
+            total += receipt
+                .shapes
+                .values()
+                .map(|shape| shape.statements)
+                .sum::<u64>();
+            eprintln!(
+                "LO-ROOT prompt retirement PostgreSQL {depth}/{run}: {}",
+                serde_json::to_string(&receipt).unwrap()
+            );
+            use lash_durable::domain::pages::PageStore as _;
+            assert_eq!(
+                store.retirement_backlog().await.unwrap().holds,
+                0,
+                "attributable cleanup is drained"
+            );
+            let remaining: std::collections::BTreeSet<_> = store
+                .prompt_texts(&hashes)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|text| text.hash)
+                .collect();
+            if run == "whole" {
+                assert_eq!(remaining, survivors);
+            } else {
+                assert!(remaining.is_empty());
+            }
+        }
+        counts.push(total);
+    }
+    assert!(
+        counts.windows(2).all(|pair| pair[0] == pair[1]),
+        "publication and drained cleanup SQL is flat: {counts:?}"
+    );
+}

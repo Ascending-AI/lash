@@ -47,7 +47,7 @@ use lash_durable::{DueSource, DurableInstant};
 use super::session::{ModelPin, TurnDrive, TurnError};
 use crate::{
     ActorContext, EffectId, ExecutionBudgets, ExecutionLimit, FailureCode, HostTurnProtocol,
-    LlmCallError, LlmRequest, LlmTerminalReason, ProviderFailureKind, TurnFailureCode,
+    LlmCallError, LlmTerminalReason, ProviderFailureKind, TurnFailureCode,
 };
 use lash_sansio::TurnCheckpoint;
 
@@ -276,7 +276,7 @@ pub(super) async fn send(
     cx: &ActorContext,
     drive: &mut dyn TurnDrive,
     id: EffectId,
-    request: std::sync::Arc<LlmRequest>,
+    request: std::sync::Arc<lash_protocol_types::llm::types::RetainedLlmRequest>,
     admitted: &lash_protocol_types::llm::types::AdmittedSend,
     start: &ModelStart,
 ) -> Result<bool, TurnError> {

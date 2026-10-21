@@ -383,7 +383,11 @@ impl World {
         let log = AdvanceLog::default();
         let backend = Backend::assemble(BackendParts {
             stores: Arc::new(stores),
-            settings: DurableSettings::default(),
+            settings: DurableSettings { owner_retention: Some(lash_durable::OwnerRetentionSettings { idle_evict: std::time::Duration::from_secs(60),
+ max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+ max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+ max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+ max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() }, }), ..DurableSettings::default() },
             engines: vec![Arc::new(LawEngine {
                 log: Arc::clone(&log),
             })],
@@ -835,4 +839,186 @@ async fn a_start_under_a_pruned_processs_key_is_a_new_process_with_its_own_lifec
     assert_eq!(world.advances("first"), ["started"]);
     let record = world.record(&successor).await.expect("the successor");
     assert_eq!(record.start_key.as_ref(), Some(&key));
+}
+
+/// LO-EVICT / D-DEFAULTS: mandatory host policy, atomic admission, shared
+/// allocation attribution, dirty backpressure, cancellation and final release.
+#[tokio::test]
+async fn lo_evict_releases_all_owner_references_on_sqlite_memory() {
+    use lash_durable::owner_memory::{MemoryClass, NodeMemory, ReserveError};
+    use lash_durable::{DurableConfigError, Epoch, OwnerRetentionSettings};
+    use std::num::NonZeroU64;
+    let stores = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("SQLite"),
+    );
+    assert!(matches!(
+        Backend::assemble(BackendParts {
+            stores,
+            settings: DurableSettings::standard(),
+            engines: Vec::new(),
+            providers: Arc::new(NoProjectionProviders),
+            formats: Vec::new(),
+        }),
+        Err(
+            lash_execution_contracts::backend::DurableBuildError::InvalidConfig(
+                DurableConfigError::MissingOwnerRetention
+            )
+        )
+    ));
+    assert!(DurableSettings::standard().owner_retention.is_none());
+    assert!(DurableSettings::development().owner_retention.is_none());
+    let nz = |n| NonZeroU64::new(n).unwrap();
+    let policy = OwnerRetentionSettings {
+        idle_evict: Duration::ZERO,
+        max_owner_bytes: nz(1024),
+        max_node_bytes: nz(1536),
+        max_owner_dirty_bytes: nz(512),
+        max_node_dirty_bytes: nz(768),
+    };
+    assert_eq!(policy.validate(), Ok(policy));
+    for invalid in [
+        OwnerRetentionSettings {
+            max_owner_bytes: nz(1537),
+            ..policy
+        },
+        OwnerRetentionSettings {
+            max_owner_dirty_bytes: nz(1025),
+            ..policy
+        },
+        OwnerRetentionSettings {
+            max_node_dirty_bytes: nz(1537),
+            ..policy
+        },
+        OwnerRetentionSettings {
+            max_owner_dirty_bytes: nz(769),
+            ..policy
+        },
+        OwnerRetentionSettings {
+            idle_evict: Duration::from_nanos(1),
+            ..policy
+        },
+        OwnerRetentionSettings {
+            idle_evict: Duration::MAX,
+            ..policy
+        },
+    ] {
+        assert!(invalid.validate().is_err());
+    }
+    let node = NodeMemory::new(policy);
+    let key = ActorKey::session("bounded").unwrap();
+    let owner = node.owner(&key, Epoch(1));
+    let other = node.owner(&ActorKey::process("reader").unwrap(), Epoch(1));
+    let check = || {
+        assert!(owner.usage().total() <= policy.max_owner_bytes.get());
+        assert!(other.usage().total() <= policy.max_owner_bytes.get());
+        assert!(node.usage().total() <= policy.max_node_bytes.get());
+        assert!(owner.usage().dirty <= policy.max_owner_dirty_bytes.get());
+        assert!(node.usage().dirty <= policy.max_node_dirty_bytes.get());
+    };
+    assert!(matches!(
+        owner.reserve(1025, MemoryClass::Retained),
+        Err(ReserveError::TooLarge)
+    ));
+    assert!(matches!(
+        owner.reserve(513, MemoryClass::Dirty),
+        Err(ReserveError::TooLarge)
+    ));
+    let allocation = Arc::new(vec![7_u8; 384]);
+    let weak = Arc::downgrade(&allocation);
+    let identity = Arc::as_ptr(&allocation) as usize;
+    let clean = owner
+        .reserve_shared(identity, 384, MemoryClass::Retained)
+        .unwrap();
+    let draft_shared = owner
+        .reserve_shared(identity, 384, MemoryClass::Retained)
+        .unwrap();
+    let reader = other
+        .reserve_shared(identity, 384, MemoryClass::Retained)
+        .unwrap();
+    let reader_value = Arc::clone(&allocation);
+    assert_eq!(owner.usage().total(), 384);
+    assert_eq!(node.usage().total(), 384);
+    check();
+    let dirty = owner.reserve(512, MemoryClass::Dirty).unwrap();
+    check();
+    assert!(matches!(
+        owner.reserve(1, MemoryClass::Dirty),
+        Err(ReserveError::Pressure)
+    ));
+    assert!(node.under_pressure());
+    assert_eq!(
+        owner.usage().dirty,
+        512,
+        "pressure did not discard a dirty sole working copy"
+    );
+    drop(draft_shared);
+    assert!(
+        node.under_pressure(),
+        "dropping a duplicate shared handle freed no capacity"
+    );
+    let acknowledged = dirty.into_retained();
+    assert_eq!(owner.usage().dirty, 0);
+    assert_eq!(owner.usage().total(), 896);
+    check();
+    drop(acknowledged);
+    // Ownership is claimed before the first await: dropping preparation
+    // releases its dirty reservation in every cancellation state.
+    let cancelled = owner.reserve(512, MemoryClass::Dirty).unwrap();
+    let mut future = Box::pin(async move {
+        let _reservation = cancelled;
+        std::future::pending::<()>().await;
+    });
+    assert!(
+        std::future::Future::poll(
+            future.as_mut(),
+            &mut std::task::Context::from_waker(std::task::Waker::noop())
+        )
+        .is_pending()
+    );
+    check();
+    drop(future);
+    assert_eq!(owner.usage().dirty, 0);
+    drop(clean);
+    drop(allocation);
+    assert_eq!(owner.usage().total(), 0);
+    assert!(
+        weak.upgrade().is_some(),
+        "independent reader still owns its value"
+    );
+    assert_eq!(
+        node.usage().total(),
+        384,
+        "reader bytes stay charged after release"
+    );
+    drop(reader);
+    drop(reader_value);
+    assert!(weak.upgrade().is_none());
+    assert_eq!(node.usage().total(), 0);
+    // A later epoch shares no authority or retained bytes with the old owner.
+    let fresh = node.owner(&key, Epoch(2));
+    assert_eq!(fresh.usage().total(), 0);
+
+    // The production process fixture crosses a real fake-clock quiet/release
+    // boundary; a new claim resumes the same committed sleep and result.
+    let world = World::new(Script::new()).await;
+    let process = world
+        .register(registration(json!({
+            "tag":"evicted", "act":"sleep", "until_ms":SimClock::timestamp_ms_at(120_000),
+        })))
+        .await;
+    world.nodes.start("a");
+    world
+        .until("the process released its durable sleep", || async {
+            world.actor_state(&process).await == Some(ActorState::Waiting)
+        })
+        .await;
+    world.clock.advance_by(120_001).await;
+    world
+        .until("a fresh claim completed the sleep", || async {
+            world.terminal(&process).await.is_some()
+        })
+        .await;
+    assert_eq!(world.advances("evicted"), ["started", "woke"]);
 }

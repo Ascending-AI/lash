@@ -12,6 +12,8 @@ mod core;
 pub mod ingress;
 pub mod journal;
 pub mod model_receipt;
+pub mod owner_memory;
+pub mod owner_state;
 pub mod process;
 #[cfg(feature = "testing")]
 pub mod process_laws;
@@ -65,3 +67,5 @@ impl ActorContext {
         }
     }
 }
+
+pub mod owner_allocation;

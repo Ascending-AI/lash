@@ -749,17 +749,22 @@ impl LashRuntime {
             owner,
             tx,
             self.code_executor().as_ref(),
-            commit,
+            super::durable::head_commit::PreparedHeadCommit {
+                commit,
+                state: self.state.clone(),
+            },
             lash_durable::CommitLabel::SESSION_COMMAND,
             self.host.core.tracing.metrics(),
             None,
             ending,
         )
         .await;
-        self.invalidate_resident_session_state();
+        if committed.is_err() {
+            self.invalidate_resident_session_state();
+        }
         match committed {
-            Ok(()) => {
-                self.reload_invalidated_resident_session_state().await?;
+            Ok(_) => {
+                self.adopt_owner_state(owner).await?;
                 drop(RuntimeNamedPhase::begin(
                     self.turn_phase_probe.clone(),
                     SESSION_COMMAND_COMMITTED_PHASE,

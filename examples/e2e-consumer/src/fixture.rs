@@ -291,7 +291,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn s30_each_task_operation_keeps_one_body_receipt() -> anyhow::Result<()> {
         let stores = Arc::new(lash::sqlite::SqliteStoreSet::memory().await?);
-        let backend = lash::durable::DurableBackendBuilder::new(stores).build()?;
+        let backend = lash::durable::DurableBackendBuilder::new(stores).config(lash::durable::DurableSettings { owner_retention: Some(lash::durable::OwnerRetentionSettings { idle_evict: std::time::Duration::from_secs(60),
+ max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+ max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+ max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+ max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() }, }), ..lash::durable::DurableSettings::standard() }).build()?;
         let controls = Arc::new(super::Controls::default());
         let metadata = lash::LlmProfileMetadata::builder("test/s30")
             .cache_retention(lash::provider::CacheRetention::Short)

@@ -163,7 +163,11 @@ impl PluginHarness {
                 .await
                 .map_err(|error| lash_core::StoreError::Backend(error.to_string()))?,
         );
-        let backend = crate::durable::DurableBackendBuilder::new(stores)
+        let backend = crate::durable::DurableBackendBuilder::new(stores).config(lash_durable::DurableSettings { owner_retention: Some(lash_durable::OwnerRetentionSettings { idle_evict: std::time::Duration::from_secs(60),
+ max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+ max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+ max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+ max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() }, }), ..lash_durable::DurableSettings::standard() })
             .build()
             .map_err(|error| PluginHarnessError::Worker(error.to_string()))?;
         let mut harness = Self {

@@ -97,6 +97,108 @@ pub enum BodyPart<'a> {
 ///     .unwrap();
 /// assert_eq!(edited.redacted(), r#"{"stream":true,"input":["b"]}"#);
 /// ```
+/// An immutable run of already validated JSON items.
+#[derive(Clone, Debug, Default)]
+pub struct RequestItems {
+    items: crate::persistent_sequence::PersistentSequence<RequestSegment>,
+    bytes: usize,
+}
+impl RequestItems {
+    pub fn append(
+        &self,
+        tail: &[RequestSegment],
+        budget: &crate::allocation::AllocationBudget,
+    ) -> Result<Self, TemplateError> {
+        if tail.iter().any(|item| !item.is_item()) {
+            return Err(TemplateError::InvalidJson);
+        }
+        Ok(Self {
+            items: self.items.append(tail, budget)?,
+            bytes: self.bytes + tail.iter().map(RequestSegment::literal_len).sum::<usize>(),
+        })
+    }
+    pub fn prefix(
+        &self,
+        len: usize,
+        budget: &crate::allocation::AllocationBudget,
+    ) -> Result<Self, TemplateError> {
+        // Only the detached suffix is subtracted on a branch/rewrite.
+        let bytes = self.bytes
+            - self
+                .items
+                .iter_from(len)
+                .map(RequestSegment::literal_len)
+                .sum::<usize>();
+        Ok(Self {
+            items: self.items.prefix(len, budget)?,
+            bytes,
+        })
+    }
+    pub fn get(&self, index: usize) -> Option<&RequestSegment> {
+        self.items.get(index)
+    }
+    pub fn literal_len(&self) -> usize {
+        self.bytes
+    }
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+    pub fn iter(&self) -> impl Iterator<Item = &RequestSegment> {
+        self.items.iter()
+    }
+    pub fn iter_from(&self, start: usize) -> impl Iterator<Item = &RequestSegment> {
+        self.items.iter_from(start)
+    }
+    pub fn shared_prefix(&self, other: &Self) -> usize {
+        self.items.shared_prefix(&other.items, RequestSegment::same)
+    }
+}
+
+#[derive(Clone, Debug)]
+struct TemplateSegments {
+    before: Arc<[RequestSegment]>,
+    items: RequestItems,
+    after: Arc<[RequestSegment]>,
+    flat: Arc<std::sync::OnceLock<Vec<RequestSegment>>>,
+}
+impl From<Vec<RequestSegment>> for TemplateSegments {
+    fn from(segments: Vec<RequestSegment>) -> Self {
+        Self {
+            before: segments.into(),
+            items: RequestItems::default(),
+            after: Arc::default(),
+            flat: Arc::default(),
+        }
+    }
+}
+impl TemplateSegments {
+    fn len(&self) -> usize {
+        self.before.len() + self.items.len() + self.after.len()
+    }
+    fn iter(&self) -> impl Iterator<Item = &RequestSegment> {
+        self.before
+            .iter()
+            .chain(self.items.iter())
+            .chain(self.after.iter())
+    }
+}
+impl std::ops::Deref for TemplateSegments {
+    type Target = [RequestSegment];
+    fn deref(&self) -> &[RequestSegment] {
+        self.flat.get_or_init(|| self.iter().cloned().collect())
+    }
+}
+impl<'a> IntoIterator for &'a TemplateSegments {
+    type Item = &'a RequestSegment;
+    type IntoIter = Box<dyn Iterator<Item = &'a RequestSegment> + 'a>;
+    fn into_iter(self) -> Self::IntoIter {
+        Box::new(self.iter())
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct RecordedRequestTemplate {
     /// Recorded fetch slack; omission on reopen is refused, never filled from the host.
@@ -108,9 +210,10 @@ pub struct RecordedRequestTemplate {
     /// at every send (Anthropic: the beta headers the body requires), so no
     /// attempt parses the body to learn it. Empty for most routes.
     pub wire_features: Vec<Box<str>>,
-    segments: Vec<RequestSegment>,
+    segments: TemplateSegments,
     /// Literal bytes and separators: the body's length without slot values.
     literal_len: usize,
+    pub(crate) _hold: crate::allocation::AllocationHold,
 }
 
 // Body is a derived cache; only Transport is serialized as mode metadata.
@@ -616,8 +719,9 @@ impl RecordedRequestTemplate {
             response_mode,
             generation,
             wire_features: Vec::new(),
-            segments,
+            segments: segments.into(),
             literal_len: 0,
+            _hold: Default::default(),
         };
         template.literal_len = template
             .parts()
@@ -657,6 +761,58 @@ impl RecordedRequestTemplate {
             ResponseMode::Body(_) => None,
             ResponseMode::Transport(stream) => Some(stream),
         }
+    }
+
+    /// Assemble a validated item run without enumerating its immutable prefix.
+    /// Transfer the reservation made by the producer before building this envelope.
+    pub fn with_allocation(mut self, hold: crate::allocation::AllocationHold) -> Self {
+        self._hold = hold;
+        self
+    }
+
+    pub fn from_item_run(
+        route: ProviderRouteIdentity,
+        stream: bool,
+        generation: Option<GenerationReceipt>,
+        before: String,
+        items: RequestItems,
+        after: String,
+        budget: &crate::allocation::AllocationBudget,
+    ) -> Result<Self, TemplateError> {
+        let hold = budget.reserve((before.capacity() + after.capacity() + 2048) as u64)?;
+        let before = RequestSegment::text(before)?.with_allocation(hold.clone());
+        let after = RequestSegment::text(after)?.with_allocation(hold.clone());
+        let mut skeleton = vec![before.clone()];
+        skeleton.extend(items.iter().take(2).cloned());
+        skeleton.push(after.clone());
+        let mut template = Self::from_segments(route, stream, generation, skeleton)?;
+        template._hold = hold;
+        template.literal_len = before.literal_len()
+            + after.literal_len()
+            + items.bytes
+            + items.len().saturating_sub(1);
+        template.segments = TemplateSegments {
+            before: vec![before].into(),
+            items,
+            after: vec![after].into(),
+            flat: Arc::default(),
+        };
+        Ok(template)
+    }
+
+    /// The constructor-validated item run and fresh envelope, when present.
+    pub fn retained_items(&self) -> Option<(&RequestSegment, &RequestItems, &RequestSegment)> {
+        if self.segments.items.is_empty() {
+            return None;
+        }
+        Some((
+            self.segments.before.first()?,
+            &self.segments.items,
+            self.segments.after.first()?,
+        ))
+    }
+    pub fn segment_iter(&self) -> impl Iterator<Item = &RequestSegment> {
+        self.segments.iter()
     }
 
     pub fn segments(&self) -> &[RequestSegment] {
@@ -707,9 +863,10 @@ impl RecordedRequestTemplate {
             route,
             generation,
             wire_features,
-            mut segments,
+            segments,
             ..
         } = self;
+        let mut segments: Vec<_> = segments.iter().cloned().collect();
         edit(&mut segments);
         let mut template = Self::from_segments(route, stream, generation, segments)?;
         template.fetch_horizon = fetch_horizon;
@@ -1200,6 +1357,8 @@ impl std::fmt::Debug for LiveRequestBody {
 
 #[derive(Clone, Debug, thiserror::Error, PartialEq, Eq)]
 pub enum TemplateError {
+    #[error(transparent)]
+    Allocation(#[from] crate::allocation::AllocationError),
     #[error("a request template must name one response mode, agreeing with its body")]
     ResponseMode,
     #[error("a request template contains an empty literal")]

@@ -133,6 +133,8 @@ async fn lowering_sends_the_recorded_bytes() {
 #[tokio::test]
 async fn a_reused_prefix_sends_the_bytes_a_cold_lowering_sends() {
     let cache = SegmentCache::new();
+    let retained_cache = SegmentCache::new();
+    let budget = lash_protocol_types::allocation::AllocationBudget::unowned();
     let mut providers = [
         AnthropicProvider::new("key"),
         AnthropicProvider::new("key").with_base_url(Some("https://anthropic-b.example".into())),
@@ -148,6 +150,19 @@ async fn a_reused_prefix_sends_the_bytes_a_cold_lowering_sends() {
                         .lower(&request, &SegmentCache::disabled())
                         .await
                         .unwrap();
+                    let retained =
+                        lash_protocol_types::llm::types::RetainedLlmRequest::from_request(
+                            request.clone(),
+                        );
+                    let persistent = provider
+                        .lower_retained(&retained, &retained_cache, &budget)
+                        .await
+                        .unwrap();
+                    assert_eq!(
+                        serde_json::to_vec(&persistent).unwrap(),
+                        serde_json::to_vec(&cold).unwrap(),
+                        "retained {case} step {step} {variant}"
+                    );
                     assert_eq!(
                         serde_json::to_vec(&warm).unwrap(),
                         serde_json::to_vec(&cold).unwrap(),

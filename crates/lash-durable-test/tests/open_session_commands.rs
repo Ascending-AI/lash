@@ -1473,3 +1473,377 @@ async fn conflicted_kernel_commit(conflict_label: lash_durable::CommitLabel) {
     nodes.kill("owner");
     core.shutdown().await.unwrap();
 }
+
+struct PostimageCompactor;
+#[async_trait::async_trait]
+impl lash_core::plugin::ContextCompactor for PostimageCompactor {
+    fn id(&self) -> &'static str {
+        "postimage.compactor"
+    }
+    async fn compact(
+        &self,
+        _cx: &lash_core::plugin::CompactionContext<'_>,
+    ) -> Result<Option<lash_core::plugin::ContextCompaction>, lash_core::plugin::ContextError> {
+        Ok(Some(lash_core::plugin::ContextCompaction::new(vec![
+            lash_core::SessionAppendNode::plugin(
+                "postimage-summary",
+                serde_json::json!({"summary":"committed context"}),
+            ),
+        ])))
+    }
+}
+
+/// LO-POSTIMAGE compares the production owner reducer with one whose complete
+/// projection is discarded and cold-loaded after each acknowledgement. Both
+/// drive the same ingress, frame, compaction and cancellation trace.
+async fn lo_postimage(tier: Tier) {
+    let warm = postimage_trace(tier, false).await;
+    let cold = postimage_trace(tier, true).await;
+    assert_eq!(warm.len(), cold.len());
+    for (index, (warm, cold)) in warm.iter().zip(&cold).enumerate() {
+        assert_eq!(
+            warm, cold,
+            "warm and eviction reference differ at cut {index}"
+        );
+    }
+}
+
+fn normalize_postimage(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(fields) => {
+            // Store clocks and content-derived identities are compared exactly
+            // against reopen by the shared receipt law. Here compare domain
+            // state across two independently created deployments.
+            fields.retain(|key, _| {
+                !matches!(
+                    key.as_str(),
+                    "timestamp"
+                        | "checkpoint_ref"
+                        | "node_id"
+                        | "parent_node_id"
+                        | "leaf_node_id"
+                        | "current_frame_node_id"
+                        | "frame_node_id"
+                        | "previous_frame_node_id"
+                        | "external_parent"
+                        | "frame_key"
+                )
+            });
+            for value in fields.values_mut() {
+                normalize_postimage(value);
+            }
+        }
+        serde_json::Value::Array(values) => values.iter_mut().for_each(normalize_postimage),
+        _ => {}
+    }
+}
+
+async fn postimage_trace(tier: Tier, cold: bool) -> Vec<serde_json::Value> {
+    use lash_core::runtime::durable::session::SessionActivation;
+    use lash_durable::{ActorKey, OwnerRead};
+    use lash_durable_test::{Matrix, Script, SimClock, SimNodes, SimNodesConfig, Tripwire};
+    use lash_protocol_types::sync::MutexExt as _;
+    use std::sync::Mutex;
+    let (dialect, postgres_url) = dialect_of(tier).expect("required PostgreSQL service");
+    let clock = SimClock::new();
+    sim::wait_out_renders(&clock);
+    let keep = Mutex::new(Vec::new());
+    let (stores, database) =
+        dialect::open(dialect, postgres_url.as_deref(), Arc::clone(&clock), &keep).await;
+    let backend = served::configured_backend(stores, sim::settings(), Vec::new());
+    let scripts = Arc::new(served::Scripts::default());
+    for ordinal in 0..3 {
+        scripts.register(&format!("input-{ordinal}"), Vec::new());
+    }
+    let provider = served::model(Arc::clone(&scripts));
+    let core = lash::LashCore::standard_builder(backend.clone())
+        .plugin(Arc::new(lash::plugins::StaticPluginFactory::new(
+            lash::plugins::PluginDeclaration::initial("postimage-compactor"),
+            lash::plugins::PluginSpec::new()
+                .with_context_compactor(1, Arc::new(PostimageCompactor)),
+        )))
+        .serve_sessions(false)
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .execution_budgets(lash::ExecutionBudgets::recommended())
+        .delta_coalescing(lash::DeltaCoalescing::recommended())
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
+        .serve_test_llm_profile(provider, served::metadata())
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            lash::persistence::LeaseOwnerId::new("postimage"),
+            lash::persistence::LeaseIncarnationId::new("boot"),
+        ))
+        .unwrap();
+    let id = lash::SessionId::try_from("lo-postimage".to_owned()).unwrap();
+    let durable = core
+        .session(id.clone())
+        .create(lash::SessionCreation::root(served::spec(8)))
+        .await
+        .unwrap();
+    let live = core.session(id.clone()).open().await.unwrap();
+    let script = Script::new();
+    let receipts = Arc::new(Mutex::new(Vec::new()));
+    let observed = Arc::clone(&receipts);
+    script.observe_actor_receipts(move |label, tx, receipt| {
+        let facts =
+            lash_durable::domain::graph::RunFacts::appended(tx.domain(), tx.graph(), tx.epoch());
+        let mut cuts = observed.lock_recover();
+        let claims = tx
+            .requires()
+            .map(|claims| serde_json::json!(claims))
+            .unwrap_or_else(|| {
+                cuts.last()
+                    .and_then(|cut: &serde_json::Value| cut.get("claims"))
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!([]))
+            });
+        cuts.push(serde_json::json!({"label":label.as_str(),
+            "revision":receipt.revision.0,"claims":claims,"facts":facts.rows.len(),
+            "heads":receipt.session_heads.len(),"writes":tx.domain().len()}));
+    });
+    let probe = Arc::new(Tripwire::default());
+    let activation = SessionActivation::new(
+        backend.clone(),
+        lash::testing::session_turn_services(&core),
+        probe.clone(),
+    );
+    let activation = if cold {
+        activation.cold_after_acknowledgement()
+    } else {
+        activation
+    };
+    let nodes = SimNodes::new(
+        database,
+        clock,
+        script,
+        SimNodesConfig {
+            lease: Matrix::test_lease(),
+            decodes: backend.formats().decodes(),
+            serves: lash::testing::node_serves(&core),
+            max_active: 1,
+        },
+        Arc::new(activation),
+    );
+    nodes.start("owner");
+    let mut cuts = Vec::new();
+    let catalog = backend.stores().session_store_factory();
+    for ordinal in 0..3 {
+        if ordinal == 1 {
+            probe.reset();
+        }
+        let run = lash::TurnId::try_from(format!("postimage-{ordinal}")).unwrap();
+        let input = durable
+            .send(lash::TurnInput::text(format!("input-{ordinal}")))
+            .id(run.clone())
+            .await
+            .unwrap();
+        nodes.quiesce().await;
+        for _ in 0..20 {
+            if nodes
+                .database()
+                .turn_end(&id, &run)
+                .await
+                .unwrap()
+                .is_some()
+            {
+                break;
+            }
+            nodes.step().await;
+        }
+        let end = nodes
+            .database()
+            .turn_end(&id, &run)
+            .await
+            .unwrap()
+            .unwrap_or_else(|| panic!("turn ended: {}", nodes.script().rendered_trace()));
+        let output = input.output().await.unwrap();
+        served::assert_answered("postimage", &output);
+        if ordinal == 2 {
+            let requests = scripts.requests("input-2");
+            assert!(!requests.is_empty(), "the new frame reached the provider");
+            for request in requests {
+                assert!(
+                    !request.contains("input-0") && !request.contains("input-1"),
+                    "old frame escaped into retained prompt: {request}"
+                );
+            }
+        }
+        let window = catalog
+            .load_session_window(&id, lash_core::store::WindowSelector::Current)
+            .await
+            .unwrap()
+            .unwrap();
+        let state = lash_core_store::store::window_state(window, catalog.fleet_format())
+            .unwrap()
+            .state;
+        let mut value = serde_json::to_value(state.to_snapshot()).unwrap();
+        normalize_postimage(&mut value);
+        cuts.push(serde_json::json!({"head":value,"terminal":format!("{:?}",end.cause)}));
+        if ordinal == 1 && !cold {
+            let counts = probe.counts();
+            for source in [OwnerRead::OwnHeadReload, OwnerRead::OwnCommittedPhaseReload] {
+                assert_eq!(
+                    counts
+                        .owner_reads
+                        .iter()
+                        .filter(|((_, _, kind), _)| *kind == source)
+                        .map(|(_, count)| *count)
+                        .sum::<u64>(),
+                    0,
+                    "unchanged-owner turn reloaded its own state: {counts:?}"
+                );
+            }
+            assert!(counts.owner_reads.iter().any(|((_, _, kind), count)| *kind
+                == OwnerRead::ExternalFrontierReads
+                && *count > 0));
+        }
+        if ordinal == 1 {
+            for (key, command) in [
+                (
+                    "frame",
+                    lash_core::facade_support::SessionCommand::OpenAgentFrame {
+                        request: Box::new(frame("postimage-frame")),
+                    },
+                ),
+                (
+                    "compact",
+                    lash_core::facade_support::SessionCommand::CompactContext {
+                        instructions: None,
+                    },
+                ),
+            ] {
+                let accepted = live.admin().commands().submit(command, key).await.unwrap();
+                nodes.quiesce().await;
+                for _ in 0..20 {
+                    if catalog
+                        .queued_work_batch_completion(&id, accepted.batch_id.as_str())
+                        .await
+                        .unwrap()
+                        .is_some()
+                    {
+                        break;
+                    }
+                    nodes.step().await;
+                }
+                let receipt = catalog
+                    .queued_work_batch_completion(&id, accepted.batch_id.as_str())
+                    .await
+                    .unwrap()
+                    .expect("command settled");
+                if key == "compact" {
+                    assert!(
+                        receipt.command_outcomes.values().any(|outcome| matches!(
+                            outcome,
+                            lash_core::runtime::SessionCommandOutcome::CompactContext {
+                                outcome: lash_core::runtime::CompactContextOutcome::Opened { .. }
+                            }
+                        )),
+                        "compaction must actually open a frame: {:?}",
+                        receipt.command_outcomes
+                    );
+                }
+                assert_eq!(
+                    backend.owner_memory().usage().total(),
+                    0,
+                    "{key}: previous-frame prompt allocations remain retained after command adoption"
+                );
+                let mut outcome =
+                    serde_json::to_value(receipt.command_outcomes.values().collect::<Vec<_>>())
+                        .unwrap();
+                normalize_postimage(&mut outcome);
+                cuts.push(serde_json::json!({"command":key,"outcomes":outcome}));
+            }
+        }
+    }
+    nodes.script().cut(
+        lash_durable::CommitLabel::MODEL_START,
+        4,
+        lash_durable_test::Fault::DelayedAck(std::time::Duration::from_secs(1)),
+    );
+    let cancelled = durable
+        .send(lash::TurnInput::text("cancel-me"))
+        .id(lash::TurnId::try_from("postimage-cancel".to_owned()).unwrap())
+        .await
+        .unwrap();
+    for _ in 0..20 {
+        nodes.step().await;
+        if nodes
+            .database()
+            .turn(&id)
+            .await
+            .unwrap()
+            .is_some_and(|row| row.phase.model().is_some())
+        {
+            break;
+        }
+    }
+    assert!(
+        nodes
+            .database()
+            .turn(&id)
+            .await
+            .unwrap()
+            .is_some_and(|row| row.phase.model().is_some()),
+        "cancel must race an admitted model call"
+    );
+    let cancelled_run = nodes.database().turn(&id).await.unwrap().unwrap().run;
+    let cancellation = cancelled
+        .cancel()
+        .mode(lash::TurnCancelMode::Immediate)
+        .await
+        .unwrap();
+    assert!(
+        matches!(cancellation, lash::CancelReceipt::Cancelled { .. }),
+        "{cancellation:?}"
+    );
+    for _ in 0..20 {
+        nodes.step().await;
+        if nodes
+            .database()
+            .turn_end(&id, &cancelled_run)
+            .await
+            .unwrap()
+            .is_some()
+        {
+            break;
+        }
+    }
+    let end = nodes
+        .database()
+        .turn_end(&id, &cancelled_run)
+        .await
+        .unwrap()
+        .unwrap_or_else(|| {
+            panic!(
+                "cancel terminal: current={:?} trace={} receipt={cancellation:?}",
+                cancelled_run,
+                nodes.script().rendered_trace()
+            )
+        });
+    cuts.push(serde_json::json!({"cancel":format!("{:?}", end.cause)}));
+    let actor = ActorKey::session(id.as_str()).unwrap();
+    let authority = nodes.database().actor(&actor).await.unwrap().unwrap();
+    cuts.push(serde_json::json!({"revision":authority.revision.0}));
+    cuts.extend(receipts.lock_recover().clone());
+    assert!(
+        probe.counts().owner_cuts.len() > 2,
+        "adoption hooks were missed"
+    );
+    nodes.stop("owner");
+    nodes.quiesce().await;
+    cuts
+}
+
+#[tokio::test]
+async fn lo_postimage_on_sqlite_memory() {
+    lo_postimage(Tier::SqliteMemory).await;
+}
+#[tokio::test]
+async fn lo_postimage_on_sqlite_file() {
+    lo_postimage(Tier::SqliteFile).await;
+}
+#[tokio::test]
+#[ignore = "requires a private PostgreSQL service"]
+async fn lo_postimage_on_postgres_when_configured() {
+    lo_postimage(Tier::Postgres).await;
+}

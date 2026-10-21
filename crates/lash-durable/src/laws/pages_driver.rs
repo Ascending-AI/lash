@@ -232,7 +232,20 @@ impl Retiring {
                     ..LeaseSettings::default()
                 },
                 retirement,
-                ..DurableSettings::default()
+                ..DurableSettings {
+                    owner_retention: Some(crate::OwnerRetentionSettings {
+                        idle_evict: std::time::Duration::from_secs(60),
+                        max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+                        max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+                        max_owner_dirty_bytes: const {
+                            std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap()
+                        },
+                        max_node_dirty_bytes: const {
+                            std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap()
+                        },
+                    }),
+                    ..DurableSettings::default()
+                }
             },
             self.probe.turns.clone(),
         )
@@ -815,6 +828,18 @@ impl DurableStore for Retiring {
 
     async fn begin(&self, actor: &ActorKey, epoch: Epoch) -> Result<ActorTx, DurableError> {
         self.inner.begin(actor, epoch).await
+    }
+
+    async fn begin_retained(
+        &self,
+        actor: &ActorKey,
+        epoch: crate::Epoch,
+        expected: crate::StateRevision,
+        max_mail_bytes: u64,
+    ) -> Result<ActorTx, DurableError> {
+        self.inner
+            .begin_retained(actor, epoch, expected, max_mail_bytes)
+            .await
     }
 
     async fn open_process(

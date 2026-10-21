@@ -36,7 +36,16 @@ async fn world() -> World {
     let stores = lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock.clone())
         .await
         .expect("open the memory store set");
-    let backend = lash_execution_contracts::backend::Backend::for_testing(Arc::new(stores));
+    let backend = lash_execution_contracts::backend::Backend::for_testing(
+        Arc::new(stores),
+        lash_durable::OwnerRetentionSettings {
+            idle_evict: std::time::Duration::from_secs(60),
+            max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+            max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+            max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+            max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+        },
+    );
     let formats = FormatSet::new("owned-call-deadline");
     let actor = ActorKey::session(SESSION).expect("a session actor key");
     let mut create = MailTx::new();

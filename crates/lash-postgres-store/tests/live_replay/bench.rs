@@ -98,7 +98,17 @@ async fn streaming_runs_publish_to_deliver() {
             },
             ..lash::postgres::LiveReplayPolicy::default()
         }),
-        ..lash::postgres::PostgresHostConfig::default()
+        ..{
+            let mut config = lash::postgres::PostgresHostConfig::default();
+            config.node.owner_retention = Some(lash_durable::OwnerRetentionSettings {
+                idle_evict: std::time::Duration::from_secs(60),
+                max_owner_bytes: const { std::num::NonZeroU64::new(64 * 1024 * 1024).unwrap() },
+                max_node_bytes: const { std::num::NonZeroU64::new(512 * 1024 * 1024).unwrap() },
+                max_owner_dirty_bytes: const { std::num::NonZeroU64::new(32 * 1024 * 1024).unwrap() },
+                max_node_dirty_bytes: const { std::num::NonZeroU64::new(256 * 1024 * 1024).unwrap() },
+            });
+            config
+        }
     };
     let a = connect(database.url(), production.clone());
     let b = connect(database.url(), production.clone());

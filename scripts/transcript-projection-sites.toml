@@ -95,7 +95,6 @@ roles = ["Assistant", "Event", "Tool", "User"]
 "crates/lash-sansio/src/sansio/tests/bounded_checkpoint.rs#a_windowed_checkpoint_holds_only_the_turn_and_restores_over_its_window" = { reads = 2, outputs = 0, kind = "evidence-read", reason = "a_windowed_checkpoint_holds_only_the_turn_and_restores_over_its_window inspects recorded state for a law assertion." }
 "crates/lash-sansio/src/sansio/tests/bounded_checkpoint.rs#a_windowed_checkpoint_refuses_any_window_but_its_own" = { reads = 2, outputs = 0, kind = "evidence-read", reason = "a_windowed_checkpoint_refuses_any_window_but_its_own inspects recorded state for a law assertion." }
 "crates/lash-sansio/src/sansio/tests/bounded_checkpoint.rs#a_finished_turn_leaves_the_commit_its_records_to_mark_in_place" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "The FIG-6910 sharing law reads the committed window's records to prove a finished turn leaves the commit their one buffer, so marking the reply rewrites its slot in place." }
-"crates/lash-sansio/src/sansio/tests/bounded_checkpoint.rs#prepared_prompt_rendering_does_not_clone_retained_history" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "The FIG-6441 counted law reads the committed window to compare prompt adoption and rendering allocations at two history depths." }
 "crates/lash-durable-test/tests/turn_phases.rs#restore_after_the_head_moved" = { reads = 2, outputs = 0, kind = "evidence-read", reason = "restore_after_the_head_moved inspects recorded state for a law assertion." }
 "crates/lash-durable-test/tests/support/served.rs#calls" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "calls reads the settled transcript's tool calls for a tool-semantics law assertion (FIG-5210)." }
 "crates/lash-durable-test/tests/support/served.rs#results" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "results reads the settled transcript's tool results for a tool-semantics law assertion (FIG-5210)." }
@@ -257,3 +256,13 @@ roles = ["Assistant", "Event", "Tool", "User"]
 "examples/dataframe/src/tests.rs#df_split" = { reads = 0, outputs = 1, kind = "output-read", reason = "DF-SPLIT compares the settled control.finish rows of the real wordcount samples with callback-bearing pipelines reopened on SQLite (FIG-7075)." }
 "examples/dataframe/src/tests.rs#separated_runs" = { reads = 0, outputs = 1, kind = "output-read", reason = "DF-SPLIT reads the settled rows and placement after a crash between two native expression runs (FIG-7075)." }
 "crates/lash-durable-test/tests/open_session_commands.rs#execute" = { reads = 0, outputs = 1, kind = "output-read", reason = "LO-FENCE reads the settled kernel-cell finish value after one typed revision-conflict retry (FIG-7118); the local tool executor is the scraper's enclosing function." }
+
+"crates/lash-core-execution/src/runtime/effect/envelope.rs#from_retained" = { reads = 1, outputs = 0, kind = "projection-core", reason = "The persistent request path shares or counts immutable message nodes for lowering and journaling; it selects no transcript reply (FIG-7121)." }
+
+"crates/lash-core-llm/src/provider/attachment_wire.rs#retained_groups" = { reads = 6, outputs = 0, kind = "projection-core", reason = "The persistent request path shares or counts immutable message nodes for lowering and journaling; it selects no transcript reply (FIG-7121)." }
+
+"crates/lash-core-store/src/prompt_sections_tests.rs#lo_prefix_tail_work_matches_full_render" = { reads = 9, outputs = 0, kind = "evidence-read", reason = "LO-PREFIX compares full rendered request evidence and held-reader allocation lifetimes (FIG-7121)." }
+
+"crates/lash-core-store/src/prompt_sections_tests.rs#reserve_shared" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "LO-PREFIX compares full rendered request evidence and held-reader allocation lifetimes (FIG-7121)." }
+
+"crates/lash-protocol-types/src/llm/provider_body/canonical.rs#of_retained_request" = { reads = 4, outputs = 0, kind = "projection-core", reason = "The persistent request path shares or counts immutable message nodes for lowering and journaling; it selects no transcript reply (FIG-7121)." }
