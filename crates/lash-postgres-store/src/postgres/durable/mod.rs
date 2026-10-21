@@ -791,7 +791,7 @@ async fn apply_domain(
         }
         DomainWrite::SessionMail(write) => session_mail::apply(tx, committing, write).await,
         DomainWrite::Prompt(write) => prompts::apply(tx, committing, write).await,
-        DomainWrite::ModelCallPin(write) => model_calls::apply_pin(tx, write).await,
+        DomainWrite::ModelCallPin(write) => model_calls::apply_pin(tx, committing, write).await,
         DomainWrite::ModelCall(write) => model_calls::apply(tx, committing, write).await,
     }
 }

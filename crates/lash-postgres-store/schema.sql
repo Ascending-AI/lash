@@ -1366,7 +1366,7 @@ CREATE OR REPLACE FUNCTION lash_owner_commit(
     p_body_hashes BYTEA[], p_bodies BYTEA[],
     p_named BYTEA[], p_roots BYTEA[], p_digests BYTEA[], p_contents BYTEA[],
     p_parents BYTEA[], p_children BYTEA[], p_steps JSONB,
-    p_formats TEXT, p_ack BIGINT, p_release TEXT, p_due BIGINT, p_now BIGINT)
+    p_formats TEXT, p_ack BIGINT, p_release TEXT, p_due BIGINT, p_now BIGINT, p_requires TEXT)
 RETURNS TABLE (o_revision BIGINT, o_now BIGINT, o_fleet INTEGER, o_state TEXT,
     o_installed BIGINT, o_cancel_turn TEXT, o_cancel_request TEXT, o_cancel_origin TEXT,
     o_cancel_reason TEXT, o_cancel_disposition TEXT, o_cancel_mode TEXT)
@@ -1417,9 +1417,9 @@ DECLARE
     v_answer JSONB;
     v_frame TEXT;
 BEGIN
-    -- Generated from this build's statements (registry e696efecaabe0542); a call
+    -- Generated from this build's statements (registry d8edea84fe4bf6d1); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM 'e696efecaabe0542'
+    IF p_registry IS DISTINCT FROM 'd8edea84fe4bf6d1'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -1528,6 +1528,36 @@ BEGIN
         v_p := v_step->'p';
         v_first := NULL;
         CASE v_step->>'s'
+        WHEN 'durable_model_call.append' THEN
+            INSERT INTO lash_model_call_records
+            (session_id, run, call, call_id, record_ref, ended_at_ms, written_epoch)
+            VALUES ((v_p->>0), (v_p->>1), (v_p->>2), (v_p->>3), (decode(v_p->>4, 'hex')), (v_now), ((v_p->>6)::BIGINT)) ON CONFLICT (session_id, run, call) DO NOTHING;
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'durable_model_call_postgres.root_matches' THEN
+            v_rows := 0;
+            FOR v_row IN SELECT record_ref FROM lash_model_call_records
+            WHERE session_id = (v_p->>0) AND run = (v_p->>1) AND call = (v_p->>2) AND record_ref = (decode(v_p->>3, 'hex')) LOOP
+                IF v_step ? 'c' AND v_first IS NULL THEN
+                    v_first := to_jsonb(v_row);
+                END IF;
+                v_rows := v_rows + 1;
+            END LOOP;
+        WHEN 'durable_model_call.retire_pin' THEN
+            DELETE FROM lash_model_call_pins WHERE session_id = (v_p->>0) AND run = (v_p->>1) AND call = (v_p->>2);
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'durable_model_call.reserve' THEN
+            INSERT INTO lash_model_call_pins (session_id, run, call, call_id, attempt, answered, enclosing_owner, enclosing_run, enclosing_call)
+            VALUES ((v_p->>0), (v_p->>1), (v_p->>2), (v_p->>3), ((v_p->>4)::BIGINT), FALSE, (v_p->>5), ((v_p->>6)::BIGINT), (v_p->>7))
+            ON CONFLICT (session_id, run, call) DO UPDATE SET attempt = excluded.attempt
+            WHERE lash_model_call_pins.call_id = excluded.call_id AND lash_model_call_pins.attempt < excluded.attempt;
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
+        WHEN 'durable_model_call.answered' THEN
+            UPDATE lash_model_call_pins SET answered = TRUE WHERE session_id = (v_p->>0) AND run = (v_p->>1) AND call = (v_p->>2);
+            GET DIAGNOSTICS v_rows = ROW_COUNT;
+            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'durable_run_record.append' THEN
             v_rows := 0;
             FOR v_row IN INSERT INTO lash_run_records
@@ -1729,51 +1759,14 @@ BEGIN
                 END IF;
                 v_rows := v_rows + 1;
             END LOOP;
-        WHEN 'durable_prompt.insert_snapshot' THEN
+        WHEN 'durable_prompt_postgres.record' THEN
             v_rows := 0;
-            FOR v_row IN INSERT INTO lash_prompt_snapshots
-                 (session_id, owner, call, snapshot, request, written_epoch)
-             VALUES ((v_p->>0), (v_p->>1), (v_p->>2), (v_p->>3), (v_p->>4), ((v_p->>5)::BIGINT))
-             ON CONFLICT (session_id, owner, call) DO NOTHING
-             RETURNING call LOOP
+            FOR v_row IN SELECT * FROM lash_prompt_record((v_p->>0), (v_p->>1), (v_p->>2), (v_p->>3), (v_p->>4), ((v_p->>5)::BIGINT), (ARRAY(SELECT decode(element, 'hex') FROM jsonb_array_elements_text(v_p->6) WITH ORDINALITY AS listed(element, position) ORDER BY position)), (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->7) WITH ORDINALITY AS listed(element, position) ORDER BY position)), (ARRAY(SELECT decode(element, 'hex') FROM jsonb_array_elements_text(v_p->8) WITH ORDINALITY AS listed(element, position) ORDER BY position)), (ARRAY(SELECT decode(element, 'hex') FROM jsonb_array_elements_text(v_p->9) WITH ORDINALITY AS listed(element, position) ORDER BY position)), (ARRAY(SELECT decode(element, 'hex') FROM jsonb_array_elements_text(v_p->10) WITH ORDINALITY AS listed(element, position) ORDER BY position)), (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->11) WITH ORDINALITY AS listed(element, position) ORDER BY position)), (ARRAY(SELECT decode(element, 'hex') FROM jsonb_array_elements_text(v_p->12) WITH ORDINALITY AS listed(element, position) ORDER BY position)), (decode(v_p->>13, 'hex')), ((v_p->>14)::BOOLEAN)) LOOP
                 IF v_step ? 'c' AND v_first IS NULL THEN
                     v_first := to_jsonb(v_row);
                 END IF;
-                v_rows := v_rows + 1;
+                IF v_row."accepted" THEN v_rows := v_rows + 1; END IF;
             END LOOP;
-        WHEN 'postgres_connection.lock_xact_shared_by_keys_seeded' THEN
-            v_rows := 0;
-            FOR v_row IN SELECT pg_advisory_xact_lock_shared(hashtextextended(encode(ordered.key, 'hex'), ((v_p->>1)::BIGINT)))
-             FROM (SELECT DISTINCT key FROM unnest((ARRAY(SELECT decode(element, 'hex') FROM jsonb_array_elements_text(v_p->0) WITH ORDINALITY AS listed(element, position) ORDER BY position))::BYTEA[]) AS target(key) ORDER BY key) AS ordered LOOP
-                IF v_step ? 'c' AND v_first IS NULL THEN
-                    v_first := to_jsonb(v_row);
-                END IF;
-                v_rows := v_rows + 1;
-            END LOOP;
-        WHEN 'durable_prompt_postgres.unsent_absent' THEN
-            v_rows := 0;
-            FOR v_row IN SELECT batch.hash
-             FROM unnest((ARRAY(SELECT decode(element, 'hex') FROM jsonb_array_elements_text(v_p->0) WITH ORDINALITY AS listed(element, position) ORDER BY position))::BYTEA[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->1) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[]) AS batch(hash, text)
-             WHERE batch.text IS NULL
-               AND NOT EXISTS (SELECT 1 FROM lash_prompt_texts AS stored WHERE stored.hash = batch.hash) LOOP
-                IF v_step ? 'c' AND v_first IS NULL THEN
-                    v_first := to_jsonb(v_row);
-                END IF;
-                v_rows := v_rows + 1;
-            END LOOP;
-        WHEN 'durable_prompt_postgres.insert_sent_texts' THEN
-            INSERT INTO lash_prompt_texts (hash, text)
-             SELECT hash, text FROM unnest((ARRAY(SELECT decode(element, 'hex') FROM jsonb_array_elements_text(v_p->0) WITH ORDINALITY AS listed(element, position) ORDER BY position))::BYTEA[], (ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->1) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[]) AS batch(hash, text)
-             WHERE batch.text IS NOT NULL
-             ON CONFLICT (hash) DO NOTHING;
-            GET DIAGNOSTICS v_rows = ROW_COUNT;
-            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
-        WHEN 'durable_prompt_postgres.insert_edges' THEN
-            INSERT INTO lash_prompt_snapshot_texts (session_id, owner, call, part, hash)
-             SELECT (v_p->>0), (v_p->>1), (v_p->>2), part, hash
-               FROM unnest((ARRAY(SELECT element FROM jsonb_array_elements_text(v_p->3) WITH ORDINALITY AS listed(element, position) ORDER BY position))::TEXT[], (ARRAY(SELECT decode(element, 'hex') FROM jsonb_array_elements_text(v_p->4) WITH ORDINALITY AS listed(element, position) ORDER BY position))::BYTEA[]) AS batch(part, hash);
-            GET DIAGNOSTICS v_rows = ROW_COUNT;
-            IF v_rows > 0 THEN v_first := '{}'::JSONB; END IF;
         WHEN 'durable_graph.admission_put' THEN
             v_rows := 0;
             FOR v_row IN INSERT INTO lash_effect_admissions
@@ -2758,6 +2751,9 @@ BEGIN
     IF p_formats IS NOT NULL THEN
         UPDATE lash_actors SET formats = (p_formats) WHERE actor_key = (p_actor);
     END IF;
+    IF p_requires IS NOT NULL THEN
+        UPDATE lash_actors SET requires = (p_requires) WHERE actor_key = (p_actor);
+    END IF;
     IF p_ack IS NOT NULL THEN
         WITH acked AS (
                  UPDATE lash_actors SET acked_seq = (p_ack) WHERE actor_key = (p_actor) AND acked_seq < (p_ack)
@@ -2956,4 +2952,120 @@ BEGIN
     RETURN QUERY SELECT hash FROM lash_prompt_texts WHERE hash = ANY((p_keys)::BYTEA[]);
 END
 $lash_prompt_held_texts$;
+CREATE OR REPLACE FUNCTION lash_prompt_record(
+    p_session TEXT, p_owner TEXT, p_call TEXT, p_snapshot TEXT, p_request TEXT, p_epoch BIGINT,
+    p_hashes BYTEA[], p_bodies TEXT[], p_parents BYTEA[], p_children BYTEA[], p_roots BYTEA[],
+    p_parts TEXT[], p_edges BYTEA[], p_prefix BYTEA, p_turn BOOLEAN)
+RETURNS TABLE (accepted BOOLEAN, missing BYTEA)
+LANGUAGE plpgsql VOLATILE
+AS $lash_prompt_record$
+DECLARE
+    v_rows BIGINT;
+    v_frontier BYTEA[] := p_roots;
+    v_held BYTEA[];
+    v_new BYTEA[];
+    v_unheld BYTEA[] := '{}';
+    v_hash BYTEA;
+    v_position INTEGER;
+    v_hashes BYTEA[];
+    v_bodies TEXT[];
+    v_parents BYTEA[];
+    v_children BYTEA[];
+    v_texts BYTEA[] := '{}';
+    v_protect BYTEA[] := '{}';
+    v_tfront BYTEA[];
+    v_closure BYTEA[];
+    v_tparents BYTEA[];
+    v_tchildren BYTEA[];
+BEGIN
+    WITH recorded AS (INSERT INTO lash_prompt_snapshots
+                 (session_id, owner, call, snapshot, request, written_epoch)
+             VALUES ((p_session), (p_owner), (p_call), (p_snapshot), (p_request), (p_epoch))
+             ON CONFLICT (session_id, owner, call) DO NOTHING
+             RETURNING call) SELECT count(*) INTO v_rows FROM recorded;
+    IF v_rows <> 1 THEN
+        RETURN QUERY SELECT FALSE, NULL::BYTEA;
+        RETURN;
+    END IF;
+    WHILE cardinality(v_frontier) > 0 LOOP
+        v_held := ARRAY(SELECT lash_prompt_held_texts((v_frontier), (2)));
+        v_protect := v_protect || v_held;
+        v_new := '{}';
+        FOREACH v_hash IN ARRAY v_frontier LOOP
+            IF v_hash = ANY(v_held) OR v_hash = ANY(v_unheld) THEN CONTINUE; END IF;
+            v_position := array_position(p_hashes, v_hash);
+            IF v_position IS NULL OR p_bodies[v_position] IS NULL THEN
+                RETURN QUERY SELECT FALSE, v_hash;
+                RETURN;
+            END IF;
+            v_new := v_new || v_hash;
+            v_unheld := v_unheld || v_hash;
+        END LOOP;
+        v_frontier := ARRAY(SELECT DISTINCT edge.child
+            FROM unnest(p_parents, p_children) AS edge(parent, child)
+            WHERE edge.parent = ANY(v_new) ORDER BY edge.child);
+    END LOOP;
+    IF cardinality(v_unheld) > 0 THEN
+        SELECT array_agg(supplied.hash ORDER BY supplied.hash), array_agg(supplied.body ORDER BY supplied.hash)
+        INTO v_hashes, v_bodies FROM unnest(p_hashes, p_bodies) AS supplied(hash, body)
+        WHERE supplied.hash = ANY(v_unheld);
+        INSERT INTO lash_prompt_texts (hash, text)
+             SELECT hash, text FROM unnest((v_hashes)::BYTEA[], (v_bodies)::TEXT[]) AS batch(hash, text)
+             ON CONFLICT (hash) DO NOTHING;
+        SELECT COALESCE(array_agg(edge.parent ORDER BY edge.parent, edge.child), '{}'),
+               COALESCE(array_agg(edge.child ORDER BY edge.parent, edge.child), '{}')
+        INTO v_parents, v_children FROM unnest(p_parents, p_children) AS edge(parent, child)
+        WHERE edge.parent = ANY(v_unheld);
+        INSERT INTO lash_prompt_text_edges (parent, child)
+             SELECT parent, child FROM unnest((v_parents)::BYTEA[], (v_children)::BYTEA[]) AS batch(parent, child)
+             ON CONFLICT (parent, child) DO NOTHING;
+    END IF;
+    INSERT INTO lash_prompt_snapshot_texts (session_id, owner, call, part, hash)
+             SELECT (p_session), (p_owner), (p_call), part, hash
+               FROM unnest((p_parts)::TEXT[], (p_edges)::BYTEA[]) AS batch(part, hash);
+    IF p_turn THEN
+        WITH released AS (DELETE FROM lash_prompt_prefixes WHERE session_id = (p_session) RETURNING hash)
+        SELECT COALESCE(array_agg(hash), '{}') INTO v_texts FROM released;
+        IF p_prefix IS NOT NULL THEN INSERT INTO lash_prompt_prefixes (session_id, hash) VALUES ((p_session), (p_prefix))
+             ON CONFLICT (session_id) DO UPDATE SET hash = excluded.hash; END IF;
+        v_tfront := ARRAY(SELECT DISTINCT hash FROM unnest(v_texts) AS released(hash) ORDER BY hash);
+            IF cardinality(v_tfront) > 0 THEN
+                v_closure := ARRAY(WITH RECURSIVE closure AS (
+                 SELECT unnest((v_tfront)::BYTEA[]) AS hash
+                 UNION
+                 SELECT edge.child FROM closure
+                   JOIN lash_prompt_text_edges AS edge ON edge.parent = closure.hash
+                  WHERE NOT (closure.hash = ANY((v_protect)::BYTEA[]))
+             ) SELECT hash FROM closure WHERE NOT (hash = ANY((v_protect)::BYTEA[])) ORDER BY hash);
+                PERFORM pg_advisory_xact_lock(hashtextextended(encode(ordered.key, 'hex'), (2)))
+             FROM (SELECT DISTINCT key FROM unnest((v_closure)::BYTEA[]) AS target(key) ORDER BY key) AS ordered;
+                v_tfront := ARRAY(SELECT hash FROM unnest(v_tfront) AS released(hash)
+                    WHERE NOT (hash = ANY(v_protect)) ORDER BY hash);
+                WHILE cardinality(v_tfront) > 0 LOOP
+                    SELECT COALESCE(array_agg(level.hash), '{}'), COALESCE(array_agg(edge.child), '{}')
+                    INTO v_tparents, v_tchildren
+                    FROM unnest(v_tfront) AS level(hash), LATERAL (SELECT child FROM lash_prompt_text_edges WHERE parent = (level.hash) ORDER BY child) AS edge;
+                    WITH gone AS (DELETE FROM lash_prompt_texts AS stored
+             WHERE stored.hash = ANY((v_tfront)::BYTEA[])
+               AND NOT EXISTS (
+                   SELECT 1 FROM lash_prompt_snapshot_texts AS edge WHERE edge.hash = stored.hash
+               ) AND NOT EXISTS (
+                   SELECT 1 FROM lash_prompt_prefixes AS prefix WHERE prefix.hash = stored.hash
+               ) AND NOT EXISTS (
+                   SELECT 1 FROM lash_prompt_text_edges AS edge WHERE edge.child = stored.hash
+               ) RETURNING hash)
+                    SELECT COALESCE(array_agg(hash), '{}') INTO v_closure FROM gone;
+                    v_tfront := ARRAY(SELECT DISTINCT edge.child
+                        FROM unnest(v_tparents, v_tchildren) AS edge(parent, child)
+                        WHERE edge.parent = ANY(v_closure) AND NOT (edge.child = ANY(v_protect))
+                        ORDER BY edge.child);
+                END LOOP;
+            END IF;
+            v_texts := '{}';
+            v_protect := '{}';
+            v_rows := 0;
+    END IF;
+    RETURN QUERY SELECT TRUE, NULL::BYTEA;
+END
+$lash_prompt_record$;
 -- END GENERATED lash_owner_commit

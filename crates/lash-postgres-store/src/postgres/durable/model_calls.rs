@@ -1,4 +1,5 @@
 //! PostgreSQL adapter for sealed model-call records.
+use super::steps::{Entry, Shape, Step, Ty, Value};
 use super::{Committing, DurableError, sqlx_failure};
 use lash_core_store::model_calls::ModelCallRecord;
 use lash_durable::domain::ModelCallWrite;
@@ -8,42 +9,131 @@ use std::sync::LazyLock;
 
 pub(super) static SQL: LazyLock<ModelCallStatements> =
     LazyLock::new(|| ModelCallStatements::render(Dialect::postgres()));
+lash_store_sql::statements! {
+    /// The immutable record guard, checked after the idempotent insert.
+    struct ModelCallPostgresStatements @ "durable_model_call_postgres" {
+        root_matches = "SELECT record_ref FROM model_call_records
+            WHERE session_id = ?1 AND run = ?2 AND call = ?3 AND record_ref = ?4";
+    }
+}
+static POSTGRES: LazyLock<ModelCallPostgresStatements> =
+    LazyLock::new(|| ModelCallPostgresStatements::render(Dialect::postgres()));
+
+pub(super) static APPEND: Entry = Entry::new(
+    || &SQL.append,
+    &[
+        Ty::Text,
+        Ty::Text,
+        Ty::Text,
+        Ty::Text,
+        Ty::Key,
+        Ty::Now,
+        Ty::Int,
+    ],
+    Shape::Exec,
+);
+pub(super) static ROOT_MATCHES: Entry = Entry::new(
+    || &POSTGRES.root_matches,
+    &[Ty::Text, Ty::Text, Ty::Text, Ty::Key],
+    Shape::Select,
+);
+pub(super) static RETIRE_PIN: Entry = Entry::new(
+    || &SQL.retire_pin,
+    &[Ty::Text, Ty::Text, Ty::Text],
+    Shape::Exec,
+);
+pub(super) static RESERVE: Entry = Entry::new(
+    || &SQL.reserve,
+    &[
+        Ty::Text,
+        Ty::Text,
+        Ty::Text,
+        Ty::Text,
+        Ty::Int,
+        Ty::Text,
+        Ty::Int,
+        Ty::Text,
+    ],
+    Shape::Exec,
+);
+pub(super) static ANSWERED: Entry = Entry::new(
+    || &SQL.answered,
+    &[Ty::Text, Ty::Text, Ty::Text],
+    Shape::Exec,
+);
+
+fn key_values(key: &lash_durable::domain::PromptCallKey) -> Vec<Value> {
+    vec![
+        Value::text(key.session.as_str()),
+        Value::text(key.call.owner_column()),
+        Value::text(key.call.call_column()),
+    ]
+}
+
+/// The insert, immutable-root check and reservation retirement stay ordered.
+pub(super) fn steps(epoch: lash_durable::Epoch, write: &ModelCallWrite) -> Vec<Step> {
+    let key = key_values(&write.key);
+    let mut append = key.clone();
+    append.extend([
+        Value::text(&write.call_id.0),
+        Value::key(write.record.to_hex()),
+        Value::Now,
+        Value::int(epoch.0),
+    ]);
+    let mut guard = key.clone();
+    guard.push(Value::key(write.record.to_hex()));
+    vec![
+        Step::any(&APPEND, append),
+        Step::one(&ROOT_MATCHES, guard),
+        Step::any(&RETIRE_PIN, key),
+    ]
+}
+
+pub(super) fn pin_steps(write: &lash_durable::domain::ModelCallPinWrite) -> Vec<Step> {
+    use lash_durable::domain::ModelCallPinWrite;
+    vec![match write {
+        ModelCallPinWrite::Reserve {
+            key,
+            call_id,
+            attempt,
+            enclosing,
+        } => {
+            let mut values = key_values(key);
+            values.extend([
+                Value::text(&call_id.0),
+                Value::int(i64::from(*attempt)),
+                Value::Text(enclosing.as_ref().map(|owner| owner.owner.stored())),
+                Value::Int(
+                    enclosing
+                        .as_ref()
+                        .map(|owner| i64::try_from(owner.run.0).unwrap_or(i64::MAX)),
+                ),
+                Value::Text(
+                    enclosing
+                        .as_ref()
+                        .map(|owner| owner.call.as_str().to_owned()),
+                ),
+            ]);
+            Step::any(&RESERVE, values)
+        }
+        ModelCallPinWrite::Answered { key } => Step::any(&ANSWERED, key_values(key)),
+    }]
+}
+
 pub(super) async fn apply(
     tx: &mut PgConnection,
     commit: &Committing<'_>,
     write: &ModelCallWrite,
 ) -> Result<(), DurableError> {
-    crate::observed_sql::query(SQL.append.sql())
-        .bind(write.key.session.as_str())
-        .bind(write.key.call.owner_column())
-        .bind(write.key.call.call_column())
-        .bind(&write.call_id.0)
-        .bind(crate::keys::key(write.record.to_hex()))
-        .bind(commit.now.0)
-        .bind(commit.epoch.0)
-        .execute(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(sqlx_failure)?;
-    let retained: String = crate::keys::query_scalar(SQL.root.sql())
-        .bind(write.key.session.as_str())
-        .bind(write.key.call.owner_column())
-        .bind(write.key.call.call_column())
-        .fetch_one(crate::observed_sql::executor(&mut *tx))
-        .await
-        .map_err(sqlx_failure)?;
-    if retained != write.record.to_hex() {
+    if super::steps::run(tx, &steps(commit.epoch, write), &commit.steps())
+        .await?
+        .is_some()
+    {
         return Err(super::corrupt(
             "model call",
             "a sealed call cannot be replaced",
         ));
     }
-    crate::observed_sql::query(SQL.retire_pin.sql())
-        .bind(write.key.session.as_str())
-        .bind(write.key.call.owner_column())
-        .bind(write.key.call.call_column())
-        .execute(crate::observed_sql::executor(tx))
-        .await
-        .map_err(sqlx_failure)?;
     Ok(())
 }
 pub(super) async fn delete_session(
@@ -116,43 +206,11 @@ impl super::PostgresDurableStore {
 
 pub(super) async fn apply_pin(
     tx: &mut PgConnection,
+    commit: &Committing<'_>,
     write: &lash_durable::domain::ModelCallPinWrite,
 ) -> Result<(), DurableError> {
-    use lash_durable::domain::ModelCallPinWrite;
-    match write {
-        ModelCallPinWrite::Reserve {
-            key,
-            call_id,
-            attempt,
-            enclosing,
-        } => {
-            crate::observed_sql::query(SQL.reserve.sql())
-                .bind(key.session.as_str())
-                .bind(key.call.owner_column())
-                .bind(key.call.call_column())
-                .bind(&call_id.0)
-                .bind(i64::from(*attempt))
-                .bind(enclosing.as_ref().map(|owner| owner.owner.stored()))
-                .bind(
-                    enclosing
-                        .as_ref()
-                        .map(|owner| i64::try_from(owner.run.0).unwrap_or(i64::MAX)),
-                )
-                .bind(enclosing.as_ref().map(|owner| owner.call.as_str()))
-                .execute(crate::observed_sql::executor(tx))
-                .await
-                .map_err(sqlx_failure)?;
-        }
-        ModelCallPinWrite::Answered { key } => {
-            crate::observed_sql::query(SQL.answered.sql())
-                .bind(key.session.as_str())
-                .bind(key.call.owner_column())
-                .bind(key.call.call_column())
-                .execute(crate::observed_sql::executor(tx))
-                .await
-                .map_err(sqlx_failure)?;
-        }
-    }
+    // These writes accept any row count, exactly as their explicit SQL did.
+    super::steps::run(tx, &pin_steps(write), &commit.steps()).await?;
     Ok(())
 }
 /// SQL reservation row, including the opaque outcome that owns its terminal.

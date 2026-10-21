@@ -548,3 +548,292 @@ async fn turn_commit_round_trips(holds_artifacts: bool) {
     );
     assert!(store.turn(&owned.session).await.expect("read").is_none());
 }
+
+/// Real model boundaries include claim requirements and dispatch records,
+/// unlike the minimal phase-only budgets above (FIG-7082).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn model_and_tool_boundaries_each_commit_in_one_call() {
+    use lash_durable::domain::{ModelCallId, ModelCallPinWrite, ModelCallWrite, PromptCallKey};
+    use lash_protocol_types::llm::types::LlmCallId;
+    let Some(owned) = owned("round-trips-model-boundaries").await else {
+        return;
+    };
+    let store = owned.storage.durable_store();
+    let input = accept(&owned, "boundaries").await;
+    let run = TurnId::from("round-trips-turn");
+    let mut tx = store.begin(&owned.actor, owned.epoch).await.expect("open");
+    admit(&mut tx, &owned, &run, input);
+    store
+        .commit(tx, CommitLabel::TURN_ADMIT)
+        .await
+        .expect("admit");
+    let key = PromptCallKey {
+        session: owned.session.clone(),
+        call: ModelCallId::Turn {
+            run: run.clone(),
+            ordinal: 1,
+        },
+    };
+    let record_prompt = |tx: &mut ActorTx, ordinal| {
+        use lash_durable::domain::{PromptText, PromptWrite};
+        let leaf = PromptText {
+            hash: lash_core_store::store::BlobRef::for_content(b"leaf").0,
+            text: "leaf".into(),
+            children: Vec::new(),
+        };
+        let prefix = PromptText {
+            hash: lash_core_store::store::BlobRef::for_content(b"prefix").0,
+            text: "prefix".into(),
+            children: vec![leaf.hash.clone()],
+        };
+        tx.write(DomainWrite::Prompt(PromptWrite::Record {
+            call: PromptCallKey {
+                session: owned.session.clone(),
+                call: ModelCallId::Turn {
+                    run: run.clone(),
+                    ordinal,
+                },
+            },
+            snapshot: Some("audit".into()),
+            request: "request".into(),
+            snapshot_texts: Vec::new(),
+            request_texts: vec![leaf, prefix.clone()].into(),
+            prefix: Some(prefix.hash),
+        }));
+    };
+    let mut tx = store.begin(&owned.actor, owned.epoch).await.expect("open");
+    tx.set_requires(vec!["model-component".into()]);
+    record_prompt(&mut tx, 1);
+    model_start(&mut tx, &owned, &run, 1);
+    tx.write(DomainWrite::ModelCallPin(ModelCallPinWrite::Reserve {
+        key: key.clone(),
+        call_id: LlmCallId("boundary-call".into()),
+        attempt: 1,
+        enclosing: None,
+    }));
+    let (started, start) = round_trips(store.commit(tx, CommitLabel::MODEL_START)).await;
+    started.expect("model.start");
+    let mut tx = store.begin(&owned.actor, owned.epoch).await.expect("open");
+    let answer = staged(&mut tx, NodeKind::TURN_CONTENT, "answer");
+    tx.write(DomainWrite::ModelCallPin(ModelCallPinWrite::Answered {
+        key: key.clone(),
+    }));
+    tx.write(DomainWrite::Turn(TurnWrite::Answer {
+        session: owned.session.clone(),
+        run: run.clone(),
+        answer,
+    }));
+    let (answered, answer_trips) = round_trips(store.commit(tx, CommitLabel::MODEL_ANSWER)).await;
+    answered.expect("answer");
+    let mut tx = store.begin(&owned.actor, owned.epoch).await.expect("open");
+    tx.set_requires(vec!["tool-component".into()]);
+    let record = staged(&mut tx, NodeKind::TURN_CONTENT, "sealed model call");
+    tx.write(DomainWrite::ModelCall(ModelCallWrite {
+        key: key.clone(),
+        call_id: LlmCallId("boundary-call".into()),
+        record,
+    }));
+    let checkpoint = staged(&mut tx, NodeKind::TURN_CONTENT, "tools");
+    tx.write(DomainWrite::Turn(TurnWrite::Advance {
+        session: owned.session.clone(),
+        run: run.clone(),
+        phase: PhaseAdvance::Tools {
+            run: RunSeq(0),
+            checkpoint,
+        },
+        iteration: 0,
+    }));
+    let (done, done_trips) = round_trips(store.commit(tx, CommitLabel::MODEL_DONE)).await;
+    done.expect("model.done");
+    let mut tx = store.begin(&owned.actor, owned.epoch).await.expect("open");
+    tx.set_requires(vec!["model-component".into()]);
+    record_prompt(&mut tx, 2);
+    model_start(&mut tx, &owned, &run, 2);
+    let (next, next_trips) =
+        round_trips(store.commit(tx, CommitLabel::ROUND_OUTCOME_PRESENT_MODEL_START)).await;
+    next.expect("next model call");
+    eprintln!(
+        "boundary calls: start={start} answer={answer_trips} done={done_trips} next={next_trips}"
+    );
+    assert_eq!([start, answer_trips, done_trips, next_trips], [1; 4]);
+    let requirements = store
+        .actor_requirements(None, 10)
+        .await
+        .expect("requirements");
+    assert!(
+        requirements
+            .iter()
+            .any(|(actor, requires)| actor == &owned.actor && requires == &["model-component"])
+    );
+    assert!(
+        store
+            .model_call_pins(&owned.session, &ModelCallId::turn_owner(&run))
+            .await
+            .expect("pins")
+            .is_empty()
+    );
+
+    // A different immutable root must refuse before the later (also invalid)
+    // phase write, and the failed call must roll its requirement stamp back.
+    let mut tx = store
+        .begin(&owned.actor, owned.epoch)
+        .await
+        .expect("open collision");
+    tx.set_requires(vec!["must-not-publish".into()]);
+    let record = staged(&mut tx, NodeKind::TURN_CONTENT, "conflicting sealed call");
+    tx.write(DomainWrite::ModelCall(ModelCallWrite {
+        key,
+        call_id: LlmCallId("boundary-call".into()),
+        record,
+    }));
+    tx.write(DomainWrite::Turn(TurnWrite::Answer {
+        session: owned.session.clone(),
+        run: TurnId::from("absent-run"),
+        answer: record,
+    }));
+    let error = store
+        .commit(tx, CommitLabel::MODEL_ANSWER)
+        .await
+        .expect_err("immutable record refuses");
+    assert!(
+        matches!(error, lash_durable::DurableError::Store(lash_durable::StoreFailure { kind: lash_durable::StoreFailureKind::Corrupt, ref message }) if message.contains("a sealed call cannot be replaced")),
+        "the first refusal stays durable: {error}"
+    );
+    let requirements = store
+        .actor_requirements(None, 10)
+        .await
+        .expect("requirements after refusal");
+    assert!(
+        requirements
+            .iter()
+            .any(|(actor, requires)| actor == &owned.actor && requires == &["model-component"])
+    );
+    // Held-text hints never vouch for retention: a reclaimed forest must
+    // be installed again from its supplied bodies through the direct form.
+    let mut tx = store
+        .begin(&owned.actor, owned.epoch)
+        .await
+        .expect("open release");
+    tx.write(DomainWrite::Prompt(
+        lash_durable::domain::PromptWrite::Release {
+            session: owned.session.clone(),
+            run: None,
+        },
+    ));
+    store
+        .commit(tx, CommitLabel::MODEL_DONE)
+        .await
+        .expect("release texts");
+    let mut tx = store
+        .begin(&owned.actor, owned.epoch)
+        .await
+        .expect("open re-record");
+    record_prompt(&mut tx, 3);
+    let (recorded, trips) = round_trips(store.commit(tx, CommitLabel::MODEL_START)).await;
+    recorded.expect("stale hint falls back to supplied bodies");
+    assert!(trips > 1, "the stale held-text hint was refused");
+
+    // The root's duplicate identity wins before any missing fragment; on
+    // a new call, its missing fragment wins before a later phase refusal.
+    let missing = lash_core_store::store::BlobRef::for_content(b"missing prompt fragment").0;
+    for ordinal in [3, 4] {
+        let call = PromptCallKey {
+            session: owned.session.clone(),
+            call: ModelCallId::Turn {
+                run: run.clone(),
+                ordinal,
+            },
+        };
+        let mut tx = store
+            .begin(&owned.actor, owned.epoch)
+            .await
+            .expect("open prompt refusal");
+        tx.write(DomainWrite::Prompt(
+            lash_durable::domain::PromptWrite::Record {
+                call: call.clone(),
+                snapshot: None,
+                request: "missing".into(),
+                snapshot_texts: Vec::new(),
+                request_texts: Default::default(),
+                prefix: Some(missing.clone()),
+            },
+        ));
+        let later_answer = staged(&mut tx, NodeKind::TURN_CONTENT, "later invalid phase");
+        tx.write(DomainWrite::Turn(TurnWrite::Answer {
+            session: owned.session.clone(),
+            run: TurnId::from("absent-run"),
+            answer: later_answer,
+        }));
+        let error = store
+            .commit(tx, CommitLabel::MODEL_START)
+            .await
+            .expect_err("prompt refuses first");
+        let expected = if ordinal == 3 {
+            lash_durable::domain::DomainRefusal::PromptCallRecorded { call }
+        } else {
+            lash_durable::domain::DomainRefusal::PromptFragmentMissing {
+                hash: missing.clone(),
+            }
+        };
+        assert_eq!(error, lash_durable::DurableError::Domain(expected));
+    }
+}
+
+/// PREFIX-DELTA on the server-call boundary: a carried immutable prefix
+/// sends only its new frontier, including metadata, as history grows.
+#[tokio::test]
+async fn a_growing_prompt_forest_binds_only_its_new_frontier() {
+    use lash_durable::domain::{ModelCallId, PromptCallKey, PromptText, PromptWrite};
+    let Some(owned) = owned("round-trips-prompt-frontier").await else {
+        return;
+    };
+    let store = owned.storage.durable_store();
+    let mut texts: Vec<PromptText> = Vec::new();
+    for ordinal in 1..=64 {
+        let body = format!("frontier {ordinal}");
+        let text = PromptText {
+            hash: lash_core_store::store::BlobRef::for_content(body.as_bytes()).0,
+            text: body.into(),
+            children: texts
+                .last()
+                .map(|parent| vec![parent.hash.clone()])
+                .unwrap_or_default(),
+        };
+        texts.push(text.clone());
+        let mut tx = store
+            .begin(&owned.actor, owned.epoch)
+            .await
+            .expect("open frontier");
+        tx.write(DomainWrite::Prompt(PromptWrite::Record {
+            call: PromptCallKey {
+                session: owned.session.clone(),
+                call: ModelCallId::Turn {
+                    run: TurnId::from("frontier-turn"),
+                    ordinal,
+                },
+            },
+            snapshot: None,
+            request: "frontier".into(),
+            snapshot_texts: Vec::new(),
+            request_texts: texts.clone().into(),
+            prefix: Some(text.hash.clone()),
+        }));
+        let (committed, receipt) = lash_core_ids::operational_metrics::sql::collect(
+            "frontier",
+            "postgres",
+            store.commit(tx, CommitLabel::MODEL_START),
+        )
+        .await;
+        committed.expect("publish frontier");
+        let bound: u64 = receipt.shapes.values().map(|shape| shape.bound_bytes).sum();
+        assert!(
+            bound <= 8192,
+            "call {ordinal} bound {bound} bytes for one new frontier node"
+        );
+        let stored = store
+            .prompt_texts(std::slice::from_ref(&text.hash))
+            .await
+            .expect("read frontier");
+        assert_eq!(stored, [text]);
+    }
+}

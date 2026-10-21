@@ -44,8 +44,9 @@ use lash_store_sql::Dialect;
 
 use super::steps::{Entry, Step};
 use super::{
-    PostgresDurableStore, SQL, get, graph, head_commit, park, processes, prompts, replay,
-    retention, run_records, session_close, session_mail, snapshots, sqlx_failure, turns, waits,
+    PostgresDurableStore, SQL, get, graph, head_commit, model_calls, park, processes, prompts,
+    replay, retention, run_records, session_close, session_mail, snapshots, sqlx_failure, turns,
+    waits,
 };
 use crate::connection_sql::connection_sql;
 use crate::replayable::Attempt;
@@ -171,6 +172,11 @@ pub(crate) const FUNCTION: &str = "lash_owner_commit";
 /// Every statement a step may name: what the function dispatches on.
 pub(super) fn entries() -> Vec<&'static Entry> {
     vec![
+        &model_calls::APPEND,
+        &model_calls::ROOT_MATCHES,
+        &model_calls::RETIRE_PIN,
+        &model_calls::RESERVE,
+        &model_calls::ANSWERED,
         &run_records::APPEND,
         &run_records::PRUNE,
         &snapshots::PUT_FIRST,
@@ -189,11 +195,7 @@ pub(super) fn entries() -> Vec<&'static Entry> {
         &turns::NAMESPACE_ROOTS,
         &session_mail::BIND_INPUTS,
         &session_mail::BIND_BATCHES,
-        &prompts::INSERT_SNAPSHOT,
-        &prompts::LOCK_TEXTS,
-        &prompts::UNSENT_ABSENT,
-        &prompts::INSERT_SENT_TEXTS,
-        &prompts::INSERT_EDGES,
+        &prompts::RECORD,
         &graph::ADMISSION_PUT,
         &graph::ADMISSION_REMOVE,
         &run_records::DELETE_OWNER,
@@ -290,10 +292,9 @@ pub(super) fn program(
         }
         DomainWrite::Wait(write) => Ok(waits::steps(write)),
         DomainWrite::Process(write) => Ok(processes::steps(write, actor, epoch)),
-        DomainWrite::SessionCommit(_)
-        | DomainWrite::SessionClose(_)
-        | DomainWrite::ModelCall(_)
-        | DomainWrite::ModelCallPin(_) => Ok(None),
+        DomainWrite::SessionCommit(_) | DomainWrite::SessionClose(_) => Ok(None),
+        DomainWrite::ModelCall(write) => Ok(Some(model_calls::steps(epoch, write))),
+        DomainWrite::ModelCallPin(write) => Ok(Some(model_calls::pin_steps(write))),
     }
 }
 
@@ -308,7 +309,7 @@ pub(crate) static REGISTRY: LazyLock<String> = LazyLock::new(|| {
             hash = hash.wrapping_mul(0x0100_0000_01b3);
         }
     };
-    for text in mechanics() {
+    for text in mechanics().into_iter().chain(prompts::record_mechanics()) {
         feed(text);
     }
     for entry in entries() {
@@ -342,6 +343,7 @@ fn mechanics() -> Vec<&'static str> {
         super::pages::hold_statements().0.sql(),
         super::pages::hold_statements().1.sql(),
         SQL.actor.stamp_formats.sql(),
+        SQL.actor.stamp_requires.sql(),
         SQL.postgres.ack_through.sql(),
         SQL.mail.delete_all.sql(),
         SQL.actor.end.sql(),
@@ -406,11 +408,6 @@ impl Call {
         hints: &head_commit::SessionHints,
         fleet: lash_core_store::store::FleetFormat,
     ) -> Option<Self> {
-        // A claim-requirement rewrite takes the explicit-transaction form,
-        // which stamps it (FIG-6034 D3).
-        if tx.requires().is_some() {
-            return None;
-        }
         let mut call = Self {
             steps: serde_json::Value::Null,
             body_hashes: Vec::new(),
@@ -540,7 +537,7 @@ impl Call {
 
 /// The call's SQL.
 pub(super) static CALL: LazyLock<String> = LazyLock::new(|| {
-    let params: Vec<String> = (1..=23).map(|index| format!("${index}")).collect();
+    let params: Vec<String> = (1..=24).map(|index| format!("${index}")).collect();
     format!("SELECT * FROM {FUNCTION}({})", params.join(", "))
 });
 
@@ -632,7 +629,8 @@ impl PostgresDurableStore {
             .bind(tx.ack().map(|through| through.0))
             .bind(call.release)
             .bind(call.due)
-            .bind(injected.map(|now| now.0));
+            .bind(injected.map(|now| now.0))
+            .bind(tx.requires().map(lash_durable::encode_requires));
         #[cfg(any(test, feature = "testing"))]
         let loses_answer = match self.commit_fault.as_deref() {
             Some(fault) => fault.take_call(&mut connection).await,

@@ -558,7 +558,13 @@ impl Lifecycle {
     /// [`RoundError`]: ownership lost, another store failure on a read, or a
     /// record that cannot be written as it is.
     pub async fn act(&mut self, folded: &RunFold, now: DurableInstant) -> Result<Act, RoundError> {
-        self.act_with(folded, true, now).await
+        self.act_with(folded, true, Some(now)).await
+    }
+
+    /// Read the store clock only when a retry needs a due comparison.
+    /// Outcome backoffs use their own transaction's validated clock.
+    pub(crate) async fn act_current(&mut self, folded: &RunFold) -> Result<Act, RoundError> {
+        self.act_with(folded, true, None).await
     }
 
     /// [`act`](Self::act) for an owner that is draining: start nothing,
@@ -574,7 +580,7 @@ impl Lifecycle {
         folded: &RunFold,
         now: DurableInstant,
     ) -> Result<Act, RoundError> {
-        self.act_with(folded, false, now).await
+        self.act_with(folded, false, Some(now)).await
     }
 
     /// Restore committed namespaces before the process drops consumed runs
@@ -607,7 +613,7 @@ impl Lifecycle {
         &mut self,
         folded: &RunFold,
         starting: bool,
-        now: DurableInstant,
+        mut now: Option<DurableInstant>,
     ) -> Result<Act, RoundError> {
         // What the rows committed publishes before anything reads it: an
         // earlier activation's outcomes on a resume, and outcomes whose
@@ -675,7 +681,15 @@ impl Lifecycle {
                             settlements.push((execution, cancelled_outcome()));
                         }
                         Recovery::RetryDue { at, .. } => {
-                            if at <= now {
+                            let observed = match now {
+                                Some(now) => now,
+                                None => {
+                                    let observed = self.cx.durable_now().await?;
+                                    now = Some(observed);
+                                    observed
+                                }
+                            };
+                            if at <= observed {
                                 due_starts.push(execution);
                             } else {
                                 next_due = Some(next_due.map_or(at, |due| due.min(at)));
@@ -709,10 +723,7 @@ impl Lifecycle {
             }
         }
 
-        if let Some(act) = self
-            .commit_one(folded, settlements, due_starts, now)
-            .await?
-        {
+        if let Some(act) = self.commit_one(folded, settlements, due_starts).await? {
             return Ok(act);
         }
         Ok(Act::Idle(Idle {
@@ -734,7 +745,6 @@ impl Lifecycle {
         folded: &RunFold,
         settlements: Vec<(AdmittedExecution, SettledOutput)>,
         due_starts: Vec<AdmittedExecution>,
-        now: DurableInstant,
     ) -> Result<Option<Act>, RoundError> {
         let group = self.cx.backend().config().settings().group_commit;
         let batch_due = !self.finished.is_empty()
@@ -745,6 +755,7 @@ impl Lifecycle {
                     .is_some_and(|opened| self.cx.clock().now() >= opened + group.window));
         if batch_due {
             let mut tx = self.cx.begin().await?;
+            let now = tx.opened_at();
             let fenced = self.fence.as_ref().is_some_and(|fence| fence(&tx));
             if fenced {
                 self.cancel_runs_before(RunSeq(u64::MAX));

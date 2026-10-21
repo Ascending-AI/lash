@@ -272,8 +272,7 @@ impl RoundRunner {
                 .round(self.run)
                 .ok_or(RoundError::NotAdmitted(self.run))?
                 .settled();
-            let now = self.cx.durable_now().await?;
-            let idle = match self.lifecycle.act(&folded, now).await? {
+            let idle = match self.lifecycle.act_current(&folded).await? {
                 Act::Committed(committed) => {
                     rows.extend(committed.appended.of_run(self.run), committed.staged);
                     quiet_since = None;

@@ -177,3 +177,5 @@ DROP FUNCTION IF EXISTS lash_artifact_end_local CASCADE;
 DROP FUNCTION IF EXISTS lash_node_renew CASCADE;
 
 DROP FUNCTION IF EXISTS lash_prompt_held_texts CASCADE;
+
+DROP FUNCTION IF EXISTS lash_prompt_record CASCADE;

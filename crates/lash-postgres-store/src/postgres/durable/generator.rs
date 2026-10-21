@@ -327,6 +327,7 @@ pub(crate) fn function_ddl() -> String {
     let ancestor_retire = inline(session_sql().graph_postgres.retire.sql(), &["v_node"]);
     let wake = inline(SQL.actor.wake.sql(), &["v_owner", "v_now"]);
     let stamp_formats = inline(SQL.actor.stamp_formats.sql(), &["p_actor", "p_formats"]);
+    let stamp_requires = inline(SQL.actor.stamp_requires.sql(), &["p_actor", "p_requires"]);
     let ack_through = inline(SQL.postgres.ack_through.sql(), &["p_actor", "p_ack"]);
     let delete_mail = inline(SQL.mail.delete_all.sql(), &["p_actor"]);
     let end = inline(SQL.actor.end.sql(), &["p_actor"]);
@@ -364,7 +365,7 @@ pub(crate) fn function_ddl() -> String {
     p_body_hashes BYTEA[], p_bodies BYTEA[],
     p_named BYTEA[], p_roots BYTEA[], p_digests BYTEA[], p_contents BYTEA[],
     p_parents BYTEA[], p_children BYTEA[], p_steps JSONB,
-    p_formats TEXT, p_ack BIGINT, p_release TEXT, p_due BIGINT, p_now BIGINT)
+    p_formats TEXT, p_ack BIGINT, p_release TEXT, p_due BIGINT, p_now BIGINT, p_requires TEXT)
 RETURNS TABLE (o_revision BIGINT, o_now BIGINT, o_fleet INTEGER, o_state TEXT,
     o_installed BIGINT, o_cancel_turn TEXT, o_cancel_request TEXT, o_cancel_origin TEXT,
     o_cancel_reason TEXT, o_cancel_disposition TEXT, o_cancel_mode TEXT)
@@ -545,6 +546,9 @@ BEGIN
     IF p_formats IS NOT NULL THEN
         {stamp_formats};
     END IF;
+    IF p_requires IS NOT NULL THEN
+        {stamp_requires};
+    END IF;
     IF p_ack IS NOT NULL THEN
         {ack_through};
     END IF;
@@ -573,6 +577,113 @@ $lash_owner_commit$;
     ) + &crate::artifact_store::local_end_function_ddl()
         + &renewal_ddl()
         + &held_texts_ddl()
+        + &prompt_record_ddl()
+}
+
+/// The same frontier the explicit record used: share-lock a level, read it
+/// after the locks, stop at held immutable nodes, and install only the absent
+/// reachable texts and their edges. A prefix is replaced after publication,
+/// then its former closure is reclaimed with the held frontier protected.
+fn prompt_record_ddl() -> String {
+    let sql = &*prompts::SQL;
+    let pg = &*prompts::POSTGRES_SQL;
+    let snapshot = inline(
+        sql.insert_snapshot.sql(),
+        &[
+            "p_session",
+            "p_owner",
+            "p_call",
+            "p_snapshot",
+            "p_request",
+            "p_epoch",
+        ],
+    );
+    let held = inline(
+        pg.held_after_lock.sql(),
+        &["v_frontier", &prompts::TEXT_LOCK_SEED.to_string()],
+    );
+    let insert = inline(pg.insert_texts.sql(), &["v_hashes", "v_bodies"]);
+    let index = inline(pg.insert_index_edges.sql(), &["v_parents", "v_children"]);
+    let edges = inline(
+        pg.insert_edges.sql(),
+        &["p_session", "p_owner", "p_call", "p_parts", "p_edges"],
+    );
+    let release = inline(sql.release_prefix.sql(), &["p_session"]);
+    let prefix = inline(sql.set_prefix.sql(), &["p_session", "p_prefix"]);
+    let reclaim = text_reclaim();
+    format!(
+        "CREATE OR REPLACE FUNCTION lash_prompt_record(
+    p_session TEXT, p_owner TEXT, p_call TEXT, p_snapshot TEXT, p_request TEXT, p_epoch BIGINT,
+    p_hashes BYTEA[], p_bodies TEXT[], p_parents BYTEA[], p_children BYTEA[], p_roots BYTEA[],
+    p_parts TEXT[], p_edges BYTEA[], p_prefix BYTEA, p_turn BOOLEAN)
+RETURNS TABLE (accepted BOOLEAN, missing BYTEA)
+LANGUAGE plpgsql VOLATILE
+AS $lash_prompt_record$
+DECLARE
+    v_rows BIGINT;
+    v_frontier BYTEA[] := p_roots;
+    v_held BYTEA[];
+    v_new BYTEA[];
+    v_unheld BYTEA[] := '{{}}';
+    v_hash BYTEA;
+    v_position INTEGER;
+    v_hashes BYTEA[];
+    v_bodies TEXT[];
+    v_parents BYTEA[];
+    v_children BYTEA[];
+    v_texts BYTEA[] := '{{}}';
+    v_protect BYTEA[] := '{{}}';
+    v_tfront BYTEA[];
+    v_closure BYTEA[];
+    v_tparents BYTEA[];
+    v_tchildren BYTEA[];
+BEGIN
+    WITH recorded AS ({snapshot}) SELECT count(*) INTO v_rows FROM recorded;
+    IF v_rows <> 1 THEN
+        RETURN QUERY SELECT FALSE, NULL::BYTEA;
+        RETURN;
+    END IF;
+    WHILE cardinality(v_frontier) > 0 LOOP
+        v_held := ARRAY({held});
+        v_protect := v_protect || v_held;
+        v_new := '{{}}';
+        FOREACH v_hash IN ARRAY v_frontier LOOP
+            IF v_hash = ANY(v_held) OR v_hash = ANY(v_unheld) THEN CONTINUE; END IF;
+            v_position := array_position(p_hashes, v_hash);
+            IF v_position IS NULL OR p_bodies[v_position] IS NULL THEN
+                RETURN QUERY SELECT FALSE, v_hash;
+                RETURN;
+            END IF;
+            v_new := v_new || v_hash;
+            v_unheld := v_unheld || v_hash;
+        END LOOP;
+        v_frontier := ARRAY(SELECT DISTINCT edge.child
+            FROM unnest(p_parents, p_children) AS edge(parent, child)
+            WHERE edge.parent = ANY(v_new) ORDER BY edge.child);
+    END LOOP;
+    IF cardinality(v_unheld) > 0 THEN
+        SELECT array_agg(supplied.hash ORDER BY supplied.hash), array_agg(supplied.body ORDER BY supplied.hash)
+        INTO v_hashes, v_bodies FROM unnest(p_hashes, p_bodies) AS supplied(hash, body)
+        WHERE supplied.hash = ANY(v_unheld);
+        {insert};
+        SELECT COALESCE(array_agg(edge.parent ORDER BY edge.parent, edge.child), '{{}}'),
+               COALESCE(array_agg(edge.child ORDER BY edge.parent, edge.child), '{{}}')
+        INTO v_parents, v_children FROM unnest(p_parents, p_children) AS edge(parent, child)
+        WHERE edge.parent = ANY(v_unheld);
+        {index};
+    END IF;
+    {edges};
+    IF p_turn THEN
+        WITH released AS ({release})
+        SELECT COALESCE(array_agg(hash), '{{}}') INTO v_texts FROM released;
+        IF p_prefix IS NOT NULL THEN {prefix}; END IF;
+        {reclaim}
+    END IF;
+    RETURN QUERY SELECT TRUE, NULL::BYTEA;
+END
+$lash_prompt_record$;
+"
+    )
 }
 
 /// The guarded renewal of a node's lease as one server request (FIG-7049):

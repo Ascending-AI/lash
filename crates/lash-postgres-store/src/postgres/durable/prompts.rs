@@ -39,14 +39,14 @@ use super::steps::{Collect, Entry, Shape, Step, Ty, Value};
 use super::{Committing, HeldTexts, get, sqlx_failure};
 use crate::connection_sql::connection_sql;
 
-static SQL: LazyLock<PromptStatements> =
+pub(super) static SQL: LazyLock<PromptStatements> =
     LazyLock::new(|| PromptStatements::render(Dialect::postgres()));
 
 lash_store_sql::statements! {
     /// The `prompt_texts` and `prompt_snapshot_texts` statements only
     /// PostgreSQL issues: `unnest` is how it binds a call's texts as one
     /// list.
-    struct PostgresPromptStatements @ "durable_prompt_postgres" {
+    pub(super) struct PostgresPromptStatements @ "durable_prompt_postgres" {
         /// Every content address in `?1` already stored.
         held_texts = "SELECT hash FROM prompt_texts WHERE hash = ANY(?1::BYTEA[])";
 
@@ -62,19 +62,9 @@ lash_store_sql::statements! {
              SELECT hash, text FROM unnest(?1::BYTEA[], ?2::TEXT[]) AS batch(hash, text)
              ON CONFLICT (hash) DO NOTHING";
 
-        /// Of the addresses `?1`, every one sent without its body (`?2[i]`
-        /// null) that is not stored: a one-call record's texts are locked
-        /// first, so one it finds stays until it commits.
-        unsent_absent = "SELECT batch.hash
-             FROM unnest(?1::BYTEA[], ?2::TEXT[]) AS batch(hash, text)
-             WHERE batch.text IS NULL
-               AND NOT EXISTS (SELECT 1 FROM prompt_texts AS stored WHERE stored.hash = batch.hash)";
-
-        /// [`Self::insert_texts`] of the texts sent with their bodies.
-        insert_sent_texts = "INSERT INTO prompt_texts (hash, text)
-             SELECT hash, text FROM unnest(?1::BYTEA[], ?2::TEXT[]) AS batch(hash, text)
-             WHERE batch.text IS NOT NULL
-             ON CONFLICT (hash) DO NOTHING";
+        /// Publish a prompt's immutable forest and prefix under its text
+        /// locks. The routine returns the first typed refusal's facts.
+        record = "SELECT * FROM lash_prompt_record(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)";
 
         /// Root text `?5[i]` under part `?4[i]` of call `?3` of owner `?2`
         /// in session `?1`, for every `i`.
@@ -169,7 +159,7 @@ lash_store_sql::statements! {
     }
 }
 
-static POSTGRES_SQL: LazyLock<PostgresPromptStatements> =
+pub(super) static POSTGRES_SQL: LazyLock<PostgresPromptStatements> =
     LazyLock::new(|| PostgresPromptStatements::render(Dialect::postgres()));
 
 /// The advisory-lock seed of prompt-text retention (`connection_sql`).
@@ -212,31 +202,41 @@ pub(crate) static LAW_SQL: LazyLock<PromptLawStatements> =
     LazyLock::new(|| PromptLawStatements::render(Dialect::postgres()));
 
 /// The prompt statements an owner commit runs as steps.
-pub(super) static INSERT_SNAPSHOT: Entry = Entry::new(
-    || &SQL.insert_snapshot,
-    &[Ty::Text, Ty::Text, Ty::Text, Ty::Text, Ty::Text, Ty::Int],
-    Shape::Returning,
-);
-pub(super) static LOCK_TEXTS: Entry = Entry::new(
-    || &connection_sql().lock_xact_shared_by_keys_seeded,
-    &[Ty::Keys, Ty::Int],
+pub(super) static RECORD: Entry = Entry::new(
+    || &POSTGRES_SQL.record,
+    &[
+        Ty::Text,
+        Ty::Text,
+        Ty::Text,
+        Ty::Text,
+        Ty::Text,
+        Ty::Int,
+        Ty::Keys,
+        Ty::Texts,
+        Ty::Keys,
+        Ty::Keys,
+        Ty::Keys,
+        Ty::Texts,
+        Ty::Keys,
+        Ty::Key,
+        Ty::Bool,
+    ],
     Shape::Select,
-);
-pub(super) static UNSENT_ABSENT: Entry = Entry::new(
-    || &POSTGRES_SQL.unsent_absent,
-    &[Ty::Keys, Ty::Texts],
-    Shape::Select,
-);
-pub(super) static INSERT_SENT_TEXTS: Entry = Entry::new(
-    || &POSTGRES_SQL.insert_sent_texts,
-    &[Ty::Keys, Ty::Texts],
-    Shape::Exec,
-);
-pub(super) static INSERT_EDGES: Entry = Entry::new(
-    || &POSTGRES_SQL.insert_edges,
-    &[Ty::Text, Ty::Text, Ty::Text, Ty::Texts, Ty::Keys],
-    Shape::Exec,
-);
+)
+.flagged("accepted");
+
+/// Statements of the prompt-record routine, included in the owner registry.
+pub(super) fn record_mechanics() -> Vec<&'static str> {
+    vec![
+        SQL.insert_snapshot.sql(),
+        POSTGRES_SQL.held_after_lock.sql(),
+        POSTGRES_SQL.insert_texts.sql(),
+        POSTGRES_SQL.insert_index_edges.sql(),
+        POSTGRES_SQL.insert_edges.sql(),
+        SQL.release_prefix.sql(),
+        SQL.set_prefix.sql(),
+    ]
+}
 
 /// A settlement's and a prefix reset's statements (FIG-5942): each answers
 /// the texts it released, a settlement keeps the session's prefix, and the
@@ -345,76 +345,80 @@ pub(super) fn steps(epoch: Epoch, write: &PromptWrite, held: &HeldTexts) -> Opti
     else {
         return None;
     };
-    // The direct path publishes fragment children and replaces or releases a
-    // turn's session prefix. This step program only represents leaf texts
-    // without a prefix transition, so keep those writes on the direct path.
-    if prefix.is_some()
-        || matches!(&call.call, ModelCallId::Turn { .. })
-        || snapshot_texts
-            .iter()
-            .chain(request_texts.iter())
-            .any(|text| !text.children.is_empty())
-    {
-        return None;
+    // Keep the request's root list intact. A held immutable root stops the
+    // server frontier, even when its descendants were not supplied.
+    let roots: BTreeSet<_> = snapshot_texts
+        .iter()
+        .map(|text| text.hash.clone())
+        .chain(request_texts.roots().iter().cloned())
+        .chain(prefix.iter().cloned())
+        .collect();
+    let snapshots: BTreeMap<_, _> = snapshot_texts
+        .iter()
+        .map(|text| (text.hash.as_str(), text))
+        .collect();
+    let mut frontier = roots.clone();
+    let mut texts = BTreeMap::new();
+    while let Some(hash) = frontier.pop_first() {
+        if texts.contains_key(&hash) {
+            continue;
+        }
+        let text = (!held.contains(&hash))
+            .then(|| {
+                request_texts
+                    .get(&hash)
+                    .or_else(|| snapshots.get(hash.as_str()).copied())
+            })
+            .flatten();
+        if let Some(text) = text {
+            frontier.extend(text.children.iter().cloned());
+        }
+        // A hint prunes only what is sent. The server still locks and reads
+        // this root, and refuses an absent body before any text publication.
+        texts.insert(hash, text);
     }
-    let mut program = vec![Step::one(
-        &INSERT_SNAPSHOT,
+    let (hashes, bodies): (Vec<_>, Vec<_>) = texts
+        .iter()
+        .map(|(hash, text)| (Some(hash.clone()), text.map(|text| text.text.to_string())))
+        .unzip();
+    let paths: BTreeSet<_> = texts
+        .iter()
+        .flat_map(|(hash, text)| {
+            text.iter().flat_map(move |text| {
+                text.children
+                    .iter()
+                    .map(move |child| (hash.clone(), child.clone()))
+            })
+        })
+        .collect();
+    let (parents, children): (Vec<_>, Vec<_>) = paths
+        .into_iter()
+        .map(|(parent, child)| (Some(parent), Some(child)))
+        .unzip();
+    let (parts, edges): (Vec<_>, Vec<_>) = edges(snapshot_texts, request_texts)
+        .into_iter()
+        .map(|(part, hash)| (Some(part.to_owned()), Some(hash.to_owned())))
+        .unzip();
+    Some(vec![Step::one(
+        &RECORD,
         vec![
             Value::text(call.session.as_str()),
             Value::text(call.call.owner_column()),
             Value::text(call.call.call_column()),
             Value::Text(snapshot.clone()),
-            Value::text(request.clone()),
+            Value::text(request),
             Value::int(epoch.0),
+            Value::Keys(hashes),
+            Value::Texts(bodies),
+            Value::Keys(parents),
+            Value::Keys(children),
+            Value::Keys(roots.into_iter().map(Some).collect()),
+            Value::Texts(parts),
+            Value::Keys(edges),
+            Value::Key(prefix.clone()),
+            Value::Bool(matches!(call.call, ModelCallId::Turn { .. })),
         ],
-    )];
-    // The first text under each address stands for it.
-    let mut distinct = BTreeMap::new();
-    for text in snapshot_texts.iter().chain(request_texts.iter()) {
-        distinct.entry(text.hash.as_str()).or_insert(&*text.text);
-    }
-    if distinct.is_empty() {
-        return Some(program);
-    }
-    let hashes: Vec<Option<String>> = distinct
-        .keys()
-        .map(|hash| Some((*hash).to_owned()))
-        .collect();
-    let bodies: Vec<Option<String>> = distinct
-        .iter()
-        .map(|(hash, text)| (!held.contains(hash)).then(|| (*text).to_owned()))
-        .collect();
-    let (parts, edges): (Vec<Option<String>>, Vec<Option<String>>) =
-        edges(snapshot_texts, request_texts)
-            .into_iter()
-            .map(|(part, hash)| (Some(part.to_owned()), Some(hash.to_owned())))
-            .unzip();
-    program.extend([
-        Step::any(
-            &LOCK_TEXTS,
-            vec![Value::Keys(hashes.clone()), Value::int(TEXT_LOCK_SEED)],
-        ),
-        Step::new(
-            &UNSENT_ABSENT,
-            vec![Value::Keys(hashes.clone()), Value::Texts(bodies.clone())],
-            Some(0),
-        ),
-        Step::any(
-            &INSERT_SENT_TEXTS,
-            vec![Value::Keys(hashes), Value::Texts(bodies)],
-        ),
-        Step::any(
-            &INSERT_EDGES,
-            vec![
-                Value::text(call.session.as_str()),
-                Value::text(call.call.owner_column()),
-                Value::text(call.call.call_column()),
-                Value::Texts(parts),
-                Value::Keys(edges),
-            ],
-        ),
-    ]);
-    Some(program)
+    )])
 }
 
 pub(super) async fn apply(
@@ -423,130 +427,22 @@ pub(super) async fn apply(
     write: &PromptWrite,
 ) -> Result<(), DurableError> {
     match write {
-        PromptWrite::Record {
-            call,
-            snapshot,
-            request,
-            snapshot_texts,
-            request_texts,
-            prefix,
-        } => {
-            let recorded = crate::observed_sql::query(SQL.insert_snapshot.sql())
-                .bind(call.session.as_str())
-                .bind(call.call.owner_column())
-                .bind(call.call.call_column())
-                .bind(snapshot.as_deref())
-                .bind(request)
-                .bind(commit.epoch.0)
-                .fetch_optional(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?;
-            if recorded.is_none() {
-                return Err(DurableError::Domain(DomainRefusal::PromptCallRecorded {
-                    call: call.clone(),
+        PromptWrite::Record { call, .. } => {
+            // The direct form supplies every body. A stale held-text hint in
+            // the owner call rolls back before this path names the refusal.
+            let program = steps(commit.epoch, write, &HeldTexts::default()).unwrap_or_default();
+            if let Some(refused) = super::steps::run(tx, &program, &commit.steps()).await? {
+                let missing = refused
+                    .rows
+                    .first()
+                    .map(|row| crate::keys::get::<Option<String>>(row, "missing"))
+                    .transpose()
+                    .map_err(sqlx_failure)?
+                    .flatten();
+                return Err(DurableError::Domain(match missing {
+                    Some(hash) => DomainRefusal::PromptFragmentMissing { hash },
+                    None => DomainRefusal::PromptCallRecorded { call: call.clone() },
                 }));
-            }
-            let snapshot_by_hash: BTreeMap<_, _> = snapshot_texts
-                .iter()
-                .map(|text| (text.hash.as_str(), text))
-                .collect();
-            let text = |hash: &str| {
-                request_texts
-                    .get(hash)
-                    .or_else(|| snapshot_by_hash.get(hash).copied())
-            };
-            let mut frontier: BTreeSet<&str> = snapshot_texts
-                .iter()
-                .map(|text| text.hash.as_str())
-                .chain(request_texts.roots().iter().map(String::as_str))
-                .chain(prefix.as_deref())
-                .collect();
-            let mut unheld = BTreeMap::new();
-            let mut protected = BTreeSet::new();
-            // Each level is one request: its texts share-locked, then the
-            // stored among them read after the locks are held.
-            while !frontier.is_empty() {
-                let hashes: Vec<_> = frontier.iter().copied().collect();
-                let held: BTreeSet<String> =
-                    crate::keys::query_scalar(POSTGRES_SQL.held_after_lock.sql())
-                        .bind(crate::keys::keys(&hashes))
-                        .bind(TEXT_LOCK_SEED)
-                        .fetch_all(crate::observed_sql::executor(&mut *tx))
-                        .await
-                        .map_err(sqlx_failure)?
-                        .into_iter()
-                        .collect();
-                protected.extend(held.iter().cloned());
-                let mut next = BTreeSet::new();
-                for hash in frontier {
-                    if held.contains(hash) || unheld.contains_key(hash) {
-                        continue;
-                    }
-                    let Some(text) = text(hash) else {
-                        return Err(DurableError::Domain(DomainRefusal::PromptFragmentMissing {
-                            hash: hash.to_owned(),
-                        }));
-                    };
-                    next.extend(text.children.iter().map(String::as_str));
-                    unheld.insert(hash, text);
-                }
-                frontier = next;
-            }
-            if !unheld.is_empty() {
-                let (hashes, bodies): (Vec<_>, Vec<_>) = unheld
-                    .iter()
-                    .map(|(hash, text)| (*hash, &*text.text))
-                    .unzip();
-                crate::observed_sql::query(POSTGRES_SQL.insert_texts.sql())
-                    .bind(crate::keys::keys(&hashes))
-                    .bind(&bodies)
-                    .execute(crate::observed_sql::executor(&mut *tx))
-                    .await
-                    .map_err(sqlx_failure)?;
-                let paths: BTreeSet<_> = unheld
-                    .iter()
-                    .flat_map(|(hash, text)| {
-                        text.children
-                            .iter()
-                            .map(move |child| (*hash, child.as_str()))
-                    })
-                    .collect();
-                let (parents, children): (Vec<_>, Vec<_>) = paths.into_iter().unzip();
-                crate::observed_sql::query(POSTGRES_SQL.insert_index_edges.sql())
-                    .bind(crate::keys::keys(&parents))
-                    .bind(crate::keys::keys(&children))
-                    .execute(crate::observed_sql::executor(&mut *tx))
-                    .await
-                    .map_err(sqlx_failure)?;
-            }
-            let (parts, edges): (Vec<&str>, Vec<&str>) =
-                edges(snapshot_texts, request_texts).into_iter().unzip();
-            crate::observed_sql::query(POSTGRES_SQL.insert_edges.sql())
-                .bind(call.session.as_str())
-                .bind(call.call.owner_column())
-                .bind(call.call.call_column())
-                .bind(&parts)
-                .bind(crate::keys::keys(&edges))
-                .execute(crate::observed_sql::executor(&mut *tx))
-                .await
-                .map_err(sqlx_failure)?;
-            if matches!(call.call, ModelCallId::Turn { .. }) {
-                let old: Vec<String> = crate::keys::query_scalar(SQL.release_prefix.sql())
-                    .bind(call.session.as_str())
-                    .fetch_all(crate::observed_sql::executor(&mut *tx))
-                    .await
-                    .map_err(sqlx_failure)?;
-                if let Some(prefix) = prefix {
-                    crate::observed_sql::query(SQL.set_prefix.sql())
-                        .bind(call.session.as_str())
-                        .bind(crate::keys::key(prefix))
-                        .execute(crate::observed_sql::executor(&mut *tx))
-                        .await
-                        .map_err(sqlx_failure)?;
-                }
-                reclaim_with_protection(tx, old, &protected)
-                    .await
-                    .map_err(sqlx_failure)?;
             }
             Ok(())
         }
