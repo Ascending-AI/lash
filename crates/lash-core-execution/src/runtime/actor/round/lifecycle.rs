@@ -1161,22 +1161,27 @@ impl Lifecycle {
         ),
         staged: Vec<StagedRecord>,
     ) -> Result<Act, RoundError> {
-        let appended = RunFacts::appended(tx.domain(), tx.graph(), self.cx.epoch());
         let commit = lash_core_store::checkpoint_graph::CommitId::mint();
-        let manifest = match candidate.0.publication(&mut tx, commit).await {
-            Ok(manifest) => manifest,
+        let published = match candidate.0.publication(&mut tx, commit).await {
+            Ok(published) => published,
             Err(error) => {
                 candidate.0.abandoned().await;
                 return Err(error.into());
             }
         };
+        // The facts as the store holds them once the commit lands: the
+        // nodes the transaction stages, with what the publication staged in
+        // it, and the root page the outcome names, which only the
+        // candidate's manifest supplies.
+        let appended = RunFacts::appended(tx.domain(), tx.graph(), self.cx.epoch())
+            .with_published(&published.root);
         let publication = lash_durable::domain::pages::CandidatePublication {
             owner: lash_durable::domain::pages::CandidateOwner::RunFactAppend {
                 owner,
                 run,
                 ordinal,
             },
-            manifest,
+            manifest: published.manifest,
         };
         match self
             .cx

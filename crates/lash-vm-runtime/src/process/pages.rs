@@ -17,11 +17,11 @@ use std::time::Duration;
 use lash_core::ProcessId;
 use lash_core_execution::runtime::Clock;
 use lash_core_store::checkpoint_graph::stage::StageFault;
-use lash_core_store::checkpoint_graph::{CommitId, NodeId};
+use lash_core_store::checkpoint_graph::{CommitId, EncodedNode, NodeId};
 use lash_durable::DurableError;
 use lash_durable::domain::pages::{LeaseFence, PageStore, RootLeaseId, RootLeaseRequest};
 use lash_durable::domain::{ExecKey, RootOwner};
-use lash_execution_contracts::process::StepPages;
+use lash_execution_contracts::process::{StepManifest, StepPages};
 use lash_kernel_state::AdmittedWait;
 use lash_vm_broker::kernel::closure::Closure;
 use lash_vm_broker::kernel::pages::{
@@ -245,16 +245,17 @@ impl lash_execution_contracts::process::StepPublication for RunCandidate {
         &self,
         tx: &mut lash_durable::ActorTx,
         commit: CommitId,
-    ) -> Result<Box<dyn lash_core_store::checkpoint_graph::stage::CandidateManifest>, DurableError>
-    {
+    ) -> Result<StepManifest, DurableError> {
         self.closure.stage(tx, self.first);
-        let manifest = self
-            .pages
-            .lock()
-            .await
+        let mut pages = self.pages.lock().await;
+        let root = EncodedNode {
+            id: self.root,
+            bytes: pages.spool().read(&self.root).map_err(staging)?,
+        };
+        let manifest = pages
             .candidate(self.root, None, self.root, commit)
             .map_err(staging)?;
-        Ok(manifest)
+        Ok(StepManifest { manifest, root })
     }
 
     async fn settled(&self, commit: CommitId) {

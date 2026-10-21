@@ -361,6 +361,21 @@ impl RunFacts {
         }
     }
 
+    /// These facts with `node`, a page their commit installs from a
+    /// candidate's manifest rather than its staged nodes, as the store
+    /// holds it once the commit lands.
+    #[must_use]
+    pub fn with_published(mut self, node: &EncodedNode) -> Self {
+        self.nodes.insert(
+            node.id,
+            HydratedNode {
+                encoding: BlobEncoding::Graph,
+                bytes: Arc::clone(&node.bytes),
+            },
+        );
+        self
+    }
+
     /// These facts and `other`'s, rows in order.
     pub fn extend(&mut self, other: Self) {
         self.rows.extend(other.rows);

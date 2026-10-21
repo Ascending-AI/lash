@@ -83,6 +83,7 @@ pub use panicking::{
 };
 pub use parked_calls::a_parked_call_is_reopened_from_its_completion_wait_after_a_restart_and_a_handover;
 pub use passes::{
+    a_paged_step_chain_folds_each_published_outcome_from_what_its_owner_kept,
     a_step_chain_restores_its_state_once_and_reloads_after_a_lost_acknowledgement,
     ready_step_completions_commit_together_up_to_the_member_bound,
 };
@@ -260,7 +261,9 @@ fn origin_name(origin: CancelOrigin) -> String {
 /// - `fan`: runs `steps` `law_ready` steps at once, and ends once every one
 ///   settled;
 /// - `chain`: runs `steps` `law_ready` steps one after another, and ends
-///   once the last settled.
+///   once the last settled;
+/// - `paged_chain`: runs `steps` `law_paged` steps one after another, and
+///   ends once the last settled.
 pub struct LawEngine {
     version: u32,
 }
@@ -329,16 +332,31 @@ fn law_step(step: &str, tool: &str) -> EngineAction {
 /// once its process's gate in [`READY_GATES`] opens, at once without one.
 const LAW_READY: &str = "law_ready";
 
-/// A `law_ready` step named `step`.
-fn ready_step(step: &str) -> StepRequest {
+/// The tool of [`LawEngine`]'s `paged_chain` steps: `Once`, completing at
+/// once with heap pages of its own to publish ([`passes::paged_body`]).
+const LAW_PAGED: &str = "law_paged";
+
+/// A step named `step` running law tool `tool`.
+fn tool_step(step: &str, tool: &str) -> StepRequest {
     StepRequest::Tool {
         step: StepName(step.to_owned()),
-        effect: law_effect(LAW_READY),
+        effect: law_effect(tool),
         contract: lash_kernel_doc::ContractId::new("law"),
         input: json!({}),
         site: None,
         matched: None,
     }
+}
+
+/// Link `link` of act `act`: a `law_paged` step of a `paged_chain`, else a
+/// `law_ready` one.
+fn chain_link(act: &str, link: u64) -> StepRequest {
+    let tool = if act == "paged_chain" {
+        LAW_PAGED
+    } else {
+        LAW_READY
+    };
+    tool_step(&format!("link-{link}"), tool)
 }
 
 /// The gate each `law_ready` body of a process waits on before it
@@ -506,12 +524,12 @@ impl ProcessEngine for LawEngine {
                 },
                 "fan" => EngineAction::Steps {
                     steps: (0..script["steps"].as_u64().unwrap_or(0))
-                        .map(|step| ready_step(&format!("ready-{step}")))
+                        .map(|step| tool_step(&format!("ready-{step}"), LAW_READY))
                         .collect(),
                     wake: None,
                 },
-                "chain" => EngineAction::Steps {
-                    steps: vec![ready_step("link-0")],
+                "chain" | "paged_chain" => EngineAction::Steps {
+                    steps: vec![chain_link(&act, 0)],
                     wake: None,
                 },
                 "sleep" | "flap" => EngineAction::Sleep {
@@ -530,7 +548,9 @@ impl ProcessEngine for LawEngine {
                     "payload": outcome.payload(),
                 }))
             }
-            EngineEvent::StepSettled { .. } if act == "fan" || act == "chain" => {
+            EngineEvent::StepSettled { .. }
+                if act == "fan" || act == "chain" || act == "paged_chain" =>
+            {
                 let settled = script["settled"].as_u64().unwrap_or(0) + 1;
                 script["settled"] = json!(settled);
                 match (
@@ -538,8 +558,8 @@ impl ProcessEngine for LawEngine {
                     settled < script["steps"].as_u64().unwrap_or(0),
                 ) {
                     (_, false) => ended(json!({ "settled": settled })),
-                    ("chain", true) => EngineAction::Steps {
-                        steps: vec![ready_step(&format!("link-{settled}"))],
+                    ("chain" | "paged_chain", true) => EngineAction::Steps {
+                        steps: vec![chain_link(&act, settled)],
                         wake: None,
                     },
                     _ => EngineAction::Idle,
@@ -639,8 +659,9 @@ impl ProcessEngine for LawEngine {
 /// Every law step. `law_flaky` is `Repeatable` and fails its first attempt
 /// with a known failure; `law_park` is `Once`, may park, and parks on the
 /// completion wait its admission pinned, handing that wait's key to
-/// [`PARKED_KEYS`] under its process's tag; any other tool is a `Once` whose
-/// body never ends and ignores its cancel token.
+/// [`PARKED_KEYS`] under its process's tag; `law_paged` is `Once` and
+/// completes at once with heap pages to publish; any other tool is a `Once`
+/// whose body never ends and ignores its cancel token.
 struct LawSteps;
 
 /// The completion key each parked `law_park` step handed out, by its
@@ -735,6 +756,9 @@ impl ProcessSteps for LawSteps {
         step: &StepRequest,
         execution: &AdmittedExecution,
     ) -> crate::runtime::actor::round::MemberBody {
+        if step_tool(step) == LAW_PAGED {
+            return passes::paged_body(process.id.clone(), execution.call().clone());
+        }
         crate::runtime::actor::round::member_body({
             let tool = step_tool(step).to_owned();
             let owner = process.id.clone();

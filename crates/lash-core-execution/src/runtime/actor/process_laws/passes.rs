@@ -1,8 +1,18 @@
 use super::*;
 
 use crate::testing::DurableCommitHook;
+use lash_core_store::checkpoint_graph::node::VerifiedNode;
+use lash_core_store::checkpoint_graph::stage::{
+    CandidateManifest, EdgeLog, ManifestEntry, ManifestSummary, MemoryEdgeLog, StageFault,
+    node_range,
+};
+use lash_core_store::checkpoint_graph::{
+    CommitId, DecodeLimits, EncodeBudget, EncodedNode, ExplicitLimit, GraphStaging, NodeId,
+    NodeKind, TokenWriter, TypedBody,
+};
 use lash_durable::domain::{OwnerKey, RunFactKind, RunFactWrite};
 use lash_durable::{CommitLabel, DomainWrite};
+use lash_execution_contracts::process::{StepCandidate, StepManifest, StepPublication};
 
 /// How many outcomes `tx` records.
 fn outcomes(tx: &lash_durable::ActorTx) -> usize {
@@ -198,6 +208,176 @@ pub async fn a_step_chain_restores_its_state_once_and_reloads_after_a_lost_ackno
             ensure!(
                 hook.calls(method) == expected,
                 "the chain's owner called `{method}` {} times, not {expected}",
+                hook.calls(method)
+            );
+        }
+        each_ran_once(&backend, &process, usize::try_from(STEPS).unwrap_or(0)).await
+    }
+    .await;
+    serving.stop().await;
+    result
+}
+
+/// The CheckpointRoot page a `law_paged` step of call `call` publishes:
+/// one page of its own, named by its outcome and supplied only by its
+/// candidate's manifest, as a kernel run's parked root is.
+#[expect(
+    clippy::expect_used,
+    reason = "a law's fixed one-page body always encodes"
+)]
+fn law_root(call: &ToolCallId) -> VerifiedNode {
+    let mut body = TokenWriter::new();
+    body.seq(1);
+    body.text(call.as_str());
+    let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+    let id = staging
+        .encode(
+            NodeKind::CHECKPOINT_ROOT,
+            TypedBody::logical(body.as_bytes()),
+        )
+        .expect("a law's page encodes");
+    let page = staging.get(&id).cloned().expect("a law's page is staged");
+    VerifiedNode::check(page, &DecodeLimits::within_total(u64::MAX)).expect("a law's page checks")
+}
+
+/// What a `law_paged` step's outcome publishes: its one root page.
+struct LawPages {
+    root: VerifiedNode,
+}
+
+#[async_trait::async_trait]
+impl StepPublication for LawPages {
+    fn root(&self) -> NodeId {
+        self.root.id
+    }
+
+    async fn publication(
+        &self,
+        _tx: &mut lash_durable::ActorTx,
+        commit: CommitId,
+    ) -> Result<StepManifest, DurableError> {
+        let manifest = Box::new(OnePage {
+            summary: ManifestSummary {
+                root: self.root.id,
+                base: None,
+                commit,
+                fresh_nodes: 1,
+                fresh_bytes: self.root.len(),
+                fresh_edges: 0,
+                external: 0,
+            },
+            root: self.root.clone(),
+        });
+        Ok(StepManifest {
+            manifest,
+            root: EncodedNode::clone(&self.root),
+        })
+    }
+
+    async fn settled(&self, _commit: CommitId) {}
+
+    async fn withdrawn(&self, _commit: CommitId) {}
+
+    async fn abandoned(&self) {}
+}
+
+/// The manifest of a candidate that is its root page alone.
+struct OnePage {
+    summary: ManifestSummary,
+    root: VerifiedNode,
+}
+
+impl CandidateManifest for OnePage {
+    fn summary(&self) -> ManifestSummary {
+        self.summary
+    }
+
+    fn entries(
+        &mut self,
+        after: Option<NodeId>,
+        limit: usize,
+    ) -> Result<Vec<ManifestEntry>, StageFault> {
+        Ok(
+            (limit > 0 && after.is_none_or(|after| self.root.id > after))
+                .then(|| ManifestEntry::Fresh(self.root.clone()))
+                .into_iter()
+                .collect(),
+        )
+    }
+
+    fn fresh_range(&mut self, id: &NodeId, offset: u64, len: usize) -> Result<Vec<u8>, StageFault> {
+        if *id == self.root.id {
+            node_range(&self.root, offset, len)
+        } else {
+            Err(StageFault::Missing(*id))
+        }
+    }
+
+    fn edge_log(&mut self) -> Result<Box<dyn EdgeLog>, StageFault> {
+        Ok(Box::new(MemoryEdgeLog::default()))
+    }
+}
+
+/// The body of `process`'s `law_paged` step `call`: it completes at once,
+/// publishing its root page with its outcome.
+pub(super) fn paged_body(process: ProcessId, call: ToolCallId) -> round::MemberBody {
+    Box::new(move |_token| {
+        Box::pin(async move {
+            *STEP_ENTRIES
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .entry(call.as_str().to_owned())
+                .or_default() += 1;
+            round::MemberOutcome {
+                candidate: Some(StepCandidate(Arc::new(LawPages {
+                    root: law_root(&call),
+                }))),
+                ..SettledOutput::Completed(step_output(&process, "paged")).into()
+            }
+        })
+    })
+}
+
+/// FIG-7063: what a process owner keeps of its own acknowledged commits
+/// decodes as the store's read of them does. A step outcome that publishes
+/// heap pages names a CheckpointRoot that only its candidate supplies, not
+/// its transaction's staged nodes; the owner keeps that page with the
+/// outcome's fact, so its next pass folds the outcome without reading the
+/// run again. A chain of steps that each publish pages settles every step
+/// once, restoring its facts once and reading no run's facts again; an
+/// owner that kept only the staged nodes refuses its own outcome as
+/// undecodable.
+///
+/// # Errors
+///
+/// The first rule broken.
+pub async fn a_paged_step_chain_folds_each_published_outcome_from_what_its_owner_kept(
+    backend: &Backend,
+) -> LawOutcome {
+    const STEPS: u64 = 4;
+    let backend = law_backend(backend)?;
+    let hook = DurableCommitHook::over(Arc::clone(backend.durable()));
+    let tag = tag("paged");
+    let process = root(
+        &backend,
+        json!({ "tag": tag, "act": "paged_chain", "steps": STEPS }),
+    )
+    .await?;
+    let serving = serve_over(&backend, NODE, Vec::new(), Arc::new(hook.clone()));
+    let result = async {
+        eventually(SETTLE, "the paged chain ended", || async {
+            Ok(terminal(&backend, &process).await?.is_some())
+        })
+        .await?;
+        let outcome = terminal(&backend, &process).await?.unwrap_or_default();
+        ensure!(
+            find(&outcome, "settled") == Some(&json!(STEPS)),
+            "the paged chain ended as {outcome}, not after its {STEPS} steps"
+        );
+        for (method, expected) in [("run_facts", 1), ("run_facts_of", 0)] {
+            ensure!(
+                hook.calls(method) == expected,
+                "the paged chain's owner called `{method}` {} times, not {expected}",
                 hook.calls(method)
             );
         }

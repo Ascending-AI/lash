@@ -738,7 +738,7 @@ await control.finish({ recovered: true });
     let turn_session = session.clone();
     let turn_events: Arc<dyn lash::TurnActivitySink> =
         contract_turn_events(&events, &graph_store, &core);
-    let turn = tokio::spawn(async move {
+    let mut turn = tokio::spawn(async move {
         turn_engine
             .run_turn(
                 &turn_session,
@@ -750,7 +750,23 @@ await control.finish({ recovered: true });
             .map(|output| output.outcome)
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))
     });
-    let key = wait_for_contract_durable_input_key(key_rx).await?;
+    // The key comes from inside the process's tool body: a turn that ends
+    // first (its process failed before it asked) never sends one, and its
+    // outcome is the diagnostic.
+    let key = tokio::select! {
+        biased;
+        key = wait_for_contract_durable_input_key(key_rx) => key?,
+        ended = &mut turn => {
+            let ended = match ended {
+                Ok(Ok(outcome)) => format!("{outcome:?}"),
+                Ok(Err(err)) => err.to_string(),
+                Err(err) => format!("its task failed to join: {err}"),
+            };
+            return Err(FixedScriptRunnerError::Assertion(format!(
+                "the durable input turn ended before its process asked for input: {ended}"
+            )));
+        }
+    };
     if !host_delay.is_zero() {
         tokio::time::sleep(host_delay).await;
     }

@@ -370,9 +370,9 @@ pub trait StepPublication: Send + Sync {
     fn root(&self) -> lash_core_store::checkpoint_graph::NodeId;
 
     /// The candidate rooted at [`root`](Self::root), with no base,
-    /// published under `commit`. What the pages name beyond the heap and
-    /// the store may not hold yet, such as the release the root pins, is
-    /// staged in the outcome's `tx`.
+    /// published under `commit`, and that root page. What the pages name
+    /// beyond the heap and the store may not hold yet, such as the release
+    /// the root pins, is staged in the outcome's `tx`.
     ///
     /// # Errors
     ///
@@ -382,10 +382,7 @@ pub trait StepPublication: Send + Sync {
         &self,
         tx: &mut lash_durable::ActorTx,
         commit: lash_core_store::checkpoint_graph::CommitId,
-    ) -> Result<
-        Box<dyn lash_core_store::checkpoint_graph::stage::CandidateManifest>,
-        lash_durable::DurableError,
-    >;
+    ) -> Result<StepManifest, lash_durable::DurableError>;
 
     /// The publication under `commit` committed: the pages are the
     /// store's, and the staging lets them go.
@@ -399,6 +396,15 @@ pub trait StepPublication: Send + Sync {
     /// Nothing was published: the staging is dropped, and none of its
     /// pages is ever reachable.
     async fn abandoned(&self);
+}
+
+/// What a [`StepPublication`] publishes under one commit: the candidate's
+/// manifest, and its root, the CheckpointRoot page the outcome's record
+/// names. Only the manifest supplies that page, not the outcome's staged
+/// nodes, so the facts the commit appends decode only with it.
+pub struct StepManifest {
+    pub manifest: Box<dyn lash_core_store::checkpoint_graph::stage::CandidateManifest>,
+    pub root: lash_core_store::checkpoint_graph::EncodedNode,
 }
 
 /// An engine step outcome's [`StepPublication`], compared by its root.
