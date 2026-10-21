@@ -552,3 +552,253 @@ async fn a_terminally_refused_command_commit_settles_with_its_cause_on_postgres(
     )
     .await;
 }
+
+/// LO-FENCE: an answered revision refusal crosses the head/runtime boundary
+/// without settling the command, and only one immediate replan is allowed.
+#[tokio::test]
+async fn lo_fence_replans_one_conflicted_command_on_sqlite_memory() {
+    use lash_core::runtime::durable::session::SessionActivation;
+    use lash_durable::{ActorKey, ActorState, CommitLabel, DomainWrite, DurableError};
+    use lash_durable_test::{Matrix, Script, SimClock, SimNodes, SimNodesConfig, Tripwire};
+    use std::sync::{
+        Mutex,
+        atomic::{AtomicUsize, Ordering},
+    };
+
+    for conflicts in [1, 3] {
+        let clock = SimClock::new();
+        let keep = Mutex::new(Vec::new());
+        let (stores, database) =
+            dialect::open(dialect::Dialect::SqliteMemory, None, clock.clone(), &keep).await;
+        let mut settings = sim::settings();
+        settings.activation_loop_budget = 2;
+        let backend = served::configured_backend(stores, settings, Vec::new());
+        let core = lash::LashCore::standard_builder(backend.clone())
+            .serve_sessions(false)
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+            .execution_budgets(lash::ExecutionBudgets::recommended())
+            .delta_coalescing(lash::DeltaCoalescing::recommended())
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .data_retention(lash::DataRetention::standard())
+            .serve_test_llm_profile(served::model(Arc::default()), served::metadata())
+            .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                lash::persistence::LeaseOwnerId::new("lo-fence-runtime"),
+                lash::persistence::LeaseIncarnationId::new("boot"),
+            ))
+            .unwrap();
+        let id = lash::SessionId::try_from(format!("lo-fence-command-{conflicts}")).unwrap();
+        let durable = core
+            .session(id.clone())
+            .create(lash::SessionCreation::root(served::spec(8)))
+            .await
+            .unwrap();
+        let live = core.session(id.clone()).open().await.unwrap();
+        let commands = live.admin().commands();
+        let before_head = backend
+            .stores()
+            .session_store_factory()
+            .load_session_head_meta(&id)
+            .await
+            .unwrap()
+            .unwrap()
+            .head_revision;
+        let receipt = commands
+            .submit(
+                lash_core::facade_support::SessionCommand::OpenAgentFrame {
+                    request: Box::new(frame("lo-fence-command")),
+                },
+                "lo-fence-command",
+            )
+            .await
+            .unwrap();
+        let script = Script::new();
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let injected = Arc::new(AtomicUsize::new(0));
+        let discarded = Arc::new(AtomicUsize::new(0));
+        let db = database.clone();
+        let seen = attempts.clone();
+        let wins = injected.clone();
+        script.observe_commits(Arc::new(move |label, draft| {
+            if label != CommitLabel::SESSION_COMMAND
+                || !draft
+                    .domain()
+                    .iter()
+                    .any(|write| matches!(write, DomainWrite::SessionCommit(_)))
+            {
+                return;
+            }
+            let attempt = seen.fetch_add(1, Ordering::SeqCst);
+            if attempt >= conflicts {
+                return;
+            }
+            let db = db.clone();
+            let actor = draft.actor().clone();
+            let epoch = draft.epoch();
+            // Store observation is after preparation and before the real
+            // fence. The intervening write uses the same production store.
+            std::thread::spawn(move || {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap()
+                    .block_on(async {
+                        let winner = db.begin(&actor, epoch).await.unwrap();
+                        db.commit(winner, CommitLabel::new("law.intervene"))
+                            .await
+                            .unwrap();
+                    });
+            })
+            .join()
+            .unwrap();
+            wins.fetch_add(1, Ordering::SeqCst);
+        }));
+        let refused = discarded.clone();
+        script.observe_actor_replies(move |label, _, answer| {
+            if label == CommitLabel::SESSION_COMMAND
+                && matches!(answer, Err(DurableError::RevisionConflict { .. }))
+            {
+                refused.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+        let nodes = SimNodes::new(
+            database,
+            clock,
+            script,
+            SimNodesConfig {
+                lease: Matrix::test_lease(),
+                decodes: backend.formats().decodes(),
+                serves: lash::testing::node_serves(&core),
+                max_active: 1,
+            },
+            Arc::new(SessionActivation::new(
+                backend.clone(),
+                lash::testing::session_turn_services(&core),
+                Arc::new(Tripwire::default()),
+            )),
+        );
+        nodes.start("owner");
+        let actor = ActorKey::session(id.as_str()).unwrap();
+        let catalog = backend.stores().session_store_factory();
+        for _ in 0..100 {
+            nodes.step().await;
+            nodes.quiesce().await;
+            let row = nodes.database().actor(&actor).await.unwrap().unwrap();
+            if row.state == ActorState::Parked
+                || catalog
+                    .queued_work_batch_completion(&id, receipt.batch_id.as_str())
+                    .await
+                    .unwrap()
+                    .is_some()
+            {
+                break;
+            }
+        }
+        let completion = catalog
+            .queued_work_batch_completion(&id, receipt.batch_id.as_str())
+            .await
+            .unwrap();
+        if conflicts == 1 {
+            assert!(
+                completion.is_some(),
+                "the replan settles the command; actor={:?}; attempts={}; replies={}; trace={}",
+                nodes.database().actor(&actor).await.unwrap(),
+                attempts.load(Ordering::SeqCst),
+                discarded.load(Ordering::SeqCst),
+                nodes.script().rendered_trace()
+            );
+            assert_eq!(
+                attempts.load(Ordering::SeqCst),
+                2,
+                "one discarded draft and one replan"
+            );
+            assert_eq!(discarded.load(Ordering::SeqCst), 1);
+            assert_eq!(
+                catalog
+                    .load_session_head_meta(&id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .head_revision,
+                before_head + 1,
+                "only the acknowledged candidate moves the head"
+            );
+            let settled = commands.settle(receipt).await.unwrap();
+            assert!(
+                matches!(
+                    settled,
+                    lash_core::runtime::SessionCommandSettlement::Applied { .. }
+                ),
+                "{settled:?}"
+            );
+        } else {
+            assert!(
+                completion.is_none(),
+                "repeated conflicts never settle as command failure"
+            );
+            assert_eq!(
+                attempts.load(Ordering::SeqCst),
+                3,
+                "one immediate retry then two budgeted failures; actor={:?}; trace={}",
+                nodes.database().actor(&actor).await.unwrap(),
+                nodes.script().rendered_trace()
+            );
+            assert_eq!(discarded.load(Ordering::SeqCst), 3);
+            assert_eq!(
+                nodes.database().actor(&actor).await.unwrap().unwrap().state,
+                ActorState::Parked
+            );
+            let attempts: Vec<_> = nodes
+                .script()
+                .trace()
+                .into_iter()
+                .filter(|write| {
+                    write.point.label == CommitLabel::SESSION_COMMAND
+                        && matches!(write.stored, lash_durable_test::Stored::Refused(_))
+                })
+                .collect();
+            let parked = nodes.database().actor(&actor).await.unwrap().unwrap();
+            let reason: lash_core::runtime::durable::session::SessionParkReason =
+                serde_json::from_str(parked.park.as_deref().unwrap()).unwrap();
+            let lash_core::runtime::durable::session::SessionParkReason::PassLoop {
+                failed_passes,
+                error,
+            } = reason
+            else {
+                panic!("{reason:?}")
+            };
+            assert_eq!(failed_passes, 2);
+            assert_eq!(
+                error.code,
+                Some(lash_core::RuntimeErrorCode::OwnerRevisionConflict)
+            );
+            let Some(lash_core::RuntimeErrorCause::OwnerRevisionConflict(cause)) = error.cause
+            else {
+                panic!("revision cause was lost")
+            };
+            assert_eq!(cause.actor, actor.as_str());
+            assert_eq!(cause.actual, cause.expected + 1);
+            assert_eq!(
+                catalog
+                    .load_session_head_meta(&id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .head_revision,
+                before_head,
+                "all refused candidates are discarded"
+            );
+            assert_eq!(attempts.len(), 3);
+            assert!(
+                attempts[2].at_ms > attempts[1].at_ms,
+                "a repeated conflict spends the existing wait/backoff"
+            );
+        }
+        assert_eq!(
+            injected.load(Ordering::SeqCst),
+            discarded.load(Ordering::SeqCst)
+        );
+        nodes.kill("owner");
+        core.shutdown().await.unwrap();
+        drop(durable);
+    }
+}

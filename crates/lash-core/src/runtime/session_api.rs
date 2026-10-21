@@ -1034,8 +1034,10 @@ impl LashRuntime {
                 .and_then(super::config_ops::catalog_refusal_of)
                 .is_some()
             {
+                let tx = self.open_head_attempt(effect_controller).await?;
                 let committed = Box::pin(self.commit_host_command(
                     effect_controller,
+                    tx,
                     &completion,
                     None,
                     None,
@@ -1179,6 +1181,10 @@ impl LashRuntime {
         commands: Vec<crate::SessionCommand>,
         applied: Option<(crate::QueuedWorkCompletion, &crate::ActorContext)>,
     ) -> Result<bool, RuntimeError> {
+        let tx = match applied.as_ref() {
+            Some((_, owner)) => Some(self.open_head_attempt(owner).await?),
+            None => None,
+        };
         self.refresh_session_graph_from_store()
             .await
             .map_err(|err| {
@@ -1228,7 +1234,7 @@ impl LashRuntime {
         if self.services.store.is_none() {
             return Ok(true);
         }
-        let Some((completion, owner)) = applied else {
+        let Some(((completion, owner), tx)) = applied.zip(tx) else {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::StoreCommitFailed,
                 "persisted session commands are applied by the session's command lane",
@@ -1265,6 +1271,7 @@ impl LashRuntime {
         commit.applied_commands = Some(completion);
         let committed = super::durable::head_commit::commit(
             owner,
+            tx,
             self.code_executor().as_ref(),
             commit,
             lash_durable::CommitLabel::SESSION_COMMAND,

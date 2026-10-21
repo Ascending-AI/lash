@@ -102,13 +102,14 @@ crate::statements! {
              RETURNING actor_key";
 
         /// The owner fence: bump owned actor `?1`'s state revision only at
-        /// epoch `?2`. No row means the caller is not the owner.
+        /// epoch `?2` and planning revision `?3`. No row refuses the draft.
         fence = "UPDATE actors SET state_revision = state_revision + 1
              WHERE actor_key = ?1 AND epoch = ?2 AND state = 'owned'
+                 AND state_revision = ?3
              RETURNING state_revision, mail_seq, acked_seq";
 
         /// Actor `?1`'s epoch and state, for a refusal's account.
-        epoch_of = "SELECT epoch, state FROM actors WHERE actor_key = ?1";
+        epoch_of = "SELECT epoch, state, state_revision FROM actors WHERE actor_key = ?1";
 
         /// Release every actor boot `?2` of node `?1` owns, ready at `?3`,
         /// with its epoch bumped.

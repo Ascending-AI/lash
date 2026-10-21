@@ -146,8 +146,9 @@ impl LashRuntime {
                 batch_id.as_str(),
             ),
         )?;
+        let tx = self.open_head_attempt(run_controller).await?;
         let run = Box::pin(self.run_compaction(instructions, &controller)).await?;
-        Box::pin(self.commit_compact_context_command(run, completion, run_controller)).await
+        Box::pin(self.commit_compact_context_command(run, completion, run_controller, tx)).await
     }
 
     /// Summarize the frame current at the compaction's recorded base and
@@ -256,6 +257,7 @@ impl LashRuntime {
         run: CompactionRun,
         completion: crate::QueuedWorkCompletion,
         owner: &crate::ActorContext,
+        mut tx: lash_durable::ActorTx,
     ) -> Result<bool, RuntimeError> {
         let store = self.services.store.clone().ok_or_else(|| {
             RuntimeError::new(
@@ -278,7 +280,7 @@ impl LashRuntime {
             // Nothing of a failed compaction stays resident: the settlement
             // is written over the durable head.
             self.invalidate_resident_session_state();
-            self.reload_invalidated_resident_session_state().await?;
+            tx = self.open_head_attempt(owner).await?;
         }
         let operation = crate::OperationId::new(
             self.state.session_operation_scope(&batch_id),
@@ -336,6 +338,7 @@ impl LashRuntime {
             }
             let committed = super::durable::head_commit::commit(
                 owner,
+                tx,
                 self.code_executor().as_ref(),
                 commit,
                 lash_durable::CommitLabel::SESSION_COMMAND,
@@ -365,7 +368,7 @@ impl LashRuntime {
             };
             match error {
                 crate::StoreError::HeadRevisionConflict { .. } => {
-                    self.reload_invalidated_resident_session_state().await?;
+                    tx = self.open_head_attempt(owner).await?;
                     if switch.take().is_some() {
                         failure = Some(RuntimeError::new(
                             RuntimeErrorCode::StoreCommitSuperseded,

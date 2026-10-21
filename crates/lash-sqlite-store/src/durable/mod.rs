@@ -645,17 +645,42 @@ fn release_owned_by(
         .collect())
 }
 
-/// The refusal for an owner whose fence did not match: its epoch against
-/// the actor's current one.
-fn fenced(tx: &Connection, actor: &ActorKey, held: Epoch) -> rusqlite::Result<DurableError> {
+/// Classify a refused owner fence from the same writer transaction: loss
+/// of the grant or a revision that moved within the held epoch.
+fn fenced(
+    tx: &Connection,
+    actor: &ActorKey,
+    held: Epoch,
+    expected: StateRevision,
+) -> rusqlite::Result<DurableError> {
     let current = tx
         .prepare_cached(SQL.actor.epoch_of.sql())?
-        .query_row([actor.as_str()], |row| row.get::<_, i64>(0))
+        .query_row([actor.as_str()], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })
         .optional()?;
+    if let Some((epoch, state, actual)) = &current {
+        let state = match actor_state(state) {
+            Ok(state) => state,
+            Err(error) => return Ok(error),
+        };
+        if *epoch == held.0 && state == ActorState::Owned && *actual != expected.0 {
+            return Ok(DurableError::RevisionConflict {
+                actor: actor.clone(),
+                epoch: held,
+                expected,
+                actual: StateRevision(*actual),
+            });
+        }
+    }
     Ok(DurableError::OwnershipLost(Fenced {
         actor: actor.clone(),
         held,
-        current: current.map(Epoch),
+        current: current.map(|(epoch, _, _)| Epoch(epoch)),
     }))
 }
 

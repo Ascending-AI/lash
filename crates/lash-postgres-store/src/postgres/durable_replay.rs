@@ -208,6 +208,7 @@ impl PostgresDurableStore {
                     .bind(owner.actor().as_str())
                     .bind(owner.epoch().0)
                     .bind(session)
+                    .bind(owner.revision().0)
                     .fetch_one(crate::observed_sql::executor(locked.connection()))
                     .await
                     .map_err(|error| attempt(sqlx_failure(error)))?;
@@ -305,7 +306,7 @@ pub(super) async fn apply_owner(
 ) -> Result<ActorCommit, DurableError> {
     let actor = write.actor().as_str();
     let Some(fence) = fence else {
-        return Err(fenced(tx, write.actor(), write.epoch()).await?);
+        return Err(fenced(tx, write.actor(), write.epoch(), write.revision()).await?);
     };
     let publications: Vec<_> = write
         .domain()

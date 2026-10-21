@@ -871,7 +871,6 @@ pub use runtime::RuntimeEffectEnvelope;
 pub use runtime::RuntimeEffectInvocation;
 pub use runtime::RuntimeEffectLocalExecutor;
 pub use runtime::RuntimeEffectOutcome;
-pub use runtime::RuntimeErrorCause;
 pub use runtime::SegmentProgress;
 pub use runtime::ServedOnly;
 pub use runtime::ServedOnlyRange;
@@ -891,6 +890,7 @@ pub use runtime::TurnFailurePartialOutput;
 pub use runtime::TurnFailureSettlement;
 pub use runtime::TurnLaneAdmissionPolicy;
 pub use runtime::TurnPrelude;
+pub use runtime::{OwnerRevisionConflict, RuntimeErrorCause};
 
 pub use runtime::WatchedRegistry;
 pub use runtime::WeakProcessEngineRegistry;

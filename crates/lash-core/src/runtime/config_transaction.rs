@@ -273,7 +273,7 @@ impl LashRuntime {
         ));
         // The transaction resolves over the boundary's committed head,
         // whichever runtime committed it last.
-        self.reload_invalidated_resident_session_state().await?;
+        let tx = self.open_head_attempt(run_controller).await?;
         self.adopt_committed_head().await?;
         // The head this runtime committed itself is not reloaded, so the
         // recorded view of the run it ran last is still installed: the
@@ -310,13 +310,15 @@ impl LashRuntime {
                     self.owed_config_change(previous, current)?;
             }
         }
-        let committed =
-            Box::pin(
-                self.commit_host_command(run_controller, &completion, None, None, |_, _| {
-                    crate::runtime::SessionCommandOutcome::ConfigTransaction { outcome }
-                }),
-            )
-            .await?;
+        let committed = Box::pin(self.commit_host_command(
+            run_controller,
+            tx,
+            &completion,
+            None,
+            None,
+            |_, _| crate::runtime::SessionCommandOutcome::ConfigTransaction { outcome },
+        ))
+        .await?;
         if matches!(
             committed,
             super::host_commands::CommandCommit::Landed
@@ -382,6 +384,14 @@ impl LashRuntime {
         if self.state.undelivered_config_change.is_none() {
             return;
         }
+        let tx = match run_controller.begin().await {
+            Ok(tx) => tx,
+            Err(error) => {
+                self.invalidate_resident_session_state();
+                tracing::warn!(%error, "could not open config delivery retirement");
+                return;
+            }
+        };
         if let Err(error) = Box::pin(self.materialize_command_session(run_controller)).await {
             tracing::warn!(
                 session_id = %self.state.session_id,
@@ -391,7 +401,7 @@ impl LashRuntime {
             return;
         }
         if self.state.undelivered_config_change.is_none() {
-            Box::pin(self.retire_delivered_config_change(run_controller, batch_id)).await;
+            Box::pin(self.retire_delivered_config_change(run_controller, tx, batch_id)).await;
         }
     }
 
@@ -402,6 +412,7 @@ impl LashRuntime {
     async fn retire_delivered_config_change(
         &mut self,
         owner: &crate::ActorContext,
+        tx: lash_durable::ActorTx,
         batch_id: &crate::BatchId,
     ) {
         let operation = crate::OperationId::new(
@@ -420,6 +431,7 @@ impl LashRuntime {
         ) {
             Ok((commit, _)) => super::durable::head_commit::commit(
                 owner,
+                tx,
                 self.code_executor().as_ref(),
                 commit,
                 lash_durable::CommitLabel::SESSION_COMMAND,

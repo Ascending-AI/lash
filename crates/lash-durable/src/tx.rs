@@ -71,6 +71,7 @@ pub enum Release {
 /// fenced read; it carries the actor's mailbox position and pending mail as
 /// of that read. [`DurableStore::commit`](crate::DurableStore::commit)
 /// applies it in one transaction whose first statement re-checks the epoch
+/// and the planning revision
 /// and bumps the actor's state revision; then its [`DomainWrite`]s in the
 /// order recorded, then the acknowledgement, then the release. A refused
 /// domain write rolls all of it back.
@@ -167,7 +168,8 @@ impl ActorTx {
         self.epoch
     }
 
-    /// The actor's state revision as of the fenced read.
+    /// The immutable revision from which this attempt was planned. A newer
+    /// open validates this value; it never grants this draft a new basis.
     #[must_use]
     pub fn revision(&self) -> StateRevision {
         self.revision

@@ -225,3 +225,61 @@ law!(
     a_turn_counts_its_tool_admissions_atomically,
     |store, _advance| { laws::a_turn_counts_its_tool_admissions_atomically(store) }
 );
+
+/// LO-FENCE exercises the function itself as well as its same-draft fallback.
+async fn lo_fence_path(explicit: bool) {
+    let url = crate::testing::required_database_url();
+    let database = IsolatedDatabase::create(&url).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("isolated store");
+    let clock = Arc::new(TestClock::new(1_000_000));
+    let store = storage
+        .durable_store()
+        .with_clock_for_testing(clock.clone());
+    let advance = |by: Duration| clock.advance(u64::try_from(by.as_millis()).expect("millis"));
+    let (outcome, refused) = super::executor::observe_fence_refusals(laws::lo_fence_with_path(
+        &store, &advance, explicit,
+    ))
+    .await;
+    outcome.unwrap_or_else(|broken| panic!("{broken}"));
+    if explicit {
+        // Takeover reaches the function; park and root-lease work select
+        // the explicit path.
+        assert_eq!(refused, 1, "only takeover reaches the function fence");
+    } else {
+        assert_eq!(refused, 2, "stale graph and takeover each raised LX003");
+    }
+    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM lash_blobs WHERE hash = $1")
+        .bind(lo_fence_staged_hash())
+        .fetch_one(storage.pool())
+        .await
+        .unwrap();
+    assert_eq!(rows, 0, "stale staged nodes were rolled back");
+}
+
+fn lo_fence_staged_hash() -> Vec<u8> {
+    use lash_core_store::checkpoint_graph::{
+        EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TokenWriter, TypedBody,
+    };
+    let mut out = TokenWriter::new();
+    out.text("lo-fence-stale");
+    let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
+    staging
+        .encode(NodeKind::FROZEN_VALUE, TypedBody::logical(out.as_bytes()))
+        .unwrap()
+        .0
+        .to_vec()
+}
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL"]
+async fn lo_fence_explicit_when_configured() {
+    lo_fence_path(true).await;
+}
+
+#[tokio::test]
+#[ignore = "requires PostgreSQL"]
+async fn lo_fence_function_when_configured() {
+    lo_fence_path(false).await;
+}

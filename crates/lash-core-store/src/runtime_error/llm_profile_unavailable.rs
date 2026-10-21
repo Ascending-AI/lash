@@ -23,7 +23,8 @@ impl RuntimeErrorCause {
                 refusal.as_ref(),
                 crate::obligations::RetirementRefusal::Admission { .. }
             ),
-            Self::LlmProfileUnavailable { .. }
+            Self::OwnerRevisionConflict(_)
+            | Self::LlmProfileUnavailable { .. }
             | Self::CellSnapshotUndecodable { .. }
             | Self::RecordedCallbackUnavailable { .. }
             | Self::StreamStateFormatUnreadable { .. }

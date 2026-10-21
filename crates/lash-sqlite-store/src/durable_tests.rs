@@ -1219,3 +1219,23 @@ law!(
     a_turn_counts_its_tool_admissions_atomically,
     |store, _advance| { laws::a_turn_counts_its_tool_admissions_atomically(store) }
 );
+
+law!(
+    lo_fence_rejects_stale_epoch_and_revision,
+    |store, advance| {
+        async {
+            laws::lo_fence_rejects_stale_epoch_and_revision(store, advance).await?;
+            let nodes = store
+                .connection_for_testing()
+                .call(|conn| {
+                    conn.query_row("SELECT count(*) FROM blobs WHERE encoding = 1", [], |row| {
+                        row.get::<_, i64>(0)
+                    })
+                })
+                .await
+                .unwrap();
+            assert_eq!(nodes, 0, "a stale draft left no graph blobs");
+            Ok::<(), laws::LawBroken>(())
+        }
+    }
+);

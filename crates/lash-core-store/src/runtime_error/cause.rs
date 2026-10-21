@@ -3,6 +3,17 @@
 use super::{IngressReservedSourceKeyRefusal, RuntimeEffectControllerError, RuntimeErrorCode};
 use crate::SessionId;
 
+/// The planning revision refused under a still-current owner epoch.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct OwnerRevisionConflict {
+    pub actor: String,
+    pub epoch: i64,
+    pub expected: i64,
+    pub actual: i64,
+}
+
 /// Typed cause retained when a controller-owned runtime effect must abort
 /// through the generic runtime error boundary.
 ///
@@ -14,6 +25,8 @@ use crate::SessionId;
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum RuntimeErrorCause {
+    /// The owner still holds its epoch, but its draft has an older revision.
+    OwnerRevisionConflict(Box<OwnerRevisionConflict>),
     /// The deployment retired a registry entry a session still needs.
     PluginRetired {
         refusal: Box<crate::obligations::RetirementRefusal>,

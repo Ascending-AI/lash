@@ -1,7 +1,7 @@
 //! The port's typed refusals.
 
 use crate::domain::DomainRefusal;
-use crate::ids::{ActorKey, CommitLabel, Epoch, NodeId};
+use crate::ids::{ActorKey, CommitLabel, Epoch, NodeId, StateRevision};
 
 /// A transaction refused because its epoch is not the actor's current one.
 ///
@@ -43,6 +43,17 @@ pub enum DurableError {
     /// The caller's epoch is stale: it is no longer the owner.
     #[error(transparent)]
     OwnershipLost(Fenced),
+    /// The grant still holds, but this draft was derived from older state.
+    /// Nothing was written; discard the draft and reload before replanning.
+    #[error(
+        "revision conflict for {actor} at epoch {epoch}: expected {expected:?}, actual {actual:?}"
+    )]
+    RevisionConflict {
+        actor: ActorKey,
+        epoch: Epoch,
+        expected: StateRevision,
+        actual: StateRevision,
+    },
     /// The node's lease is gone: it was reaped, released or never
     /// registered. The node must stop serving at once.
     #[error("node {node} has no live lease")]

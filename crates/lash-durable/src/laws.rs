@@ -911,3 +911,158 @@ pub async fn a_turn_cancel_is_a_first_winner_row_with_a_wake(
     );
     Ok(())
 }
+
+/// LO-FENCE: stale revisions refuse the entire transition, while mailbox
+/// arrival alone remains revision-neutral. Takeover keeps its distinct cause.
+pub async fn lo_fence_rejects_stale_epoch_and_revision(
+    store: &dyn DurableStore,
+    advance: Advance<'_>,
+) -> LawOutcome {
+    lo_fence_with_path(store, advance, false).await
+}
+
+/// The same law with root-lease work to select PostgreSQL's explicit path.
+pub async fn lo_fence_with_path(
+    store: &dyn DurableStore,
+    advance: Advance<'_>,
+    explicit: bool,
+) -> LawOutcome {
+    use crate::domain::{
+        CellId, EffectAdmissionWrite, EffectKey, ExecKey, Ordinal, OwnerKey, RootOwner,
+        RunFactKind, RunFactWrite, RunSeq,
+    };
+    use lash_core_store::checkpoint_graph::{DecodeLimits, GraphRefusal};
+    use lash_protocol_types::{SessionId, TurnId};
+    let actor = session("lo-fence")?;
+    create(store, std::slice::from_ref(&actor)).await?;
+    append(store, &actor, "seen before draft").await?;
+    let owner = node(store, "lo-fence-owner").await?;
+    let grant = store.claim(&owner, 1).await?;
+    let epoch = grant[0].epoch;
+    let sid =
+        SessionId::try_from("lo-fence".to_owned()).map_err(|error| LawBroken(error.to_string()))?;
+    let run = TurnId::try_from("lo-fence-run".to_owned())
+        .map_err(|error| LawBroken(error.to_string()))?;
+    let facts = OwnerKey::Cell(sid.clone(), run.clone(), CellId::new("stale"));
+    let exec = ExecKey::Cell(sid, run, CellId::new("stale"));
+    let effect = EffectKey(vec![7].into());
+    let (root, encoded) = tagged_node("lo-fence-stale");
+    let mut stale = store.begin(&actor, epoch).await?;
+    let expected = stale.revision();
+    stale.stage([encoded]);
+    stale.write(crate::DomainWrite::RunFact(RunFactWrite::Append {
+        owner: facts.clone(),
+        run: RunSeq(0),
+        ordinal: Ordinal(0),
+        kind: RunFactKind::Admit,
+        call: None,
+        record: root,
+    }));
+    stale.write(crate::DomainWrite::EffectAdmission(
+        EffectAdmissionWrite::Put {
+            exec: exec.clone(),
+            effect: effect.clone(),
+            member: None,
+            admission: root,
+        },
+    ));
+    stale.ack_seen().give_up(Release::Idle);
+    if explicit {
+        stale.lease_root(
+            RootOwner::EffectAdmission {
+                exec: exec.clone(),
+                effect: effect.clone(),
+            },
+            root,
+            TTL_MILLIS,
+        );
+    }
+    let mut parked = store.begin(&actor, epoch).await?;
+    parked.write(crate::DomainWrite::ActorPark {
+        reason_json: Some("stale-park".into()),
+    });
+    parked.ack_seen().give_up(Release::Parked);
+    let winner = store.begin(&actor, epoch).await?;
+    let acknowledged = store.commit(winner, LABEL).await?;
+    let before = store
+        .actor(&actor)
+        .await?
+        .ok_or_else(|| LawBroken("the fenced actor vanished".into()))?;
+    let mut stale_effect_starts = 0;
+    let refused = store.commit(stale, LABEL).await;
+    if refused.is_ok() {
+        stale_effect_starts += 1;
+    }
+    ensure!(
+        matches!(refused, Err(DurableError::RevisionConflict {
+        actor: ref refused_actor, epoch: held, expected: planned, actual
+    }) if refused_actor == &actor && held == epoch && planned == expected && actual == acknowledged.revision),
+        "same-epoch stale draft was not refused at its planning revision: {refused:?}"
+    );
+    ensure!(
+        matches!(store.commit(parked, LABEL).await,
+        Err(DurableError::RevisionConflict { expected: planned, actual, .. })
+            if planned == expected && actual == acknowledged.revision),
+        "a stale claimed park/release committed"
+    );
+    let after = store
+        .actor(&actor)
+        .await?
+        .ok_or_else(|| LawBroken("the fenced actor vanished".into()))?;
+    ensure!(
+        after == before,
+        "refused transition changed actor/ack/park/release: {after:?}"
+    );
+    let stale_domain_rows = store.run_facts(&facts).await?.rows.len();
+    ensure!(
+        stale_domain_rows == 0 && stale_effect_starts == 0,
+        "stale_domain_rows={stale_domain_rows} stale_effect_starts={stale_effect_starts}"
+    );
+    for owner in [
+        RootOwner::RunFact {
+            owner: facts,
+            run: RunSeq(0),
+            ordinal: Ordinal(0),
+        },
+        RootOwner::EffectAdmission { exec, effect },
+    ] {
+        ensure!(
+            matches!(
+                store
+                    .hydrate(owner, None, DecodeLimits::within_total(1024))
+                    .await,
+                Err(DurableError::Graph(GraphRefusal::RootRetired))
+            ),
+            "a stale root was installed"
+        );
+    }
+    // Arrival changes mail_seq, never the actor's planning revision. The
+    // old read can acknowledge only its seen prefix, leaving new mail owed.
+    let mut tx = store.begin(&actor, epoch).await?;
+    append(store, &actor, "unseen arrival").await?;
+    tx.ack_seen();
+    store.commit(tx, LABEL).await?;
+    let after = store
+        .actor(&actor)
+        .await?
+        .ok_or_else(|| LawBroken("the fenced actor vanished".into()))?;
+    ensure!(
+        after.has_mail && after.pending_mail == 1,
+        "unseen mail was acknowledged"
+    );
+    let takeover = store.begin(&actor, epoch).await?;
+    advance(TTL + Duration::from_millis(1));
+    let successor = node(store, "lo-fence-successor").await?;
+    store.reap(&successor).await?;
+    let claimed = store.claim(&successor, 1).await?;
+    ensure!(claimed.len() == 1, "the successor did not claim");
+    ensure!(
+        matches!(
+            store.commit(takeover, LABEL).await,
+            Err(DurableError::OwnershipLost(_))
+        ),
+        "takeover lost its distinct ownership cause"
+    );
+    eprintln!("LO-FENCE stale_domain_rows=0 stale_effect_starts=0");
+    Ok(())
+}

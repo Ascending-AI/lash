@@ -109,6 +109,7 @@ pub(super) struct Inner {
     /// [`ActorContext::next_drive`] numbers.
     drives: AtomicU32,
     tool_call_admissions: AtomicU64,
+    acknowledged_commits: AtomicU64,
     model_tasks: std::sync::Mutex<Vec<crate::task::JoinHandle<()>>>,
     model_attempts: std::sync::Mutex<Vec<crate::EffectAttempt>>,
     model_calls: std::sync::Mutex<Vec<lash_durable::domain::model_calls::OwnedModelCall>>,
@@ -159,6 +160,7 @@ impl ActorContext {
                 obligations: None,
                 drives: AtomicU32::new(0),
                 tool_call_admissions: AtomicU64::new(0),
+                acknowledged_commits: AtomicU64::new(0),
                 model_calls: std::sync::Mutex::default(),
                 model_attempts: std::sync::Mutex::default(),
                 model_tasks: std::sync::Mutex::default(),
@@ -204,6 +206,7 @@ impl ActorContext {
                     }),
                 drives: AtomicU32::new(0),
                 tool_call_admissions: AtomicU64::new(0),
+                acknowledged_commits: AtomicU64::new(0),
                 model_calls: std::sync::Mutex::default(),
                 model_attempts: std::sync::Mutex::default(),
                 model_tasks: std::sync::Mutex::default(),
@@ -239,6 +242,7 @@ impl ActorContext {
                 obligations: None,
                 drives: AtomicU32::new(0),
                 tool_call_admissions: AtomicU64::new(0),
+                acknowledged_commits: AtomicU64::new(0),
                 model_calls: std::sync::Mutex::default(),
                 model_attempts: std::sync::Mutex::default(),
                 model_tasks: std::sync::Mutex::default(),
@@ -480,6 +484,9 @@ impl ActorContext {
             .sum::<u64>();
         let effects = lash_durable::runner::CommitEffects::of(&tx);
         let committed = self.commit_with_obligations(tx, owing, commit).await?;
+        self.inner
+            .acknowledged_commits
+            .fetch_add(1, Ordering::Relaxed);
         if let Some(hints) = &self.inner.hints {
             hints.owner_committed(&effects, &committed);
         }
@@ -591,6 +598,21 @@ impl ActorContext {
         let mut calls = self.inner.model_calls.lock_recover();
         if !calls.iter().any(|stored| stored.key == call.key) {
             calls.push(call);
+        }
+    }
+
+    /// Acknowledged progress of this activation, used to bound immediate
+    /// conflict recovery. Reads and idle passes do not reset that budget.
+    #[doc(hidden)]
+    pub fn acknowledged_commits(&self) -> u64 {
+        self.inner.acknowledged_commits.load(Ordering::Relaxed)
+    }
+
+    /// Discard claim work derived from a refused attempt before reloading.
+    #[doc(hidden)]
+    pub async fn discard_conflicted_attempt(&self) {
+        if let Some(obligations) = &self.inner.obligations {
+            obligations.invalidate().await;
         }
     }
 

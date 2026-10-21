@@ -634,6 +634,8 @@ impl Activation for SessionActivation {
         // (FIG-5230), so a poison session holds no slot.
         let budget = self.backend.config().settings().activation_loop_budget;
         let mut failed_passes = 0_u32;
+        let mut retried_conflict = false;
+        let mut acknowledged = cx.acknowledged_commits();
         loop {
             let release = woke == Some(lash_durable::runner::Wake::Yield)
                 || idle_since.is_some_and(|since: std::time::Instant| {
@@ -648,7 +650,13 @@ impl Activation for SessionActivation {
                 Box::pin(self.pass(&cx, &session, release, &mut heads, &mut carry_checked)).await
             };
             witness_pass(woke.take(), &pass);
-            if pass.is_ok() {
+            if pass.is_ok() && !retried_conflict {
+                failed_passes = 0;
+            }
+            let progress = cx.acknowledged_commits();
+            if progress != acknowledged {
+                acknowledged = progress;
+                retried_conflict = false;
                 failed_passes = 0;
             }
             match pass {
@@ -660,14 +668,24 @@ impl Activation for SessionActivation {
                     let since = *idle_since.get_or_insert_with(|| owned.clock().now());
                     woke = Some(owned.wait_idle(since).await);
                 }
-                Ok(Pass::Released | Pass::Lost)
-                | Err(TurnError::Durable(DurableError::OwnershipLost(_))) => return Exit::Released,
+                Ok(Pass::Released | Pass::Lost) => return Exit::Released,
+                Err(error) if matches!(owner_refusal(&error), Some(OwnerRefusal::Lost)) => {
+                    return Exit::Released;
+                }
                 // Anything else did not commit, or committed with its answer
                 // lost: the next pass reloads the rows, the head among them,
                 // and carries on from them. A lost epoch shows at its fenced
                 // read.
                 Err(error) => {
                     heads.evict();
+                    if matches!(owner_refusal(&error), Some(OwnerRefusal::Revision)) {
+                        cx.discard_conflicted_attempt().await;
+                        if !retried_conflict {
+                            retried_conflict = true;
+                            idle_since = None;
+                            continue;
+                        }
+                    }
                     if !passes_by_itself(&error) {
                         failed_passes = failed_passes.saturating_add(1);
                     }
@@ -739,6 +757,38 @@ fn witness_pass(woke: Option<lash_durable::runner::Wake>, pass: &Result<Pass, Tu
     }
     #[cfg(not(feature = "perf-witness"))]
     let _ = (woke, pass);
+}
+
+/// The owner fence cause stays typed through phase-specific wrappers.
+fn owner_refusal(error: &TurnError) -> Option<OwnerRefusal> {
+    fn durable(error: &DurableError) -> Option<OwnerRefusal> {
+        match error {
+            DurableError::OwnershipLost(_) => Some(OwnerRefusal::Lost),
+            DurableError::RevisionConflict { .. } => Some(OwnerRefusal::Revision),
+            _ => None,
+        }
+    }
+    match error {
+        TurnError::Durable(error)
+        | TurnError::Mail(SessionMailError::Durable(error))
+        | TurnError::Stop(TurnChildrenStopError::Durable(error)) => durable(error),
+        TurnError::Close(error) => match error.as_ref() {
+            SessionCloseError::Durable(error) => durable(error),
+            SessionCloseError::Turn(error) => owner_refusal(error),
+            _ => None,
+        },
+        TurnError::Runtime(error) => match error.code {
+            crate::RuntimeErrorCode::OwnerRevisionConflict => Some(OwnerRefusal::Revision),
+            crate::RuntimeErrorCode::SessionExecutionLeaseLost => Some(OwnerRefusal::Lost),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+enum OwnerRefusal {
+    Lost,
+    Revision,
 }
 
 /// Whether `error` may pass by itself, so the next pass can succeed with

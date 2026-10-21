@@ -644,16 +644,32 @@ async fn fenced(
     tx: &mut PgConnection,
     actor: &ActorKey,
     held: Epoch,
+    expected: StateRevision,
 ) -> Result<DurableError, DurableError> {
-    let current: Option<i64> = crate::observed_sql::query_scalar(SQL.actor.epoch_of.sql())
-        .bind(actor.as_str())
-        .fetch_optional(crate::observed_sql::executor(tx))
-        .await
-        .map_err(sqlx_failure)?;
+    let current: Option<(i64, String, i64)> =
+        crate::observed_sql::query_as(SQL.actor.epoch_of.sql())
+            .bind(actor.as_str())
+            .fetch_optional(crate::observed_sql::executor(tx))
+            .await
+            .map_err(sqlx_failure)?;
+    if let Some((epoch, state, actual)) = &current {
+        let state = match actor_state(state) {
+            Ok(state) => state,
+            Err(error) => return Ok(error),
+        };
+        if *epoch == held.0 && state == ActorState::Owned && *actual != expected.0 {
+            return Ok(DurableError::RevisionConflict {
+                actor: actor.clone(),
+                epoch: held,
+                expected,
+                actual: StateRevision(*actual),
+            });
+        }
+    }
     Ok(DurableError::OwnershipLost(Fenced {
         actor: actor.clone(),
         held,
-        current: current.map(Epoch),
+        current: current.map(|(epoch, _, _)| Epoch(epoch)),
     }))
 }
 
@@ -699,11 +715,12 @@ pub(crate) async fn wake_within(
         .await
         .map_err(sqlx_failure)?;
     let Some(row) = woke else {
-        let state: Option<(i64, String)> = crate::observed_sql::query_as(SQL.actor.epoch_of.sql())
-            .bind(actor.as_str())
-            .fetch_optional(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(sqlx_failure)?;
+        let state: Option<(i64, String, i64)> =
+            crate::observed_sql::query_as(SQL.actor.epoch_of.sql())
+                .bind(actor.as_str())
+                .fetch_optional(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(sqlx_failure)?;
         return Err(DurableError::MailRefused(match state {
             None => MailRefusal::UnknownActor(actor.clone()),
             Some(_) => MailRefusal::ActorTerminal(actor.clone()),

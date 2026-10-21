@@ -18,7 +18,7 @@ mod cause;
 mod classification;
 mod controller;
 mod recorded_refusal;
-pub use cause::{RuntimeErrorCause, StoredDataCorruption};
+pub use cause::{OwnerRevisionConflict, RuntimeErrorCause, StoredDataCorruption};
 pub use controller::RuntimeEffectControllerError;
 pub use recorded_refusal::RecordedRefusal;
 pub(crate) mod llm_profile_unavailable;
@@ -294,6 +294,8 @@ runtime_error_codes! {
         ResidentSessionReloadFailed = "resident_session_reload_failed" => Redrivable,
         // store I/O failed at commit.
         StoreCommitFailed = "store_commit_failed" => Redrivable,
+        /// The owner must discard its draft and reload the acknowledged state.
+        OwnerRevisionConflict = "owner_revision_conflict" => Redrivable,
         // a session-manager or registry write failed; store I/O, not the turn.
         PluginSessionManager = "plugin_session_manager" => Redrivable,
         // a plugin finalize hook refused over the same turn.
@@ -1135,6 +1137,7 @@ impl RuntimeError {
             | RuntimeErrorCause::NoCompatibleSnapshot { .. }
             | RuntimeErrorCause::ConfigRefused { .. }
             | RuntimeErrorCause::MissingRecordedProcessConfig { .. }
+            | RuntimeErrorCause::OwnerRevisionConflict(_)
             | RuntimeErrorCause::StoreRefusal { .. }
             | RuntimeErrorCause::PluginStateUnrecorded { .. }
             | RuntimeErrorCause::PluginStateEffectOwnerMismatch
