@@ -945,7 +945,7 @@ async fn run_linked_cell(
                     held: false,
                 })
             })
-            .map_err(KernelFailure::Checkpoint),
+            .map_err(KernelFailure::from),
         None => Ok(None),
     };
     match ended {
@@ -1029,7 +1029,9 @@ async fn record_end(
     pages: &lash_vm_broker::kernel::pages::SharedPages,
 ) -> Result<lash_core_store::checkpoint_graph::NodeId, KernelFailure> {
     let session = state.end_descriptor().map_err(|error| {
-        KernelFailure::Checkpoint(lash_vm_broker::QuietPointRefusal(error.to_string()))
+        KernelFailure::Checkpoint(lash_vm_broker::QuietPointRefusal::Refused(
+            error.to_string(),
+        ))
     })?;
     let carried = state.carried_closures();
     snapshots
@@ -1047,7 +1049,7 @@ async fn record_end(
         )
         .await
         .map(|saved| saved.root)
-        .map_err(KernelFailure::Checkpoint)
+        .map_err(KernelFailure::from)
 }
 
 /// The pages a cell's run reads and stages: the turn's spool, the
@@ -1098,6 +1100,43 @@ fn broker_failure(
         )
     };
     match failure {
+        KernelFailure::Durable(error) => {
+            let fault = match error {
+                lash_durable::DurableError::RevisionConflict {
+                    actor,
+                    epoch,
+                    expected,
+                    actual,
+                } => lash_core::RuntimeError::new(
+                    lash_core::RuntimeErrorCode::OwnerRevisionConflict,
+                    message.clone(),
+                )
+                .with_cause(lash_core::RuntimeErrorCause::OwnerRevisionConflict(
+                    Box::new(lash_core::OwnerRevisionConflict {
+                        actor: actor.as_str().to_owned(),
+                        epoch: epoch.0,
+                        expected: expected.0,
+                        actual: actual.0,
+                    }),
+                )),
+                lash_durable::DurableError::OwnershipLost(_) => lash_core::RuntimeError::new(
+                    lash_core::RuntimeErrorCode::SessionExecutionLeaseLost,
+                    message.clone(),
+                ),
+                _ => lash_core::RuntimeError::new(
+                    lash_core::RuntimeErrorCode::RuntimeStore,
+                    message.clone(),
+                ),
+            };
+            ctx.record_nested_effect_error(
+                lash_core::RuntimeEffectControllerError::from(fault)
+                    .retryable_uncommitted_derivation(),
+            );
+            if ctx.is_cancelled() {
+                state.rollback_code_execution();
+            }
+            host(message)
+        }
         KernelFailure::Worker { outcome } => {
             // A limit the run itself exhausted is the cell's result.
             if let lash_vm_protocol::InfrastructureOutcome::WorkerLimitExceeded { limit } = &outcome

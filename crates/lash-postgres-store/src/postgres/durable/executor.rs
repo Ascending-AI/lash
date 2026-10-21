@@ -309,6 +309,7 @@ pub(crate) static REGISTRY: LazyLock<String> = LazyLock::new(|| {
             hash = hash.wrapping_mul(0x0100_0000_01b3);
         }
     };
+    feed("owner-envelope-v1");
     for text in mechanics().into_iter().chain(prompts::record_mechanics()) {
         feed(text);
     }
@@ -473,7 +474,8 @@ impl Call {
             };
             steps.extend(program.iter().map(step_json));
         }
-        call.steps = serde_json::Value::Array(steps);
+        call.steps =
+            serde_json::json!({"version": 1, "expected_revision": tx.revision().0, "steps": steps});
         let publications: Vec<_> = tx
             .domain()
             .iter()
@@ -655,6 +657,16 @@ impl PostgresDurableStore {
         let row = match sent {
             Ok(row) => row,
             Err(error) if declined(&error) => {
+                #[cfg(test)]
+                if error
+                    .as_database_error()
+                    .and_then(|error| error.code())
+                    .as_deref()
+                    == Some("LX003")
+                {
+                    let _ = FENCE_REFUSALS
+                        .try_with(|count| count.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+                }
                 // The hint a declined head commit planned on is not kept:
                 // the owner's next open reads the head again.
                 if let Some((key, _)) = &call.hint {
@@ -834,4 +846,24 @@ pub(super) fn answer(
         state,
         turn_cancel,
     })
+}
+
+#[cfg(test)]
+tokio::task_local! {
+    static FENCE_REFUSALS: std::sync::atomic::AtomicUsize;
+}
+
+#[cfg(test)]
+pub(super) async fn observe_fence_refusals<T>(
+    future: impl std::future::Future<Output = T>,
+) -> (T, usize) {
+    FENCE_REFUSALS
+        .scope(std::sync::atomic::AtomicUsize::new(0), async {
+            let answer = future.await;
+            (
+                answer,
+                FENCE_REFUSALS.with(|count| count.load(std::sync::atomic::Ordering::Relaxed)),
+            )
+        })
+        .await
 }

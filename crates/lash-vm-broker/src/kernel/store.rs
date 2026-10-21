@@ -675,7 +675,7 @@ impl DurableSnapshotStore {
             });
         }
         let expected = self.revision().await?;
-        let mut tx = self.cx.begin().await.map_err(refused)?;
+        let mut tx = self.cx.begin().await.map_err(QuietPointRefusal::from)?;
         // The response the turn held commits first, as `model.done` would
         // have, in this transaction: unless the turn stops at once.
         if let Some(response) = response {
@@ -685,7 +685,7 @@ impl DurableSnapshotStore {
             let held = response
                 .writes()
                 .ok_or_else(|| refused("a first save carries a response its turn holds"))?;
-            tx.append(held);
+            tx.append(held)?;
         }
         // A sleep is a timer wait of the run's scope, pinned with the park
         // that admits it: the owner that holds only sleeps releases until
@@ -1043,7 +1043,7 @@ impl DurableSnapshotStore {
                         if committed { "holds" } else { "does not hold" }
                     )));
                 }
-                Err(refused(error))
+                Err(error.into())
             }
         }
     }
@@ -1320,6 +1320,9 @@ impl DurableSnapshotStore {
             })
             .await
             .map_err(|undriven| match undriven {
+                Undriven::Round(
+                    lash_core_execution::runtime::actor::round::RoundError::Durable(error),
+                ) => DriveRefusal::Durable(error),
                 Undriven::Round(error) => DriveRefusal::from(refused(error)),
                 Undriven::Unbound => BrokerInvariant::Unbound.into(),
                 Undriven::Unanswerable => BrokerInvariant::Unanswerable {

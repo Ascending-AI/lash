@@ -720,7 +720,7 @@ async fn displaced_terminals_are_published_as_composition_evidence() {
             _session_id: &crate::SessionId,
             _request: crate::AppendSessionNodesRequest,
         ) -> Result<
-            crate::AppendSessionNodesOutcome,
+            crate::SessionGraphAppendResult,
             lash_execution_contracts::plugin_error::PluginError,
         > {
             Err(

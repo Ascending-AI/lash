@@ -449,6 +449,9 @@ pub(crate) fn apply_runtime_commit_conn(
             }
         }
     }
+    if writer == lash_core_store::store::HeadWriter::Store {
+        crate::durable::bump_unclaimed_session(tx, &commit.session_id, now)?;
+    }
     let actual_revision = existing.as_ref().map_or(0, |meta| meta.head_revision);
     let old_leaf_node_id = existing.as_ref().and_then(|head| head.leaf_node_id.clone());
     let parent_leaf = old_leaf_node_id

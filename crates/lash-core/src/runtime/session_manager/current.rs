@@ -41,23 +41,6 @@ impl CurrentOwnerCapability {
             .turn_scope(turn_id))
     }
 
-    pub(in crate::runtime) async fn current_snapshot_for_store_write(
-        &self,
-    ) -> Result<RuntimeSessionState, lash_execution_contracts::plugin_error::PluginError> {
-        let session = self.require_session("session_store_write")?;
-        let mut state = session.snapshot.to_runtime_state();
-        if let Some(store) = &session.store {
-            crate::store::refresh_session_window(store, &mut state)
-                .await
-                .map_err(|err| {
-                    lash_execution_contracts::plugin_error::PluginError::Session(format!(
-                        "failed to refresh persisted session state: {err}"
-                    ))
-                })?;
-        }
-        Ok(state)
-    }
-
     /// A named session's snapshot: the resident session's own state, or any
     /// other session's durable head read by name. A process runtime has no
     /// resident session, so every snapshot it reads names one explicitly

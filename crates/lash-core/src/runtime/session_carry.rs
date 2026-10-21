@@ -12,7 +12,7 @@
 
 use crate::facade_support::RuntimeSessionStateFacadeOps as _;
 use crate::store::RuntimeCommit;
-use crate::{LashRuntime, RuntimeError, RuntimeErrorCode};
+use crate::{LashRuntime, RuntimeError};
 
 use super::turn_boundary::{
     ExecutionStateUpdate, capture_execution_state_update, execution_state_capture_error,
@@ -34,6 +34,7 @@ impl LashRuntime {
         owner: &crate::ActorContext,
         formats: lash_durable::FormatSet,
     ) -> Result<(), RuntimeError> {
+        let mut tx = self.open_head_attempt(owner).await?;
         Box::pin(self.materialize_command_session(owner)).await?;
         let update = match self.session.as_mut() {
             Some(session) => capture_execution_state_update(session)
@@ -44,17 +45,13 @@ impl LashRuntime {
         };
         if update == ExecutionStateUpdate::Clean {
             let stamped = async {
-                let mut tx = owner.begin().await?;
                 tx.stamp_formats(formats);
                 owner
                     .commit(tx, lash_durable::CommitLabel::SESSION_COMMAND)
                     .await
             };
             return stamped.await.map(|_| ()).map_err(|error| {
-                RuntimeError::new(
-                    RuntimeErrorCode::StoreCommitFailed,
-                    format!("the session's carry to this build's formats: {error}"),
-                )
+                super::durable::head_commit::HeadCommitError::Owner(error).into_runtime_error()
             });
         }
         let fleet_format = self.fleet_format();
@@ -82,6 +79,7 @@ impl LashRuntime {
             .map_err(super::runtime_error_from_store_commit)?;
         let committed = super::durable::head_commit::commit_in(
             owner,
+            tx,
             self.code_executor().as_ref(),
             commit,
             lash_durable::CommitLabel::SESSION_COMMAND,

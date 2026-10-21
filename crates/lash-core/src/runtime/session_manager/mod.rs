@@ -28,8 +28,8 @@ pub use crate::direct_completion_client::DirectCompletionClient;
 
 #[derive(Clone)]
 enum CurrentSnapshot {
-    /// Host-scoped services own a full persistence snapshot and commit
-    /// against the store themselves.
+    /// Host-scoped services read a persistence snapshot. Their graph writes
+    /// enqueue commands for the session owner.
     Owned(RuntimeSessionState),
     /// Turn-scoped services see a read projection of the running turn's base
     /// state. It is never a durable base: graph appends made through these
@@ -67,10 +67,6 @@ pub(in crate::runtime) struct CurrentSession {
     pub(in crate::runtime) session_id: SessionId,
     snapshot: CurrentSnapshot,
     store: Option<crate::store::SessionStore>,
-    /// Explicit lane context for services scoped to a running parent turn.
-    /// `None` identifies a lane-less host/service call and selects the fresh
-    /// acquisition path at the persistence call site.
-    resident_graph_head_stale: Arc<AtomicBool>,
 }
 
 /// Who the services run for. A process runtime is keyed by its minted id: it
@@ -150,27 +146,6 @@ pub(in crate::runtime) struct CurrentOwnerCapability {
 }
 
 impl CurrentOwnerCapability {
-    /// The fleet-format generation this capability's durable writers emit:
-    /// the `F` the bound session's store recorded (FIG-3796), or, for a
-    /// process owner, the `F` its process registry recorded, since a process
-    /// writes its effect occurrences and terminal through that registry
-    /// (FIG-3805). A capability holding neither writes nothing durable, so the
-    /// build's own generation is the only honest answer it can give.
-    pub(in crate::runtime) fn fleet_format(&self) -> crate::FleetFormat {
-        match &self.owner {
-            CurrentOwner::Session(session) => session
-                .store
-                .as_ref()
-                .map(|store| store.fleet_format())
-                .unwrap_or_else(crate::FleetFormat::current),
-            CurrentOwner::Process { .. } => self
-                .host
-                .process_registry()
-                .map(|registry| registry.fleet_format())
-                .unwrap_or_else(crate::FleetFormat::current),
-        }
-    }
-
     pub(in crate::runtime) fn runtime_owner(&self) -> crate::RuntimeOwner {
         match &self.owner {
             CurrentOwner::Session(session) => {
@@ -446,9 +421,6 @@ impl CurrentOwnerCapability {
                     }
                 },
                 store: runtime.services.store.clone(),
-                resident_graph_head_stale: Arc::clone(
-                    runtime.resident_session.graph_head_stale_flag(),
-                ),
             })),
             policy: Some(runtime.state.effective_policy().clone()),
             host: runtime.host.clone(),

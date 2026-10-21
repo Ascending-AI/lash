@@ -421,6 +421,9 @@ impl std::fmt::Debug for KernelEnd {
 /// Why a run did not stop where [`KernelEnd`] says. Every variant is typed.
 #[derive(Debug, thiserror::Error)]
 pub enum KernelFailure {
+    /// The owner's read or commit failed, retaining its fence cause.
+    #[error(transparent)]
+    Durable(#[from] DurableError),
     #[error("the run's {bound:?} bound of {stated} is over the broker's ceiling of {ceiling}")]
     OverCeiling {
         bound: Bound,
@@ -452,7 +455,7 @@ pub enum KernelFailure {
     #[error("the machine parked on a wait the broker does not hold")]
     Stalled,
     #[error(transparent)]
-    Checkpoint(#[from] QuietPointRefusal),
+    Checkpoint(QuietPointRefusal),
     /// The broker's own invariant failed, not the store: the run ends with
     /// it, since every pass would meet it again.
     #[error(transparent)]
@@ -466,10 +469,20 @@ pub enum KernelFailure {
     Worker { outcome: InfrastructureOutcome },
 }
 
+impl From<QuietPointRefusal> for KernelFailure {
+    fn from(refusal: QuietPointRefusal) -> Self {
+        match refusal {
+            QuietPointRefusal::Durable(error) => Self::Durable(error),
+            QuietPointRefusal::Refused(_) => Self::Checkpoint(refusal),
+        }
+    }
+}
+
 impl From<DriveRefusal> for KernelFailure {
     fn from(refusal: DriveRefusal) -> Self {
         match refusal {
-            DriveRefusal::Refused(refusal) => Self::Checkpoint(refusal),
+            DriveRefusal::Durable(error) => Self::Durable(error),
+            DriveRefusal::Refused(refusal) => refusal.into(),
             DriveRefusal::Invariant(invariant) => Self::Invariant(invariant),
         }
     }
@@ -942,10 +955,7 @@ impl KernelBroker<'_> {
         held: &mut Option<&lash_core_execution::HeldResponse>,
     ) -> Result<(), KernelFailure> {
         if let Some(response) = held.take() {
-            response
-                .commit_alone(self.store.context())
-                .await
-                .map_err(|error| QuietPointRefusal(error.to_string()))?;
+            response.commit_alone(self.store.context()).await?;
         }
         Ok(())
     }
@@ -992,13 +1002,7 @@ impl KernelBroker<'_> {
                 Request::Sleep(sleep) => {
                     let now = match now {
                         Some(now) => now,
-                        None => *now.insert(
-                            self.store
-                                .context()
-                                .durable_now()
-                                .await
-                                .map_err(|error| QuietPointRefusal(error.to_string()))?,
-                        ),
+                        None => *now.insert(self.store.context().durable_now().await?),
                     };
                     let millis = i64::try_from(sleep.duration.as_millis()).unwrap_or(i64::MAX);
                     EffectAdmission {

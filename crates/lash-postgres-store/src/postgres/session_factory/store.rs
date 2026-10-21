@@ -39,6 +39,8 @@ impl PostgresStore {
         )
         .await?;
         if inserted {
+            crate::durable::bump_unclaimed_session(&mut tx, &request.session_id, created_at_ms)
+                .await?;
             // The config's plugin namespaces are admitted against the fleet
             // record's writer ranges before the head that carries them is
             // written (FIG-4746).

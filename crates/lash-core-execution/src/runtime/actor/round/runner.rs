@@ -64,8 +64,13 @@ impl std::fmt::Debug for DeferredOutcome {
 impl DeferredOutcome {
     /// Append the outcomes to a freshly fenced transaction of the same owner.
     /// Its fresh cancellation read decides whether these answers may commit.
-    pub fn append_to(&self, tx: &mut lash_durable::ActorTx) {
-        tx.append(self.tx.clone());
+    ///
+    /// # Errors
+    ///
+    /// The fresh read must retain the held outcome's actor, epoch and revision.
+    pub fn append_to(&self, tx: &mut lash_durable::ActorTx) -> Result<(), DurableError> {
+        tx.append(self.tx.clone())?;
+        Ok(())
     }
 
     /// Publish the final observations only after the combined commit was

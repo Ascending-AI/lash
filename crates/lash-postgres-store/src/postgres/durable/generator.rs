@@ -282,7 +282,12 @@ pub(crate) fn function_ddl() -> String {
     let executor = &*EXECUTOR_SQL;
     let envelope = inline(
         SQL.postgres.owner_envelope.sql(),
-        &["p_actor", "p_epoch", "p_session"],
+        &[
+            "p_actor",
+            "p_epoch",
+            "p_session",
+            "(p_steps->>'expected_revision')::BIGINT",
+        ],
     );
     let put_bodies = inline(
         crate::blobs::blob_sql().postgres.insert_chunk.sql(),
@@ -422,6 +427,18 @@ BEGIN
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
+    IF jsonb_typeof(p_steps) IS DISTINCT FROM 'object'
+        OR p_steps->'version' IS DISTINCT FROM '1'::JSONB
+        OR jsonb_typeof(p_steps->'expected_revision') IS DISTINCT FROM 'number'
+        OR (p_steps->>'expected_revision') !~ '^-?[0-9]+$'
+        OR jsonb_typeof(p_steps->'steps') IS DISTINCT FROM 'array' THEN
+        RAISE EXCEPTION 'lash_owner_commit: invalid owner-envelope-v1' USING ERRCODE = 'LX000';
+    END IF;
+    BEGIN
+        PERFORM (p_steps->>'expected_revision')::BIGINT;
+    EXCEPTION WHEN numeric_value_out_of_range OR invalid_text_representation THEN
+        RAISE EXCEPTION 'lash_owner_commit: invalid expected revision' USING ERRCODE = 'LX000';
+    END;
     IF p_lock_timeout IS NOT NULL THEN
         PERFORM set_config('lock_timeout', p_lock_timeout, true);
     END IF;
@@ -468,7 +485,7 @@ BEGIN
         END IF;
         {installed_bytes} INTO v_installed;
     END IF;
-    FOR v_step IN SELECT value FROM jsonb_array_elements(p_steps) LOOP
+    FOR v_step IN SELECT value FROM jsonb_array_elements(p_steps->'steps') LOOP
         v_index := v_index + 1;
         -- A step runs only when the slot it names holds what it names: a
         -- row, or a row whose column is true (FIG-5942).

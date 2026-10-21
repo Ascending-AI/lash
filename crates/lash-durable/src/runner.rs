@@ -400,9 +400,18 @@ pub struct Owned {
     poll: std::time::Duration,
     drain: Drain,
     liveness: Liveness,
+    acknowledged_commits: std::sync::atomic::AtomicU64,
 }
 
 impl Owned {
+    /// Successful writes acknowledged through this grant. Idle reads do not
+    /// reset an activation's immediate conflict-retry allowance.
+    #[doc(hidden)]
+    pub fn acknowledged_commits(&self) -> u64 {
+        self.acknowledged_commits
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     /// The actor.
     #[must_use]
     pub fn actor(&self) -> &ActorKey {
@@ -504,6 +513,8 @@ impl Owned {
         let committing = self.store.commit(tx, label);
         async move {
             let commit = committing.await?;
+            self.acknowledged_commits
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             self.hints.owner_committed(&effects, &commit);
             Ok(commit)
         }
@@ -1302,6 +1313,7 @@ impl Runner {
             poll: self.config.lease.settings().claim_poll,
             drain: self.drain.clone(),
             liveness: self.liveness.clone(),
+            acknowledged_commits: std::sync::atomic::AtomicU64::new(0),
         };
         let activation = Arc::clone(&self.activation);
         let running = Running {

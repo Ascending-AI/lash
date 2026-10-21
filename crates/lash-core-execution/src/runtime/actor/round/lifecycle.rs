@@ -558,13 +558,13 @@ impl Lifecycle {
     /// [`RoundError`]: ownership lost, another store failure on a read, or a
     /// record that cannot be written as it is.
     pub async fn act(&mut self, folded: &RunFold, now: DurableInstant) -> Result<Act, RoundError> {
-        self.act_with(folded, true, Some(now)).await
+        self.act_with(folded, true, Some(now), None).await
     }
 
     /// Read the store clock only when a retry needs a due comparison.
     /// Outcome backoffs use their own transaction's validated clock.
     pub(crate) async fn act_current(&mut self, folded: &RunFold) -> Result<Act, RoundError> {
-        self.act_with(folded, true, None).await
+        self.act_with(folded, true, None, None).await
     }
 
     /// [`act`](Self::act) for an owner that is draining: start nothing,
@@ -580,7 +580,19 @@ impl Lifecycle {
         folded: &RunFold,
         now: DurableInstant,
     ) -> Result<Act, RoundError> {
-        self.act_with(folded, false, Some(now)).await
+        self.act_with(folded, false, Some(now), None).await
+    }
+
+    /// Use the process pass's coherent open; never grant a newer basis to
+    /// outcomes classified from that pass's rows.
+    pub(crate) async fn act_in(
+        &mut self,
+        folded: &RunFold,
+        now: DurableInstant,
+        tx: &lash_durable::ActorTx,
+        starting: bool,
+    ) -> Result<Act, RoundError> {
+        self.act_with(folded, starting, Some(now), Some(tx)).await
     }
 
     /// Restore committed namespaces before the process drops consumed runs
@@ -614,6 +626,7 @@ impl Lifecycle {
         folded: &RunFold,
         starting: bool,
         mut now: Option<DurableInstant>,
+        attempt: Option<&lash_durable::ActorTx>,
     ) -> Result<Act, RoundError> {
         // What the rows committed publishes before anything reads it: an
         // earlier activation's outcomes on a resume, and outcomes whose
@@ -723,7 +736,10 @@ impl Lifecycle {
             }
         }
 
-        if let Some(act) = self.commit_one(folded, settlements, due_starts).await? {
+        if let Some(act) = self
+            .commit_one(folded, settlements, due_starts, attempt)
+            .await?
+        {
             return Ok(act);
         }
         Ok(Act::Idle(Idle {
@@ -745,6 +761,7 @@ impl Lifecycle {
         folded: &RunFold,
         settlements: Vec<(AdmittedExecution, SettledOutput)>,
         due_starts: Vec<AdmittedExecution>,
+        attempt: Option<&lash_durable::ActorTx>,
     ) -> Result<Option<Act>, RoundError> {
         let group = self.cx.backend().config().settings().group_commit;
         let batch_due = !self.finished.is_empty()
@@ -754,7 +771,10 @@ impl Lifecycle {
                     .batch_opened
                     .is_some_and(|opened| self.cx.clock().now() >= opened + group.window));
         if batch_due {
-            let mut tx = self.cx.begin().await?;
+            let mut tx = match attempt {
+                Some(tx) => tx.clone(),
+                None => self.cx.begin().await?,
+            };
             let now = tx.opened_at();
             let fenced = self.fence.as_ref().is_some_and(|fence| fence(&tx));
             if fenced {
@@ -765,15 +785,12 @@ impl Lifecycle {
             }
             // One transaction publishes at most one candidate: a second
             // paged completion waits for the next batch.
-            let deferred: Vec<(AdmittedId, Result<MemberOutcome, Stop>)> = self
+            let deferred: BTreeSet<AdmittedId> = self
                 .finished
                 .iter()
                 .filter(|(_, result)| matches!(result, Ok(outcome) if outcome.candidate.is_some()))
                 .skip(1)
                 .map(|(id, _)| id.clone())
-                .collect::<Vec<_>>()
-                .into_iter()
-                .filter_map(|id| self.finished.remove(&id).map(|result| (id, result)))
                 .collect();
             let mut retried = false;
             let mut outcomes = BTreeSet::new();
@@ -781,7 +798,11 @@ impl Lifecycle {
             let mut publication = None;
             let mut unused = Vec::new();
             let mut staged = Vec::new();
-            for (id, result) in &self.finished {
+            for (id, result) in self
+                .finished
+                .iter()
+                .filter(|(id, _)| !deferred.contains(*id))
+            {
                 let Some(execution) = folded.admitted(id) else {
                     continue;
                 };
@@ -859,6 +880,10 @@ impl Lifecycle {
                 // The outcomes are durable: their plugin state publishes now,
                 // before the reservations they hold are released.
                 for (id, result) in std::mem::take(&mut self.finished) {
+                    if deferred.contains(&id) {
+                        self.finished.insert(id, result);
+                        continue;
+                    }
                     if let (true, Ok(result)) = (outcomes.contains(&id), &result) {
                         self.publish(id, &staged_state(&result.store_local))?;
                     }
@@ -868,15 +893,17 @@ impl Lifecycle {
                     self.bodies.unanswered(execution, output);
                 }
             }
-            if !deferred.is_empty() {
-                self.finished.extend(deferred);
+            if !self.finished.is_empty() {
                 self.batch_opened
                     .get_or_insert_with(|| self.cx.clock().now());
             }
             return Ok(Some(act));
         }
         if !settlements.is_empty() {
-            let mut tx = self.cx.begin().await?;
+            let mut tx = match attempt {
+                Some(tx) => tx.clone(),
+                None => self.cx.begin().await?,
+            };
             let mut staged = Vec::with_capacity(settlements.len());
             for (execution, outcome) in &settlements {
                 staged.push(settle_staged(
@@ -901,7 +928,10 @@ impl Lifecycle {
             return Ok(Some(act));
         }
         if !due_starts.is_empty() {
-            let mut tx = self.cx.begin().await?;
+            let mut tx = match attempt {
+                Some(tx) => tx.clone(),
+                None => self.cx.begin().await?,
+            };
             let started: Vec<AdmittedExecution> = due_starts
                 .iter()
                 .map(|failed| start_retry(&mut tx, failed))
@@ -1136,7 +1166,9 @@ impl Lifecycle {
                 revision: commit.revision,
                 staged,
             })),
-            Err(error @ DurableError::OwnershipLost(_)) => Err(error.into()),
+            Err(
+                error @ (DurableError::OwnershipLost(_) | DurableError::RevisionConflict { .. }),
+            ) => Err(error.into()),
             // A start its registrar refused after it was staged refuses
             // every repeat of the commit: the activation ends, and the next
             // owner settles the call as its records say, without the start.
@@ -1219,6 +1251,10 @@ impl Lifecycle {
                     revision: receipt.revision,
                     staged,
                 }))
+            }
+            Err(error @ DurableError::RevisionConflict { .. }) => {
+                candidate.0.withdrawn(commit).await;
+                Err(error.into())
             }
             Err(
                 error @ (DurableError::OwnershipLost(_)
@@ -1461,10 +1497,13 @@ fn discard_answer(result: &mut Result<MemberOutcome, Stop>) {
 /// finished result that does (`park`) or does not park it: a park records
 /// only on a started attempt, an end on a started or a parked one.
 fn unsettled(view: &RoundView, id: &AdmittedId, park: bool) -> bool {
-    view.members().iter().any(|member| match member.state() {
-        super::MemberState::Started { start, .. } => *start == id.ordinal,
-        super::MemberState::Waiting { start, .. } => !park && *start == id.ordinal,
-        super::MemberState::RetryDue { .. } | super::MemberState::Final { .. } => false,
+    view.members().iter().any(|member| {
+        view.id_of(member) == *id
+            && match member.state() {
+                super::MemberState::Started { start, .. } => *start == id.ordinal,
+                super::MemberState::Waiting { start, .. } => !park && *start == id.ordinal,
+                super::MemberState::RetryDue { .. } | super::MemberState::Final { .. } => false,
+            }
     })
 }
 

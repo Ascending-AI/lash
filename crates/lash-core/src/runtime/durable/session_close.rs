@@ -214,9 +214,6 @@ pub enum SessionCloseError {
     /// The open turn's cancel failed.
     #[error("the open turn's cancel: {0}")]
     Turn(#[from] TurnError),
-    /// The session's storage delete stopped.
-    #[error("storage: {0}")]
-    Storage(Box<crate::store::MaintenanceFailure<crate::store::SessionBlobReclaimReport>>),
     /// The process registry did not delete the session's process state.
     #[error("process state: {0}")]
     Process(lash_execution_contracts::plugin_error::PluginError),
@@ -314,11 +311,6 @@ pub async fn run_session_close(
                     waits::pin_process_terminal(cx, scope.clone(), &live, None).await?;
                     return Ok(Some(SessionCloseExit::Waiting));
                 }
-                backend
-                    .session_store_factory()
-                    .delete_session(session)
-                    .await
-                    .map_err(|failure| SessionCloseError::Storage(Box::new(failure)))?;
                 commit_step(cx, cx.begin().await?, session, step).await?;
             }
             SessionCloseStep::Tombstone => {

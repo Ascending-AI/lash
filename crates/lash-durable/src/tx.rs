@@ -71,6 +71,7 @@ pub enum Release {
 /// fenced read; it carries the actor's mailbox position and pending mail as
 /// of that read. [`DurableStore::commit`](crate::DurableStore::commit)
 /// applies it in one transaction whose first statement re-checks the epoch
+/// and the planning revision
 /// and bumps the actor's state revision; then its [`DomainWrite`]s in the
 /// order recorded, then the acknowledgement, then the release. A refused
 /// domain write rolls all of it back.
@@ -167,7 +168,8 @@ impl ActorTx {
         self.epoch
     }
 
-    /// The actor's state revision as of the fenced read.
+    /// The immutable revision from which this attempt was planned. A newer
+    /// open validates this value; it never grants this draft a new basis.
     #[must_use]
     pub fn revision(&self) -> StateRevision {
         self.revision
@@ -318,16 +320,43 @@ impl ActorTx {
 
     /// Carry `held`, a transaction of the same actor that was never
     /// submitted: its domain writes after the ones recorded here, its staged
-    /// nodes, the stored nodes it requires and what its roots owe. Its open
-    /// read, fence and mailbox position are this transaction's own.
-    pub fn append(&mut self, held: Self) -> &mut Self {
+    /// nodes, the stored nodes it requires and what its roots owe. The fresh
+    /// mailbox and cancellation read remain this transaction's own; its actor,
+    /// epoch and revision must match the held draft before any writes are added.
+    ///
+    /// # Errors
+    ///
+    /// A different actor is an invalid composition. A lost epoch or a changed
+    /// revision keeps its typed refusal; discard both drafts and reload.
+    pub fn append(&mut self, held: Self) -> Result<&mut Self, crate::DurableError> {
+        if self.actor != held.actor {
+            return Err(crate::DurableError::Store(crate::StoreFailure {
+                kind: crate::StoreFailureKind::Corrupt,
+                message: format!("cannot compose {} into {}", held.actor, self.actor),
+            }));
+        }
+        if self.epoch != held.epoch {
+            return Err(crate::DurableError::OwnershipLost(crate::Fenced {
+                actor: held.actor,
+                held: held.epoch,
+                current: Some(self.epoch),
+            }));
+        }
+        if self.revision != held.revision {
+            return Err(crate::DurableError::RevisionConflict {
+                actor: held.actor,
+                epoch: held.epoch,
+                expected: held.revision,
+                actual: self.revision,
+            });
+        }
         self.domain.extend(held.domain);
         for (id, node) in held.graph {
             self.graph.entry(id).or_insert(node);
         }
         self.reads.extend(held.reads);
         self.owed.extend(held.owed);
-        self
+        Ok(self)
     }
 
     /// Stage everything `staging` made.

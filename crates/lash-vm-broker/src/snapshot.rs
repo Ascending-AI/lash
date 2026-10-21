@@ -194,8 +194,14 @@ impl DurableSnapshotStore {
 
 /// Why a store refused a save.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("the save was not committed: {0}")]
-pub struct QuietPointRefusal(pub String);
+pub enum QuietPointRefusal {
+    /// An owner read or commit refused the save, retaining its fence cause.
+    #[error(transparent)]
+    Durable(#[from] lash_durable::DurableError),
+    /// The save could not be prepared or reconciled.
+    #[error("the save was not committed: {0}")]
+    Refused(String),
+}
 
 /// A broker invariant that failed, not the store: the records are sound,
 /// so every pass meets it again. The run ends with it; it is never a store
@@ -231,6 +237,9 @@ fn named(calls: &[lash_protocol_types::ToolCallId]) -> String {
 /// Why driving a run's effects failed.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum DriveRefusal {
+    /// The owner's read or commit failed, retaining its fence cause.
+    #[error(transparent)]
+    Durable(#[from] lash_durable::DurableError),
     /// The store refused or failed a read or a commit, or the activation
     /// stopped.
     #[error(transparent)]
@@ -241,5 +250,5 @@ pub enum DriveRefusal {
 }
 
 pub(crate) fn refused(error: impl std::fmt::Display) -> QuietPointRefusal {
-    QuietPointRefusal(error.to_string())
+    QuietPointRefusal::Refused(error.to_string())
 }

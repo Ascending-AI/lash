@@ -320,7 +320,11 @@ pub(super) async fn resumed_cell(
     snapshots: &lash_vm_broker::DurableSnapshotStore,
     code: &str,
 ) -> Result<Option<ResumedCell>, String> {
-    let Some(read) = snapshots.latest_root().await.map_err(|refusal| refusal.0)? else {
+    let Some(read) = snapshots
+        .latest_root()
+        .await
+        .map_err(|refusal| refusal.to_string())?
+    else {
         return Ok(None);
     };
     let cell = load_cell(&read.graph, read.held.root, read.read_limits)?;

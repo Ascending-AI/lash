@@ -26,10 +26,11 @@ impl OutputBoundary {
         self.emissions.push(effect);
     }
 
-    pub(super) fn append_to(&self, tx: &mut ActorTx) {
+    pub(super) fn append_to(&self, tx: &mut ActorTx) -> Result<(), lash_durable::DurableError> {
         if let Some(outcome) = &self.outcome {
-            outcome.append_to(tx);
+            outcome.append_to(tx)?;
         }
+        Ok(())
     }
 
     pub(super) async fn committed(
@@ -58,7 +59,7 @@ impl OutputBoundary {
         if turn_cancel::immediate_in(&tx) || turn_cancel::close_requested_in(&tx) {
             return Ok(false);
         }
-        self.append_to(&mut tx);
+        self.append_to(&mut tx)?;
         match release {
             Some(release) => {
                 cx.commit_draining(tx, CommitLabel::ROUND_OUTCOME, release)

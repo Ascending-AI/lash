@@ -485,7 +485,16 @@ pub(crate) async fn head_ownership_facts_conn(
     .fetch_one(crate::observed_sql::executor(&mut *conn))
     .await
     .map_err(store_sqlx_error)?;
+    let actor = lash_durable::ActorKey::session(session_id.as_str())
+        .map_err(|error| StoreError::Backend(error.to_string()))?;
+    let claimed_epoch =
+        crate::observed_sql::query_scalar(crate::durable::SQL.actor.claimed_epoch.sql())
+            .bind(actor.as_str())
+            .fetch_optional(crate::observed_sql::executor(&mut *conn))
+            .await
+            .map_err(store_sqlx_error)?;
     Ok(lash_core_store::store::HeadOwnershipFacts {
+        claimed_epoch,
         unfinished_run,
         open_command: row
             .1

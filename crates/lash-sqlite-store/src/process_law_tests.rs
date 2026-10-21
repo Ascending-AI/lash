@@ -37,6 +37,7 @@ macro_rules! law {
 }
 
 law!(
+    a_once_process_body_survives_one_revision_conflict,
     a_transition_in_another_format_commits_no_state,
     c1_a_parked_child_ends_engine_free_and_its_child_receives_parent_ended,
     c1_a_waiting_child_ends_within_its_grace_with_one_cancelled_advance,

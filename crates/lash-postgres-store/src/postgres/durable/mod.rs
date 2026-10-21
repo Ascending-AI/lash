@@ -188,9 +188,9 @@ impl Retired {
 mod scheduling_sql;
 use scheduling_sql::PostgresDurableStatements;
 
-struct Sql {
+pub(crate) struct Sql {
     node: NodeStatements,
-    actor: ActorStatements,
+    pub(crate) actor: ActorStatements,
     mail: MailStatements,
     park: ActorParkStatements,
     process: ProcessActorStatements,
@@ -198,7 +198,7 @@ struct Sql {
     postgres: PostgresDurableStatements,
 }
 
-static SQL: LazyLock<Sql> = LazyLock::new(|| {
+pub(crate) static SQL: LazyLock<Sql> = LazyLock::new(|| {
     let dialect = Dialect::postgres();
     Sql {
         node: NodeStatements::render(dialect),
@@ -644,16 +644,32 @@ async fn fenced(
     tx: &mut PgConnection,
     actor: &ActorKey,
     held: Epoch,
+    expected: StateRevision,
 ) -> Result<DurableError, DurableError> {
-    let current: Option<i64> = crate::observed_sql::query_scalar(SQL.actor.epoch_of.sql())
-        .bind(actor.as_str())
-        .fetch_optional(crate::observed_sql::executor(tx))
-        .await
-        .map_err(sqlx_failure)?;
+    let current: Option<(i64, String, i64)> =
+        crate::observed_sql::query_as(SQL.actor.epoch_of.sql())
+            .bind(actor.as_str())
+            .fetch_optional(crate::observed_sql::executor(tx))
+            .await
+            .map_err(sqlx_failure)?;
+    if let Some((epoch, state, actual)) = &current {
+        let state = match actor_state(state) {
+            Ok(state) => state,
+            Err(error) => return Ok(error),
+        };
+        if *epoch == held.0 && state == ActorState::Owned && *actual != expected.0 {
+            return Ok(DurableError::RevisionConflict {
+                actor: actor.clone(),
+                epoch: held,
+                expected,
+                actual: StateRevision(*actual),
+            });
+        }
+    }
     Ok(DurableError::OwnershipLost(Fenced {
         actor: actor.clone(),
         held,
-        current: current.map(Epoch),
+        current: current.map(|(epoch, _, _)| Epoch(epoch)),
     }))
 }
 
@@ -699,11 +715,12 @@ pub(crate) async fn wake_within(
         .await
         .map_err(sqlx_failure)?;
     let Some(row) = woke else {
-        let state: Option<(i64, String)> = crate::observed_sql::query_as(SQL.actor.epoch_of.sql())
-            .bind(actor.as_str())
-            .fetch_optional(crate::observed_sql::executor(&mut *tx))
-            .await
-            .map_err(sqlx_failure)?;
+        let state: Option<(i64, String, i64)> =
+            crate::observed_sql::query_as(SQL.actor.epoch_of.sql())
+                .bind(actor.as_str())
+                .fetch_optional(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(sqlx_failure)?;
         return Err(DurableError::MailRefused(match state {
             None => MailRefusal::UnknownActor(actor.clone()),
             Some(_) => MailRefusal::ActorTerminal(actor.clone()),
@@ -718,6 +735,47 @@ pub(crate) async fn wake_within(
         },
         MailSeq(seq),
     ))
+}
+
+/// Guard and advance a fresh direct session mutation under its actor lock.
+pub(crate) async fn bump_unclaimed_session(
+    tx: &mut PgConnection,
+    session: &lash_protocol_types::SessionId,
+    at_ms: u64,
+) -> Result<(), StoreError> {
+    use lash_core_store::store::{HeadOwnershipFacts, require_unclaimed_actor};
+    let actor = ActorKey::session(session.as_str())
+        .map_err(|error| StoreError::Backend(error.to_string()))?;
+    crate::observed_sql::query(SQL.actor.create_idle.sql())
+        .bind(actor.as_str())
+        .bind(lash_durable::domain::SESSION_ACTOR_FORMATS)
+        .bind(crate::support::clamp_epoch_ms(at_ms))
+        .execute(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(store_sqlx_error)?;
+    let claimed_epoch = crate::observed_sql::query_scalar(SQL.actor.claimed_epoch.sql())
+        .bind(actor.as_str())
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(store_sqlx_error)?;
+    require_unclaimed_actor(
+        session,
+        &HeadOwnershipFacts {
+            claimed_epoch,
+            ..Default::default()
+        },
+    )?;
+    let bumped: Option<i64> = crate::observed_sql::query_scalar(SQL.actor.bump_unclaimed.sql())
+        .bind(actor.as_str())
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(store_sqlx_error)?;
+    if bumped.is_none() {
+        return Err(StoreError::SessionDeleted {
+            session_id: session.clone(),
+        });
+    }
+    Ok(())
 }
 
 /// Wake session `session`'s actor inside a producer's transaction (ADR

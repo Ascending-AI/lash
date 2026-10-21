@@ -222,7 +222,7 @@ impl SessionGraphService for NoopSessionManager {
         &self,
         _session_id: &crate::SessionId,
         _request: crate::AppendSessionNodesRequest,
-    ) -> Result<crate::AppendSessionNodesOutcome, lash_execution_contracts::plugin_error::PluginError>
+    ) -> Result<crate::SessionGraphAppendResult, lash_execution_contracts::plugin_error::PluginError>
     {
         Err(
             lash_execution_contracts::plugin_error::PluginError::Session(

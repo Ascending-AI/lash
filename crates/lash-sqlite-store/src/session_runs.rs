@@ -455,7 +455,18 @@ pub(crate) fn head_ownership_facts_conn(
             statement.query_row(params![session_id.as_str()], |row| row.get(1))
         })
         .map_err(sqlite_error)?;
+    let actor = lash_durable::ActorKey::session(session_id.as_str())
+        .map_err(|error| StoreError::Backend(error.to_string()))?;
+    let claimed_epoch = conn
+        .query_row(
+            crate::durable::SQL.actor.claimed_epoch.sql(),
+            [actor.as_str()],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(sqlite_error)?;
     Ok(lash_core_store::store::HeadOwnershipFacts {
+        claimed_epoch,
         unfinished_run,
         open_command: open_command
             .map(|seq| stored_u64("QueuedWorkBatch", seq))

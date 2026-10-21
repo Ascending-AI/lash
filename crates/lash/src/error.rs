@@ -814,6 +814,7 @@ mod tests {
                 run: lash_core::TurnId::from("bound-run"),
             },
             lash_core::store::SessionHeadOwner::CommandLane { enqueue_seq: 7 },
+            lash_core::store::SessionHeadOwner::Actor { epoch: 3 },
         ] {
             let plugin = PluginError::from(StoreError::SessionHeadOwned {
                 session_id: session_id.clone(),

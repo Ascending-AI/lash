@@ -5,33 +5,22 @@
 //! head: a derive-then-append caller whose base was merely overtaken keeps its
 //! work, and only a caller whose base has left the active path is refused. Both
 //! halves are load-bearing and both are asserted here, against every backend,
-//! through the plugin-facing
-//! [`SessionGraphService`](crate::plugin::SessionGraphService). A host's
-//! append is a session command its session actor applies (FIG-4202); its
-//! commit is that actor's fenced `session.command` (FIG-5230), proven by the
-//! crash matrix's command case.
+//! through the unclaimed direct store contract. The served LO-OWNER-ONLY
+//! law certifies service appends through the session command lane.
 
 use super::*;
 use crate::facade_support::SessionGraphFacadeOps;
-use lash_core::plugin::PluginSessionRequest;
 use pretty_assertions::assert_eq;
 
 pub async fn session_graph_append_branch_liveness(factory: Arc<dyn crate::DeploymentStore>) {
-    Box::pin(session_graph_service_append_tolerates_an_advanced_head(
-        &factory,
-    ))
-    .await;
-    Box::pin(session_graph_service_append_rejects_an_abandoned_branch(
-        &factory,
-    ))
-    .await;
+    Box::pin(direct_store_append_tolerates_an_advanced_head(&factory)).await;
+    Box::pin(direct_store_append_rejects_an_abandoned_branch(&factory)).await;
 }
 
 /// An ancestor base plus an advanced head must still append. The derivation is
 /// expensive and remains true of the prefix it read, so it is kept and
 /// re-parented onto the current leaf; nothing already committed is lost. The
-/// service captured its snapshot before the head moved — the shape a
-/// post-turn hook actually has.
+/// store reads the current head at application time, after the derivation.
 ///
 /// Reddens if the precondition is tightened into a head compare-and-swap
 /// (`leaf_node_id == Some(required)`): the append would be refused as
@@ -40,9 +29,7 @@ pub async fn session_graph_append_branch_liveness(factory: Arc<dyn crate::Deploy
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn session_graph_service_append_tolerates_an_advanced_head(
-    factory: &Arc<dyn crate::DeploymentStore>,
-) {
+async fn direct_store_append_tolerates_an_advanced_head(factory: &Arc<dyn crate::DeploymentStore>) {
     let request = session_store_request(
         &SessionId::from("service-append-advanced-head"),
         "append-fence-model",
@@ -52,7 +39,7 @@ async fn session_graph_service_append_tolerates_an_advanced_head(
         .admit_view(&request)
         .await
         .expect("create service advanced-head session store");
-    let runtime = append_conformance_runtime(store.store(), &request).await;
+    let runtime = append_conformance_store(store.store(), &request);
     let observed_base = Box::pin(append_conformance_plugin_node(
         &runtime,
         &request.session_id,
@@ -61,27 +48,22 @@ async fn session_graph_service_append_tolerates_an_advanced_head(
     ))
     .await;
 
-    // Captured at the observed base, exactly as a plugin hook captures it
-    // before spending seconds deriving something.
-    let service = runtime
-        .session_graph_service()
-        .expect("session graph service");
+    // The direct writer opens the current head after the derivation.
     let advanced_leaf = advance_durable_head_behind_the_runtime(&store).await;
 
-    let result = service
-        .append_session_nodes(
-            &request.session_id,
-            derived_append_request(&observed_base, "service-derived-append"),
-        )
-        .await
-        .expect("an ancestor base is a live branch, not a plugin error");
+    let result = direct_append(
+        &runtime,
+        derived_append_request(&observed_base, "service-derived-append"),
+    )
+    .await
+    .expect("an ancestor base is a live branch, not a plugin error");
 
     assert_appended_onto_current_leaf(
         &store,
         result,
         &observed_base,
         &advanced_leaf,
-        "SessionGraphService::append_session_nodes",
+        "unclaimed direct store append",
     )
     .await;
 }
@@ -97,7 +79,7 @@ async fn session_graph_service_append_tolerates_an_advanced_head(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn session_graph_service_append_rejects_an_abandoned_branch(
+async fn direct_store_append_rejects_an_abandoned_branch(
     factory: &Arc<dyn crate::DeploymentStore>,
 ) {
     let scenario = Box::pin(abandoned_branch_scenario(
@@ -105,27 +87,23 @@ async fn session_graph_service_append_rejects_an_abandoned_branch(
         "service-append-abandoned",
     ))
     .await;
-    let runtime =
-        append_conformance_runtime(scenario.branch.store(), &scenario.branch_request).await;
-    let service = runtime
-        .session_graph_service()
-        .expect("session graph service");
+    let runtime = append_conformance_store(scenario.branch.store(), &scenario.branch_request);
+
     let before = read_conformance_session(&scenario.branch).await;
 
-    let result = service
-        .append_session_nodes(
-            &scenario.branch_request.session_id,
-            derived_append_request(&scenario.abandoned_base, "service-abandoned-append"),
-        )
-        .await
-        .expect("an abandoned branch is a typed outcome, not a plugin error");
+    let result = direct_append(
+        &runtime,
+        derived_append_request(&scenario.abandoned_base, "service-abandoned-append"),
+    )
+    .await
+    .expect("an abandoned branch is a typed outcome, not a plugin error");
 
     assert_stale_branch_changed_nothing(
         &scenario.branch,
         result,
         &scenario.abandoned_base,
         before,
-        "SessionGraphService::append_session_nodes",
+        "unclaimed direct store append",
     )
     .await;
 }
@@ -156,7 +134,7 @@ async fn abandoned_branch_scenario(
         .admit_view(&source_request)
         .await
         .expect("create abandoned-branch source store");
-    let source_runtime = append_conformance_runtime(source.store(), &source_request).await;
+    let source_runtime = append_conformance_store(source.store(), &source_request);
     let fork_point = Box::pin(append_conformance_plugin_node(
         &source_runtime,
         &source_request.session_id,
@@ -360,118 +338,58 @@ async fn assert_stale_branch_changed_nothing(
 
 #[expect(
     clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
+    reason = "the conformance fixture uses a validated session id"
 )]
-async fn append_conformance_runtime(
+fn append_conformance_store(
     store: &Arc<dyn crate::RuntimeStore>,
     request: &crate::SessionStoreCreateRequest,
-) -> crate::LashRuntime {
-    let mut state = crate::conformance::helpers::load_window_state(store, &request.session_id)
-        .await
-        .expect("load session state for the append conformance runtime")
-        .unwrap_or_else(|| crate::RuntimeSessionState {
-            session_id: request.session_id.clone(),
-            policy: request.config.session_policy(),
-            ..crate::RuntimeSessionState::fixture(request.config.session_policy())
-        });
-    if state.policy.model.is_none() {
-        state.policy = request.config.session_policy();
-    }
-    // The protocol-session capability is embedder-supplied; the in-tree fake is
-    // enough here because this suite never runs a turn.
-    let host = crate::PluginHost::new(
-        crate::testing::test_standard_protocol_factories(),
-        lash_core::ExecutionBudgets::recommended(),
-        lash_core::trace::TraceRuntime::new(std::sync::Arc::new(
-            lash_core::facade_support::SystemClock,
-        )),
-    );
-    let plugins = match state.plugin_state() {
-        Some(snapshot) => host.defer_session(PluginSessionRequest::rematerialization(
-            request.session_id.clone(),
-            snapshot,
-            crate::plugin::SessionAuthorityContext {
-                plugin_config: state.admitted_plugin_config(),
-            },
-        )),
-        None => host.defer_session(PluginSessionRequest::creation(
-            request.session_id.clone(),
-            lash_core::plugin::SessionAuthorityContext::fixture(),
-        )),
-    }
-    .expect("append conformance plugin session");
-    // FIG-4857: a store-backed runtime constructs its session only from a
-    // published native view. Record and publish the fixture's admission
-    // before asking that session to apply host commands.
-    let transition = host.transition_plugins(
-        crate::plugin::PluginTransitionRequest {
-            id: crate::plugin::PluginTransitionId(
-                crate::EffectAddress::new(
-                    crate::ExecutionScope::session_operation(&request.session_id, "append-fixture"),
-                    "plugin-transition",
-                )
-                .expect("append fixture transition identity"),
-            ),
-            owner: crate::RuntimeOwner::Session(request.session_id.clone()),
-            base: crate::plugin::PluginTransitionBase::Session {
-                head: crate::store::SessionHeadRef {
-                    generation: store
-                        .read_session_state_version(&request.session_id)
-                        .await
-                        .expect("state version"),
-                    revision: state.head_revision,
-                    leaf: state.session_graph.leaf_node_id.clone(),
-                    checkpoint: state.checkpoint_ref.clone(),
-                },
-            },
-            target: host
-                .admit_plugins(store.as_ref())
-                .await
-                .expect("admit fixture plugins"),
-        },
-        &plugins.export_state(),
-        &state.authority.plugin_config,
-    );
-    let plugins = plugins
-        .materialize_transition_candidate(&transition)
-        .expect("materialize the append fixture's recorded plugin view");
-    state
-        .capture_plugin_states(plugins.as_ref(), lash_core::FleetFormat::current())
-        .expect("capture the append fixture's native view");
-    commit_conformance_state(store, &mut state)
-        .await
-        .expect("publish the append fixture's native view");
-    let state = crate::conformance::helpers::load_window_state(store, &request.session_id)
-        .await
-        .expect("reload the append fixture's published components")
-        .expect("the append fixture has a published head");
-    let runtime_host = crate::EmbeddedRuntimeHost::new(crate::StoreLawBackend::new().host_config(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-    ));
-    let runtime_services = crate::PersistentRuntimeServices::new(
-        plugins,
-        crate::conformance::helpers::session_view(store, request.session_id.clone()),
-        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
-        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
-    );
-    crate::LashRuntime::from_persistent_embedded_state(
-        request.config.session_policy(),
-        runtime_host,
-        runtime_services,
-        state,
-        crate::testing::runtime_lease_owner(),
-    )
-    .await
-    .expect("append conformance runtime")
+) -> crate::store::SessionStore {
+    crate::store::SessionStore::new(Arc::clone(store), request.session_id.clone())
+        .expect("valid conformance session id")
+}
+
+/// Certify an unclaimed store's append, preserving its semantic receipt,
+/// requested-count validation, returned node identities and legacy leaf result.
+#[expect(
+    clippy::expect_used,
+    reason = "the conformance fixture creates the session before appending"
+)]
+async fn direct_append(
+    store: &crate::store::SessionStore,
+    request: crate::AppendSessionNodesRequest,
+) -> Result<crate::AppendSessionNodesOutcome, crate::StoreError> {
+    let mut state =
+        crate::conformance::helpers::load_window_state(store.store(), store.session_id())
+            .await?
+            .expect("the direct append session exists");
+    let commit = crate::store::append_request_commit_for_testing(
+        &mut state,
+        &request.operation_id,
+        &request.nodes,
+        request.requires_ancestor_node_id.as_deref(),
+    )?;
+    let leaf = commit.graph.leaf_node_id().cloned();
+    let result = match store.commit_runtime_state(commit).await {
+        Ok(result) => result,
+        Err(crate::StoreError::AppendAncestorNotActive { required_node_id }) => {
+            return Ok(crate::AppendSessionNodesOutcome::StaleBranch { required_node_id });
+        }
+        Err(error) => return Err(error),
+    };
+    let node_ids =
+        lash_core_store::session_state::receipt_append_node_ids(&result, request.nodes.len())?;
+    Ok(crate::AppendSessionNodesOutcome::Appended {
+        node_ids,
+        leaf_node_id: result.committed_leaf_node_id.or(leaf),
+    })
 }
 
 /// Rewrite a committed receipt to a genuine pre-upgrade JSON shape and prove
-/// that the public runtime result still returns the original non-empty leaf.
+/// that the direct store result still returns the original non-empty leaf.
 ///
 /// `rewrite_receipt` performs backend-specific row surgery after the first
 /// append, removing the newer result fields from durable storage while leaving
-/// the receipt's request identity intact so the public replay path is exercised.
+/// the receipt's request identity intact so the direct receipt replay path is exercised.
 ///
 /// Integrator class (ADR 0051): **conformance-suite embedders**.
 #[expect(
@@ -490,14 +408,11 @@ pub async fn old_format_append_receipt_returns_public_leaf<F, Fut>(
         "old-format-append-receipt-model",
         crate::SessionRelation::Root,
     );
-    let runtime = append_conformance_runtime(&store, &request).await;
-    // The plugin-facing service writes through the store's append receipt:
-    // a host's append is a session command, whose own receipt is its batch.
-    let service = runtime
-        .session_graph_service()
-        .expect("session graph service");
-    Box::pin(service.append_session_nodes(
-        &request.session_id,
+    let runtime = append_conformance_store(&store, &request);
+    // This law certifies the direct store receipt, including its legacy shape.
+
+    Box::pin(direct_append(
+        &runtime,
         crate::AppendSessionNodesRequest {
             operation_id: "old-format-append-receipt-seed".to_string(),
             nodes: vec![crate::SessionAppendNode::plugin(
@@ -517,11 +432,11 @@ pub async fn old_format_append_receipt_returns_public_leaf<F, Fut>(
         )],
         requires_ancestor_node_id: None,
     };
-    let first = Box::pin(service.append_session_nodes(&request.session_id, append.clone()))
+    let first = Box::pin(direct_append(&runtime, append.clone()))
         .await
         .expect("first old-format fixture append");
     rewrite_receipt().await;
-    let replay = Box::pin(service.append_session_nodes(&request.session_id, append))
+    let replay = Box::pin(direct_append(&runtime, append))
         .await
         .expect("old-format fixture receipt replay");
     let (
@@ -546,23 +461,19 @@ pub async fn old_format_append_receipt_returns_public_leaf<F, Fut>(
     );
 }
 
-/// Append one plugin node through the plugin-facing service, and return its
-/// durable id.
+/// Append one plugin node through the unclaimed direct store contract.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn append_conformance_plugin_node(
-    runtime: &crate::LashRuntime,
-    session_id: &SessionId,
+    runtime: &crate::store::SessionStore,
+    _session_id: &SessionId,
     operation_id: &str,
     step: u64,
 ) -> String {
-    let service = runtime
-        .session_graph_service()
-        .expect("session graph service");
-    let result = Box::pin(service.append_session_nodes(
-        session_id,
+    let result = Box::pin(direct_append(
+        runtime,
         crate::AppendSessionNodesRequest {
             operation_id: operation_id.to_string(),
             nodes: vec![crate::SessionAppendNode::plugin(

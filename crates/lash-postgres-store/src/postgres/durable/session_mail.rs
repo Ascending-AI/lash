@@ -20,6 +20,13 @@ lash_store_sql::statements! {
     /// The session-mail statements only PostgreSQL issues: `UNNEST` binds a
     /// run's admitted mail as one list.
     struct PostgresSessionMailStatements @ "durable_session_mail_postgres" {
+        /// Take a cross-target actor before its history without waiting on
+        /// an actor another source envelope may hold in the opposite order.
+        lock_target = "SELECT actor_key FROM actors WHERE actor_key = ?1 FOR UPDATE NOWAIT";
+
+        /// The currently existing rows, without acquiring new locks after history.
+        actor_keys = "SELECT actor_key FROM actors WHERE actor_key = ANY(?1) ORDER BY actor_key";
+
         /// Bind each input `?2[i]` of session `?1` to run `?3`, its admitting
         /// owner, or keep it bound there, as the neutral `bind_input` does
         /// one input; returns each input it bound.
@@ -65,18 +72,43 @@ impl super::PostgresDurableStore {
         tx: &mut PgConnection,
         session: &SessionId,
     ) -> Result<(), crate::StoreError> {
+        Self::lock_session_writes_with(tx, session, false).await
+    }
+
+    async fn lock_session_writes_with(
+        tx: &mut PgConnection,
+        session: &SessionId,
+        nowait: bool,
+    ) -> Result<(), crate::StoreError> {
         use crate::support::store_sqlx_error;
         let connection = crate::connection_sql::connection_sql();
         let actor = session_actor(session)?;
         loop {
-            let held: Option<i64> =
-                crate::observed_sql::query_scalar(SQL.postgres.lock_session_writes.sql())
+            let held = if nowait {
+                let held = crate::observed_sql::query(POSTGRES_SQL.lock_target.sql())
+                    .bind(actor.as_str())
+                    .fetch_optional(crate::observed_sql::executor(&mut *tx))
+                    .await
+                    .map_err(store_sqlx_error)?
+                    .is_some();
+                if held {
+                    crate::observed_sql::query(connection.lock_xact_session_history.sql())
+                        .bind(session.as_str())
+                        .execute(crate::observed_sql::executor(&mut *tx))
+                        .await
+                        .map_err(store_sqlx_error)?;
+                }
+                held
+            } else {
+                crate::observed_sql::query(SQL.postgres.lock_session_writes.sql())
                     .bind(actor.as_str())
                     .bind(session.as_str())
                     .fetch_optional(crate::observed_sql::executor(&mut *tx))
                     .await
-                    .map_err(store_sqlx_error)?;
-            if held.is_some() {
+                    .map_err(store_sqlx_error)?
+                    .is_some()
+            };
+            if held {
                 return Ok(());
             }
             crate::observed_sql::query(connection.savepoint_session_history.sql())
@@ -108,6 +140,64 @@ impl super::PostgresDurableStore {
                 return Ok(());
             }
         }
+    }
+
+    /// All fork participants' existing actor rows, before any history lock.
+    pub(crate) async fn lock_session_actors(
+        tx: &mut PgConnection,
+        actors: &[String],
+    ) -> Result<Vec<String>, crate::StoreError> {
+        crate::observed_sql::query_scalar(SQL.postgres.lock_actors.sql())
+            .bind(actors)
+            .fetch_all(crate::observed_sql::executor(tx))
+            .await
+            .map_err(crate::support::store_sqlx_error)
+    }
+
+    pub(crate) async fn session_actor_keys(
+        tx: &mut PgConnection,
+        actors: &[String],
+    ) -> Result<Vec<String>, crate::StoreError> {
+        crate::observed_sql::query_scalar(POSTGRES_SQL.actor_keys.sql())
+            .bind(actors)
+            .fetch_all(crate::observed_sql::executor(tx))
+            .await
+            .map_err(crate::support::store_sqlx_error)
+    }
+
+    pub(crate) async fn lock_cross_target(
+        tx: &mut PgConnection,
+        session: &SessionId,
+    ) -> Result<(), crate::StoreError> {
+        Self::lock_session_writes_with(tx, session, true).await
+    }
+
+    /// Lock cross-target heads before an owner installs any graph/root rows.
+    pub(crate) async fn lock_cross_target_heads(
+        tx: &mut PgConnection,
+        write: &lash_durable::ActorTx,
+    ) -> Result<(), DurableError> {
+        let mut targets = write
+            .domain()
+            .iter()
+            .filter_map(|domain| match domain {
+                lash_durable::domain::DomainWrite::SessionCommit(commit)
+                    if super::turns::head_writer(write.actor(), &commit.session)
+                        == lash_core_store::store::HeadWriter::Store =>
+                {
+                    Some(&commit.session)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        targets.sort();
+        targets.dedup();
+        for target in targets {
+            Self::lock_cross_target(tx, target)
+                .await
+                .map_err(super::store_failure)?;
+        }
+        Ok(())
     }
 
     /// The session's actor row alone: an owner commit's first lock, as a

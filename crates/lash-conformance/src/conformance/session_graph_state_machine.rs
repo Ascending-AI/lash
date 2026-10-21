@@ -5,8 +5,6 @@
 //! [`ConformanceDeployment`](crate::store::ConformanceDeployment) for each
 //! case: a deployment store with the test seams that corrupt its accelerators.
 
-use crate::facade_support::SessionGraphFacadeOps;
-use lash_core::plugin::PluginSessionRequest;
 use lash_protocol_types::SessionId;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
@@ -19,6 +17,7 @@ use proptest::test_runner::{Config, RngSeed, TestError, TestRunner};
 
 use super::run_shape::Counter;
 use super::*;
+use crate::facade_support::SessionGraphFacadeOps;
 
 const SESSION_COUNT: u8 = 3;
 const DEFAULT_CASES: u32 = 24;
@@ -584,12 +583,8 @@ impl SessionGraphScenario {
         };
         let operation_id = self.next_operation_id("append");
         let live = self.live.get(&slot).expect("ensured live session");
-        let runtime = property_runtime(live.store.store(), &live.request).await?;
-        // The plugin-facing service writes straight through the store's
-        // append path: nothing works this session, so nothing owns its head.
-        let service = runtime
-            .session_graph_service()
-            .map_err(|error| error.to_string())?;
+        // This state machine certifies the unclaimed direct store contract;
+        // owner-routed service acceptance has its served-engine law.
         let nodes = (0..usize::from(node_count.max(1)))
             .map(|ordinal| {
                 crate::SessionAppendNode::plugin(
@@ -598,8 +593,8 @@ impl SessionGraphScenario {
                 )
             })
             .collect();
-        let result = Box::pin(service.append_session_nodes(
-            &live.request.session_id,
+        let result = Box::pin(direct_append(
+            &live.store,
             crate::AppendSessionNodesRequest {
                 operation_id,
                 nodes,
@@ -1539,58 +1534,38 @@ impl SessionGraphScenario {
     }
 }
 
-async fn property_runtime(
-    store: &Arc<dyn crate::RuntimeStore>,
-    request: &crate::SessionStoreCreateRequest,
-) -> Result<crate::LashRuntime, String> {
-    let state = crate::conformance::helpers::load_window_state(store, &request.session_id)
-        .await
-        .map_err(|error| error.to_string())?
-        .unwrap_or_else(|| crate::RuntimeSessionState {
-            session_id: request.session_id.clone(),
-            policy: request.config.session_policy(),
-            ..crate::RuntimeSessionState::fixture(request.config.session_policy())
-        });
-    let host = crate::PluginHost::new(
-        crate::testing::test_standard_protocol_factories(),
-        lash_core::ExecutionBudgets::recommended(),
-        lash_core::trace::TraceRuntime::new(std::sync::Arc::new(
-            lash_core::facade_support::SystemClock,
-        )),
-    );
-    let plugins = match state.plugin_state() {
-        Some(snapshot) => host.build_session(PluginSessionRequest::rematerialization(
-            request.session_id.clone(),
-            snapshot,
-            crate::plugin::SessionAuthorityContext {
-                plugin_config: state.admitted_plugin_config(),
-            },
-        )),
-        None => host.build_session(PluginSessionRequest::creation(
-            request.session_id.clone(),
-            lash_core::plugin::SessionAuthorityContext::fixture(),
-        )),
-    }
-    .map_err(|error| error.to_string())?;
-    let runtime_host = crate::EmbeddedRuntimeHost::new(crate::StoreLawBackend::new().host_config(
-        crate::CommitBudget::bounded(1024 * 1024, 512),
-        crate::QueuedWorkBatchingConfig::new(1),
-    ));
-    let runtime_services = crate::PersistentRuntimeServices::new(
-        plugins,
-        crate::conformance::helpers::session_view(store, request.session_id.clone()),
-        std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
-        std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
-    );
-    crate::LashRuntime::from_persistent_embedded_state(
-        request.config.session_policy(),
-        runtime_host,
-        runtime_services,
-        state,
-        crate::testing::runtime_lease_owner(),
-    )
-    .await
-    .map_err(|error| error.to_string())
+#[expect(
+    clippy::expect_used,
+    reason = "the conformance fixture creates the session before appending"
+)]
+async fn direct_append(
+    store: &crate::store::SessionStore,
+    request: crate::AppendSessionNodesRequest,
+) -> Result<crate::AppendSessionNodesOutcome, crate::StoreError> {
+    let mut state =
+        crate::conformance::helpers::load_window_state(store.store(), store.session_id())
+            .await?
+            .expect("the direct append session exists");
+    let commit = crate::store::append_request_commit_for_testing(
+        &mut state,
+        &request.operation_id,
+        &request.nodes,
+        request.requires_ancestor_node_id.as_deref(),
+    )?;
+    let leaf = commit.graph.leaf_node_id().cloned();
+    let result = match store.commit_runtime_state(commit).await {
+        Ok(result) => result,
+        Err(crate::StoreError::AppendAncestorNotActive { required_node_id }) => {
+            return Ok(crate::AppendSessionNodesOutcome::StaleBranch { required_node_id });
+        }
+        Err(error) => return Err(error),
+    };
+    let node_ids =
+        lash_core_store::session_state::receipt_append_node_ids(&result, request.nodes.len())?;
+    Ok(crate::AppendSessionNodesOutcome::Appended {
+        node_ids,
+        leaf_node_id: result.committed_leaf_node_id.or(leaf),
+    })
 }
 
 async fn commit_runtime_state_for_property(
