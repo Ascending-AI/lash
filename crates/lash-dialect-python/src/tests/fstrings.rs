@@ -44,9 +44,20 @@ fn fields_are_formatted_before_the_text_is_built() {
     let text = kernel_text(source);
     assert!(text.matches("text.concat(").count() >= 6, "{text}");
     assert!(!text.contains("text.join("), "{text}");
-    for function in lowered.document.functions.values() {
+    for function in lowered.document.functions.values().filter(|function| {
+        matches!(
+            function.implementation,
+            lash_kernel_doc::Implementation::Guest {
+                metering: lash_kernel_doc::Metering::Statements,
+                ..
+            }
+        )
+    }) {
         assert!(
-            !action_in_call(lash_kernel_doc::Node::Block(&function.body), false),
+            !action_in_call(
+                lash_kernel_doc::Node::Block(&function.body().unwrap().block),
+                false
+            ),
             "a field formats inside a concatenation:\n{text}"
         );
     }

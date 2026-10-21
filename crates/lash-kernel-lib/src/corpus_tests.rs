@@ -1,9 +1,8 @@
 //! Independent recorded native outcomes and charges.
 
 use lash_kernel_doc::arena::{ArenaHandle, Body};
-use lash_kernel_doc::{
-    Datum, FunctionId, FunctionRegistry, Measure, NativeError, Operand, Value, WorkCounter,
-};
+use lash_kernel_doc::{Datum, FunctionRegistry, Measure, NativeError, Operand, Value, WorkCounter};
+use lash_vocabulary::FunctionId;
 use num_traits::ToPrimitive;
 
 use crate::register_numbers;
@@ -232,23 +231,26 @@ fn k_lib_006_recorded_native_edges_and_charges_match() {
             let charged = if matches!(result, Err(NativeError::Guard(_))) {
                 0
             } else {
-                definition.charge.evaluate(&mut |operand, measure| {
-                    let value = match operand {
-                        Operand::Result => result.as_ref().ok(),
-                        Operand::Param(name) => definition
-                            .signature
-                            .params
-                            .iter()
-                            .position(|param| param.name == *name)
-                            .map(|index| &args[index]),
-                    };
-                    value.map_or(0, |value| match measure {
-                        Measure::Size => size(value, &heap),
-                        Measure::DeepSize => deep_size(value, &heap),
-                        Measure::Magnitude => magnitude(value, &heap),
-                        Measure::NestedSize => nested_size(value, &heap),
+                definition
+                    .charge()
+                    .expect("formula-metered library function")
+                    .evaluate(&mut |operand, measure| {
+                        let value = match operand {
+                            Operand::Result => result.as_ref().ok(),
+                            Operand::Param(name) => definition
+                                .signature
+                                .params
+                                .iter()
+                                .position(|param| param.name == *name)
+                                .map(|index| &args[index]),
+                        };
+                        value.map_or(0, |value| match measure {
+                            Measure::Size => size(value, &heap),
+                            Measure::DeepSize => deep_size(value, &heap),
+                            Measure::Magnitude => magnitude(value, &heap),
+                            Measure::NestedSize => nested_size(value, &heap),
+                        })
                     })
-                })
             };
             assert_eq!(
                 charged,
@@ -430,23 +432,26 @@ fn prepared_scalar_completion_matches_operator_corpus() {
             else {
                 continue;
             };
-            let generic = definition.charge.evaluate(&mut |operand, measure| {
-                let value = match operand {
-                    Operand::Result => Some(&answer.value),
-                    Operand::Param(name) => definition
-                        .signature
-                        .params
-                        .iter()
-                        .position(|param| param.name == *name)
-                        .and_then(|index| args.get(index)),
-                };
-                value.map_or(0, |value| match measure {
-                    Measure::Size => size(value, &heap),
-                    Measure::DeepSize => deep_size(value, &heap),
-                    Measure::Magnitude => magnitude(value, &heap),
-                    Measure::NestedSize => nested_size(value, &heap),
-                })
-            });
+            let generic = definition
+                .charge()
+                .expect("formula-metered library function")
+                .evaluate(&mut |operand, measure| {
+                    let value = match operand {
+                        Operand::Result => Some(&answer.value),
+                        Operand::Param(name) => definition
+                            .signature
+                            .params
+                            .iter()
+                            .position(|param| param.name == *name)
+                            .and_then(|index| args.get(index)),
+                    };
+                    value.map_or(0, |value| match measure {
+                        Measure::Size => size(value, &heap),
+                        Measure::DeepSize => deep_size(value, &heap),
+                        Measure::Magnitude => magnitude(value, &heap),
+                        Measure::NestedSize => nested_size(value, &heap),
+                    })
+                });
             assert_eq!(units, generic, "{name}: guard mask {mask:04b}");
             assert_eq!(
                 units,
@@ -538,21 +543,24 @@ fn immediate_charges_are_the_declared_formula() {
                 let Some(fast) = fast else {
                     continue;
                 };
-                let general = definition.charge.evaluate(&mut |operand, measure| {
-                    let value = match operand {
-                        Operand::Result => Some(result),
-                        Operand::Param(name) => params
-                            .iter()
-                            .position(|param| param.name == *name)
-                            .and_then(|index| args.get(index)),
-                    };
-                    value.map_or(0, |value| match measure {
-                        Measure::Size => size(value, &heap),
-                        Measure::DeepSize => deep_size(value, &heap),
-                        Measure::Magnitude => magnitude(value, &heap),
-                        Measure::NestedSize => nested_size(value, &heap),
-                    })
-                });
+                let general = definition
+                    .charge()
+                    .expect("formula-metered library function")
+                    .evaluate(&mut |operand, measure| {
+                        let value = match operand {
+                            Operand::Result => Some(result),
+                            Operand::Param(name) => params
+                                .iter()
+                                .position(|param| param.name == *name)
+                                .and_then(|index| args.get(index)),
+                        };
+                        value.map_or(0, |value| match measure {
+                            Measure::Size => size(value, &heap),
+                            Measure::DeepSize => deep_size(value, &heap),
+                            Measure::Magnitude => magnitude(value, &heap),
+                            Measure::NestedSize => nested_size(value, &heap),
+                        })
+                    });
                 assert_eq!(fast, general, "{}{args:?} -> {result:?}", definition.name);
                 answered += 1;
             }
@@ -667,25 +675,28 @@ fn typed_scalar_kernels_agree_with_general_entries_on_edge_pairs() {
                             answer.scalar_sizes.unwrap(),
                         )
                         .unwrap();
-                        let generic = definition.charge.evaluate(&mut |operand, measure| {
-                            let value = match operand {
-                                Operand::Result => &general,
-                                Operand::Param(name) => {
-                                    &args[definition
-                                        .signature
-                                        .params
-                                        .iter()
-                                        .position(|p| p.name == *name)
-                                        .unwrap()]
+                        let generic = definition
+                            .charge()
+                            .expect("formula-metered library function")
+                            .evaluate(&mut |operand, measure| {
+                                let value = match operand {
+                                    Operand::Result => &general,
+                                    Operand::Param(name) => {
+                                        &args[definition
+                                            .signature
+                                            .params
+                                            .iter()
+                                            .position(|p| p.name == *name)
+                                            .unwrap()]
+                                    }
+                                };
+                                match measure {
+                                    Measure::Size => size(value, &heap),
+                                    Measure::DeepSize => deep_size(value, &heap),
+                                    Measure::Magnitude => magnitude(value, &heap),
+                                    Measure::NestedSize => nested_size(value, &heap),
                                 }
-                            };
-                            match measure {
-                                Measure::Size => size(value, &heap),
-                                Measure::DeepSize => deep_size(value, &heap),
-                                Measure::Magnitude => magnitude(value, &heap),
-                                Measure::NestedSize => nested_size(value, &heap),
-                            }
-                        });
+                            });
                         assert_eq!(units, generic, "{context}");
                     }
                 }

@@ -35,3 +35,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     Ok(())
 }
+
+#[path = "../src/tests/linked.rs"]
+mod linked;

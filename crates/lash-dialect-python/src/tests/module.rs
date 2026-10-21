@@ -7,18 +7,14 @@ use std::collections::BTreeMap;
 
 use lash_kernel_dialect::workflow::ModuleRefusal;
 use lash_kernel_dialect::{Environment, Lowered, Mode};
-use lash_kernel_doc::{MapType, Name, Param, Signature, Type};
+use lash_vocabulary::{MapType, Name, Param, Signature, Type};
 
 use super::machine;
 
 fn module(source: &str) -> Result<Lowered, lash_kernel_dialect::Diagnostic> {
     let effects = machine::effects();
-    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        &effects,
-        &lash_kernel_doc::ContractId::new("1"),
-        machine::controls(),
-    )
-    .expect("the test's effects are operations");
+    let environment_namespaces = crate::tests::linked::namespaces(&effects, machine::controls())
+        .expect("the test's effects are operations");
     let environment = Environment::new(machine::library(), &environment_namespaces);
     let lowered = crate::lower(source, &environment, Mode::Module)?;
     lash_kernel_doc::validate_document(&lowered.document, machine::library())
@@ -36,9 +32,12 @@ fn entries(source: &str) -> BTreeMap<Name, Signature> {
     module(source)
         .unwrap_or_else(|diagnostic| panic!("{diagnostic}\n{source}"))
         .document
-        .entries
+        .exports
         .iter()
-        .map(|(name, entry)| (name.clone(), entry.signature.clone()))
+        .filter_map(|(name, export)| match export {
+            lash_kernel_doc::Export::Function(f) => Some((name.clone(), f.signature.clone())),
+            _ => None,
+        })
         .collect()
 }
 
@@ -146,7 +145,7 @@ if helper():
 /// keywords naming its parameters, as a cell calls a tool by its one name.
 #[test]
 fn a_module_calls_a_namespaced_tool_by_its_dotted_path() {
-    let show = lash_kernel_doc::EffectName::new("display.show_message").expect("a tool's name");
+    let show = lash_vocabulary::EffectName::new("display.show_message").expect("a tool's name");
     let effects = BTreeMap::from([(
         show.clone(),
         Signature {
@@ -154,12 +153,8 @@ fn a_module_calls_a_namespaced_tool_by_its_dotted_path() {
             result: Type::Any,
         },
     )]);
-    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        &effects,
-        &lash_kernel_doc::ContractId::new("1"),
-        &Default::default(),
-    )
-    .expect("the test's effects are operations");
+    let environment_namespaces = crate::tests::linked::namespaces(&effects, &Default::default())
+        .expect("the test's effects are operations");
     let environment = Environment::new(machine::library(), &environment_namespaces);
     let lowered = crate::lower(
         "async def demo():\n    return await display.show_message(text=\"hi\")\n",
@@ -167,21 +162,29 @@ fn a_module_calls_a_namespaced_tool_by_its_dotted_path() {
         Mode::Module,
     )
     .unwrap_or_else(|diagnostic| panic!("{diagnostic}"));
-    assert!(lowered.document.manifest.effects.contains_key(&show));
+    assert!(
+        lowered
+            .document
+            .imports
+            .values()
+            .any(|import| import.name.package.to_string() == "display"
+                && import.name.member.as_str() == "show_message")
+    );
 }
 
 /// FIG-6515: host tools take one input record. Python keywords name its
 /// declared fields, and the performed argument stays that one record.
 #[test]
 fn tool_keywords_name_the_declared_input_fields() {
-    use lash_kernel_doc::{Datum, EffectName};
+    use lash_kernel_doc::Datum;
     use lash_kernel_vm::{End, Outcome, Request};
+    use lash_vocabulary::EffectName;
 
     let show = EffectName::new("display.show_message").expect("a tool's name");
     let projected = |schema: serde_json::Value| {
-        lash_kernel_check::type_of_schema(&schema).expect("a tool's input type")
+        lash_vocabulary::schema::type_of_schema(&schema).expect("a tool's input type")
     };
-    let signature = lash_kernel_check::tool_signature(
+    let signature = lash_vocabulary::schema::tool_signature(
         projected(serde_json::json!({
             "type": "object",
             "properties": {
@@ -192,15 +195,11 @@ fn tool_keywords_name_the_declared_input_fields() {
             "additionalProperties": false
         })),
         false,
-        lash_kernel_doc::Type::Null,
+        lash_vocabulary::Type::Null,
     );
     let effects = BTreeMap::from([(show.clone(), signature.clone())]);
-    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        &effects,
-        &lash_kernel_doc::ContractId::new("1"),
-        machine::controls(),
-    )
-    .expect("the test's effects are operations");
+    let environment_namespaces = crate::tests::linked::namespaces(&effects, machine::controls())
+        .expect("the test's effects are operations");
     let environment = Environment::new(machine::library(), &environment_namespaces);
     for (call, expected) in [
         (
@@ -219,7 +218,17 @@ fn tool_keywords_name_the_declared_input_fields() {
         let lowered = crate::lower(&source, &environment, Mode::Module)
             .unwrap_or_else(|diagnostic| panic!("{diagnostic}\n{source}"));
         assert_eq!(
-            lowered.document.manifest.effects[&show].signature,
+            lowered
+                .document
+                .imports
+                .values()
+                .find_map(|import| match &import.kind {
+                    lash_vocabulary::ImportKind::Operation { signature }
+                        if import.name.member.as_str() == "show_message" =>
+                        Some(signature.clone()),
+                    _ => None,
+                })
+                .unwrap(),
             signature
         );
         let mut admission = lash_kernel_check::Environment::new(machine::library());
@@ -228,9 +237,9 @@ fn tool_keywords_name_the_declared_input_fields() {
             .map(|(effect, signature)| {
                 (
                     effect.clone(),
-                    lash_kernel_doc::OperationRequirement::new(
+                    lash_vocabulary::OperationRequirement::new(
                         signature.clone(),
-                        lash_kernel_doc::ContractId::new("1"),
+                        lash_vocabulary::ContractId::new("1"),
                     ),
                 )
             })
@@ -247,11 +256,9 @@ fn tool_keywords_name_the_declared_input_fields() {
                 park.requests
                     .into_iter()
                     .map(|request| {
-                        let Request::Effect(effect) = request else {
-                            panic!("the tool call does not sleep");
-                        };
+                        let Request::Effect(effect) = request;
                         calls += 1;
-                        assert_eq!(effect.effect, cell_effect);
+                        assert_eq!(crate::tests::linked::operation(&effect.use_), cell_effect);
                         assert_eq!(effect.args, [Datum::Record(expected.clone())]);
                         (effect.wait, Outcome::Completed(Datum::Null))
                     })
@@ -319,10 +326,15 @@ fn the_contract_refuses_under_the_shared_codes() {
 fn entry_convention_keeps_python_positional_and_keyword_arguments() {
     use lash_kernel_doc::{Datum, Integer, StartConvention};
     let lowered = module("async def run(a: int, b: int):\n    async def pair(x, y):\n        return [x, y]\n    return [await pair(a, b), await pair(y=a, x=b)]\n").unwrap();
-    let entry = &lowered.document.entries[&Name::new("run")];
+    let entry = super::linked::exported(&lowered.document, &Name::new("run"));
     assert_eq!(entry.convention, StartConvention::Direct);
     assert_eq!(
-        lowered.document.functions[&Name::new("run")].params,
+        lowered.document.functions[&entry.function]
+            .signature
+            .params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect::<Vec<_>>(),
         [Name::new("a"), Name::new("b")]
     );
     let a = Datum::Int(Integer::from(3));
@@ -345,20 +357,24 @@ fn task_cleanup_follows_resolved_calls_and_belongs_to_the_entry_root() {
     assert!(
         !plain
             .document
-            .manifest
-            .functions
+            .imports
             .values()
-            .any(|name| name.as_str() == "tasks.cancel_all")
+            .any(|import| import.name.package.to_string() == "tasks"
+                && import.name.member.as_str() == "cancel_all")
     );
     let tasks = module("import asyncio\nasync def run():\n    async def child():\n        try:\n            await asyncio.sleep(1)\n        finally:\n            print('cleanup')\n    def launch():\n        return asyncio.ensure_future(child())\n    launch()\n    await asyncio.sleep(0)\n    print('done')\n    return 7\n").unwrap();
     let document = &tasks.document;
     let lash_kernel_doc::StartConvention::PyDirect { cleanup } =
-        &document.entries[&Name::new("run")].convention
+        &super::linked::exported(document, &Name::new("run")).convention
     else {
         panic!("the entry declares no root cleanup");
     };
     assert_eq!(
-        document.manifest.functions[cleanup].as_str(),
+        match cleanup {
+            lash_kernel_doc::FunctionTarget::Import(slot) =>
+                document.imports[slot].name.to_string(),
+            lash_kernel_doc::FunctionTarget::Local(id) => document.functions[id].name.to_string(),
+        },
         "tasks.cancel_all"
     );
     let no_try = |body: &[lash_kernel_doc::Stmt]| {
@@ -366,7 +382,14 @@ fn task_cleanup_follows_resolved_calls_and_belongs_to_the_entry_root() {
             .iter()
             .any(|stmt| matches!(stmt, lash_kernel_doc::Stmt::Try(_)))
     };
-    assert!(no_try(&document.functions[&Name::new("run")].body) && no_try(&document.main));
+    assert!(
+        no_try(
+            &document.functions[&super::linked::exported(document, &Name::new("run")).function]
+                .body()
+                .unwrap()
+                .block
+        ) && no_try(document.main.as_deref().unwrap_or_default())
+    );
     assert_eq!(
         machine::entry_output(tasks.document.into_document(), Vec::new()),
         (

@@ -1,9 +1,9 @@
 //! Calls: functions, tools, built-ins, methods and asyncio.
 
 use lash_kernel_doc::{
-    ActExpr, ActKind, Action, Atom, Callee, EffectName, Expr, Literal, Name, RecordEntry,
-    RecordType, Rhs, Signature, Stmt, Type,
+    ActExpr, ActKind, Action, Atom, Callee, Expr, Literal, RecordEntry, Rhs, Stmt,
 };
+use lash_vocabulary::{EffectName, Name, RecordType, Signature, Type};
 use ruff_python_ast::{self as ast, Expr as PyExpr};
 use ruff_text_size::{Ranged, TextRange};
 
@@ -160,8 +160,7 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn is_asyncio(&self, expr: &PyExpr) -> bool {
-        matches!(expr, PyExpr::Name(name) if name.id.as_str() == "asyncio")
-            && self.variable("asyncio").is_none()
+        matches!(expr, PyExpr::Name(name) if self.variable(name.id.as_str()).is_none() && (name.id.as_str() == "asyncio" || self.imported.get(name.id.as_str()).is_some_and(|path|path==&["asyncio"])))
     }
 
     /// The asyncio function a call names, if it names one.
@@ -204,9 +203,12 @@ impl Lowerer<'_> {
         }
         let written = path.iter().map(String::as_str).collect::<Vec<_>>();
         match self.namespaces.resolve(&written, Spelling::Python) {
-            Resolution::Operation { operation, offered } => Some((
+            Resolution::Operation { operation, offered } => {
+                Some((operation.effect_name(), offered.signature.clone()))
+            }
+            Resolution::Deferred { operation } => Some((
                 operation.effect_name(),
-                offered.requirement.signature.clone(),
+                lash_kernel_dialect::deferred_signature(),
             )),
             _ => None,
         }
@@ -238,6 +240,9 @@ impl Lowerer<'_> {
                 let id = name.id.as_str();
                 if self.variable(id).is_some() {
                     return Some((vec![id.to_owned()], true));
+                }
+                if let Some(path) = self.imported.get(id) {
+                    return Some((path.clone(), false));
                 }
                 (!is_builtin(id) && !crate::exceptions::is_builtin(id) && id != "asyncio")
                     .then(|| (vec![id.to_owned()], false))
@@ -283,11 +288,11 @@ impl Lowerer<'_> {
         if package.is_empty()
             || !package
                 .iter()
-                .all(|segment| lash_kernel_dialect::Segment::is_canonical(segment))
+                .all(|segment| lash_vocabulary::Segment::is_canonical(segment))
         {
             return Ok(None);
         }
-        if lash_kernel_dialect::Segment::is_canonical(name) {
+        if lash_vocabulary::Segment::is_canonical(name) {
             return Ok(Some(path.to_owned()));
         }
         let Some(canonical) =
@@ -387,6 +392,19 @@ impl Lowerer<'_> {
     }
 
     pub(super) fn call(&mut self, call: &ast::ExprCall, awaited: bool) -> Lowering<Operand> {
+        if self
+            .call_path(&call.func)
+            .is_some_and(|(path, bound)| !bound && path == ["time", "time"])
+        {
+            self.plain_arguments(&call.arguments, "time.time")?;
+            if !call.arguments.args.is_empty() {
+                return Err(arguments_error(
+                    "time.time takes no arguments",
+                    call.range(),
+                ));
+            }
+            return self.invoke("py.time", &[], Ty::Float);
+        }
         self.operation_refusal(call)?;
         if self.calls.is_some()
             && let Some(path) = self.tool_path(&call.func)
@@ -660,7 +678,28 @@ impl Lowerer<'_> {
         call: &ast::ExprCall,
     ) -> Lowering<ActExpr> {
         self.no_stars(&call.arguments)?;
-        let args = if let [param] = signature.params.as_slice()
+        let deferred = self.namespaces.operation(effect).is_none();
+        let args = if deferred {
+            let exprs = call.arguments.args.iter().collect::<Vec<_>>();
+            let values = self.operands(&exprs)?;
+            let mut args = values
+                .into_iter()
+                .map(|value| value.expr)
+                .collect::<Vec<_>>();
+            if !call.arguments.keywords.is_empty() {
+                let mut fields = Vec::new();
+                for keyword in &call.arguments.keywords {
+                    let name = keyword.arg.as_ref().expect("no stars").id.to_string();
+                    let value = self.expr(&keyword.value)?;
+                    fields.push(RecordEntry {
+                        field: name,
+                        value: value.expr,
+                    });
+                }
+                args.push(Expr::Record(fields));
+            }
+            args
+        } else if let [param] = signature.params.as_slice()
             && let Type::Record(input) = &param.ty
             && !call.arguments.keywords.is_empty()
         {
@@ -669,19 +708,28 @@ impl Lowerer<'_> {
         } else {
             self.tool_arguments(effect, signature, call)?
         };
-        // The perform states the requirement the operation is offered
-        // under: its signature and its contract.
-        if let Some((_, offered)) = self.namespaces.operation(effect) {
-            self.performed
-                .insert(effect.clone(), offered.requirement.clone());
-        }
+        let operation = lash_vocabulary::names::QualifiedOperation::from_effect(effect)
+            .expect("canonical operation");
+        let deferred = self.namespaces.operation(effect).is_none();
+        let slot = self.imports.operation(
+            lash_vocabulary::names::QualifiedName {
+                package: operation.package,
+                member: operation.name,
+                type_member: None,
+            },
+            signature.clone(),
+        );
         Ok(ActExpr {
             kind: ActKind::Perform {
-                effect: effect.clone(),
+                slot,
                 result: signature.result.clone(),
                 then_yield: false,
             },
-            args,
+            args: if deferred {
+                vec![Expr::List(args)]
+            } else {
+                args
+            },
         })
     }
 
@@ -860,7 +908,7 @@ impl Lowerer<'_> {
 
     /// `await value via policy`.
     pub(super) fn await_via(&mut self, policy: &str, value: Operand) -> Lowering<Operand> {
-        let policy = self.function(policy)?;
+        let policy = self.function_target(policy)?;
         Ok(Operand::inline(
             Expr::Act(Box::new(ActExpr {
                 kind: ActKind::Await(policy),
@@ -896,19 +944,8 @@ impl Lowerer<'_> {
                         call.range(),
                     ));
                 };
-                let action = match sleep_literal(seconds) {
-                    // A sleep of zero lets the other ready tasks run.
-                    Some(None) => Action::Yield,
-                    Some(Some(duration)) => Action::Sleep {
-                        duration: Atom::Literal(duration),
-                        then_yield: false,
-                    },
-                    None => {
-                        let seconds = self.expr(seconds)?;
-                        return self.invoke("py.sleep", &[seconds], Ty::None);
-                    }
-                };
-                Ok(Operand::inline(action.into(), Ty::None))
+                let seconds = self.expr(seconds)?;
+                self.invoke("py.sleep", &[seconds], Ty::None)
             }
             "gather" => {
                 if !awaited {
@@ -1038,14 +1075,14 @@ impl Lowerer<'_> {
                 let seconds = self.expr(seconds)?;
                 let seconds = self.pin(seconds);
                 ActExpr {
-                    kind: ActKind::Call(Callee::Library(self.function("py.sleep")?)),
+                    kind: ActKind::Call(self.helper_callee("py.sleep")?),
                     args: vec![seconds.expr],
                 }
             }
             Some("gather") => {
                 let tasks = self.gather_members(call)?;
                 ActExpr {
-                    kind: ActKind::Call(Callee::Library(self.function("py.gather")?)),
+                    kind: ActKind::Call(self.helper_callee("py.gather")?),
                     args: vec![tasks.expr],
                 }
             }
@@ -1119,17 +1156,11 @@ impl Lowerer<'_> {
             this.emit(Stmt::Return { value: result.expr });
             Ok(())
         })?;
-        let closure = lash_kernel_doc::Closure {
-            params: Vec::new(),
-            body: body.stmts,
-            start: None,
-        };
-        self.inline_closures.push((closure.clone(), body.notes));
-        let work = Operand::inline(Expr::Closure(Box::new(closure)), Ty::Unknown);
-        let run = self.function("py.task.run")?;
+        let work = self.emit_closure(Vec::new(), body, None);
+        let run = self.helper_callee("py.task.run")?;
         Ok(Operand::inline(
             Expr::Act(Box::new(ActExpr {
-                kind: ActKind::Spawn(Callee::Library(run)),
+                kind: ActKind::Spawn(run),
                 args: vec![work.expr],
             })),
             Ty::Unknown,
@@ -1372,31 +1403,4 @@ pub(super) fn arguments_error(
     range: TextRange,
 ) -> lash_kernel_dialect::Diagnostic {
     diagnostics::diagnostic(Code::Arguments, message, range)
-}
-
-/// A literal sleep: `Some(None)` for zero, `Some(Some(ms))` for a positive
-/// number of seconds as milliseconds, and `None` when the source computes
-/// it.
-fn sleep_literal(seconds: &PyExpr) -> Option<Option<Literal>> {
-    let PyExpr::NumberLiteral(literal) = seconds else {
-        return None;
-    };
-    match &literal.value {
-        ast::Number::Int(value) => {
-            let seconds = value.as_u64()?;
-            if seconds == 0 {
-                return Some(None);
-            }
-            let milliseconds = i64::try_from(seconds.checked_mul(1000)?).ok()?;
-            Some(Some(Literal::Int(milliseconds.into())))
-        }
-        ast::Number::Float(value) => {
-            if *value == 0.0 {
-                return Some(None);
-            }
-            (value.is_finite() && *value > 0.0)
-                .then(|| Some(Literal::Float((*value * 1000.0).into())))
-        }
-        ast::Number::Complex { .. } => None,
-    }
 }

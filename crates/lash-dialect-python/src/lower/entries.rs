@@ -12,9 +12,8 @@
 use std::collections::HashSet;
 
 use lash_kernel_dialect::workflow::{Entry, ModuleError, ModuleRefusal};
-use lash_kernel_doc::{
-    AssignOrder, Expr, Function, Literal, Name, Param, Place, Rhs, Signature, Stmt, Type,
-};
+use lash_kernel_doc::{AssignOrder, Expr, Literal, Place, Rhs, Stmt};
+use lash_vocabulary::{Name, Param, Signature, Type};
 use ruff_python_ast::{self as ast, Expr as PyExpr, Stmt as PyStmt};
 use ruff_text_size::{Ranged, TextRange};
 
@@ -27,7 +26,7 @@ use crate::diagnostics;
 pub(super) fn declarations(body: &[PyStmt]) -> HashSet<TextRange> {
     body.iter()
         .filter_map(|statement| match statement {
-            PyStmt::FunctionDef(def) if def.is_async => Some(def.range),
+            PyStmt::FunctionDef(def) => Some(def.range),
             _ => None,
         })
         .collect()
@@ -61,7 +60,7 @@ impl Lowerer<'_> {
         self.in_entry = false;
         let convention = match self.creates_tasks {
             true => self
-                .function("tasks.cancel_all")
+                .function_target("tasks.cancel_all")
                 .map(|cleanup| lash_kernel_doc::StartConvention::PyDirect { cleanup }),
             false => Ok(lash_kernel_doc::StartConvention::Direct),
         };
@@ -79,19 +78,24 @@ impl Lowerer<'_> {
         let (params, body) = body?;
         let convention = convention?;
         let entry = Name::new(name);
-        // Only a module's lowering marks entry definitions (`declarations`).
+        let definition = lash_kernel_dialect::authoring::local_function(
+            params,
+            body.stmts,
+            &self.imports.as_map(),
+            self.library,
+            &self.local_functions,
+        );
+        let identity = definition.identity();
         if let Some(module) = self.module.as_mut() {
             module
                 .add(Entry {
                     name: entry.clone(),
                     span,
-                    function: Function {
-                        params,
-                        body: body.stmts,
-                        start: None,
-                    },
+                    function: definition,
                     signature,
                     convention,
+                    asynchronous: def.is_async,
+                    rest: def.parameters.vararg.is_some(),
                     notes: body.notes,
                 })
                 .map_err(ModuleError::into_diagnostic)?;
@@ -101,7 +105,7 @@ impl Lowerer<'_> {
         self.span = span;
         self.emit(Stmt::Assign {
             place: Place::Variable(variable),
-            value: Rhs::Expr(Expr::Literal(Literal::Function(entry))),
+            value: Rhs::Expr(Expr::Literal(Literal::Function(identity))),
             order: AssignOrder::ValueFirst,
         });
         Ok(())

@@ -16,9 +16,10 @@ use std::collections::BTreeMap;
 use std::ops::Range;
 
 use lash_kernel_doc::{
-    Caption, CaptionEntry, CaptionKind, CaptionTarget, FieldPath, FieldRoot, FieldTarget, Name,
+    Caption, CaptionEntry, CaptionKind, CaptionTarget, FieldPath, FieldRoot, FieldTarget,
     ParamTarget,
 };
+use lash_vocabulary::Name;
 use swc_common::comments::{CommentKind, SingleThreadedComments};
 use swc_ecma_ast as swc;
 

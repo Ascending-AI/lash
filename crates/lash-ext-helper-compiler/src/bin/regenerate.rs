@@ -30,15 +30,6 @@ fn main() -> ExitCode {
         }
         println!("{}: {} plans", dialect.name(), generated.planned);
     }
-    // The plan of the `dataframe` fixture's `collect_rows`, for the same
-    // laws (FIG-6916).
-    let path = lash_ext_helper_compiler::DATAFRAME_PLANS;
-    if let Err(error) = lash_ext_helper_compiler::dataframe_plans()
-        .and_then(|rust| std::fs::write(root.join(path), rust).map_err(|error| error.to_string()))
-    {
-        eprintln!("{path}: {error}");
-        return ExitCode::FAILURE;
-    }
     // The plans of the kernel's body-perform laws (FIG-6916).
     let path = lash_ext_helper_compiler::BODY_PERFORM_PLANS;
     if let Err(error) = lash_ext_helper_compiler::body_perform_plans(include_str!(
@@ -68,8 +59,7 @@ fn main() -> ExitCode {
 
 fn control_fixture() -> Result<String, String> {
     let mut library = lash_ext_helper_compiler::library::Library::of(Dialect::Python)?;
-    let mut names = lash_kernel_dialect::NamedLibrary::from_registry(&library.registry)
-        .map_err(|error| error.to_string())?;
+    let mut names = library.names.clone();
     let definitions = lash_kernel_dialect::define_functions(
         include_str!("../../tests/control.kernel"),
         &mut names,

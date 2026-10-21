@@ -8,14 +8,12 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
 use lash_kernel_dialect::Environment;
-use lash_kernel_doc::{
-    Datum, EffectName, ErrorDatum, FunctionRegistry, Handle, Integer, Name, Param, Signature,
-    Timestamp, Type,
-};
+use lash_kernel_doc::{Datum, ErrorDatum, FunctionRegistry, Handle};
 use lash_kernel_vm::{
-    Bounds, CellStart, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary, Program,
-    Request, RunError, Step, Target, WaitId,
+    Bounds, CellStart, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary, Request,
+    RunError, Step, Target, WaitId,
 };
+use lash_vocabulary::{EffectName, Name, Param, Signature, Type};
 use serde::Deserialize;
 
 /// The real kernel registry, with every dialect helper defined against it.
@@ -71,14 +69,19 @@ struct Console {
 }
 
 impl Host for Console {
-    fn clock(&mut self) -> Timestamp {
-        Timestamp {
-            nanoseconds: Integer::from(0),
-        }
-    }
-
-    fn random(&mut self) -> u64 {
-        self.random_bits.pop_front().unwrap_or(0)
+    fn perform(
+        &mut self,
+        use_: &lash_vocabulary::OperationUse,
+        _: &[Datum],
+        _: &lash_vocabulary::sites::PositionLabel,
+        _: &lash_vocabulary::sites::Site,
+    ) -> Result<Result<Datum, lash_kernel_doc::ErrorDatum>, lash_kernel_vm::HostFault> {
+        let bits = if super::linked::operation(use_).as_str().ends_with(".random") {
+            self.random_bits.pop_front().unwrap_or(0)
+        } else {
+            0
+        };
+        crate::tests::linked::read(use_, bits)
     }
 
     fn read(&mut self, _handle: &Handle, _request: &Datum) -> Result<Datum, ErrorDatum> {
@@ -139,18 +142,29 @@ fn label(request: &Request) -> String {
                 Some(Datum::Float(value)) => value.get().to_string(),
                 other => format!("{other:?}"),
             };
-            format!("{}:{argument}", effect.effect)
+            let name = crate::tests::linked::operation(&effect.use_);
+            if name.as_str() == "typescript.sleep" {
+                let Some(Datum::Int(milliseconds)) = effect.args.first() else {
+                    panic!("sleep milliseconds")
+                };
+                format!("sleep:{milliseconds}")
+            } else {
+                format!("{name}:{argument}")
+            }
         }
-        Request::Sleep(sleep) => format!("sleep:{}", sleep.duration.as_millis()),
     }
 }
 
 fn answer(request: &Request) -> (WaitId, Outcome) {
     match request {
-        Request::Sleep(sleep) => (sleep.wait, Outcome::Elapsed),
         Request::Effect(effect) => {
-            let argument = effect.args.first().cloned().unwrap_or(Datum::Null);
-            let outcome = if effect.effect.as_str() == "host.boom" {
+            let argument =
+                if crate::tests::linked::operation(&effect.use_).as_str() == "typescript.sleep" {
+                    Datum::Null
+                } else {
+                    effect.args.first().cloned().unwrap_or(Datum::Null)
+                };
+            let outcome = if crate::tests::linked::operation(&effect.use_).as_str() == "host.boom" {
                 Outcome::Failed(ErrorDatum {
                     kind: "boom".to_string(),
                     message: match &argument {
@@ -220,7 +234,11 @@ pub(crate) fn end_with_bindings(source: &str, bindings: super::pages::Session) -
                 let [Request::Effect(effect)] = park.requests.as_slice() else {
                     panic!("only `finish` is answered: {park:?}\n{text}");
                 };
-                assert_eq!(effect.effect.as_str(), "control.finish", "{text}");
+                assert_eq!(
+                    crate::tests::linked::operation(&effect.use_).as_str(),
+                    "control.finish",
+                    "{text}"
+                );
                 finished_with = Some(effect.args.first().cloned().unwrap_or(Datum::Null));
                 machine
                     .deliver(effect.wait, Outcome::Completed(Datum::Null))
@@ -253,12 +271,8 @@ fn start_with_bindings(source: &str, values: super::pages::Session) -> (KernelMa
     let library = super::library();
     let effects = effects();
     let bindings = values.names();
-    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        &effects,
-        &lash_kernel_doc::ContractId::new("1"),
-        super::controls(),
-    )
-    .expect("the test's effects are operations");
+    let environment_namespaces = crate::tests::linked::namespaces(&effects, super::controls())
+        .expect("the test's effects are operations");
     let environment = Environment::new(library, &environment_namespaces);
     let lowered = crate::lower(
         source,
@@ -273,11 +287,8 @@ fn start_with_bindings(source: &str, values: super::pages::Session) -> (KernelMa
     if let Err(invalid) = lash_kernel_doc::validate_document(&lowered.document, library) {
         panic!("{invalid}\n{text}");
     }
-    let program = Program {
-        closure: super::pages::CLOSURE,
-        document: Arc::clone(lowered.document.shared()),
-        library: prepared().clone(),
-    };
+    let program =
+        crate::tests::linked::program(Arc::clone(lowered.document.shared()), prepared().clone());
     let start = CellStart {
         target: Target::Main,
         args: Vec::new(),
@@ -311,7 +322,10 @@ fn math_random_preserves_the_kernel_unit_interval_for_direct_and_borrowed_calls(
     let [Request::Effect(effect)] = park.requests.as_slice() else {
         panic!("only finish is requested: {park:?}");
     };
-    assert_eq!(effect.effect.as_str(), "control.finish");
+    assert_eq!(
+        crate::tests::linked::operation(&effect.use_).as_str(),
+        "control.finish"
+    );
     let [Datum::List(values)] = effect.args.as_slice() else {
         panic!("finish carries the draws: {:?}", effect.args);
     };
@@ -328,18 +342,13 @@ fn math_random_preserves_the_kernel_unit_interval_for_direct_and_borrowed_calls(
             value
         })
         .collect();
-    for (offset, form) in [(0, "direct"), (1, "borrowed")] {
-        assert!(
-            draws
-                .iter()
-                .skip(offset)
-                .step_by(2)
-                .any(|value| *value >= 0.5),
-            "{form} Math.random must reach the upper half: {draws:?}"
+    let expected = [0.0, 0.25, 0.5, 9007199254740991.0 / 9007199254740992.0];
+    for (pair, expected) in draws.as_chunks::<2>().0.iter().zip(expected) {
+        assert_eq!(
+            *pair,
+            [expected, expected],
+            "direct and borrowed calls use the exact top 53 bits"
         );
-    }
-    for pair in draws.as_chunks::<2>().0 {
-        assert_eq!(pair[0], pair[1], "the same host bits give the same draw");
     }
 }
 
@@ -398,11 +407,7 @@ pub(crate) fn end_of_entry(
     args: Vec<Datum>,
 ) -> (Vec<String>, Datum) {
     let text = lash_kernel_doc::print_document(&document);
-    let program = Program {
-        closure: super::pages::CLOSURE,
-        document: Arc::new(document),
-        library: prepared().clone(),
-    };
+    let program = crate::tests::linked::program(Arc::new(document), prepared().clone());
     let start = CellStart {
         target: Target::Entry(Name::new(entry)),
         args,
@@ -439,16 +444,15 @@ pub(crate) fn end_of_entry(
 /// Executes with a fresh serialized import at slices and parks. Neither
 /// source facts nor operand metadata may be required by resumed execution.
 pub(super) fn plain_record_resume(source: &str, slice: u64, restore: bool) -> (Datum, u64, usize) {
-    let program = Program {
-        closure: super::pages::CLOSURE,
-        document: Arc::clone(
+    let program = crate::tests::linked::program(
+        Arc::clone(
             super::lower_with_effects(source)
                 .expect("law source")
                 .document
                 .shared(),
         ),
-        library: prepared().clone(),
-    };
+        prepared().clone(),
+    );
     let source_pages = super::pages::Source::default();
     let mut machine = super::pages::with_source(
         program.clone(),
@@ -478,11 +482,9 @@ pub(super) fn plain_record_resume(source: &str, slice: u64, restore: bool) -> (D
             Step::Slice => {}
             Step::Parked(park) => {
                 for request in park.requests {
-                    let Request::Effect(effect) = request else {
-                        panic!("effect only")
-                    };
+                    let Request::Effect(effect) = request;
                     let value = effect.args.first().cloned().unwrap_or(Datum::Null);
-                    if effect.effect.as_str() == "control.finish" {
+                    if crate::tests::linked::operation(&effect.use_).as_str() == "control.finish" {
                         result = Some(value.clone());
                     }
                     machine
@@ -696,12 +698,8 @@ fn a_function_crossing_to_a_tool_uses_its_source_entry_convention() {
             .split_once("function f")
             .expect("a source function");
         let effects = effects();
-        let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-            &effects,
-            &lash_kernel_doc::ContractId::new("1"),
-            super::controls(),
-        )
-        .expect("the test's effects are operations");
+        let environment_namespaces = crate::tests::linked::namespaces(&effects, super::controls())
+            .expect("the test's effects are operations");
         let environment = Environment::new(super::library(), &environment_namespaces);
         let entry = crate::lower(
             &format!("export async function run{tail}"),
@@ -711,7 +709,9 @@ fn a_function_crossing_to_a_tool_uses_its_source_entry_convention() {
         .expect("the same body imports as an entry")
         .document
         .into_document();
-        let convention = entry.entries[&Name::new("run")].convention.clone();
+        let convention = super::linked::exported(&entry, &Name::new("run"))
+            .convention
+            .clone();
         let (_, result) = end_of_entry(entry, "run", args.clone());
         assert_eq!(result, expected, "workflow: {function}");
         let source = format!("{function} await host.echo(f);");
@@ -724,9 +724,7 @@ fn a_function_crossing_to_a_tool_uses_its_source_entry_convention() {
             {
                 Step::Slice => {}
                 Step::Parked(park) => {
-                    let Request::Effect(effect) = &park.requests[0] else {
-                        panic!("a tool request");
-                    };
+                    let Request::Effect(effect) = &park.requests[0];
                     let Datum::FunctionValue(function) = &effect.args[0] else {
                         panic!("a frozen function: {:?}", effect.args);
                     };
@@ -735,24 +733,40 @@ fn a_function_crossing_to_a_tool_uses_its_source_entry_convention() {
                 other => panic!("{other:?}\n{text}"),
             }
         };
-        let entry = &function.document.entries[&function.entry];
         assert_eq!(
-            entry.convention, convention,
-            "entry and frozen callable share their host convention"
+            function.convention, convention,
+            "entry and frozen callable share the defining convention"
         );
         assert_eq!(
             matches!(
-                entry.convention,
+                function.convention,
                 lash_kernel_doc::StartConvention::TsArgsList { .. }
             ),
             packed
         );
-        assert!(matches!(
-            entry.convention,
-            lash_kernel_doc::StartConvention::TsDirect { .. }
-                | lash_kernel_doc::StartConvention::TsArgsList { .. }
-        ));
-        let (_, result) = end_of_entry(function.document, function.entry.as_str(), args);
-        assert_eq!(result, expected, "{source}");
+        let document = super::lower_with_effects(&source)
+            .unwrap()
+            .document
+            .into_document();
+        let program = super::linked::program(Arc::new(document), prepared().clone());
+        let mut restarted = super::pages::start(
+            program,
+            BOUNDS,
+            CellStart {
+                target: Target::Callable(function),
+                args,
+                session: None,
+                owner: super::pages::OWNER,
+                modes: Default::default(),
+                host: vec![],
+            },
+        )
+        .unwrap();
+        let Step::Ended(End::Finished(result)) =
+            restarted.run(&mut Console::default(), u64::MAX).unwrap()
+        else {
+            panic!("callable result")
+        };
+        assert_eq!(result.result, expected, "{source}");
     }
 }

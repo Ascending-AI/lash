@@ -18,6 +18,7 @@
 
 mod authority;
 mod boundary;
+pub mod dialect_services;
 mod formats;
 mod host;
 mod process;

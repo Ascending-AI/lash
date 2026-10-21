@@ -7,7 +7,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_dialect::dispatch::Brand;
-use lash_kernel_dialect::{Export, ExportView, Member, SpellKind, Spelling, TypeMember};
+use lash_kernel_dialect::{
+    FunctionMember, NamespaceKind, NamespaceView, SpellKind, Spelling, TypeMember,
+};
 
 use super::Ty;
 
@@ -28,7 +30,7 @@ pub(crate) struct Gives {
 }
 
 impl Gives {
-    pub(crate) fn of(member: &Member) -> Self {
+    pub(crate) fn of(member: &FunctionMember) -> Self {
         Self {
             result: Ty::decoded(&member.signature.result),
             asynchronous: member.asynchronous,
@@ -62,7 +64,7 @@ pub(crate) struct Packages {
 }
 
 impl Packages {
-    pub(crate) fn of(view: &dyn ExportView) -> Self {
+    pub(crate) fn of(view: &dyn NamespaceView) -> Self {
         let spelling = Spelling::TypeScript;
         let mut packages = Self::default();
         for package in view.paths() {
@@ -78,14 +80,14 @@ impl Packages {
                 packages.roots.insert(root.as_str().to_owned());
             }
             for (name, export) in exports {
-                match export {
-                    Export::Function(member) => {
+                match &export.kind {
+                    NamespaceKind::Function(member) => {
                         let spelled = spelling.spell(SpellKind::Member, name);
                         packages
                             .calls
                             .insert(format!("{path}.{spelled}"), Gives::of(member));
                     }
-                    Export::Type(ty) => {
+                    NamespaceKind::Type(ty) => {
                         let spelled =
                             format!("{path}.{}", spelling.spell(SpellKind::TypeName, name));
                         let brand = Brand {

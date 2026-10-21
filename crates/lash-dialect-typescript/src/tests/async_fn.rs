@@ -259,24 +259,6 @@ fn the_promise_constructor_is_refused() {
 
 /// `instanceof Promise` calls its unary predicate with the tested value,
 /// including after the kernel document has been printed as TypeScript.
-#[test]
-fn promise_instanceof_preserves_its_operand_through_printing() {
-    let source = "const f = async () => {}; const p = f(); \
-                  console.log(p instanceof Promise, 1 instanceof Promise);";
-    let original = lower(source).expect("promise predicates lower");
-    let printed = crate::print_kernel(&original.document, None, Default::default())
-        .expect("the document prints");
-    let re_lowered = crate::read_kernel(&printed.source, &original.document, Default::default())
-        .expect("printed promise predicates lower");
-    // The same document runs the same.
-    assert_eq!(
-        original.document.canonical_bytes(),
-        re_lowered.0.canonical_bytes()
-    );
-    let recorded = run(source, &[]);
-    assert_eq!(recorded.lines(), ["true false"]);
-    assert_eq!(recorded.end, "ok");
-}
 
 /// FIG-5905: the source computes the recorded Node result.
 #[test]
@@ -335,7 +317,8 @@ fn null_base_assignment_precedes_key_conversion() {
 /// FIG-6524: only free callees are tool candidates, at their lexical scope.
 #[test]
 fn tool_discovery_resolves_lexical_values_before_namespaces() {
-    let bindings = std::collections::BTreeSet::from([lash_kernel_doc::Name::new("previous")]);
+    let bindings =
+        std::collections::BTreeSet::from([lash_vocabulary::legacy_names::Name::new("previous")]);
     let calls = crate::Parser::default()
         .tool_calls(
             r#"
@@ -351,12 +334,8 @@ fn tool_discovery_resolves_lexical_values_before_namespaces() {
         "#,
             &lash_kernel_dialect::Environment::new(
                 super::library(),
-                &lash_kernel_dialect::Namespaces::of_effects(
-                    &Default::default(),
-                    &lash_kernel_doc::ContractId::new("1"),
-                    &Default::default(),
-                )
-                .expect("the test's effects are operations"),
+                &crate::tests::linked::namespaces(&Default::default(), &Default::default())
+                    .expect("the test's effects are operations"),
             ),
             lash_kernel_dialect::CellEnvironment {
                 bindings: &bindings,
@@ -383,12 +362,8 @@ fn tool_discovery_survives_refusals_and_ignores_bare_calls() {
                 source,
                 &lash_kernel_dialect::Environment::new(
                     super::library(),
-                    &lash_kernel_dialect::Namespaces::of_effects(
-                        &Default::default(),
-                        &lash_kernel_doc::ContractId::new("1"),
-                        &Default::default(),
-                    )
-                    .expect("the test's effects are operations"),
+                    &crate::tests::linked::namespaces(&Default::default(), &Default::default())
+                        .expect("the test's effects are operations"),
                 ),
                 lash_kernel_dialect::CellEnvironment::first(),
             )

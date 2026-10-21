@@ -1,8 +1,9 @@
 //! Test-owned page storage; execution and accounting are the real S4/S7 implementations.
+use lash_kernel_doc::Datum;
 use lash_kernel_doc::heap::*;
-use lash_kernel_doc::{Datum, Name};
 use lash_kernel_state::paged::*;
 use lash_kernel_vm::SessionEditor;
+use lash_vocabulary::Name;
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
@@ -78,6 +79,7 @@ pub(crate) fn start(
     session: &Session,
 ) -> lash_kernel_vm::KernelMachine {
     use lash_kernel_vm::{CellStart, KernelMachine, Machine, Target};
+    let modes = super::linked::modes(&program);
     KernelMachine::start(
         program,
         bounds,
@@ -86,7 +88,7 @@ pub(crate) fn start(
             target: Target::Main,
             args: Vec::new(),
             session: session.root,
-            modes: Default::default(),
+            modes,
             host: Vec::new(),
         },
         Box::new(session.source.clone()),

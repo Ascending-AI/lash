@@ -1,5 +1,6 @@
 //! Deterministic operand facts from source traversal, without library resolution.
 use lash_kernel_doc as k;
+use lash_vocabulary::{FunctionId, FunctionName, Name, Type};
 use std::collections::BTreeMap;
 
 /// Only facts needed to distinguish native operator identities.
@@ -14,12 +15,12 @@ pub enum Kind {
 
 /// A function-local environment; printer and reader visit identical stored nodes.
 #[derive(Default)]
-pub struct Types(pub BTreeMap<k::Name, Kind>);
+pub struct Types(pub BTreeMap<Name, Kind>);
 impl Types {
     pub fn expression(
         &self,
         expr: &k::Expr,
-        functions: &BTreeMap<k::FunctionId, k::FunctionName>,
+        functions: &BTreeMap<FunctionId, FunctionName>,
     ) -> Kind {
         match expr {
             k::Expr::Literal(k::Literal::Int(_) | k::Literal::Float(_)) => Kind::Number,
@@ -32,27 +33,21 @@ impl Types {
             _ => Kind::Unknown,
         }
     }
-    pub fn rhs(
-        &self,
-        value: &k::Rhs,
-        functions: &BTreeMap<k::FunctionId, k::FunctionName>,
-    ) -> Kind {
+    pub fn rhs(&self, value: &k::Rhs, functions: &BTreeMap<FunctionId, FunctionName>) -> Kind {
         match value {
             k::Rhs::Expr(expr) => self.expression(expr, functions),
             k::Rhs::Action(k::Action::Perform {
-                result: k::Type::Text,
-                ..
+                result: Type::Text, ..
             }) => Kind::Text,
             k::Rhs::Action(k::Action::Perform {
-                result: k::Type::Int | k::Type::Float | k::Type::Number,
+                result: Type::Int | Type::Float | Type::Number,
                 ..
             }) => Kind::Number,
             k::Rhs::Action(k::Action::Perform {
-                result: k::Type::Bool,
-                ..
+                result: Type::Bool, ..
             }) => Kind::Bool,
             k::Rhs::Action(k::Action::Call {
-                callee: k::Callee::Library(id),
+                callee: k::Callee::Local(id),
                 ..
             }) => functions
                 .get(id)
@@ -60,11 +55,7 @@ impl Types {
             _ => Kind::Unknown,
         }
     }
-    pub fn statement(
-        &mut self,
-        stmt: &k::Stmt,
-        functions: &BTreeMap<k::FunctionId, k::FunctionName>,
-    ) {
+    pub fn statement(&mut self, stmt: &k::Stmt, functions: &BTreeMap<FunctionId, FunctionName>) {
         match stmt {
             k::Stmt::Let { name, value }
             | k::Stmt::Assign {
@@ -83,8 +74,8 @@ impl Types {
     pub fn narrow(
         &mut self,
         condition: &k::Expr,
-        functions: &BTreeMap<k::FunctionId, k::FunctionName>,
-    ) -> Option<(k::Name, Option<Kind>)> {
+        functions: &BTreeMap<FunctionId, FunctionName>,
+    ) -> Option<(Name, Option<Kind>)> {
         let k::Expr::Call { function, args } = condition else {
             return None;
         };
@@ -114,7 +105,7 @@ impl Types {
         Some((x.clone(), previous))
     }
     /// Undoes a `narrow`: the guarded name reverts to its prior fact.
-    pub fn restore(&mut self, saved: Option<(k::Name, Option<Kind>)>) {
+    pub fn restore(&mut self, saved: Option<(Name, Option<Kind>)>) {
         match saved {
             Some((x, Some(kind))) => {
                 self.0.insert(x, kind);
@@ -128,8 +119,8 @@ impl Types {
 }
 fn kind_call<'a>(
     expr: &'a k::Expr,
-    functions: &BTreeMap<k::FunctionId, k::FunctionName>,
-) -> Option<&'a k::Name> {
+    functions: &BTreeMap<FunctionId, FunctionName>,
+) -> Option<&'a Name> {
     let k::Expr::Call { function, args } = expr else {
         return None;
     };

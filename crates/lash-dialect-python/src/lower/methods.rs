@@ -90,9 +90,6 @@ impl Lowerer<'_> {
         call: &ast::ExprCall,
         awaited: bool,
     ) -> Lowering<Operand> {
-        if let Some(refusal) = self.printed_receiver(&attribute.value) {
-            return Err(refusal);
-        }
         let name = attribute.attr.id.as_str();
         let method = METHODS.iter().find(|method| method.name == name);
         if self.seals() && !self.is_asyncio(&attribute.value) {

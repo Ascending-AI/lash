@@ -196,7 +196,7 @@ impl Lowerer<'_> {
         };
         let body = body?;
         self.written = Some(self.written(function));
-        let start = self.start_adapter(function);
+        let start = self.callable_presentation(function);
         let closure = self.emit_closure(vec![this, args], body, start);
         self.set_start_convention(frame.context_used || frame.arguments_used)?;
         Ok(Operand {
@@ -214,7 +214,7 @@ impl Lowerer<'_> {
     pub(super) fn entry_body(
         &mut self,
         function: &ast::Function,
-    ) -> Lowering<(Vec<lash_kernel_doc::Name>, Buf, bool)> {
+    ) -> Lowering<(Vec<lash_vocabulary::legacy_names::Name>, Buf, bool)> {
         let this = self.fresh("this");
         let args = self.fresh("args");
         let arguments = self.fresh("arguments");
@@ -276,7 +276,7 @@ impl Lowerer<'_> {
         let stmt = if self.frame().async_body {
             Stmt::ReturnVia {
                 value,
-                policy: self.function("ts.promise.adopt")?,
+                policy: self.function_target("ts.promise.adopt")?,
             }
         } else {
             Stmt::Return { value }
@@ -395,7 +395,7 @@ impl Lowerer<'_> {
             Ok(())
         })?;
         self.written = Some(self.written(function));
-        let start = self.start_adapter(function);
+        let start = self.callable_presentation(function);
         let closure = self.emit_closure(vec![this, args], body, start);
         self.set_start_convention(context_used)?;
         let closure = Operand {
@@ -414,7 +414,7 @@ impl Lowerer<'_> {
     fn parameters(
         &mut self,
         params: &[ast::Pattern],
-        args: &lash_kernel_doc::Name,
+        args: &lash_vocabulary::legacy_names::Name,
     ) -> Lowering<()> {
         let positional = params
             .iter()
@@ -439,7 +439,7 @@ impl Lowerer<'_> {
     fn supplied_arguments(
         &mut self,
         positional: usize,
-        args: &lash_kernel_doc::Name,
+        args: &lash_vocabulary::legacy_names::Name,
     ) -> Lowering<Operand> {
         let args = Operand::variable(args.clone(), Ty::Unknown);
         #[expect(clippy::cast_precision_loss, reason = "a function's parameter count")]
@@ -463,7 +463,7 @@ impl Lowerer<'_> {
 
     /// The enclosing function's `this`, which an arrow shares with the
     /// function around it.
-    pub(super) fn this_binding(&mut self) -> Option<lash_kernel_doc::Name> {
+    pub(super) fn this_binding(&mut self) -> Option<lash_vocabulary::legacy_names::Name> {
         let binding = self
             .functions
             .iter_mut()
@@ -478,7 +478,7 @@ impl Lowerer<'_> {
     }
 
     /// The enclosing function's argument list, which is its `arguments`.
-    pub(super) fn arguments_binding(&mut self) -> Option<lash_kernel_doc::Name> {
+    pub(super) fn arguments_binding(&mut self) -> Option<lash_vocabulary::legacy_names::Name> {
         let binding = self
             .functions
             .iter_mut()

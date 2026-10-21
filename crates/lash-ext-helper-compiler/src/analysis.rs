@@ -9,9 +9,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_doc::{
-    ActKind, Action, Callee, Expr, Formula, FunctionDefinition, FunctionId, Node, Operand, Place,
-    Stmt,
+    ActKind, Action, Callee, Expr, Formula, FunctionDefinition, Node, Operand, Place, Stmt,
 };
+use lash_vocabulary::FunctionId;
 
 use crate::library::Library;
 
@@ -22,7 +22,7 @@ struct Own {
     guest: Vec<String>,
     /// Task, scheduling and wait actions.
     tasks: Vec<String>,
-    /// Clock, random and projection reads.
+    /// Projection reads and printing.
     host: Vec<String>,
     /// The `perform`s the body states: it reaches the host there, where a
     /// segment waits as the body's frame does.
@@ -199,12 +199,14 @@ fn own(definition: &FunctionDefinition) -> Own {
                 Stmt::For { metered, via, .. } => {
                     own.metered |= *metered != 0;
                     if let Some(via) = via {
-                        own.callees.extend(via.functions());
+                        for target in via.targets() {
+                            target_facts(target, &mut own);
+                        }
                     }
                 }
                 Stmt::While { metered, .. } => own.metered |= *metered != 0,
                 Stmt::ReturnVia { policy, .. } => {
-                    own.callees.insert(*policy);
+                    target_facts(policy, &mut own);
                 }
                 Stmt::Try(_) => own.handlers = true,
                 Stmt::Print { .. } => own.host.push("print".into()),
@@ -219,8 +221,6 @@ fn own(definition: &FunctionDefinition) -> Own {
                     own.closures += 1;
                     continue;
                 }
-                Expr::Clock => own.host.push("clock".into()),
-                Expr::Random => own.host.push("random".into()),
                 Expr::Read(_) => own.host.push("read".into()),
                 Expr::Call { function, .. } => {
                     own.callees.insert(*function);
@@ -237,11 +237,11 @@ fn own(definition: &FunctionDefinition) -> Own {
 
 fn callee_facts(callee: &Callee, own: &mut Own) {
     match callee {
-        Callee::Library(function) => {
+        Callee::Local(function) => {
             own.callees.insert(*function);
         }
         Callee::Value(name) => own.guest.push(format!("apply {name}")),
-        Callee::Declared(name) => own.guest.push(format!("call {name}")),
+        Callee::Import(slot) => own.performs.push(format!("invoke import {}", slot.0)),
     }
 }
 
@@ -252,13 +252,12 @@ fn action_facts(action: &Action, own: &mut Own) {
             callee_facts(callee, own);
             own.tasks.push("spawn".into());
         }
-        Action::Perform { effect, .. } => own.performs.push(format!("perform {effect}")),
-        Action::Sleep { .. } => own.tasks.push("sleep".into()),
+        Action::Perform { slot, .. } => own.performs.push(format!("perform import {}", slot.0)),
         Action::Join { .. } | Action::JoinMany { .. } => own.tasks.push("join".into()),
         Action::Yield => own.tasks.push("yield".into()),
         Action::Cancel { .. } => own.tasks.push("cancel".into()),
         Action::Await { policy, .. } => {
-            own.callees.insert(*policy);
+            target_facts(policy, own);
             own.tasks.push("await".into());
         }
     }
@@ -271,13 +270,12 @@ fn act_facts(kind: &ActKind, own: &mut Own) {
             callee_facts(callee, own);
             own.tasks.push("spawn".into());
         }
-        ActKind::Perform { effect, .. } => own.performs.push(format!("perform {effect}")),
-        ActKind::Sleep { .. } => own.tasks.push("sleep".into()),
+        ActKind::Perform { slot, .. } => own.performs.push(format!("perform import {}", slot.0)),
         ActKind::Join | ActKind::JoinMany(_) => own.tasks.push("join".into()),
         ActKind::Yield => own.tasks.push("yield".into()),
         ActKind::Cancel => own.tasks.push("cancel".into()),
         ActKind::Await(policy) => {
-            own.callees.insert(*policy);
+            target_facts(policy, own);
             own.tasks.push("await".into());
         }
     }
@@ -307,5 +305,16 @@ pub fn formula(formula: &Formula) -> String {
         Formula::Max(terms) => format!("max({})", all(terms)),
         Formula::Min(terms) => format!("min({})", all(terms)),
         Formula::CeilLog2(term) => format!("ceil_log2({})", self::formula(term)),
+    }
+}
+
+fn target_facts(target: &lash_kernel_doc::FunctionTarget, own: &mut Own) {
+    match target {
+        lash_kernel_doc::FunctionTarget::Local(id) => {
+            own.callees.insert(*id);
+        }
+        lash_kernel_doc::FunctionTarget::Import(slot) => {
+            own.performs.push(format!("invoke import {}", slot.0))
+        }
     }
 }

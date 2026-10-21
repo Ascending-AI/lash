@@ -12,7 +12,8 @@ fn charge_of(name: &str, measure: &mut dyn FnMut(&Operand, Measure) -> u64) -> u
         .unwrap();
     function
         .definition()
-        .charge
+        .charge()
+        .expect("formula-metered library function")
         .evaluate(&mut |operand, measure_kind| measure(operand, measure_kind))
 }
 

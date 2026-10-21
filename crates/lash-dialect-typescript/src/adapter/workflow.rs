@@ -23,7 +23,7 @@ pub(super) fn entries_once(program: &Program) -> Result<(), Diagnostic> {
             other => (None, other),
         };
         let names: Vec<&str> = match inner {
-            Stmt::Function { name, function } if function.is_async => vec![name.as_str()],
+            Stmt::Function { name, function } => vec![name.as_str()],
             Stmt::Var {
                 kind: VarKind::Const,
                 declarations,
@@ -31,9 +31,7 @@ pub(super) fn entries_once(program: &Program) -> Result<(), Diagnostic> {
                 .iter()
                 .filter_map(
                     |declaration| match (&declaration.pattern, &declaration.init) {
-                        (Pattern::Ident(name, _), Some(Expr::Function(function)))
-                            if function.is_async =>
-                        {
+                        (Pattern::Ident(name, _), Some(Expr::Function(function))) => {
                             Some(name.as_str())
                         }
                         _ => None,
@@ -59,7 +57,7 @@ pub(super) fn entries_once(program: &Program) -> Result<(), Diagnostic> {
 fn declaration(statement: &mut Stmt) {
     match statement {
         Stmt::Spanned(_, inner) => declaration(inner),
-        Stmt::Function { name, function } if function.is_async => {
+        Stmt::Function { name, function } => {
             *statement = Stmt::Var {
                 kind: VarKind::Const,
                 declarations: vec![Var {

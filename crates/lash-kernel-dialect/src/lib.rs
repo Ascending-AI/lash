@@ -12,6 +12,7 @@
 //! end changing. A dialect's helpers are written as kernel text whose `use`
 //! lines carry names only; [`define_functions`] fills the identities in.
 
+pub mod authoring;
 mod diagnostic;
 mod dialect;
 pub mod dispatch;
@@ -20,7 +21,6 @@ mod imperative;
 mod library;
 mod metadata;
 mod name_plan;
-mod names;
 mod namespaces;
 mod notes;
 pub mod readability;
@@ -44,33 +44,29 @@ pub use dialect::{
     Printer, ReadSource,
 };
 pub use exports::{
-    BRAND_FIELD, BUILT_FIELD, Export, ExportView, Intent, Member, NoPackages, OperationExport,
-    PackagePathClass, Reserving, TypeMember, ValueType, Visibility, brand_tuple, brand_type,
-    classify_package_path, operation_visibility,
+    BRAND_FIELD, BUILT_FIELD, FunctionMember, NamespaceKind, NamespaceMember, NamespaceView,
+    OperationSignature, TypeMember, ValueType, brand_tuple, brand_type,
 };
 pub use lash_kernel_state::WaitId;
-pub use library::{Library, LibraryError, NamedLibrary, require_through_bodies};
+pub use library::{Library, LibraryError, NamedLibrary};
 pub use metadata::{check_metadata_uniqueness, metadata_json};
 pub use name_plan::NamePlan;
-pub use names::{
-    EmptyPath, InvalidOperation, InvalidSegment, MemberPath, PackagePath, QualifiedOperation,
-    Segment, Vec1,
-};
+
 pub use namespaces::{
-    Misspelled, NamespaceRefusal, Namespaces, Offered, OfferedSource, Operations, Resolution,
-    operation_keys, operation_text, spell_operation,
+    Misspelled, NamespaceRefusal, Namespaces, Resolution, deferred_signature, operation_keys,
+    operation_text, service_name, sleep_signature, spell_operation,
 };
 pub use notes::{Note, SiteLayers, SiteLayersRefusal, site_layers};
 pub use saved::{
     Bundle, BundleBody, BundleRefusal, CaptureRefusal, DOCUMENT_NODE_KIND,
-    FUNCTION_BUNDLE_NODE_KIND, Left, NotSaved, RelinkGap, Saved, Unusable, closure_of, install,
+    FUNCTION_BUNDLE_NODE_KIND, Left, NotSaved, RelinkGap, Saved, Unusable, closure_of,
     relink_saved,
 };
 /// A saved function as the kernel holds it: its captures and token are
 /// frozen heap values, which only the kernel crates read (FIG-6688). A
 /// host carries one between the dialect and the machine, never into it.
 #[doc(hidden)]
-pub use saved::{HeldAt, InstalledFunction, MemberBody, SavedFunction, Token};
+pub use saved::{HeldAt, MemberBody, SavedFunction, Token};
 pub use source::{SourceError, define_functions, define_functions_with};
 pub use spelling::{SpellKind, Spelling};
 pub use written::{CallParam, CallShape, Written, closure_site, function_captions, written_table};
@@ -80,7 +76,7 @@ pub use imperative::{
     check_captions, check_document_depth,
 };
 
-/// Operand facts used only by exact generated-source codecs.
+/// Operand facts for authored source reconstruction.
 #[doc(hidden)]
 pub mod source_types;
 

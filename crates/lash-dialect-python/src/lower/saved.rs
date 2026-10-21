@@ -2,9 +2,9 @@
 
 use lash_kernel_dialect::{CallParam, CallShape, SavedFunction, Written};
 use lash_kernel_doc::{
-    FunctionRepresentation, Name, Param, Signature, SourceLanguage, StartAdapter, StartConvention,
-    Type,
+    CallablePresentation, FunctionRepresentation, SourceLanguage, StartConvention,
 };
+use lash_vocabulary::{Name, Param, Signature, Type};
 use ruff_python_ast::{self as ast, Expr as PyExpr};
 use ruff_text_size::Ranged;
 
@@ -64,11 +64,11 @@ impl Lowerer<'_> {
 /// How a source function is started when it crosses to a tool: called
 /// directly with the start's arguments (`K-CLO-004`). None for a closure
 /// that takes more parameters than its source signature names.
-pub(super) fn start_adapter(
+pub(super) fn callable_presentation(
     parameters: Option<&ast::Parameters>,
     returns: Option<&PyExpr>,
     callable_params: usize,
-) -> Option<StartAdapter> {
+) -> Option<CallablePresentation> {
     let params = parameters
         .map(|parameters| parameters.args.as_slice())
         .unwrap_or_default();
@@ -83,7 +83,7 @@ pub(super) fn start_adapter(
             .collect(),
         result: parameter_type(returns),
     };
-    (signature.params.len() == callable_params).then_some(StartAdapter {
+    (signature.params.len() == callable_params).then_some(CallablePresentation {
         signature,
         representation: FunctionRepresentation::Bare,
         convention: StartConvention::Direct,

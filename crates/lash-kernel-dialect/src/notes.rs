@@ -5,9 +5,10 @@
 use std::collections::BTreeMap;
 
 use lash_kernel_doc::{
-    Caption, CaptionEntry, Captions, CaptionsRefusal, Name, Node, Site, SourceLanguage, SourceMap,
-    SourceMapRefusal, SourceSite, Span, Stmt, Unit,
+    Caption, CaptionEntry, Captions, CaptionsRefusal, Node, SourceLanguage, SourceMap,
+    SourceMapRefusal, SourceSite, Span, Stmt,
 };
+use lash_vocabulary::sites::{Site, Unit};
 
 use crate::Written;
 
@@ -108,17 +109,19 @@ pub fn site_layers(
     source: &str,
     language: SourceLanguage,
     main: &[Note],
-    functions: &BTreeMap<Name, Vec<Note>>,
+    functions: &BTreeMap<lash_vocabulary::FunctionId, Vec<Note>>,
     declared: &[CaptionEntry],
 ) -> Result<SiteLayers, SiteLayersRefusal> {
     let mut layers = Layers::default();
-    layers.block(&document.main, main, &Site::new(Unit::Main, Vec::new()));
+    if let Some(main_block) = &document.main {
+        layers.block(main_block, main, &Site::new(Unit::Main, Vec::new()));
+    }
     for (name, function) in &document.functions {
         if let Some(notes) = functions.get(name) {
             layers.block(
-                &function.body,
+                &function.body().expect("authored body").block,
                 notes,
-                &Site::new(Unit::Function(name.clone()), Vec::new()),
+                &Site::new(Unit::Library(*name), Vec::new()),
             );
         }
     }

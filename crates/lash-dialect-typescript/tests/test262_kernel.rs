@@ -29,7 +29,6 @@ fn selection_filter() -> Vec<String> {
 const REGISTER: &str = include_str!("../deviations.md");
 
 const SELECTION_PARTITIONS: usize = 160;
-const PRINTING_PARTITIONS: usize = 8;
 
 fn partition_paths(
     recorded: &BTreeMap<String, String>,
@@ -45,15 +44,12 @@ fn partition_paths(
 }
 
 /// No execution law owns more than a 160th of the corpus (rounded up),
-/// and the declared execution and printer laws each cover it exactly once.
+/// and the declared execution laws cover it exactly once.
 #[test]
 fn partitions_cover_the_corpus_once_in_bounded_laws() {
     let recorded = runner::recorded_classes();
     assert!(!recorded.is_empty());
-    for (declared, count) in [
-        (selection::PARTITIONS, SELECTION_PARTITIONS),
-        (printing::PARTITIONS, PRINTING_PARTITIONS),
-    ] {
+    for (declared, count) in [(selection::PARTITIONS, SELECTION_PARTITIONS)] {
         assert_eq!(declared, (0..count).collect::<Vec<_>>());
         let mut seen = std::collections::BTreeSet::new();
         for &shard in declared {
@@ -185,46 +181,6 @@ fn run_selection(shard: usize) {
 }
 
 /// K-DIALECT-001 over a disjoint part of the complete recorded corpus.
-/// Keep the printer work spread across test actions, just like execution,
-/// so one full-corpus law cannot monopolize the remote action's deadline.
-fn run_printing_selection(shard: usize) {
-    let recorded = runner::recorded_classes();
-    let paths: Vec<_> = partition_paths(&recorded, shard, PRINTING_PARTITIONS).collect();
-    assert!(!paths.is_empty(), "the printer selection is empty");
-    let accepted = paths
-        .iter()
-        .filter(|path| runner::printing_relowers(path))
-        .count();
-    assert!(accepted > 0, "no Test262 program reached the printer law");
-    println!(
-        "printer law: shard={shard} considered={} lowered={accepted} refused_or_missing_harness={}",
-        paths.len(),
-        paths.len() - accepted
-    );
-}
-
-/// Every recorded case reaches exactly one K-DIALECT-001 printer law.
-mod printing {
-    macro_rules! shards {
-        ($($name:ident: $index:literal),* $(,)?) => {
-            pub(super) const PARTITIONS: &[usize] = &[$($index),*];
-            $(
-            #[test]
-            fn $name() { super::run_printing_selection($index); }
-        )*};
-    }
-    shards! {
-        shard_00: 0,
-        shard_01: 1,
-        shard_02: 2,
-        shard_03: 3,
-        shard_04: 4,
-        shard_05: 5,
-        shard_06: 6,
-        shard_07: 7,
-    }
-}
-
 /// Every recorded case belongs to exactly one of these full-selection laws.
 mod selection {
     macro_rules! shards {

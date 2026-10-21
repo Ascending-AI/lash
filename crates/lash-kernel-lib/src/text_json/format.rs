@@ -1,7 +1,8 @@
 use super::Selection;
 use std::fmt::Write as _;
 
-use lash_kernel_doc::{Formula, NativeCall, NativeError, NewObject, Nursery, Type, Value};
+use lash_kernel_doc::{Formula, NativeCall, NativeError, NewObject, Nursery, Value};
+use lash_vocabulary::Type;
 use num_traits::ToPrimitive;
 
 use super::{

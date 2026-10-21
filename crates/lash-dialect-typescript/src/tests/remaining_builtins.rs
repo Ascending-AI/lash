@@ -1,7 +1,8 @@
 //! Executable kernel laws for the built-ins' dialect adaptations (§2.4/§4).
 use super::machine::{self, Ended};
 use super::pages::Session;
-use lash_kernel_doc::{Datum, Name};
+use lash_kernel_doc::Datum;
+use lash_vocabulary::Name;
 
 /// BRAND-ONE: native and body constructors agree on one canonical brand
 /// and stamp the value with their own identity, including nested URL
@@ -77,19 +78,17 @@ fn brand_one_package_constructors_use_canonical_brands_and_their_own_identities(
         ),
     ];
     let registry = machine::registry();
-    let mut header = String::from("kernel 1\nnumbers float\n");
-    for (id, function) in registry.iter() {
-        header.push_str(&format!("use {} = @{id}\n", function.name()));
-    }
+    let header = registry
+        .iter()
+        .map(|(_, function)| format!("use {}\n", function.name()))
+        .collect::<String>();
     for (package, ty, constructor, stamping) in cases {
         let source = format!(
-            "{header}entry run() -> Any\nfn run() {{\n{constructor}\n\
+            "{header}function run() -> Any\nkernel 1\nmetering statements\nbody {{\n{constructor}\n\
              let brand = invoke brand.of(value)\n\
-             return (brand, value.__lash_built)\n}}\nmain {{}}\n"
+             return (brand, value.__lash_built)\n}}\n"
         );
-        let mut document = lash_kernel_doc::parse_document(&source).expect("constructor law");
-        document.manifest.functions =
-            lash_kernel_check::requirements(&document, registry.as_ref()).functions;
+        let document = super::linked::definitions(&source, &["run"], super::library());
         let (_, result) = machine::end_of_entry(document, "run", vec![]);
         let Datum::Tuple(parts) = result else {
             panic!("constructor returns its brand and stamp: {package}.{ty}");

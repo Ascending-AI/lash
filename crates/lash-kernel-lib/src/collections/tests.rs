@@ -947,13 +947,17 @@ fn k_col_014_native_charges_count_the_sizes_and_are_repeatable() {
             &mut WorkCounter::new(None),
         )
         .unwrap();
-        let charge = copy.definition().charge.evaluate(&mut |operand, _| {
-            let value = match operand {
-                Operand::Result => &result,
-                Operand::Param(_) => &xs,
-            };
-            1 + heap.arena().len(value.handle().unwrap()).unwrap()
-        });
+        let charge = copy
+            .definition()
+            .charge()
+            .expect("formula-metered library function")
+            .evaluate(&mut |operand, _| {
+                let value = match operand {
+                    Operand::Result => &result,
+                    Operand::Param(_) => &xs,
+                };
+                1 + heap.arena().len(value.handle().unwrap()).unwrap()
+            });
         assert_eq!(charge, 9);
         assert_ne!(xs.handle(), result.handle());
     }
@@ -1345,7 +1349,8 @@ fn index_of_range_charge_bounds_search_and_numeric_equivalence() {
             );
             let charge = search
                 .definition()
-                .charge
+                .charge()
+                .expect("formula-metered library function")
                 .evaluate(&mut |operand, measure| {
                     let Operand::Param(name) = operand else {
                         panic!("formula only measures arguments");
@@ -1419,10 +1424,14 @@ fn identity_key_projection_preserves_identity_and_bounds_its_charge() {
                 .all(|member| matches!(member, Value::ObjectRef(id) if *id == object)),
             "every slot keys the one object by its identity"
         );
-        let charged = function.definition().charge.evaluate(&mut |operand, _| {
-            assert_eq!(*operand, Operand::Result);
-            1 + length as u64
-        });
+        let charged = function
+            .definition()
+            .charge()
+            .expect("formula-metered library function")
+            .evaluate(&mut |operand, _| {
+                assert_eq!(*operand, Operand::Result);
+                1 + length as u64
+            });
         assert_eq!(charged, 2 + length as u64);
         assert_eq!(work.spent(), 1 + length as u64);
         assert!(charged >= work.spent());

@@ -27,9 +27,10 @@ use lash_kernel_dialect::{
     CellEnvironment, Diagnostic, Environment, Library, Lowered, Mode, workflow,
 };
 use lash_kernel_doc::{
-    ActExpr, ActKind, AssignOrder, Callee, Catch, Closure, Document, EffectName, Expr, FunctionId,
-    FunctionName, Literal, Name, NumberPolicy, Place, Rhs, Stmt, TryStmt, validate_document,
+    ActExpr, ActKind, AssignOrder, Callee, Catch, Closure, Document, Expr, Literal, NumberPolicy,
+    Place, Rhs, Stmt, TryStmt, validate_document,
 };
+use lash_vocabulary::{EffectName, FunctionId, FunctionName, Name};
 use ruff_python_ast::{self as ast};
 use ruff_text_size::{Ranged, TextRange};
 
@@ -160,12 +161,15 @@ struct Found {
 pub(crate) struct Lowerer<'a> {
     source: &'a str,
     calls: Option<&'a mut BTreeSet<String>>,
+    imported: BTreeMap<String, Vec<String>>,
     library: &'a dyn Library,
     /// The packages and offered operations a dotted call resolves through.
     /// An operation that declares controls ends the turn: a control call
     /// ends `main` when it settles, and is written only where it can.
     namespaces: &'a lash_kernel_dialect::Namespaces,
-    performed: BTreeMap<EffectName, lash_kernel_doc::OperationRequirement>,
+    imports: lash_kernel_dialect::authoring::Imports,
+    local_functions: BTreeMap<FunctionId, lash_kernel_doc::FunctionDefinition>,
+    local_notes: BTreeMap<FunctionId, Vec<Note>>,
     used: BTreeMap<FunctionId, FunctionName>,
     private: BTreeSet<Name>,
     taken: HashSet<String>,
@@ -184,9 +188,8 @@ pub(crate) struct Lowerer<'a> {
     max_nesting: usize,
     saved: &'a BTreeMap<Name, lash_kernel_dialect::SavedFunction>,
     saved_used: BTreeSet<Name>,
-    declared: BTreeMap<Name, lash_kernel_doc::Function>,
     /// The notes of each declared function's body.
-    declared_notes: BTreeMap<Name, Vec<Note>>,
+    declared_notes: BTreeMap<FunctionId, Vec<Note>>,
     /// The entries of a workflow module, as they are lowered; `None` for a
     /// cell.
     module: Option<workflow::Module>,
@@ -197,7 +200,6 @@ pub(crate) struct Lowerer<'a> {
     in_entry: bool,
     creates_tasks: bool,
     /// Inline deferred calls retain their body notes without a statement binding.
-    inline_closures: Vec<(Closure, Vec<Note>)>,
     /// The first module name an entry's body named, with where, which the
     /// entry is refused for.
     captured: std::cell::RefCell<Option<(String, Option<Span>)>>,
@@ -321,12 +323,49 @@ pub(crate) fn lower_with_calls(
     }
     let integer_locals = scope::integer_locals(&module.body, &bindings, &excluded, true);
     let sequence_locals = scope::sequence_locals(&module.body, &bindings, &excluded, true);
+    let mut imported = BTreeMap::new();
+    for statement in &module.body {
+        match statement {
+            ast::Stmt::Import(import) => {
+                for alias in &import.names {
+                    let path = alias
+                        .name
+                        .id
+                        .split('.')
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>();
+                    let local = alias
+                        .asname
+                        .as_ref()
+                        .map_or_else(|| path[0].clone(), |name| name.id.to_string());
+                    imported.insert(local, path);
+                }
+            }
+            ast::Stmt::ImportFrom(import) => {
+                if let Some(module) = &import.module {
+                    for alias in &import.names {
+                        let mut path = module.id.split('.').map(str::to_owned).collect::<Vec<_>>();
+                        path.push(alias.name.id.to_string());
+                        let local = alias
+                            .asname
+                            .as_ref()
+                            .map_or_else(|| alias.name.id.to_string(), |name| name.id.to_string());
+                        imported.insert(local, path);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
     let mut lowerer = Lowerer {
         source,
         calls,
+        imported,
         library: environment.library,
         namespaces: environment.namespaces,
-        performed: BTreeMap::new(),
+        imports: Default::default(),
+        local_functions: BTreeMap::new(),
+        local_notes: BTreeMap::new(),
         used: BTreeMap::new(),
         private: BTreeSet::new(),
         taken,
@@ -350,13 +389,11 @@ pub(crate) fn lower_with_calls(
         max_nesting,
         saved: cell.functions,
         saved_used: BTreeSet::new(),
-        declared: BTreeMap::new(),
         declared_notes: BTreeMap::new(),
         module: workflow,
         entry_defs,
         in_entry: false,
         creates_tasks: false,
-        inline_closures: Vec::new(),
         captured: std::cell::RefCell::new(None),
         captions: spelled.captions,
         declared_captions: Vec::new(),
@@ -385,43 +422,31 @@ pub(crate) fn lower_with_calls(
     );
     let mut document = Document::new(NumberPolicy::BySpelling, main.stmts);
     document.private_bindings = lowerer.private;
-    document.functions = lowerer.declared;
+    document.functions = lowerer.local_functions;
     if let Some(module) = lowerer.module.take() {
         module
             .assemble(&mut document, &mut lowerer.declared_notes)
             .map_err(workflow::ModuleError::into_diagnostic)?;
     }
-    document.manifest.functions =
-        lash_kernel_dialect::regions::reachable(lowerer.used, environment.library);
-    document.manifest.effects = lowerer.performed;
-    lash_kernel_dialect::require_through_bodies(&mut document.manifest, environment.library);
+    document.imports = lowerer.imports.into_map();
+    document
+        .requires
+        .kernels
+        .insert(lash_kernel_doc::KERNEL_VERSION);
+    lash_kernel_dialect::authoring::include_native_definitions(
+        &mut document,
+        lowerer.used.keys().copied(),
+        environment.library,
+    );
     // The saved functions the source names, and each one carried data
     // holds, are declared in the cell's own document.
-    let installed = lash_kernel_dialect::install(
-        &mut document,
-        cell.functions,
-        &lowerer.saved_used,
-        &lash_kernel_doc::FunctionRepresentation::Bare,
-        environment.namespaces,
-        environment.library,
-    ).map_err(|unusable| {
-        let mut error = diagnostics::unplaced(Code::SavedFunctionUnusable, unusable.to_string());
-        error.repairs.push("provide the saved function's required tools and library functions, or define a function using this session's tools".to_owned());
-        error
-    })?;
-    if !installed.is_empty() {
-        document.manifest.functions = lash_kernel_dialect::regions::reachable(
-            std::mem::take(&mut document.manifest.functions),
-            environment.library,
-        );
-        lash_kernel_dialect::require_through_bodies(&mut document.manifest, environment.library);
-    }
     validate_document(&document, environment.library).map_err(|invalid| {
         diagnostics::unplaced(
             Code::InvalidDocument,
             format!("the program lowers to a document the kernel refuses: {invalid}"),
         )
     })?;
+    lowerer.declared_notes.extend(lowerer.local_notes);
     let document = lash_kernel_doc::IdentifiedDocument::new(document);
     let lash_kernel_dialect::SiteLayers {
         source_map,
@@ -436,19 +461,6 @@ pub(crate) fn lower_with_calls(
         &lowerer.declared_captions,
     )
     .map_err(|refused| diagnostics::unplaced(Code::InvalidDocument, refused.to_string()))?;
-    for function in cell.functions.values() {
-        if document.functions.contains_key(&function.name)
-            && let Some(metadata) = &function.written
-        {
-            written.insert(
-                lash_kernel_doc::Site::new(
-                    lash_kernel_doc::Unit::Function(function.name.clone()),
-                    Vec::new(),
-                ),
-                metadata.clone(),
-            );
-        }
-    }
     Ok(Lowered {
         document,
         source_map: Some(source_map),
@@ -473,8 +485,7 @@ impl Lowerer<'_> {
                     (Some(callee), args)
                 }
                 Action::Perform { args, .. } => (None, args),
-                Action::Sleep { duration: atom, .. }
-                | Action::Join { task: atom }
+                Action::Join { task: atom }
                 | Action::JoinMany { tasks: atom, .. }
                 | Action::Await { value: atom, .. }
                 | Action::Cancel { task: atom } => (None, std::slice::from_ref(atom)),
@@ -828,18 +839,6 @@ impl Lowerer<'_> {
         }
     }
 
-    // Attribute/method dispatch can refuse before evaluating its receiver.
-    // Recognize a missing printed namespace there as well as in plain reads.
-    fn printed_receiver(&self, receiver: &ast::Expr) -> Option<Diagnostic> {
-        let ast::Expr::Name(name) = receiver else {
-            return None;
-        };
-        if self.variable(name.id.as_str()).is_some() {
-            return None;
-        }
-        diagnostics::printed_source_name(name.id.as_str(), name.range)
-    }
-
     fn not_a_variable(&self, id: &str, range: TextRange) -> Diagnostic {
         if self.typed_dicts.contains_key(id) {
             return diagnostics::with_repair(
@@ -874,9 +873,6 @@ impl Lowerer<'_> {
         if self.namespaces.is_root(id) {
             return self.namespace_value(id, range);
         }
-        if let Some(refusal) = diagnostics::printed_source_name(id, range) {
-            return refusal;
-        }
         diagnostics::diagnostic(
             Code::UnknownName,
             format!("name `{id}` is not defined"),
@@ -903,10 +899,6 @@ impl Lowerer<'_> {
             node: lash_kernel_doc::Node<'a>,
             out: &mut Vec<(&'a [Stmt], Option<&'a Closure>)>,
         ) {
-            if let lash_kernel_doc::Node::Expr(Expr::Closure(closure)) = node {
-                out.push((&closure.body, Some(closure)));
-                return;
-            }
             for child in node.children() {
                 if let lash_kernel_doc::Node::Block(body) = child {
                     out.push((body, None));
@@ -922,14 +914,8 @@ impl Lowerer<'_> {
             blocks = nested_blocks
                 .into_iter()
                 .map(|(_, closure)| {
-                    closure
-                        .and_then(|closure| {
-                            self.inline_closures
-                                .iter()
-                                .find(|(known, _)| known == closure)
-                                .map(|(_, notes)| notes.clone())
-                        })
-                        .unwrap_or_else(|| supplied.next().unwrap_or_default())
+                    let _ = closure;
+                    supplied.next().unwrap_or_default()
                 })
                 .collect();
         }
@@ -1049,25 +1035,30 @@ impl Lowerer<'_> {
         );
     }
 
-    /// Binds a new closure to a temporary.
     fn emit_closure(
         &mut self,
         params: Vec<Name>,
         body: Buf,
-        start: Option<lash_kernel_doc::StartAdapter>,
+        start: Option<lash_kernel_doc::CallablePresentation>,
     ) -> Operand {
         let name = self.temp();
-        self.push(
-            Stmt::Let {
-                name: name.clone(),
-                value: Rhs::Expr(Expr::Closure(Box::new(Closure {
-                    params,
-                    body: body.stmts,
-                    start,
-                }))),
-            },
-            vec![body.notes],
+        let definition = lash_kernel_dialect::authoring::local_function(
+            params,
+            body.stmts,
+            &self.imports.as_map(),
+            self.library,
+            &self.local_functions,
         );
+        let function = definition.identity();
+        self.local_functions.insert(function, definition);
+        self.local_notes.insert(function, body.notes);
+        self.emit(Stmt::Let {
+            name: name.clone(),
+            value: Rhs::Expr(Expr::Closure(Box::new(Closure {
+                function,
+                presentation: start,
+            }))),
+        });
         Operand::temp(name, Ty::Unknown)
     }
 
@@ -1105,9 +1096,41 @@ impl Lowerer<'_> {
         Ok(function)
     }
 
+    /// A helper body is external code. Its import contains its signature
+    /// and convention; it carries no chosen contract or target identity.
+    fn function_target(&mut self, name: &str) -> Lowering<lash_kernel_doc::FunctionTarget> {
+        let function = self.library.resolve(name).ok_or_else(|| {
+            diagnostics::unplaced(
+                Code::LibraryMissing,
+                format!("the helper `{name}` is not installed"),
+            )
+        })?;
+        let header = self
+            .library
+            .header(&function)
+            .expect("resolved helper has a header");
+        if header.has_native() {
+            self.used.insert(function, header.name.clone());
+            return Ok(lash_kernel_doc::FunctionTarget::Local(function));
+        }
+        let slot = self.imports.code(
+            lash_kernel_dialect::authoring::helper_name(&header.name),
+            header.signature.clone(),
+            lash_vocabulary::names::Convention::Direct,
+        );
+        Ok(lash_kernel_doc::FunctionTarget::Import(slot))
+    }
+
+    fn helper_callee(&mut self, name: &str) -> Lowering<Callee> {
+        Ok(match self.function_target(name)? {
+            lash_kernel_doc::FunctionTarget::Local(function) => Callee::Local(function),
+            lash_kernel_doc::FunctionTarget::Import(slot) => Callee::Import(slot),
+        })
+    }
+
     /// A helper call stays inside the expression that uses its result.
     pub(crate) fn invoke(&mut self, function: &str, args: &[Operand], ty: Ty) -> Lowering<Operand> {
-        let callee = Callee::Library(self.function(function)?);
+        let callee = self.helper_callee(function)?;
         Ok(Operand::inline(
             Expr::Act(Box::new(ActExpr {
                 kind: ActKind::Call(callee),

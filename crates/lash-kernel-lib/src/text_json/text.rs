@@ -1,8 +1,9 @@
 use super::Selection;
 use lash_kernel_doc::{
-    Formula, Integer, Name, NativeCall, NativeError, NewObject, Nursery, Operand, PreparedNative,
-    TextView, Type, Value,
+    Formula, Integer, NativeCall, NativeError, NewObject, Nursery, Operand, PreparedNative,
+    TextView, Value,
 };
+use lash_vocabulary::{Name, Type};
 use num_traits::ToPrimitive;
 use unicode_normalization::UnicodeNormalization;
 

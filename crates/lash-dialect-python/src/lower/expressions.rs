@@ -1,8 +1,9 @@
 //! Expressions.
 
 use lash_kernel_doc::{
-    AssignOrder, Expr, Float, Integer, Literal, MapEntry, Member, Name, Place, Rhs, Stmt,
+    AssignOrder, Expr, Float, Integer, Literal, MapEntry, Member, Place, Rhs, Stmt,
 };
+use lash_vocabulary::Name;
 use ruff_python_ast::{self as ast, Expr as PyExpr};
 use ruff_text_size::{Ranged, TextRange};
 
@@ -105,8 +106,11 @@ impl Lowerer<'_> {
                     None,
                 )?;
                 let written = self.function_written(lambda.parameters.as_deref(), false, None);
-                let start =
-                    super::saved::start_adapter(lambda.parameters.as_deref(), None, params.len());
+                let start = super::saved::callable_presentation(
+                    lambda.parameters.as_deref(),
+                    None,
+                    params.len(),
+                );
                 let closure = self.emit_closure(params, body, start);
                 if let Some(note) = self.buf.notes.last_mut() {
                     note.span = Some(diagnostics::span(lambda.range));
@@ -484,9 +488,6 @@ impl Lowerer<'_> {
     }
 
     fn attribute(&mut self, attribute: &ast::ExprAttribute) -> Lowering<Operand> {
-        if let Some(refusal) = self.printed_receiver(&attribute.value) {
-            return Err(refusal);
-        }
         if self.package_rooted(&attribute.value)
             && let Some(read) = self.read_package(&PyExpr::Attribute(attribute.clone()))
         {

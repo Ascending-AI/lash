@@ -2,7 +2,8 @@
 
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{EffectName, Name, Param, Signature, Type, print_document};
+use lash_kernel_doc::print_document;
+use lash_vocabulary::{EffectName, Name, Param, Signature, Type};
 
 use super::machine;
 
@@ -82,7 +83,7 @@ fn a_capturing_async_cell_function_is_plain_code_with_or_without_process_tools()
     let offered = lower(source)
         .expect("the same closure with process tools")
         .document;
-    assert!(plain.entries.is_empty());
-    assert!(offered.entries.is_empty());
+    assert!(plain.exports.is_empty());
+    assert!(offered.exports.is_empty());
     assert_eq!(plain, offered, "tools do not change function lowering");
 }

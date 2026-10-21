@@ -137,6 +137,7 @@ PACKAGE_DEPS = {
         "normal": {
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "ruff_python_ast": "//third-party/rust:p0288",
             "ruff_python_parser": "//third-party/rust:p0289",
             "ruff_text_size": "//third-party/rust:p0292",
@@ -163,6 +164,7 @@ PACKAGE_DEPS = {
             "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
+            "lash_vm_client": "//crates/lash-vm-client:lash-vm-client",
             "lash_vm_releases": "//crates/lash-vm-releases:lash-vm-releases",
             "lash_vm_worker": "//crates/lash-vm-worker:lash-vm-worker",
             "libc": "//third-party/rust:p0188",
@@ -176,6 +178,7 @@ PACKAGE_DEPS = {
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
+            "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "ryu_js": "//third-party/rust:p0306",
             "serde": "//third-party/rust:p0317",
             "serde_json": "//third-party/rust:p0322",
@@ -215,7 +218,9 @@ PACKAGE_DEPS = {
     },
     "lash-ext-helper-compiler": {
         "build": {},
-        "dev": {},
+        "dev": {
+            "lash_kernel_state": "//crates/lash-kernel-state:lash-kernel-state"
+        },
         "normal": {
             "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
             "lash_dialect_typescript": "//crates/lash-dialect-typescript:lash-dialect-typescript",
@@ -226,7 +231,8 @@ PACKAGE_DEPS = {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
             "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
-            "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm"
+            "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
+            "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary"
         }
     },
     "lash-ext-py-core": {
@@ -247,6 +253,7 @@ PACKAGE_DEPS = {
         "normal": {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "lash_regress": "//crates/lash-regress:lash-regress",
+            "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "num_traits": "//third-party/rust:p0218",
             "thiserror": "//third-party/rust:p0375"
         }
@@ -1325,6 +1332,8 @@ PACKAGE_DEPS = {
     "lash-internal-vm-runtime": {
         "build": {},
         "dev": {
+            "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
+            "lash_core_ids": "//crates/lash-core-ids:lash-core-ids",
             "lash_kernel_package": "//crates/lash-kernel-package:lash-kernel-package",
             "lash_vm_releases": "//crates/lash-vm-releases:lash-vm-releases",
             "tokio": "//third-party/rust:p0381"
@@ -1351,6 +1360,7 @@ PACKAGE_DEPS = {
             "lash_vm_client": "//crates/lash-vm-client:lash-vm-client",
             "lash_vm_protocol": "//crates/lash-vm-protocol:lash-vm-protocol",
             "lash_vm_releases": "//crates/lash-vm-releases:lash-vm-releases",
+            "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "serde": "//third-party/rust:p0317",
             "serde_json": "//third-party/rust:p0322",
             "thiserror": "//third-party/rust:p0375",
@@ -1533,6 +1543,7 @@ PACKAGE_DEPS = {
         },
         "normal": {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "lash_vocabulary": "//crates/lash-vocabulary:lash-vocabulary",
             "libm": "//third-party/rust:p0189",
             "num_bigint": "//third-party/rust:p0212",
             "num_traits": "//third-party/rust:p0218",

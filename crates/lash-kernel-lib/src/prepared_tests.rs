@@ -7,12 +7,13 @@
 use std::sync::Arc;
 
 use lash_kernel_doc::{
-    Datum, ErrorDatum, FunctionId, FunctionRegistry, Handle, Integer, Timestamp, parse_document,
+    Datum, ErrorDatum, FunctionRegistry, Handle, Integer, Timestamp, parse_document,
 };
 use lash_kernel_vm::kernel_internals::{Layout, prepare_with_layout};
 use lash_kernel_vm::{
     Bounds, End, Host, Machine, Meters, PreparedLibrary, Program, Step, register_machine_functions,
 };
+use lash_vocabulary::FunctionId;
 
 use crate::{register_collections, register_numbers, register_text_json};
 

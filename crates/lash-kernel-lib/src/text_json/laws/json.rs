@@ -1,9 +1,9 @@
 //! JSON and number formatting natives (FIG-6144's laws, ported onto heap
 //! values).
 use lash_kernel_doc::{
-    Datum, FunctionRegistry, Handle, MapType, Measure, NumberPolicy, NumberToken, Operand,
-    RecordType, RecordTypeField, Type, Value,
+    Datum, FunctionRegistry, Handle, Measure, NumberPolicy, NumberToken, Operand, Value,
 };
+use lash_vocabulary::{MapType, RecordType, RecordTypeField, Type};
 
 use super::super::{decode_number, parse_json, stringify_json};
 use super::lab::{Lab, VALUE, b, deep, f, i, list, raised, run, t};
@@ -53,7 +53,8 @@ fn charge_of(name: &str, measure: &mut dyn FnMut(&Operand, Measure) -> u64) -> u
         .unwrap();
     function
         .definition()
-        .charge
+        .charge()
+        .expect("formula-metered library function")
         .evaluate(&mut |operand, kind| measure(operand, kind))
 }
 fn big(digits: &str) -> Datum {

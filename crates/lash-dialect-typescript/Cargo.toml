@@ -21,6 +21,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+lash-vocabulary = { workspace = true }
 lash-kernel-dialect = { workspace = true }
 lash-kernel-doc = { workspace = true }
 lash-kernel-lib = { path = "../lash-kernel-lib" }
@@ -33,6 +34,7 @@ swc_ecma_ast = { workspace = true }
 swc_ecma_parser = { workspace = true }
 
 [dev-dependencies]
+lash-vm-client = { workspace = true }
 lash-ext-helper-compiler = { workspace = true }
 lash-kernel-package = { workspace = true, features = ["testing"] }
 lash-vm-releases = { workspace = true, features = ["dialect-typescript", "dialect-python"] }

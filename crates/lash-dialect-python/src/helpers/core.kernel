@@ -1,3 +1,7 @@
+operation python.clock() -> Timestamp
+use timestamp.nanoseconds
+use num.to_float
+use num.div
 # The Python dialect's own operations (tier 2): what Python means by an
 # operator, a truth test, a subscript, an iteration and the text of a value,
 # written in kernel code. The lowerer emits a call to one of these wherever
@@ -1428,4 +1432,13 @@ body {
     do invoke py.fail("ValueError", hoisted23)
   }
   return items
+}
+
+# time.time exposes seconds; its ordinary operation returns a Timestamp.
+function py.time() -> Float
+kernel 1
+charge 6
+body {
+  let instant = perform python.clock() as Timestamp
+  return num.div(num.to_float(timestamp.nanoseconds(instant)), 1000000000.0)
 }

@@ -2,10 +2,11 @@
 use std::sync::Arc;
 
 use lash_kernel_dialect::{NamedLibrary, define_functions};
-use lash_kernel_doc::{Datum, Integer, Name, Timestamp, parse_document};
+use lash_kernel_doc::Datum;
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, Machine, PreparedLibrary, Program, Step, Target,
 };
+use lash_vocabulary::Name;
 
 // Independent pre-optimization TrimString oracle; never used in production.
 const REFERENCE: &str = r#"
@@ -59,14 +60,6 @@ body {
 #[derive(Default)]
 struct Console(Vec<Datum>);
 impl Host for Console {
-    fn clock(&mut self) -> Timestamp {
-        Timestamp {
-            nanoseconds: Integer::from(0),
-        }
-    }
-    fn random(&mut self) -> u64 {
-        0
-    }
     fn read(
         &mut self,
         _: &lash_kernel_doc::Handle,
@@ -95,18 +88,18 @@ fn native_trim_agrees_with_generic_utf16_scan() {
     for definition in define_functions(REFERENCE, &mut named).unwrap() {
         registry.register(definition, None).unwrap();
     }
-    let mut header = String::from("kernel 1\nnumbers by_spelling\n");
-    for (name, id) in named.iter() {
-        header.push_str(&format!("use {name} = @{id}\n"));
+    let mut header = String::new();
+    for (name, _) in named.iter() {
+        header.push_str(&format!("use {name}\n"));
     }
-    let prepared = PreparedLibrary::new(Arc::new(registry));
+    let registry = Arc::new(registry);
+    let prepared = PreparedLibrary::new(Arc::clone(&registry));
     let make_program = |helper: &str| {
-        let document = parse_document(&format!("{header}entry trim(text: Text, leading: Bool, trailing: Bool) -> Text\nfn trim(text, leading, trailing) {{ let output = invoke {helper}(text, leading, trailing) print output return output }} main {{}}")).unwrap();
-        Program {
-            closure: super::pages::CLOSURE,
-            document: Arc::new(document),
-            library: prepared.clone(),
-        }
+        let source = format!(
+            "{header}function trim(text: Text, leading: Bool, trailing: Bool) -> Text\nkernel 1\nmetering statements\nbody {{ let output = invoke {helper}(text, leading, trailing) print output return output }}"
+        );
+        let document = super::linked::definitions(&source, &["trim"], &named);
+        crate::tests::linked::program(Arc::new(document), prepared.clone())
     };
     let fast = make_program("ts.string.trim_value");
     let generic = make_program("ts.law.trim_value");

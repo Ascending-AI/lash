@@ -245,3 +245,6 @@ fn implementation_approximated_comparison_keeps_its_one_ulp_boundary() {
         "ts.math.exp".into()
     ])));
 }
+
+#[path = "../src/tests/linked.rs"]
+mod linked;

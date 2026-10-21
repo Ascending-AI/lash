@@ -14,7 +14,6 @@
 mod captions;
 mod diagnostics;
 mod exceptions;
-mod generated;
 mod generated_operators;
 mod lower;
 mod package;
@@ -26,12 +25,10 @@ mod scope;
 mod tests;
 
 pub use diagnostics::{Code, GeneratedSourceCode};
-pub use generated::read_kernel;
 pub use lash_kernel_dialect::{
     CaptionSupport, GeneratedSourceLimits, PrintError, PrintOptions, PrintedSource, SourceFormat,
 };
 pub use package::define_helpers;
-pub use printer::print_kernel;
 pub use readable::{print, read};
 
 /// The captions the dialect spells: every kind, as `#:` comment lines
@@ -124,7 +121,11 @@ fn lower_with_calls(
     beside: &[String],
 ) -> Result<Lowered, Diagnostic> {
     if let Mode::Cell(cell) = mode {
-        lower::check_binding_names(cell.bindings.iter().map(lash_kernel_doc::Name::as_str))?;
+        lower::check_binding_names(
+            cell.bindings
+                .iter()
+                .map(lash_vocabulary::legacy_names::Name::as_str),
+        )?;
     }
     let max_bytes = limits.max_bytes;
     if source.len() > max_bytes {

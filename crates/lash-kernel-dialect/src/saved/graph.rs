@@ -15,13 +15,14 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::graph_tokens::{
+use lash_kernel_doc::Document;
+use lash_kernel_doc::heap::PageRef;
+use lash_kernel_state::paged::FrozenRef;
+use lash_vocabulary::tokens::{
     ChildRef, CodecVariant, TokenCodec, TokenError, TokenReader, TokenWriter, check_ascending,
     encode_body,
 };
-use lash_kernel_doc::heap::PageRef;
-use lash_kernel_doc::{Document, EffectName, FunctionId, Name, OperationRequirement, Signature};
-use lash_kernel_state::paged::FrozenRef;
+use lash_vocabulary::{CallableId, EffectName, LinkId, Name};
 
 use super::{CaptureRefusal, HeldAt, NotSaved, SavedFunction, Token};
 use crate::Written;
@@ -66,12 +67,11 @@ impl Bundle {
             if members.contains_key(&function.name) {
                 continue;
             }
-            pending.extend(
-                function
-                    .needs()
-                    .iter()
-                    .filter_map(|needed| functions.get(needed)),
-            );
+            pending.extend(function.references.iter().filter_map(|needed| {
+                functions
+                    .values()
+                    .find(|candidate| candidate.environment == *needed)
+            }));
             members.insert(function.name.clone(), function.clone());
         }
         Some(Self { members })
@@ -100,30 +100,6 @@ impl Bundle {
             .and_then(|at| self.members.values().nth(at))
     }
 
-    /// The effects the members perform, each with what its member requires
-    /// of it: sorted by effect, then by member, each pair once.
-    #[must_use]
-    pub fn required_effects(&self) -> Vec<(EffectName, OperationRequirement)> {
-        let mut required: Vec<(EffectName, OperationRequirement)> = Vec::new();
-        let mut by_effect: BTreeMap<&EffectName, Vec<&OperationRequirement>> = BTreeMap::new();
-        for function in self.members.values() {
-            for (effect, requirement) in &function.document.manifest.effects {
-                let requirements = by_effect.entry(effect).or_default();
-                if !requirements.contains(&requirement) {
-                    requirements.push(requirement);
-                }
-            }
-        }
-        for (effect, requirements) in by_effect {
-            required.extend(
-                requirements
-                    .into_iter()
-                    .map(|requirement| (effect.clone(), requirement.clone())),
-            );
-        }
-        required
-    }
-
     /// Stages the bundle: each member's document as a Document node, then
     /// the bundle itself. Each member names its execution closure and
     /// frozen capture pages. Answers the bundle's
@@ -144,18 +120,16 @@ impl Bundle {
                 document,
                 captures: function.captures.clone(),
                 closure: function.closure,
-                helper_owners: function.helper_owners.clone(),
+                link: function.link,
+                callable: function.callable,
+                environment: function.environment,
                 references: function.references.clone(),
                 written: function.written.clone(),
                 token: function.token.clone(),
                 held: function.held.clone(),
-                against: function.against.clone(),
             });
         }
-        let body = BundleBody {
-            members,
-            effects: self.required_effects(),
-        };
+        let body = BundleBody { members };
         stage(FUNCTION_BUNDLE_NODE_KIND, &encode_body(&body))
     }
 
@@ -177,12 +151,13 @@ impl Bundle {
                 document: document(member.document)?,
                 captures: member.captures,
                 closure: member.closure,
-                helper_owners: member.helper_owners,
+                link: member.link,
+                callable: member.callable,
+                environment: member.environment,
                 references: member.references,
                 written: member.written,
                 token: member.token,
                 held: member.held,
-                against: member.against,
             };
             if function.definition().is_none() {
                 return Err(BundleRefusal::Undeclared {
@@ -193,9 +168,6 @@ impl Bundle {
             members.insert(member.name, function);
         }
         let bundle = Self { members };
-        if bundle.required_effects() != body.effects {
-            return Err(BundleRefusal::RequiredEffects.into());
-        }
         Ok(bundle)
     }
 }
@@ -205,8 +177,6 @@ impl Bundle {
 pub struct BundleBody {
     /// Sorted by name, each once.
     pub members: Vec<MemberBody>,
-    /// [`Bundle::required_effects`].
-    pub effects: Vec<(EffectName, OperationRequirement)>,
 }
 
 /// One member's row: a [`SavedFunction`] with its document by reference.
@@ -216,28 +186,22 @@ pub struct MemberBody {
     pub document: ChildRef,
     pub captures: BTreeMap<Name, FrozenRef>,
     pub closure: PageRef,
-    pub references: BTreeSet<Name>,
-    pub helper_owners: BTreeSet<Name>,
+    pub references: BTreeSet<lash_kernel_doc::heap::EntityId>,
+    pub link: LinkId,
+    pub callable: CallableId,
+    pub environment: lash_kernel_doc::heap::EntityId,
     pub written: Option<Written>,
     pub token: Option<Token>,
     pub held: Option<HeldAt>,
-    pub against: BTreeMap<FunctionId, Signature>,
 }
 
 impl TokenCodec for BundleBody {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(2);
+        out.seq(1);
         self.members.encode(out);
-        out.seq(self.effects.len() as u64);
-        for (effect, requirement) in &self.effects {
-            out.seq(2);
-            effect.encode(out);
-            requirement.encode(out);
-        }
     }
-
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(2)?;
+        input.expect_struct(1)?;
         let members = Vec::<MemberBody>::decode(input)?;
         check_ascending(
             &members
@@ -245,51 +209,41 @@ impl TokenCodec for BundleBody {
                 .map(|member| &member.name)
                 .collect::<Vec<_>>(),
         )?;
-        let count = input.seq()?;
-        let mut effects = Vec::new();
-        for _ in 0..count {
-            input.expect_struct(2)?;
-            effects.push((
-                EffectName::decode(input)?,
-                OperationRequirement::decode(input)?,
-            ));
-        }
-        Ok(Self { members, effects })
+        Ok(Self { members })
     }
 }
-
 impl TokenCodec for MemberBody {
     fn encode(&self, out: &mut TokenWriter) {
-        out.seq(10);
+        out.seq(11);
         self.name.encode(out);
         self.document.encode(out);
         self.captures.encode(out);
         self.closure.encode(out);
         self.references.encode(out);
-        self.helper_owners.encode(out);
+        self.link.encode(out);
+        self.callable.encode(out);
+        self.environment.encode(out);
         self.written.encode(out);
         self.token.encode(out);
         self.held.encode(out);
-        self.against.encode(out);
     }
-
     fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-        input.expect_struct(10)?;
+        input.expect_struct(11)?;
         Ok(Self {
             name: Name::decode(input)?,
             document: ChildRef::decode(input)?,
             captures: BTreeMap::decode(input)?,
             closure: PageRef::decode(input)?,
             references: BTreeSet::decode(input)?,
-            helper_owners: BTreeSet::decode(input)?,
+            link: LinkId::decode(input)?,
+            callable: CallableId::decode(input)?,
+            environment: lash_kernel_doc::heap::EntityId::decode(input)?,
             written: Option::decode(input)?,
             token: Option::decode(input)?,
             held: Option::decode(input)?,
-            against: BTreeMap::decode(input)?,
         })
     }
 }
-
 impl TokenCodec for HeldAt {
     fn encode(&self, out: &mut TokenWriter) {
         out.seq(2);

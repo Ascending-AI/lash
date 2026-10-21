@@ -6,9 +6,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::{
-    self as k, CaptionTarget, FieldPath, FieldRoot, FieldTarget, ParamTarget, Type,
-};
+use lash_kernel_doc::{self as k, CaptionTarget, FieldPath, FieldRoot, FieldTarget, ParamTarget};
+use lash_vocabulary::{Name, Type};
 
 use super::{Renderer, names::attribute_identifier};
 
@@ -16,9 +15,9 @@ use super::{Renderer, names::attribute_identifier};
 #[derive(Default)]
 pub(super) struct Signatures {
     /// The functions written with one parameter a line.
-    signed: BTreeSet<k::Name>,
+    signed: BTreeSet<Name>,
     /// Each annotated parameter's and result's annotation.
-    annotations: BTreeMap<(k::Name, FieldRoot), String>,
+    annotations: BTreeMap<(Name, FieldRoot), String>,
 }
 
 /// A `TypedDict` to write: one record of an annotated type.
@@ -50,7 +49,7 @@ impl Renderer<'_> {
     pub(super) fn typed_dicts(
         &mut self,
         document: &k::Document,
-        authored: &BTreeSet<k::Name>,
+        authored: &BTreeSet<Name>,
     ) -> Signatures {
         let mut signatures = Signatures::default();
         let mut classes = Classes {
@@ -74,8 +73,15 @@ impl Renderer<'_> {
                 .collect(),
             written: Vec::new(),
         };
-        for (name, function) in &document.functions {
-            let entry = document.entries.get(name);
+        for (name, export) in &document.exports {
+            let k::Export::Function(entry) = export else {
+                continue;
+            };
+            let Some(function) = document.functions.get(&entry.function) else {
+                continue;
+            };
+            let params = function.signature.params.iter().map(|p| &p.name);
+            let entry = Some(entry);
             // An entry's captions name its signature's parameters, which
             // the printed function takes only when its own are those.
             let spelled = entry.is_none_or(|entry| {
@@ -84,7 +90,7 @@ impl Renderer<'_> {
                     .params
                     .iter()
                     .map(|param| &param.name)
-                    .eq(function.params.iter())
+                    .eq(params)
             });
             let captioned = spelled
                 && self
@@ -161,15 +167,10 @@ impl Renderer<'_> {
 
     /// Writes the parameters of `function`, declared as `name`, and the
     /// annotation of its result when it has one.
-    pub(super) fn signature(
-        &mut self,
-        signatures: &Signatures,
-        name: &k::Name,
-        function: &k::Function,
-    ) {
+    pub(super) fn signature(&mut self, signatures: &Signatures, name: &Name, params: &[Name]) {
         if !signatures.signed.contains(name) {
             self.out.write("(");
-            for (i, param) in function.params.iter().enumerate() {
+            for (i, param) in params.iter().enumerate() {
                 if i > 0 {
                     self.out.write(", ");
                 }
@@ -188,7 +189,7 @@ impl Renderer<'_> {
         }
         self.out.write("(\n");
         self.indent += 1;
-        for param in &function.params {
+        for param in params {
             if let Some(caption) = self.out.take_caption(ParamTarget {
                 function: name.clone(),
                 param: param.clone(),
@@ -211,7 +212,7 @@ impl Renderer<'_> {
         self.result_annotation(signatures, name);
     }
 
-    fn result_annotation(&mut self, signatures: &Signatures, name: &k::Name) {
+    fn result_annotation(&mut self, signatures: &Signatures, name: &Name) {
         if let Some(annotation) = signatures
             .annotations
             .get(&(name.clone(), FieldRoot::Result))
@@ -229,7 +230,7 @@ impl Classes {
     fn annotation(
         &mut self,
         ty: &Type,
-        function: &k::Name,
+        function: &Name,
         root: &FieldRoot,
         path: &mut Vec<String>,
     ) -> String {
@@ -328,7 +329,7 @@ impl Classes {
 
     /// A class name no other name of the program takes, made of the
     /// function's, the root's and the path's words.
-    fn name(&mut self, function: &k::Name, root: &FieldRoot, path: &[String]) -> String {
+    fn name(&mut self, function: &Name, root: &FieldRoot, path: &[String]) -> String {
         let root = match root {
             FieldRoot::Param(param) => param.as_str(),
             FieldRoot::Result => "result",

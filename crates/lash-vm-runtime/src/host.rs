@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{Datum, EffectName, ErrorDatum, Handle, Integer, Timestamp};
+use lash_kernel_doc::{Datum, ErrorDatum, Handle};
 use lash_vm_broker::{DurableSnapshotStore, ParentFault};
 use lash_vm_client::RunHost;
 
@@ -17,7 +17,7 @@ pub trait EffectReads: Send + Sync {
     /// `perform`. `Err` is the parent's own failure, and stops the run.
     async fn perform(
         &self,
-        effect: &EffectName,
+        use_: &lash_vocabulary::OperationUse,
         args: &[Datum],
         site: &lash_kernel_doc::PositionLabel,
         origin: &lash_kernel_doc::Site,
@@ -33,7 +33,6 @@ pub struct ParentHost {
     pub ran: Arc<dyn Fn(&lash_kernel_vm::SiteCounts) + Send + Sync>,
     /// The run's store, whose clock is the run's clock.
     pub store: Arc<DurableSnapshotStore>,
-    pub random: Arc<dyn Fn() -> u64 + Send + Sync>,
     pub providers: ProjectionCatalog,
     /// Answers the run's read-bound `perform`s.
     pub reads: Arc<dyn EffectReads>,
@@ -51,22 +50,6 @@ impl RunHost for ParentHost {
         (self.ran)(delta);
     }
 
-    async fn clock(&self) -> Result<Timestamp, ParentFault> {
-        let now = self
-            .store
-            .context()
-            .durable_now()
-            .await
-            .map_err(|error| ParentFault(error.to_string()))?;
-        Ok(Timestamp {
-            nanoseconds: Integer::from(now.0.saturating_mul(1_000_000)),
-        })
-    }
-
-    async fn random(&self) -> Result<u64, ParentFault> {
-        Ok((self.random)())
-    }
-
     async fn read(
         &self,
         handle: &Handle,
@@ -77,12 +60,12 @@ impl RunHost for ParentHost {
 
     async fn perform(
         &self,
-        effect: &EffectName,
+        use_: &lash_vocabulary::OperationUse,
         args: &[Datum],
         site: &lash_kernel_doc::PositionLabel,
         origin: &lash_kernel_doc::Site,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
-        self.reads.perform(effect, args, site, origin).await
+        self.reads.perform(use_, args, site, origin).await
     }
 
     fn print(&self, value: Datum) -> Result<(), ParentFault> {

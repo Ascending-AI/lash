@@ -6,8 +6,9 @@ use std::borrow::Cow;
 use lash_kernel_doc::arena::ArenaHandle;
 use lash_kernel_doc::{
     Args, Float, Integer, NativeCall, NativeError, NewObject, NumberPolicy, NumberToken, Nursery,
-    Type, Value,
+    Value,
 };
+use lash_vocabulary::Type;
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 

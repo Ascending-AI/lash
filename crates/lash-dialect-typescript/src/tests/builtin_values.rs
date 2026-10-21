@@ -87,14 +87,16 @@ fn a_program_reaches_only_the_built_ins_it_names() {
         "function twice(f, x) { return f(f(x)); } const o = { scale: 2 }; o.scale; o.missing; twice(Math.abs, -3);",
     )
     .unwrap();
-    let listed: Vec<&str> = lowered
+    let listed: Vec<String> = lowered
         .document
-        .manifest
-        .functions
+        .imports
         .values()
-        .map(|name| name.as_str())
+        .map(|import| format!("{}.{}", import.name.package, import.name.member))
         .collect();
-    assert!(listed.contains(&"ts.math.abs"), "{listed:?}");
+    assert!(
+        listed.iter().any(|name| name == "ts.math.abs"),
+        "{listed:?}"
+    );
     for unnamed in [
         "ts.math.max",
         "ts.array.map",
@@ -102,7 +104,7 @@ fn a_program_reaches_only_the_built_ins_it_names() {
         "ts.map.construct",
     ] {
         assert!(
-            !listed.contains(&unnamed),
+            !listed.iter().any(|name| name == unnamed),
             "{unnamed} is reached: {listed:?}"
         );
     }

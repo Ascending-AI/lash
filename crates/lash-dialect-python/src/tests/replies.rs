@@ -46,9 +46,7 @@ fn printed(source: &str, replies: &[(&str, Datum)]) -> Vec<String> {
             let request = pending
                 .pop_front()
                 .unwrap_or_else(|| panic!("a park with nothing pending\n{text}"));
-            let Request::Effect(effect) = request else {
-                panic!("the cell does not sleep\n{text}");
-            };
+            let Request::Effect(effect) = request;
             let Some(Datum::Text(asked)) = effect.args.first() else {
                 panic!("echo is asked for a text\n{text}");
             };

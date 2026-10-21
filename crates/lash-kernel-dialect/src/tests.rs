@@ -7,8 +7,9 @@ use crate::{Library, NamedLibrary, SourceError, define_functions};
 /// signature, through either the worker JSON or stored token boundary.
 #[test]
 fn written_refuses_a_second_start_signature() {
-    use lash_kernel_doc::graph_tokens::{TokenCodec as _, TokenWriter, decode_body};
-    use lash_kernel_doc::{Signature, SourceLanguage, Type};
+    use lash_kernel_doc::SourceLanguage;
+    use lash_vocabulary::tokens::{TokenCodec as _, TokenWriter, decode_body};
+    use lash_vocabulary::{Signature, Type};
 
     let signature = Signature {
         params: Vec::new(),
@@ -72,7 +73,7 @@ fn a_helper_source_is_resolved_by_name_in_order() {
     assert_eq!(definitions.len(), 2);
     let twice = library.resolve("demo.twice").unwrap();
     assert_eq!(twice, definitions[0].identity());
-    let Implementation::Body(body) = &definitions[1].implementation else {
+    let Implementation::Guest { body, .. } = &definitions[1].implementation else {
         panic!("a helper has a body");
     };
     assert!(body.functions.contains_key(&twice));
@@ -84,7 +85,7 @@ fn a_helper_source_is_resolved_by_name_in_order() {
 fn a_definition_lists_only_the_functions_its_body_calls() {
     let mut library = kernel_library();
     let definitions = define_functions(HELPERS, &mut library).unwrap();
-    let Implementation::Body(body) = &definitions[0].implementation else {
+    let Implementation::Guest { body, .. } = &definitions[0].implementation else {
         panic!("a helper has a body");
     };
     let names: Vec<&str> = body.functions.values().map(|name| name.as_str()).collect();
@@ -146,4 +147,36 @@ fn named_libraries_share_registered_definition_facts() {
         ));
     }
     assert_eq!(calls.get(), 1);
+}
+
+/// L-ALIAS: canonical helper names retain package ownership and never select
+/// one of two source definitions that project to the same member.
+#[test]
+fn helper_name_collisions_are_refused_at_definition_owner() {
+    use lash_vocabulary::FunctionName;
+    let name = crate::authoring::helper_name(&FunctionName::new("ts.new_TypeError").unwrap());
+    assert_eq!(name.package.to_string(), "ts");
+    assert_eq!(name.member.as_str(), "new_type_error");
+    let mut library = NamedLibrary::new();
+    let define = |name: &str| {
+        parse_definition(&format!(
+            "function {name}() -> Null\nkernel 1\ncharge 1\nbody {{ return null }}"
+        ))
+        .unwrap()
+    };
+    library.insert(define("ts.new_TypeError")).unwrap();
+    assert!(matches!(
+        library.insert(define("ts.new_type_error")),
+        Err(crate::LibraryError::ImportCollision { .. })
+    ));
+}
+
+/// Helper package names admit numeric suffix words in shipped constants.
+#[test]
+fn helper_numeric_suffix_words_are_canonical() {
+    let name = lash_vocabulary::FunctionName::new("ts.math.SQRT1_2").unwrap();
+    assert_eq!(
+        crate::authoring::helper_name(&name).member.as_str(),
+        "sqrt1_n2"
+    );
 }

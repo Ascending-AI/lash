@@ -1,6 +1,8 @@
 //! Statements, and the statement runs the front end lowers one read to.
 
-use lash_kernel_doc::{self as k, Name, Site};
+use lash_kernel_doc::{self as k};
+use lash_vocabulary::Name;
+use lash_vocabulary::sites::Site;
 
 use super::lift::{Lift, Lifter, refuse};
 use super::source::{self, Arm, Body, Expr, StmtKind};
@@ -154,10 +156,12 @@ impl Lifter<'_> {
         self.is(&via.open, "ts.for_of.open")
             && via
                 .next
-                .is_some_and(|next| self.is(&next, "ts.for_of.next"))
+                .as_ref()
+                .is_some_and(|next| self.is(next, "ts.for_of.next"))
             && via
                 .item
-                .is_some_and(|item| self.is(&item, "ts.for_of.item"))
+                .as_ref()
+                .is_some_and(|item| self.is(item, "ts.for_of.item"))
             && via.check.is_none()
     }
 
@@ -290,7 +294,7 @@ impl Lifter<'_> {
     fn helper_read<'e>(&self, value: &'e k::Rhs, helper: &str) -> Option<&'e [k::Atom]> {
         match value {
             k::Rhs::Action(k::Action::Call {
-                callee: k::Callee::Library(id),
+                callee: k::Callee::Import(id),
                 args,
             }) if self.is(id, helper) => Some(args),
             _ => None,
@@ -530,26 +534,17 @@ pub(super) fn act_of(action: &k::Action) -> k::ActExpr {
             args: atoms(args),
         },
         k::Action::Perform {
-            effect,
+            slot,
             args,
             result,
             then_yield,
         } => k::ActExpr {
             kind: k::ActKind::Perform {
-                effect: effect.clone(),
+                slot: *slot,
                 result: result.clone(),
                 then_yield: *then_yield,
             },
             args: atoms(args),
-        },
-        k::Action::Sleep {
-            duration,
-            then_yield,
-        } => k::ActExpr {
-            kind: k::ActKind::Sleep {
-                then_yield: *then_yield,
-            },
-            args: vec![expr_of(duration)],
         },
         k::Action::Join { task } => k::ActExpr {
             kind: k::ActKind::Join,
@@ -572,7 +567,7 @@ pub(super) fn act_of(action: &k::Action) -> k::ActExpr {
             args: vec![expr_of(task)],
         },
         k::Action::Await { policy, value } => k::ActExpr {
-            kind: k::ActKind::Await(*policy),
+            kind: k::ActKind::Await(policy.clone()),
             args: vec![expr_of(value)],
         },
     }

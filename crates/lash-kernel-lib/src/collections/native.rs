@@ -502,7 +502,7 @@ impl NativeFunction for ErrorNew {
 }
 fn function_check(args: &[Value]) -> Result<Value, NativeError> {
     match nth(args, 0)? {
-        value @ (Value::Closure(_) | Value::Function(_) | Value::LongFunction(_)) => Ok(*value),
+        value @ (Value::Closure(_) | Value::Function(_)) => Ok(*value),
         _ => Err(raise(
             "type_error",
             "callback must be a closure or function reference",

@@ -9,13 +9,12 @@
 //! call an earlier one. A function never calls itself: its identity covers
 //! its body.
 //!
-//! The header may also state operations, one `effect <name>(<slots>) -> T
-//! contract "<id>"` per line: a package's bodies perform them under that
-//! requirement. Each definition lists only the ones its body performs.
+//! The header may also state operations, one `operation <name>(<slots>) -> T` per line: a package's bodies perform them under that signature. Each definition lists only
+//! the ones its body performs.
 
 use lash_kernel_doc::{
-    FunctionDefinition, Implementation, Invalid, Node, ParseError, parse_definition,
-    validate_definition,
+    FunctionCatalog, FunctionDefinition, Implementation, Invalid, Node, ParseError,
+    parse_definition_with_locals, validate_definition,
 };
 
 use crate::library::{Library, LibraryError, NamedLibrary};
@@ -25,7 +24,7 @@ pub enum SourceError {
     /// Text other than comments and `use <name>` lines stands before the
     /// first definition.
     #[error(
-        "line {line}: expected `use <name>`, `effect <operation>` or `function`, found `{found}`"
+        "line {line}: expected `use <name>`, `operation <operation>` or `function`, found `{found}`"
     )]
     Header { line: usize, found: String },
     #[error("`{function}`, line {line} column {column} of its definition: {reason}")]
@@ -77,24 +76,58 @@ pub fn define_functions_with(
             .trim()
             .to_string();
         let mut text = chunk;
-        for effect in &header.effects {
-            text.push_str(&format!("\neffect {effect}"));
+        for operation in &header.operations {
+            let at = operation
+                .find('(')
+                .expect("operation declaration has signature");
+            let path = &operation[..at];
+            let operation_name = lash_vocabulary::operation_text::parse(path).map_err(|error| {
+                SourceError::Complete {
+                    function: label.clone(),
+                    reason: error.to_string(),
+                }
+            })?;
+            let _signature =
+                lash_kernel_doc::parse_signature(&operation[at..]).map_err(|error| {
+                    SourceError::Complete {
+                        function: label.clone(),
+                        reason: error.to_string(),
+                    }
+                })?;
+            let name = lash_vocabulary::QualifiedName {
+                package: operation_name.package,
+                member: operation_name.name,
+                type_member: None,
+            };
+            let slot =
+                crate::authoring::service_slot(&name).ok_or_else(|| SourceError::Complete {
+                    function: label.clone(),
+                    reason: format!("{path} is not a shipped dialect service"),
+                })?;
+            text = text.replace(&format!("perform {path}("), &format!("perform {}(", slot.0));
+            text.push_str(&format!("\nimport {} operation {operation}", slot.0));
         }
         for name in &header.uses {
-            // A name the library does not hold yet is one a later definition
-            // gives; a body that calls it here fails to parse, naming it.
             if let Some(function) = library.resolve(name) {
                 text.push_str(&format!("\nuse {name} = @{function}"));
             }
         }
         text.push('\n');
-        let mut definition =
-            parse_definition(&text).map_err(|error: ParseError| SourceError::Parse {
-                function: label.clone(),
-                line: error.line,
-                column: error.column,
-                reason: error.reason.to_string(),
+        let (mut definition, locals) =
+            parse_definition_with_locals(&text).map_err(|error: ParseError| {
+                SourceError::Parse {
+                    function: label.clone(),
+                    line: error.line,
+                    column: error.column,
+                    reason: error.reason.to_string(),
+                }
             })?;
+        for local in locals {
+            if library.definition(&local.identity()).is_none() {
+                library.insert_local(local.clone());
+                definitions.push(local);
+            }
+        }
         keep_called(&mut definition);
         keep_performed(&mut definition);
         complete(&mut definition, library).map_err(|reason| SourceError::Complete {
@@ -115,10 +148,10 @@ pub fn define_functions_with(
 #[derive(Default)]
 struct Header {
     /// The functions its bodies call, by name.
-    uses: Vec<String>,
-    /// The operations its bodies perform, each as its `effect` line states
+    uses: std::collections::BTreeSet<String>,
+    /// The operations its bodies perform, each as its `operation` line states
     /// it after the keyword.
-    effects: Vec<String>,
+    operations: Vec<String>,
 }
 
 /// The header and the text of each definition.
@@ -133,12 +166,14 @@ fn split(source: &str) -> Result<(Header, Vec<String>), SourceError> {
             chunk.push_str(line);
         } else {
             let text = line.split('#').next().unwrap_or_default().trim();
-            if let Some(effect) = text.strip_prefix("effect ") {
-                header.effects.push(effect.trim().to_string());
+            if let Some(operation) = text.strip_prefix("operation ") {
+                header.operations.push(operation.trim().to_string());
                 continue;
             }
             match text.strip_prefix("use ") {
-                Some(name) => header.uses.push(name.trim().to_string()),
+                Some(name) => {
+                    header.uses.insert(name.trim().to_string());
+                }
                 None if text.is_empty() => {}
                 None => {
                     return Err(SourceError::Header {
@@ -155,34 +190,21 @@ fn split(source: &str) -> Result<(Header, Vec<String>), SourceError> {
 /// Drops from a body's operation list every operation the body does not
 /// perform: a header states the operations of every definition it heads.
 fn keep_performed(definition: &mut FunctionDefinition) {
-    let (Implementation::Body(body) | Implementation::Both(body)) = &mut definition.implementation
+    let (Implementation::Guest { body, .. } | Implementation::Both { body, .. }) =
+        &mut definition.implementation
     else {
         return;
     };
-    let mut performed = std::collections::BTreeSet::new();
-    let mut pending = vec![Node::Block(&body.block)];
-    while let Some(node) = pending.pop() {
-        match node {
-            Node::Action(lash_kernel_doc::Action::Perform { effect, .. }) => {
-                performed.insert(effect.clone());
-            }
-            Node::Expr(lash_kernel_doc::Expr::Act(act)) => {
-                if let lash_kernel_doc::ActKind::Perform { effect, .. } = &act.kind {
-                    performed.insert(effect.clone());
-                }
-            }
-            _ => {}
-        }
-        pending.extend(node.children());
-    }
-    body.effects.retain(|effect, _| performed.contains(effect));
+    let used = crate::authoring::used_imports(&body.block);
+    body.imports.retain(|slot, _| used.contains(slot));
 }
 
 /// Drops from a body's function list every function the body does not
-/// hold: the list is part of the identity and of every manifest that
-/// reaches it.
+/// hold: the list is part of the identity and of every document that
+/// retains it.
 fn keep_called(definition: &mut FunctionDefinition) {
-    let (Implementation::Body(body) | Implementation::Both(body)) = &mut definition.implementation
+    let (Implementation::Guest { body, .. } | Implementation::Both { body, .. }) =
+        &mut definition.implementation
     else {
         return;
     };

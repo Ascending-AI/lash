@@ -5,7 +5,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_dialect::Lowered;
-use lash_kernel_doc::{Document, Expr, Node, Site, Unit};
+use lash_kernel_doc::Document;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Node;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 /// Every statement and action site of `document`'s code.
 fn code_sites(document: &Document) -> Vec<(Site, String)> {
@@ -21,17 +25,19 @@ fn code_sites(document: &Document) -> Vec<(Site, String)> {
         }
     }
     let mut out = Vec::new();
-    walk(
-        Node::Block(&document.main),
-        Site::new(Unit::Main, Vec::new()),
-        &mut out,
-    );
-    for (name, function) in &document.functions {
-        walk(
-            Node::Block(&function.body),
-            Site::new(Unit::Function(name.clone()), Vec::new()),
-            &mut out,
-        );
+    for (unit, block) in document.units() {
+        if let Unit::Library(id) = unit {
+            if !matches!(
+                document.functions[&id].implementation,
+                lash_kernel_doc::Implementation::Guest {
+                    metering: lash_kernel_doc::Metering::Statements,
+                    ..
+                }
+            ) {
+                continue;
+            }
+        }
+        walk(Node::Block(block), Site::new(unit, Vec::new()), &mut out);
     }
     out
 }
@@ -63,17 +69,13 @@ fn every_entry_body_statement_and_action_is_mapped() {
         source,
         &lash_kernel_dialect::Environment::new(
             super::library(),
-            &lash_kernel_dialect::Namespaces::of_effects(
-                &effects,
-                &lash_kernel_doc::ContractId::new("1"),
-                super::controls(),
-            )
-            .expect("the test's effects are operations"),
+            &crate::tests::linked::namespaces(&effects, super::controls())
+                .expect("the test's effects are operations"),
         ),
         lash_kernel_dialect::Mode::Module,
     )
     .unwrap();
-    assert_eq!(lowered.document.entries.len(), 2);
+    assert_eq!(lowered.document.exports.len(), 2);
     assert_eq!(unmapped(&lowered), BTreeMap::new());
 }
 

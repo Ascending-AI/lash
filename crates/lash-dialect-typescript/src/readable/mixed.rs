@@ -1,5 +1,4 @@
-//! Reading printed source back: lifted source through the front end, and
-//! the regions written in kernel form through the kernel reader.
+//! Ordinary authored source read through the front end.
 
 use lash_kernel_dialect::regions::{self, RegionRead};
 use lash_kernel_dialect::{CellEnvironment, Environment, GeneratedSourceLimits, Lowered, Mode};
@@ -20,60 +19,12 @@ pub(super) fn read(
             None,
         ));
     }
-    let marked = crate::intrinsics::read_marked(source, base, limits)?;
-    if marked.spans.is_empty() {
-        let lowered = lower(source, environment, base.entries.is_empty(), &[])?;
-        return Ok(RegionRead {
-            document: lowered.document.document().clone(),
-            captions: lowered.captions,
-            map: lowered.source_map,
-        });
-    }
-    if !marked.main {
-        return Err(Diagnostic::new(
-            DiagnosticCode::GeneratedSourceFormat,
-            "a module with regions in kernel form writes `main` in kernel form",
-            None,
-        ));
-    }
-    let spans: Vec<_> = marked
-        .spans
-        .iter()
-        .map(|span| with_caption(source, span.clone()))
-        .collect();
-    let lowered = if marked.unmarked > 0 {
-        let (blanked, beside) = regions::blank(source, &spans)
-            .map_err(|refused| Diagnostic::new(DiagnosticCode::InvalidAst, refused, None))?;
-        Some(lower(&blanked, environment, false, &beside)?)
-    } else {
-        None
-    };
-    regions::assemble(
-        base,
-        marked.document,
-        marked.captions,
-        lowered,
-        environment.library,
-    )
-    .map_err(|refused| {
-        Diagnostic::new(
-            DiagnosticCode::InvalidAst,
-            format!("misplaced caption: {refused}"),
-            None,
-        )
+    let lowered = lower(source, environment, base.exports.is_empty(), &[])?;
+    Ok(RegionRead {
+        document: lowered.document.document().clone(),
+        captions: lowered.captions,
+        map: lowered.source_map,
     })
-}
-
-/// `span`, widened to the caption written right before it.
-fn with_caption(source: &str, span: std::ops::Range<usize>) -> std::ops::Range<usize> {
-    let before = source[..span.start].trim_end();
-    if before.ends_with("*/")
-        && let Some(open) = before.rfind("/**")
-        && !before[open..before.len() - 2].contains("*/")
-    {
-        return open..span.end;
-    }
-    span
 }
 
 fn lower(

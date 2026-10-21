@@ -3,10 +3,11 @@
     reason = "scripted conformance fixture construction uses admitted pages; a refusal is a defect in the fixture"
 )]
 //! Test-owned page storage; execution and accounting are the real S4/S7 implementations.
+use lash_kernel_doc::Datum;
 use lash_kernel_doc::heap::*;
-use lash_kernel_doc::{Datum, Name};
 use lash_kernel_state::paged::*;
 use lash_kernel_vm::SessionEditor;
+use lash_vocabulary::Name;
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
@@ -86,10 +87,13 @@ pub(crate) fn start(
 pub(crate) fn with_source(
     program: lash_kernel_vm::Program,
     bounds: lash_kernel_vm::Bounds,
-    start: lash_kernel_vm::CellStart,
+    mut start: lash_kernel_vm::CellStart,
     source: &Source,
 ) -> Result<lash_kernel_vm::KernelMachine, lash_kernel_vm::StartError> {
     use lash_kernel_vm::Machine;
+    for (use_, mode) in super::linked::modes(&program) {
+        start.modes.entry(use_).or_insert(mode);
+    }
     lash_kernel_vm::KernelMachine::start(program, bounds, start, Box::new(source.clone()))
 }
 /// Seals `machine` and opens it again from its pages, as a cold worker

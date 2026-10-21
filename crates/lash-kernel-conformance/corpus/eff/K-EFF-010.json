@@ -2,8 +2,8 @@
   "rule": "K-EFF-010",
   "cases": [
     {
-      "name": "zero sleep requests elapsed outcome",
-      "document": "kernel 1\nnumbers by_spelling\n\nmain {\ndo sleep 0 finish 1\n}\n",
+      "name": "ordinary zero sleep is waited and completes with null",
+      "document": "kernel 1\nnumbers by_spelling\nimport 0 operation typescript.sleep(milliseconds: Int) -> Null\nmain { do perform 0(0) as Null finish 1 }\n",
       "expected": {
         "prints": [],
         "end": {
@@ -13,8 +13,14 @@
         },
         "trace": [
           {
-            "sleep": {
-              "nanoseconds": 0
+            "effect": {
+              "effect": "typescript.sleep",
+              "args": [
+                {
+                  "int": "0"
+                }
+              ],
+              "result": "null"
             }
           }
         ]
@@ -24,25 +30,12 @@
           [
             {
               "request": 0,
-              "outcome": "elapsed"
+              "outcome": {
+                "completed": "null"
+              }
             }
           ]
         ]
-      }
-    },
-    {
-      "name": "negative sleep duration raises number_range",
-      "document": "kernel 1\nnumbers by_spelling\n\nmain {\ntry { do sleep -1 } catch e { print e.kind }\n}\n",
-      "expected": {
-        "prints": [
-          {
-            "text": "number_range"
-          }
-        ],
-        "end": {
-          "finished": "null"
-        },
-        "trace": []
       }
     }
   ]

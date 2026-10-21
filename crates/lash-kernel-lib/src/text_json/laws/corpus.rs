@@ -436,7 +436,7 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
             }
             (actual, expected) => panic!("{name}: {actual:?} != {expected:?}"),
         };
-        let param = |name: &lash_kernel_doc::Name| {
+        let param = |name: &lash_vocabulary::legacy_names::Name| {
             registered
                 .definition()
                 .signature
@@ -447,7 +447,8 @@ fn k_lib_006_native_corpus_pins_results_charges_and_determinism() {
         };
         let charged = registered
             .definition()
-            .charge
+            .charge()
+            .expect("formula-metered library function")
             .evaluate(&mut |operand, measure| match (operand, measure) {
                 (Operand::Result, Measure::Magnitude) => result_magnitude,
                 (Operand::Result, Measure::DeepSize) => result_size,
