@@ -641,11 +641,27 @@ pub struct PromptText {
 /// and its roots are known to its builder (FIG-6889), so an admission names
 /// them without a pass over the forest, and a store finds a text by address
 /// without indexing the forest again.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default)]
 pub struct RequestTexts {
     roots: Vec<String>,
-    texts: Vec<std::sync::Arc<PromptText>>,
+    texts: crate::persistent_map::PersistentMap<String, std::sync::Arc<PromptText>>,
+    len: usize,
 }
+
+impl PartialEq for RequestTexts {
+    fn eq(&self, other: &Self) -> bool {
+        if self.roots != other.roots || self.len != other.len {
+            return false;
+        }
+        let mut equal = true;
+        self.texts.for_each(|hash, text| {
+            equal &= other.texts.get(hash) == Some(text);
+        });
+        equal
+    }
+}
+
+impl Eq for RequestTexts {}
 
 impl RequestTexts {
     /// The texts of a forest given in any order: each address once, its
@@ -666,7 +682,14 @@ impl RequestTexts {
             .filter(|text| !children.contains(text.hash.as_str()))
             .map(|text| text.hash.clone())
             .collect();
-        Self { roots, texts }
+        Self {
+            roots,
+            len: texts.len(),
+            texts: texts
+                .into_iter()
+                .map(|text| (text.hash.clone(), text))
+                .collect(),
+        }
     }
 
     /// The texts the record roots, in address order.
@@ -676,23 +699,26 @@ impl RequestTexts {
 
     /// The text stored under `hash`.
     pub fn get(&self, hash: &str) -> Option<&PromptText> {
-        self.texts
-            .binary_search_by(|text| text.hash.as_str().cmp(hash))
-            .ok()
-            .map(|index| self.texts[index].as_ref())
+        self.texts.get(hash).map(std::sync::Arc::as_ref)
     }
 
     /// Every text, in address order.
     pub fn iter(&self) -> impl Iterator<Item = &PromptText> {
-        self.texts.iter().map(std::sync::Arc::as_ref)
+        // Whole-forest enumeration is an explicit boundary. Admissions and
+        // store lookups keep the shared index; only an enumerator needs its
+        // addresses sorted into the public iteration order.
+        let mut texts = Vec::with_capacity(self.len);
+        self.texts.for_each(|_, text| texts.push(text.as_ref()));
+        texts.sort_unstable_by(|left, right| left.hash.cmp(&right.hash));
+        texts.into_iter()
     }
 
     pub fn len(&self) -> usize {
-        self.texts.len()
+        self.len
     }
 
     pub fn is_empty(&self) -> bool {
-        self.texts.is_empty()
+        self.len == 0
     }
 }
 
@@ -936,7 +962,8 @@ fn fragment_tree(
 struct PreparedPrefix {
     leaves: Vec<PromptTextRef>,
     tree: Option<PreparedTree>,
-    texts: std::collections::BTreeMap<BlobRef, (std::sync::Arc<PromptText>, usize)>,
+    uses: std::collections::BTreeMap<BlobRef, usize>,
+    texts: RequestTexts,
 }
 
 struct PreparedTree {
@@ -989,18 +1016,32 @@ impl PreparedTree {
 }
 
 impl PreparedPrefix {
+    fn snapshot(&self, root: &PromptTextRef) -> RequestTexts {
+        RequestTexts {
+            roots: vec![root.blob.as_str().to_owned()],
+            texts: self.texts.texts.clone(),
+            len: self.texts.len,
+        }
+    }
+
     fn keep(&mut self, reference: &PromptTextRef, encoded: std::sync::Arc<PromptText>) {
-        self.texts
-            .entry(reference.blob.clone())
-            .and_modify(|(_, uses)| *uses += 1)
-            .or_insert((encoded, 1));
+        let uses = self.uses.entry(reference.blob.clone()).or_default();
+        if *uses == 0 {
+            self.texts
+                .texts
+                .insert(reference.blob.as_str().to_owned(), encoded);
+            self.texts.len += 1;
+        }
+        *uses += 1;
     }
 
     fn remove(&mut self, hash: &BlobRef) {
-        if let Some((_, uses)) = self.texts.get_mut(hash) {
+        if let Some(uses) = self.uses.get_mut(hash) {
             *uses -= 1;
             if *uses == 0 {
-                self.texts.remove(hash);
+                self.uses.remove(hash);
+                self.texts.texts.remove(hash.as_str());
+                self.texts.len -= 1;
             }
         }
     }
@@ -1147,19 +1188,12 @@ impl ChunkedRequestTemplate {
         // rebuild's partition. Preserve the remaining inline nodes' wire order.
         let inline = inline
             .into_iter()
-            .filter(|(hash, _)| !prepared.texts.contains_key(hash))
+            .filter(|(hash, _)| prepared.texts.get(hash.as_str()).is_none())
             .map(|(hash, fragment)| (hash, fragment.text.to_string()))
             .collect();
         // The carried texts are exactly the prefix tree's nodes, each held
         // by its parent, so the tree's root is the forest's one root.
-        let texts = RequestTexts {
-            roots: vec![tree.reference.blob.as_str().to_owned()],
-            texts: prepared
-                .texts
-                .values()
-                .map(|(text, _)| std::sync::Arc::clone(text))
-                .collect(),
-        };
+        let texts = prepared.snapshot(&tree.reference);
         (
             Self {
                 fetch_horizon: template.fetch_horizon,

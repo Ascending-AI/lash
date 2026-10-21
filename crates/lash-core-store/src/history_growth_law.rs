@@ -131,7 +131,7 @@ fn a_turns_window_extension_allocates_independently_of_history_depth() {
     );
 }
 
-mod allocation_counter {
+pub(crate) mod allocation_counter {
     //! Allocation requests on the measuring thread.
     use std::alloc::{GlobalAlloc, Layout, System};
     use std::cell::Cell;

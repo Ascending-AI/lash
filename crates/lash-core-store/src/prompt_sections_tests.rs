@@ -275,6 +275,52 @@ fn carried_prefix_matches_rebuild_across_appends_compaction_and_cache_break() {
     }
 }
 
+/// FOREST-HANDOFF: admission and its clones retain an immutable address index
+/// without copying one pointer per fragment already in the conversation.
+#[test]
+fn handing_off_request_texts_does_not_copy_the_retained_forest() {
+    use crate::history_growth_law::allocation_counter::Measurement;
+
+    let measured = [1, 10, 1000].map(|turns| {
+        let leaves: Vec<_> = (0..turns)
+            .map(|turn| {
+                encode_fragment(&RequestFragment::Literal {
+                    text: &format!("turn {turn}"),
+                })
+            })
+            .collect();
+        let mut prefix = PreparedPrefix::default();
+        let tree = PreparedTree::build(&leaves.iter().collect::<Vec<_>>(), &mut prefix);
+        let measurement = Measurement::start();
+        let texts = prefix.snapshot(&tree.reference);
+        let held = texts.clone();
+        let counts = measurement.finish();
+
+        // The next call can retire the old tree without changing an admitted
+        // call's forest, including its root and address ordering.
+        prefix.remove(&tree.reference.blob);
+        assert_eq!(texts, held);
+        assert!(held.get(tree.reference.blob.as_str()).is_some());
+        let hashes: Vec<_> = held.iter().map(|text| text.hash.as_str()).collect();
+        assert!(hashes.windows(2).all(|pair| pair[0] < pair[1]));
+        assert_eq!(hashes.len(), 2 * turns - 1);
+        counts
+    });
+    eprintln!("forest handoff at 1, 10 and 1000 turns: {measured:?}");
+    assert!(
+        measured
+            .iter()
+            .all(|counts| counts.allocated <= measured[0].allocated),
+        "handing off a forest must not copy its retained texts: {measured:?}"
+    );
+    assert!(
+        measured
+            .iter()
+            .all(|counts| counts.allocations <= measured[0].allocations),
+        "handing off a forest must not allocate per retained text: {measured:?}"
+    );
+}
+
 // Independent full rebuild of the canonical fragment forest.
 fn rebuild_fragments(
     template: &lash_protocol_types::llm::types::RecordedRequestTemplate,
