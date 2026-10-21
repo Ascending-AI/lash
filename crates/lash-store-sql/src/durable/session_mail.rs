@@ -35,7 +35,7 @@ crate::statements! {
                     trace_cause_json
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND admitted_run IS NULL
-               AND state IN ('deferred_next_turn', 'pending_active')
+               AND {{undelivered_turn_input_state(state)}}
              ORDER BY enqueue_seq";
 
         /// The unbound active-turn inputs the cancellation transaction may

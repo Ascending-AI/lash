@@ -163,6 +163,21 @@ impl MessageSequence {
         matches!(&self.mode, SequenceMode::Layered { base: own, .. } if AppendVec::ptr_eq(own, base))
     }
 
+    /// The length of this sequence's base when `messages` shares that prefix
+    /// by buffer identity. Later appends may already be visible in `messages`;
+    /// the shared prefix remains immutable while this sequence holds it.
+    pub fn base_prefix_len_in(&self, messages: &AppendVec<Message>) -> Option<usize> {
+        let SequenceMode::Layered { base, .. } = &self.mode else {
+            return None;
+        };
+        if base.len() > messages.len() {
+            return None;
+        }
+        let mut prefix = messages.clone();
+        prefix.truncate(base.len());
+        AppendVec::ptr_eq(base, &prefix).then_some(base.len())
+    }
+
     pub fn iter(&self) -> MessageSequenceIter<'_> {
         match &self.mode {
             SequenceMode::Owned(owned) => MessageSequenceIter::Owned(owned.iter()),

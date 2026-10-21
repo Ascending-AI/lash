@@ -1,10 +1,9 @@
 //! Per-turn lash work as one session's history grows (FIG-6889).
 //!
 //! One same-process session on a SQLite file store set sends `turns` plain
-//! fast-provider turns in sequence. Each turn's `instructions:u` (the whole
-//! process, inherited threads included) and the process RSS after it land in
-//! one JSON report, so a reader compares turn 600's cost with turn 10's
-//! without any wall-clock noise.
+//! fast-provider turns in sequence. Each turn records process instructions,
+//! allocations, SQL statements, CPU and RSS. Monotonic span clocks join a
+//! sampled CPU profile to the exact history depth.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -33,6 +32,13 @@ pub struct HistoryRun {
 struct TurnCost {
     turn: usize,
     instructions: u64,
+    allocations: usize,
+    allocated_bytes: usize,
+    live_bytes: i128,
+    statements: u64,
+    cpu_ms: Option<f64>,
+    start_ns: u64,
+    end_ns: u64,
     rss_kb: Option<u64>,
 }
 
@@ -49,6 +55,7 @@ struct HistoryReport {
 /// # Errors
 /// Returns an error when the store, a send or the report write fails.
 pub async fn run(run: HistoryRun, counter: InstructionCounter) -> Result<()> {
+    let work = lash_core_ids::perf_witness::Collector::install()?;
     let core = open_core(&run.store_dir).await?;
     let session_id = SessionId::fixture("history-growth");
     core.session(session_id.clone())
@@ -68,13 +75,22 @@ pub async fn run(run: HistoryRun, counter: InstructionCounter) -> Result<()> {
             std::fs::write(control, b"enable\n")
                 .with_context(|| format!("enable perf through {}", control.display()))?;
         }
+        let statements_before = work.snapshot().sql_statements;
+        let cpu_before = crate::perf_support::scheduler::process_cpu_ms();
         let before = counter.read()?;
+        let alloc_before = crate::GLOBAL_ALLOCATOR.stats();
+        let start_ns = lash_core_ids::perf_witness::latency::Stamp::now().monotonic_ns;
         let handle = session
             .send(lash::TurnInput::text(format!("history turn {turn}")))
             .into_future()
             .await?;
         let outcome = handle.outcome().await?;
+        let end_ns = lash_core_ids::perf_witness::latency::Stamp::now().monotonic_ns;
+        let alloc = crate::GLOBAL_ALLOCATOR.stats() - alloc_before;
         let instructions = counter.read()? - before;
+        let cpu_ms = crate::perf_support::scheduler::process_cpu_ms()
+            .zip(cpu_before)
+            .map(|(after, before)| after - before);
         anyhow::ensure!(
             super::runner::status_name(&outcome.status()) == "answered",
             "turn {turn} ended {}",
@@ -83,6 +99,13 @@ pub async fn run(run: HistoryRun, counter: InstructionCounter) -> Result<()> {
         turns.push(TurnCost {
             turn,
             instructions,
+            allocations: alloc.allocations,
+            allocated_bytes: alloc.bytes_allocated,
+            live_bytes: alloc.bytes_allocated as i128 - alloc.bytes_deallocated as i128,
+            statements: work.snapshot().sql_statements - statements_before,
+            cpu_ms,
+            start_ns,
+            end_ns,
             rss_kb: process_memory_sample().rss_kb,
         });
     }

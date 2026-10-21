@@ -49,6 +49,7 @@ impl NodeIdIndex {
 struct ActiveReadModel {
     active_events: AppendVec<SessionHistoryRecord>,
     active_messages: AppendVec<Message>,
+    assistant_ids: PersistentMap<String, usize>,
     prompt_render_cache: Arc<BaseRenderCache>,
     pending_events: Vec<SessionHistoryRecord>,
     pending_messages: Vec<Message>,
@@ -147,6 +148,7 @@ impl SessionGraphCache {
             active_read: StdMutex::new(ActiveReadModel {
                 active_events: AppendVec::new(),
                 active_messages: AppendVec::new(),
+                assistant_ids: PersistentMap::default(),
                 prompt_render_cache: Arc::new(BaseRenderCache::new()),
                 pending_events: Vec::new(),
                 pending_messages: Vec::new(),
@@ -200,6 +202,7 @@ impl SessionGraphCache {
         let frame_path = &self.active_path_indices[frame_start..];
         let mut active_messages = Vec::with_capacity(frame_path.len());
         let mut active_events = Vec::with_capacity(frame_path.len());
+        let mut assistant_ids = PersistentMap::default();
         for idx in frame_path {
             let node = &graph.nodes[*idx];
             if let Some(event) = node.event() {
@@ -208,6 +211,15 @@ impl SessionGraphCache {
             if let Some(message) = node.message()
                 && !message.is_transient()
             {
+                if message.role == crate::MessageRole::Assistant {
+                    assistant_ids.upsert(
+                        message.id.clone(),
+                        active_messages.len(),
+                        |first, index| {
+                            *first = (*first).min(index);
+                        },
+                    );
+                }
                 active_messages.push(message);
             }
         }
@@ -217,10 +229,22 @@ impl SessionGraphCache {
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = ActiveReadModel {
             active_events: AppendVec::from(active_events),
             active_messages: AppendVec::from(active_messages),
+            assistant_ids,
             prompt_render_cache: Arc::new(BaseRenderCache::new()),
             pending_events: Vec::new(),
             pending_messages: Vec::new(),
         };
+    }
+
+    /// The same active-frame projection owns both the message sequence and
+    /// its assistant-id membership. Rebuilds and frame changes replace both.
+    pub(crate) fn contains_active_assistant_message_id_before(&self, id: &str, end: usize) -> bool {
+        self.active_read
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .assistant_ids
+            .get(id)
+            .is_some_and(|index| *index < end)
     }
 
     /// The current frame's read model, materializing pending appends once.
@@ -328,6 +352,7 @@ impl SessionGraphCache {
             *read = ActiveReadModel {
                 active_events: AppendVec::new(),
                 active_messages: AppendVec::new(),
+                assistant_ids: PersistentMap::default(),
                 prompt_render_cache: Arc::new(BaseRenderCache::new()),
                 pending_events: Vec::new(),
                 pending_messages: Vec::new(),
@@ -339,6 +364,13 @@ impl SessionGraphCache {
         if let Some(message) = node.message()
             && !message.is_transient()
         {
+            if message.role == crate::MessageRole::Assistant {
+                let index = read.active_messages.len() + read.pending_messages.len();
+                read.assistant_ids
+                    .upsert(message.id.clone(), index, |first, index| {
+                        *first = (*first).min(index);
+                    });
+            }
             read.pending_messages.push(message);
         }
     }

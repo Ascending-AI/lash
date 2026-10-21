@@ -365,3 +365,53 @@ fn a_bound_run_probe_skips_settled_history_without_changing_bindings() {
         "a queued-work binding remains visible beside settled input bindings",
     );
 }
+
+/// FIG-7080: reading the next turn's mailbox visits only open inputs,
+/// regardless of the settled tombstones the session retains.
+#[test]
+fn an_open_mailbox_probe_does_no_more_work_after_a_thousand_turns() {
+    use rusqlite::StatementStatus;
+
+    let work = [1, 10, 1000].map(|turns| {
+        let conn = catalog();
+        conn.execute(
+            "WITH RECURSIVE history(n) AS (
+                 VALUES(1) UNION ALL SELECT n + 1 FROM history WHERE n < ?1
+             )
+             INSERT INTO pending_turn_inputs
+                 (enqueue_seq, input_id, session_id, ingress_json, state, input_json,
+                  submission_digest, enqueued_at_ms, admitted_run, terminal_at_ms)
+             SELECT n, 'settled-' || n, 'history', '{\"scope\":\"next_turn\"}',
+                    CASE WHEN n % 2 = 0 THEN 'completed' ELSE 'cancelled' END,
+                    '{}', 'digest', 0, 'past-' || n, 0 FROM history",
+            [turns],
+        )
+        .expect("settled history retains its run bindings");
+        conn.execute_batch(
+            "INSERT INTO pending_turn_inputs
+                 (enqueue_seq, input_id, session_id, ingress_json, state, input_json,
+                  submission_digest, enqueued_at_ms)
+             VALUES (2002, 'next', 'history', '{\"scope\":\"next_turn\"}',
+                         'deferred_next_turn', '{}', 'digest', 0),
+                    (2001, 'active', 'history', '{\"scope\":\"active_turn\",\"turn_id\":\"current\"}',
+                         'pending_active', '{}', 'digest', 0)",
+        )
+        .expect("open inputs of both delivery kinds");
+        let sql = lash_store_sql::durable::session_mail::SessionMailStatements::render(
+            crate::schema_layout::MAIN.with_vocabulary(super::TURN_INPUT_LIFECYCLE),
+        );
+        let mut probe = conn.prepare(sql.open_inputs.sql()).expect("mailbox query");
+        let inputs = probe
+            .query_map(["history"], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(inputs, ["active", "next"], "ingress order stays intact");
+        probe.get_status(StatementStatus::VmStep)
+    });
+    eprintln!("open mailbox at 1, 10 and 1000 turns: {work:?} VM steps");
+    assert!(
+        work[1..].iter().all(|steps| *steps <= work[0]),
+        "settled history must not lengthen an open mailbox read: {work:?}"
+    );
+}

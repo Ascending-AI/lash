@@ -1,47 +1,76 @@
 use super::*;
+use crate::facade_support::SessionGraphFacadeOps as _;
 use std::collections::BTreeSet;
 
-/// Names the assistant messages the protocol driver appends after its final
-/// model call: the turn's reply as the protocol materialized it.
-///
-/// The snapshot of assistant ids is taken when a run starts and again at every
-/// model call; whatever assistant messages exist beyond it when the machine
-/// finishes were appended by the finishing step. Identity is by message id,
-/// so a message appended later by a finalize-turn hook never displaces it.
+/// Retains the messages at the last model call by shared identity. An
+/// append-only machine names its reply from the witnessed extension, without
+/// collecting or searching ids from preceding turns. A deliberate history
+/// rewrite reconciles ids against that same snapshot.
 #[derive(Debug, Default)]
 pub(in crate::runtime) struct ProtocolReplyTracker {
-    assistant_ids_at_last_model_call: Option<BTreeSet<String>>,
+    at_last_model_call: Option<crate::MessageSequence>,
 }
 
 impl ProtocolReplyTracker {
-    fn assistant_ids<'a>(messages: impl Iterator<Item = &'a Message>) -> BTreeSet<String> {
-        messages
-            .filter(|message| message.role == MessageRole::Assistant)
-            .map(|message| message.id.clone())
-            .collect()
-    }
-
-    /// Anchors the first run on the messages the turn started with; later runs
-    /// keep the anchor from their predecessor's last model call.
-    pub(super) fn mark_run_start<'a>(&mut self, messages: impl Iterator<Item = &'a Message>) {
-        if self.assistant_ids_at_last_model_call.is_none() {
-            self.assistant_ids_at_last_model_call = Some(Self::assistant_ids(messages));
+    /// Later runs retain the predecessor's last model-call boundary.
+    pub(super) fn mark_run_start(&mut self, messages: &crate::MessageSequence) {
+        if self.at_last_model_call.is_none() {
+            self.mark_model_call(messages);
         }
     }
 
-    pub(super) fn mark_model_call<'a>(&mut self, messages: impl Iterator<Item = &'a Message>) {
-        self.assistant_ids_at_last_model_call = Some(Self::assistant_ids(messages));
+    pub(super) fn mark_model_call(&mut self, messages: &crate::MessageSequence) {
+        self.at_last_model_call = Some(messages.clone());
     }
 
-    /// Ids of the assistant messages appended since the last model call.
-    pub(super) fn terminal_output<'a>(
+    /// Ids of assistant messages added since the last model call. A suffix is
+    /// used only when its base and earlier delta agree by construction; its
+    /// position alone never establishes message identity.
+    pub(super) fn terminal_output(
         &self,
-        messages: impl Iterator<Item = &'a Message>,
+        messages: &crate::MessageSequence,
+        graph: &crate::SessionGraph,
     ) -> Vec<String> {
-        let before = self.assistant_ids_at_last_model_call.as_ref();
-        messages
+        if let Some(before) = &self.at_last_model_call
+            && let Some(tail) = before.preserved_extension_delta(messages)
+        {
+            let read = graph.read_model();
+            if let Some(prefix_len) = before.base_prefix_len_in(&read.messages) {
+                let mut prefix = read.messages;
+                prefix.truncate(prefix_len);
+                let base = crate::MessageSequence::from_base(prefix);
+                if let Some(prior_delta) = base.preserved_extension_delta(before) {
+                    let before_ids: BTreeSet<_> = prior_delta
+                        .iter()
+                        .filter(|message| message.role == MessageRole::Assistant)
+                        .map(|message| message.id.as_str())
+                        .collect();
+                    return tail
+                        .iter()
+                        .filter(|message| message.role == MessageRole::Assistant)
+                        .filter(|message| {
+                            !before_ids.contains(message.id.as_str())
+                                && !graph.contains_active_assistant_message_id_before(
+                                    &message.id,
+                                    prefix_len,
+                                )
+                        })
+                        .map(|message| message.id.clone())
+                        .collect();
+                }
+            }
+        }
+        let before: BTreeSet<_> = self
+            .at_last_model_call
+            .iter()
+            .flat_map(crate::MessageSequence::iter)
             .filter(|message| message.role == MessageRole::Assistant)
-            .filter(|message| !before.is_some_and(|before| before.contains(&message.id)))
+            .map(|message| message.id.as_str())
+            .collect();
+        messages
+            .iter()
+            .filter(|message| message.role == MessageRole::Assistant)
+            .filter(|message| !before.contains(message.id.as_str()))
             .map(|message| message.id.clone())
             .collect()
     }
@@ -86,72 +115,5 @@ impl RuntimeTurnDriver<'_> {
         for event in events {
             self.emit_trace(protocol_iteration, || protocol_step_trace_event(event));
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn message(id: &str, role: MessageRole) -> Message {
-        Message {
-            id: id.to_string(),
-            role,
-            parts: crate::shared_parts(vec![crate::Part::prose(
-                format!("{id}.p0"),
-                id.to_string(),
-                None,
-            )]),
-            origin: None,
-            reply_marker: None,
-        }
-    }
-
-    #[test]
-    fn terminal_output_is_the_assistant_tail_after_the_last_model_call() {
-        let history = vec![
-            message("a0", MessageRole::Assistant),
-            message("u1", MessageRole::User),
-        ];
-        let mut tracker = ProtocolReplyTracker::default();
-        tracker.mark_run_start(history.iter());
-
-        let mut turn = history.clone();
-        turn.push(message("retry", MessageRole::Assistant));
-        turn.push(message("reminder", MessageRole::System));
-        tracker.mark_model_call(turn.iter());
-        turn.push(message("reply", MessageRole::Assistant));
-        turn.push(message("enqueued", MessageRole::User));
-
-        assert_eq!(
-            tracker.terminal_output(turn.iter()),
-            vec!["reply".to_string()]
-        );
-    }
-
-    #[test]
-    fn a_finish_without_a_new_assistant_message_names_nothing() {
-        let mut turn = vec![message("u0", MessageRole::User)];
-        let mut tracker = ProtocolReplyTracker::default();
-        tracker.mark_run_start(turn.iter());
-        turn.push(message("prose", MessageRole::Assistant));
-        tracker.mark_model_call(turn.iter());
-
-        assert!(tracker.terminal_output(turn.iter()).is_empty());
-    }
-
-    #[test]
-    fn a_later_run_keeps_the_anchor_from_the_last_model_call() {
-        let mut turn = vec![message("u0", MessageRole::User)];
-        let mut tracker = ProtocolReplyTracker::default();
-        tracker.mark_run_start(turn.iter());
-        tracker.mark_model_call(turn.iter());
-        turn.push(message("reply", MessageRole::Assistant));
-        tracker.mark_run_start(turn.iter());
-
-        assert_eq!(
-            tracker.terminal_output(turn.iter()),
-            vec!["reply".to_string()]
-        );
     }
 }

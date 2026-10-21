@@ -96,6 +96,76 @@ async fn effect_executor_allocations_are_independent_of_history_depth() {
     );
 }
 
+/// FIG-7080: anchoring and recognizing one protocol reply must not copy
+/// the assistant ids of every preceding turn.
+#[test]
+fn protocol_reply_tracking_allocates_independently_of_history_depth() {
+    let message = |id: String| crate::Message {
+        parts: crate::shared_parts(vec![crate::Part::text(
+            format!("{id}.p0"),
+            "reply".to_owned(),
+            None,
+        )]),
+        id,
+        role: crate::MessageRole::Assistant,
+        origin: None,
+        reply_marker: None,
+    };
+    let work = [1, 10, 1000].map(|turns| {
+        let history = (0..turns)
+            .map(|turn| message(format!("old-{turn:04}")))
+            .collect::<Vec<_>>();
+        let mut suffix = vec![
+            message("current-reply".to_owned()),
+            message("old-0000".to_owned()),
+        ];
+        let mut user = message("after-turn-input".to_owned());
+        user.role = crate::MessageRole::User;
+        suffix.push(user);
+        // The commit draft may already have folded the terminal delta. The
+        // boundary's base is a shorter immutable view of that same buffer.
+        let mut all = history;
+        all.extend(suffix.iter().cloned());
+        let graph = crate::SessionGraph::from_active_read_state(&all);
+        let mut prefix = graph.read_model().messages;
+        prefix.truncate(turns);
+        let before = crate::MessageSequence::from_base(prefix);
+        let mut after = before.clone();
+        after.extend(suffix);
+        let measurement = allocation_counter::Measurement::start();
+        let mut tracker = super::machine::ProtocolReplyTracker::default();
+        tracker.mark_run_start(&before);
+        tracker.mark_model_call(&before);
+        assert!(tracker.terminal_output(&before, &graph).is_empty());
+        let reply = tracker.terminal_output(&after, &graph);
+        let counts = measurement.finish();
+        assert_eq!(reply, ["current-reply"]);
+        // A continuation run keeps the last model call's identity boundary.
+        tracker.mark_run_start(&after);
+        assert_eq!(tracker.terminal_output(&after, &graph), ["current-reply"]);
+        // A new model call excludes that reply from its successor's output.
+        tracker.mark_model_call(&after);
+        assert!(tracker.terminal_output(&after, &graph).is_empty());
+        after.push(message("following-reply".to_owned()));
+        assert_eq!(tracker.terminal_output(&after, &graph), ["following-reply"]);
+        // Rebuilt/edited histories have no prefix witness: preserve the same
+        // id semantics, including an old assistant moved after the reply.
+        let mut rewritten = after.iter().cloned().collect::<Vec<_>>();
+        rewritten.rotate_left(1);
+        let rewritten = crate::MessageSequence::from_owned(rewritten);
+        assert_eq!(
+            tracker.terminal_output(&rewritten, &graph),
+            ["following-reply"]
+        );
+        counts
+    });
+    eprintln!("reply tracking at 1, 10 and 1000 turns: {work:?}");
+    for counts in &work[1..] {
+        assert_eq!(work[0].allocations, counts.allocations);
+        assert_eq!(work[0].allocated, counts.allocated);
+    }
+}
+
 mod allocation_counter {
     //! Allocation requests on the thread constructing an effect executor.
     use std::alloc::{GlobalAlloc, Layout, System};

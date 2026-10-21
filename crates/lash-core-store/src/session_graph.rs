@@ -89,10 +89,17 @@ pub mod facade_ops {
         fn nearest_frame_node_id(&self, leaf_node_id: Option<&str>) -> Option<&NodeId>;
 
         fn agent_frame_records(&self, session_id: &SessionId) -> Vec<crate::AgentFrameRecord>;
+
+        fn contains_active_assistant_message_id_before(&self, id: &str, end: usize) -> bool;
     }
 
     #[doc(hidden)]
     impl SessionGraphFacadeOps for SessionGraph {
+        fn contains_active_assistant_message_id_before(&self, id: &str, end: usize) -> bool {
+            self.cache()
+                .contains_active_assistant_message_id_before(id, end)
+        }
+
         fn active_path_nodes(&self) -> Vec<&SessionNodeRecord> {
             self.cache()
                 .active_path_indices

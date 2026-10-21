@@ -638,7 +638,7 @@ fn fresh_machine(
     window: crate::runtime::durable::head::TurnWindow,
     messages: crate::MessageSequence,
 ) -> Result<TurnMachine, TurnError> {
-    driver.protocol_reply.mark_run_start(messages.iter());
+    driver.protocol_reply.mark_run_start(&messages);
     let refused = driver.validate_recorded_selection().err();
     let mut machine = driver.turn_machine(window, messages);
     if let Some(event) = refused {
@@ -755,7 +755,7 @@ impl TurnDrive for RuntimeDrive {
         self.driver.model_limit = Some(limit);
         self.driver
             .protocol_reply
-            .mark_model_call(self.machine.messages().iter());
+            .mark_model_call(&self.machine.message_sequence());
         let stop = self.driver.children_stop.clone();
         let owed = {
             let call = Box::pin(self.driver.handle_llm_call_effect(
@@ -1268,7 +1268,9 @@ impl TurnDrive for RuntimeDrive {
         let driver = &mut self.driver;
         driver.apply_final_event_delta(done.event_delta, done.protocol_iteration);
         driver.turn_pipeline.record_protocol_terminal_output(
-            driver.protocol_reply.terminal_output(done.messages.iter()),
+            driver
+                .protocol_reply
+                .terminal_output(&done.messages, head.state().session_graph()),
         );
         let outcome = done
             .outcome
