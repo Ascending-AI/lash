@@ -13,7 +13,7 @@ use lash_kernel_doc::{
     FunctionRegistry, Implementation, Node, Operand, Type, parse_definition,
 };
 
-use crate::package::{Code, PackageDisplay, digest_of};
+use crate::package::{Code, digest_of};
 use crate::shape::{STALE_VALUE, Shapes};
 use crate::surface;
 use crate::{NameRole, Origin, Package, PackageRefusal, Root};
@@ -25,7 +25,7 @@ pub struct PackageSources<'a> {
     pub kernel: &'a str,
     /// `<pkg>.surface`: the exports, under canonical names.
     pub surface: &'a str,
-    /// `<pkg>.labels.tsv`: a title per member path.
+    /// `<pkg>.labels.json`: display facts for members and private definitions.
     pub labels: &'a str,
 }
 
@@ -73,15 +73,17 @@ impl Package {
             text: invalid.text,
         })?;
         let exports = surface::exports(&path, sources.surface)?;
-        let display = PackageDisplay {
-            members: surface::labels(&path, &exports, sources.labels)?,
-            definitions: BTreeMap::new(),
-        };
+        let roots: BTreeSet<Root> = [Root::new(path.to_string())].into();
+        let display = crate::labels::read(sources.labels, &exports, &roots).map_err(|error| {
+            PackageRefusal::Labels {
+                package: path.clone(),
+                error,
+            }
+        })?;
         let requirements: BTreeMap<PackagePath, ArtifactDigest> = requires
             .iter()
             .map(|package| (package.path().clone(), package.digest()))
             .collect();
-        let roots: BTreeSet<Root> = [Root::new(path.to_string())].into();
         let types: BTreeMap<String, &Type> = exports
             .iter()
             .filter_map(|(segment, export)| match export {

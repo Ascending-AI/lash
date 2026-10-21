@@ -1110,18 +1110,14 @@
   },
   "crates/lash-kernel-package": {
     "compile_data": [
-      "labels/date.tsv",
-      "labels/kernel.comparisons.tsv",
-      "labels/kernel.tsv",
-      "labels/python.comparisons.tsv",
-      "labels/python.replies.tsv",
-      "labels/python.tsv",
-      "labels/regex.tsv",
-      "labels/typescript.comparisons.tsv",
-      "labels/typescript.tsv",
-      "labels/url.tsv",
+      "labels/date.json",
+      "labels/kernel.json",
+      "labels/python.json",
+      "labels/regex.json",
+      "labels/typescript.json",
+      "labels/url.json",
       "src/testing/dataframe.kernel",
-      "src/testing/dataframe.labels.tsv",
+      "src/testing/dataframe.labels.json",
       "src/testing/dataframe.surface"
     ]
   },
@@ -1129,7 +1125,7 @@
     "compile_data": [
       "dataframe.kernel",
       "dataframe.surface",
-      "dataframe.labels.tsv",
+      "dataframe.labels.json",
       "wordcount.ts",
       "wordcount.py"
     ]

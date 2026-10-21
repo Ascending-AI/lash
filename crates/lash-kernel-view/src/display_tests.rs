@@ -40,7 +40,7 @@ fn comparison_package(name: &str, title: &str, kernel: &Package) -> Package {
                  kernel 1\ncharge 4\nbody {{ return eq(left, right) }}\n"
             ),
             surface: &format!("function compare(left: Any, right: Any) -> Bool = {name}.compare\n"),
-            labels: &format!("compare\t{title}\n"),
+            labels: &serde_json::json!({"members": {"compare": title}}).to_string(),
         },
         &[kernel],
     )

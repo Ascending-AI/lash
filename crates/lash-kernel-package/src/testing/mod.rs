@@ -8,7 +8,7 @@ use crate::{Package, PackageRefusal, PackageSources};
 pub const DATAFRAME: PackageSources<'static> = PackageSources {
     kernel: include_str!("dataframe.kernel"),
     surface: include_str!("dataframe.surface"),
-    labels: include_str!("dataframe.labels.tsv"),
+    labels: include_str!("dataframe.labels.json"),
 };
 
 /// The fixture's release label.

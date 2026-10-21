@@ -26,7 +26,7 @@ fn q(value: i64) -> Package {
         &PackageSources {
             kernel: &kernel,
             surface: "function v() -> Int = q.v\n",
-            labels: "v\tvalue\n",
+            labels: r#"{"members": {"v": "value"}}"#,
         },
         &[],
     )
@@ -40,7 +40,7 @@ fn p(q: &Package) -> Package {
         &PackageSources {
             kernel: "use q.v\n\nfunction p.f() -> Int\nkernel 1\ncharge 2\nbody {\n  let value = invoke q.v()\n  return value\n}\n",
             surface: "function f() -> Int = p.f\n",
-            labels: "f\tf\n",
+            labels: r#"{"members": {"f": "f"}}"#,
         },
         &[q],
     )
@@ -206,7 +206,7 @@ fn a_native_only_leaf_the_node_lacks_refuses_that_run_alone_naming_it() {
         &PackageSources {
             kernel: "function n.leaf() -> Int\nkernel 1\ncharge 1\nnative\n",
             surface: "function leaf() -> Int = n.leaf\n",
-            labels: "leaf\tleaf\n",
+            labels: r#"{"members": {"leaf": "leaf"}}"#,
         },
         &[],
     )
@@ -244,7 +244,7 @@ fn declaration_mode_reads_a_header_whose_native_the_node_lacks() {
         &PackageSources {
             kernel: "function n.leaf(x: Text) -> Int\nkernel 1\ncharge 1\nnative\n",
             surface: "function leaf(x: Text) -> Int = n.leaf\n",
-            labels: "leaf\tleaf\n",
+            labels: r#"{"members": {"leaf": "leaf"}}"#,
         },
         &[],
     )
@@ -327,7 +327,7 @@ fn a_run_requires_the_natives_its_code_reaches_and_its_kernel() {
         &PackageSources {
             kernel: "function n.leaf() -> Int\nkernel 1\ncharge 1\nnative\n",
             surface: "function leaf() -> Int = n.leaf\n",
-            labels: "leaf\tleaf\n",
+            labels: r#"{"members": {"leaf": "leaf"}}"#,
         },
         &[],
     )

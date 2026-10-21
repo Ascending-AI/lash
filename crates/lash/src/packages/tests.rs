@@ -22,7 +22,7 @@ fn q(value: i64) -> Package {
         &PackageSources {
             kernel: &kernel,
             surface: "function v() -> Int = q.v\n",
-            labels: "v\tvalue\n",
+            labels: r#"{"members": {"v": "value"}}"#,
         },
         &[],
     )
@@ -51,7 +51,7 @@ async fn imported_internal_body(bootstrap: bool) {
         Package::build("dataframe", release, &PackageSources {
             kernel: &format!("effect dataframe.run(input?: Json) -> Text contract \"run/1\"\n\nfunction dataframe.execute() -> Text\nkernel 1\ncharge {}\nbody {{\n  let got = perform dataframe.run({{}}) as Text\n  return {}\n}}\n", if release == "old" { 2 } else { 3 }, if release == "old" { "got" } else { "\"new-body\"" }),
             surface: "internal operation run(input?: Json) -> Text contract \"run/1\"\nasync function execute() -> Text = dataframe.execute\n",
-            labels: "execute\texecute\n",
+            labels: r#"{"members": {"execute": "execute"}}"#,
         }, &[]).unwrap()
     };
     let old = Arc::new(package("old"));
@@ -569,13 +569,13 @@ fn q_natives(value: i64, natives: &[&str]) -> Package {
     let mut kernel =
         format!("function q.v() -> Int\nkernel 1\ncharge 1\nbody {{\n  return {value}\n}}\n");
     let mut surface = "function v() -> Int = q.v\n".to_owned();
-    let mut labels = "v\tvalue\n".to_owned();
+    let mut labels = serde_json::json!({"members": {"v": "value"}});
     for native in natives {
         kernel.push_str(&format!(
             "\nfunction q.{native}() -> Int\nkernel 1\ncharge 1\nnative\n"
         ));
         surface.push_str(&format!("function {native}() -> Int = q.{native}\n"));
-        labels.push_str(&format!("{native}\t{native}\n"));
+        labels["members"][native] = (*native).into();
     }
     Package::build(
         "q",
@@ -583,7 +583,7 @@ fn q_natives(value: i64, natives: &[&str]) -> Package {
         &PackageSources {
             kernel: &kernel,
             surface: &surface,
-            labels: &labels,
+            labels: &labels.to_string(),
         },
         &[],
     )
@@ -802,7 +802,7 @@ fn q_with_helper() -> Package {
         &PackageSources {
             kernel: "use q.base\n\nfunction q.base() -> Int\nkernel 1\ncharge 1\nbody {\n  return 2\n}\n\nfunction q.v() -> Int\nkernel 1\ncharge 2\nbody {\n  let value = invoke q.base()\n  return value\n}\n\nfunction q.twice() -> Int\nkernel 1\ncharge 2\nbody {\n  return 4\n}\n",
             surface: "function v() -> Int = q.v\nfunction twice() -> Int = q.twice\n",
-            labels: "v\tvalue\ntwice\ttwice\n",
+            labels: r#"{"members": {"v": "value", "twice": "twice"}}"#,
         },
         &[],
     )

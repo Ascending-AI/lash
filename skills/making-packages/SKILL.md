@@ -27,7 +27,11 @@ Paths in this skill are relative to this file.
 
 2. **Write the surface and kernel sources; build the artifact.**
    Author the declarations in a `.surface` file, definitions in `.kernel`, and
-   display titles in `.labels.tsv`. Match each member's signature to its named
+   display facts in one `.labels.json`: `members` maps surface paths to title
+   strings or objects with `title`, optional `comparison` and `reply`;
+   `definitions` is only for private definitions under the package roots.
+   Duplicate keys, unknown fields or member paths, and empty titles are refused
+   with a JSON pointer. Match each member's signature to its named
    definition. A method's receiver is first; a property has only its receiver.
    Mark a member `async` if it can wait, including through another body. Keep
    definitions under the package's path and off lash's reserved roots.
@@ -41,7 +45,7 @@ Paths in this skill are relative to this file.
    Read [Declare the package](../../docs/host-packages.md#declare-the-package).
    Follow [src/lib.rs](../../examples/dataframe/src/lib.rs),
    [dataframe.kernel](../../examples/dataframe/dataframe.kernel)
-   and [dataframe.labels.tsv](../../examples/dataframe/dataframe.labels.tsv).
+   and [dataframe.labels.json](../../examples/dataframe/dataframe.labels.json).
    Use the [surface reference](references/surface.md) for indentation and slots.
 
 3. **Keep effects at the declared operation boundary.**

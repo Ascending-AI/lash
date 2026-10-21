@@ -26,7 +26,7 @@ lash_rust_library(
     compile_data_patterns = [
         "dataframe.kernel",
         "dataframe.surface",
-        "dataframe.labels.tsv",
+        "dataframe.labels.json",
         "wordcount.ts",
         "wordcount.py",
     ],

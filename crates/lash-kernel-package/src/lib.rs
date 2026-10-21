@@ -14,6 +14,7 @@ mod build;
 mod frame;
 mod held;
 mod install;
+mod labels;
 mod lash;
 mod package;
 mod refusal;

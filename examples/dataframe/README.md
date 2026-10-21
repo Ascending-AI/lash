@@ -4,6 +4,10 @@ This example computes the Rigel wordcount using a host package and a small Rust
 evaluator. It adds no dataframe subsystem to lash. Copy the package and provider
 into your host; `src/evaluator.rs` is where you plug in DataFusion or a database.
 
+`dataframe.labels.json` keeps display titles separate from the kernel and
+surface sources. Its `members` object maps canonical member paths to titles;
+these labels affect neither the package digest nor function identities.
+
 `wordcount.ts` and `wordcount.py` use the installed `dataframe` namespace, without
 imports. `viaJs` / `via_js` applies every callback in the kernel and makes no
 native call. `viaExprs` / `via_exprs` tokenizes in the kernel, then sends filter,

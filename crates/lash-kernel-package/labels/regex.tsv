@@ -1,6 +1,0 @@
-regex.ecma.compile_check	regex ecma compile check
-regex.ecma.exec	regex ecma exec
-regex.ecma.match_all	regex ecma match all
-regex.ecma.replace	regex ecma replace
-regex.ecma.split	regex ecma split
-regex.ecma.test	regex ecma test

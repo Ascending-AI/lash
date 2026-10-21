@@ -294,7 +294,9 @@ PACKAGE_DEPS = {
         "build": {},
         "dev": {},
         "normal": {
-            "serde": "//third-party/rust:p0317"
+            "serde": "//third-party/rust:p0317",
+            "serde_json": "//third-party/rust:p0322",
+            "serde_path_to_error": "//third-party/rust:p0323"
         }
     },
     "lash-internal-checkpoint-encoder": {

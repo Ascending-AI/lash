@@ -20,10 +20,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_helper_labels::MemberDisplay;
 use lash_kernel_dialect::{
-    BRAND_FIELD, BUILT_FIELD, Export, Intent, Member, MemberPath, OperationExport, PackagePath,
-    Segment, TypeMember, ValueType, Visibility, brand_tuple, brand_type,
+    BRAND_FIELD, BUILT_FIELD, Export, Intent, Member, OperationExport, PackagePath, Segment,
+    TypeMember, ValueType, Visibility, brand_tuple, brand_type,
 };
 use lash_kernel_doc::{
     ContractId, FunctionName, OperationRequirement, RecordTypeField, Signature, Type,
@@ -94,49 +93,6 @@ pub(crate) fn exports(
         .into_iter()
         .map(|(segment, (_, export))| (segment, export))
         .collect())
-}
-
-/// Reads `labels`, rows of a member path and its title, as display data
-/// for `exports`.
-///
-/// # Errors
-///
-/// [`PackageRefusal::Source`] for a malformed row or one naming no member.
-pub(crate) fn labels(
-    path: &PackagePath,
-    exports: &BTreeMap<Segment, Export>,
-    labels: &str,
-) -> Result<BTreeMap<MemberPath, MemberDisplay>, PackageRefusal> {
-    let mut read = BTreeMap::new();
-    for (index, row) in labels.lines().enumerate() {
-        if row.trim().is_empty() {
-            continue;
-        }
-        let refuse = |message: &str| PackageRefusal::Source {
-            package: path.clone(),
-            message: format!("labels line {}: {message}", index + 1),
-        };
-        let (member, title) = row
-            .split_once('\t')
-            .ok_or_else(|| refuse("expected a member path and a title"))?;
-        if title.trim().is_empty() || title.contains('\t') {
-            return Err(refuse("expected one non-empty title"));
-        }
-        let member = MemberPath::try_from(member.to_owned())
-            .map_err(|_| refuse("expected a canonical member path"))?;
-        let declared = match (exports.get(&member.export), &member.member) {
-            (Some(_), None) => true,
-            (Some(Export::Type(ty)), Some(name)) => ty.members.contains_key(name),
-            _ => false,
-        };
-        if !declared {
-            return Err(refuse(&format!("`{member}` is no export or member")));
-        }
-        if read.insert(member, MemberDisplay::new(title)).is_some() {
-            return Err(refuse("a member labelled twice"));
-        }
-    }
-    Ok(read)
 }
 
 fn member_declared(member: &TypeMember) -> Declared {

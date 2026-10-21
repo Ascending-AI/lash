@@ -2250,6 +2250,8 @@ name = "lash-helper-labels"
 version = "0.0.0-dev"
 dependencies = [
  "serde",
+ "serde_json",
+ "serde_path_to_error",
 ]
 
 [[package]]

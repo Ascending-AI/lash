@@ -391,7 +391,7 @@ fn a_run_from_stored_definitions_charges_exactly_as_the_writers_build() {
                     "use ts.number.parse_int\n\nfunction w.go(s: Text) -> Any\nkernel 1\ncharge 2\nbody {{\n  let n = invoke ts.number.parse_int(s, 10, false)\n  let out = [n, {step}]\n  return out\n}}\n"
                 ),
                 surface: "function go(s: Text) -> Any = w.go\n",
-                labels: "go\tgo\n",
+                labels: r#"{"members": {"go": "go"}}"#,
             },
             &lash.iter().collect::<Vec<_>>(),
         )

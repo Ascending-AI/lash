@@ -46,7 +46,7 @@ fn slow(release: &str, step: i64) -> Package {
                 "function slow.wait(n: Int) -> Any\nkernel 1\ncharge 3\nbody {{\n  do sleep 1000\n  do sleep 1000\n  return [n, {step}]\n}}\n"
             ),
             surface: "async function wait(n: Int) -> Any = slow.wait\n",
-            labels: "wait\twait\n",
+            labels: r#"{"members": {"wait": "wait"}}"#,
         },
         &[],
     )

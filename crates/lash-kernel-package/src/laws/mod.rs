@@ -3,6 +3,7 @@
 //! machine over test-owned pages.
 
 mod build;
+mod labels;
 mod shape;
 
 use std::cell::RefCell;

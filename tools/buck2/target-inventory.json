@@ -95554,7 +95554,9 @@
     {
       "declared_features": [],
       "dependencies": [
-        "serde"
+        "serde",
+        "serde_json",
+        "serde_path_to_error"
       ],
       "doc": "//crates/lash-helper-labels:lash-helper-labels__doc",
       "manifest": "crates/lash-helper-labels/Cargo.toml",

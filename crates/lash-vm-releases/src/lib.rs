@@ -125,7 +125,7 @@ pub fn built() -> Result<Vec<Package>, String> {
             let image = lash_kernel_doc::ReleasedFunctions::read(built.image)
                 .map_err(|error| error.to_string())?;
             let package = Package::from_image(header, image).map_err(|error| error.to_string())?;
-            let display = lash_kernel_package::shipped_display::of(package.path())
+            let display = lash_kernel_package::shipped_display::of(&package)
                 .map_err(|error| error.to_string())?;
             Ok(package.with_display(display))
         })

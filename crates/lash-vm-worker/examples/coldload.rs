@@ -99,7 +99,7 @@ fn chain(lash: &[Package], step: i64) -> Outcome<Package> {
         &PackageSources {
             kernel: &kernel,
             surface: &format!("function top(n: Int) -> Any = w.f{top}\n"),
-            labels: "top\ttop\n",
+            labels: r#"{"members": {"top": "top"}}"#,
         },
         &lash.iter().collect::<Vec<_>>(),
     )?)

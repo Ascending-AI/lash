@@ -82,8 +82,7 @@ pub enum Origin {
     Host,
 }
 
-/// Labels for a package's members and, for lash's packages, whose
-/// definitions back no member, for its definitions. Display data never
+/// Labels for a package's members and private definitions that back no member. Display data never
 /// enters the digest.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

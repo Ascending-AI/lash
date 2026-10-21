@@ -150,6 +150,12 @@ pub enum PackageRefusal {
     /// with one set and nothing beside it.
     #[error("{key} is not a member of the node's set")]
     NotMember { key: ArtifactKey },
+    /// The package's JSON display labels are refused at the named pointer.
+    #[error("package `{package}`: {error}")]
+    Labels {
+        package: PackagePath,
+        error: lash_helper_labels::LabelError,
+    },
     /// The package's sources do not read.
     #[error("package `{package}`: {message}")]
     Source {

@@ -26,7 +26,7 @@ pub fn packages() -> Result<Arc<HeldPackages>, String> {
         &PackageSources {
             kernel: include_str!("../dataframe.kernel"),
             surface: include_str!("../dataframe.surface"),
-            labels: include_str!("../dataframe.labels.tsv"),
+            labels: include_str!("../dataframe.labels.json"),
         },
         &[kernel],
     )

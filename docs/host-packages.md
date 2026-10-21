@@ -138,8 +138,31 @@ host explain a change; the artifact digest identifies the artifact. Display
 labels and comparison descriptions stay outside execution identity.
 
 Author definitions in a `.kernel` source, the surface in a `.surface` source
-and display labels in a `.labels.tsv` source. The surface has one `exports`
-map, keyed by canonical segment. Each entry is one `Export` variant:
+and display labels in a `.labels.json` source. The surface has one `exports`
+map, keyed by canonical segment. Labels are a separate JSON document:
+
+```json
+{
+  "members": {
+    "col": "column",
+    "data_quanta.flat_map": { "title": "flat map" }
+  },
+  "definitions": {
+    "dataframe.helper": { "title": "helper" }
+  }
+}
+```
+
+A string is shorthand for an object with `title`. Objects may also supply
+`comparison` (`Eq`, `Ne`, `Lt`, `Le`, `Gt`, `Ge`, `Not`, `Contains`,
+`StartsWith`, `EndsWith`) and `reply` (a boolean). `members` names declared
+surface paths; `definitions` labels private definitions that back no member
+and must stay under the package's roots. Either map may be omitted. Unknown
+keys or fields, duplicate keys and empty titles are refused as
+`PackageRefusal::Labels`, carrying the JSON pointer and offending key.
+Labels never affect the artifact digest or any function identity.
+
+Each surface entry is one `Export` variant:
 
 | Export | What the author declares |
 | --- | --- |

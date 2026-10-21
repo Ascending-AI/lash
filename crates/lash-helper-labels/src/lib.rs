@@ -1,7 +1,7 @@
 //! Package-owned display facts, without execution semantics.
 //!
 //! The package crate owns each display entry and its key. This crate supplies
-//! the plain data and the two-column label reader; it owns no library inventory.
+//! the plain data and the JSON label reader; it owns no library inventory.
 
 use std::collections::BTreeMap;
 
@@ -64,67 +64,236 @@ impl Comparison {
     }
 }
 
-/// A malformed shipped side file: a build defect, never guest input.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// A refused labels document, located by JSON pointer rather than source line.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LabelError {
-    pub line: usize,
+    pub pointer: String,
+    pub key: String,
     pub message: String,
+}
+
+impl LabelError {
+    pub fn at(parent: &str, key: &str, message: impl Into<String>) -> Self {
+        Self {
+            pointer: format!("{parent}/{}", key.replace('~', "~0").replace('/', "~1")),
+            key: key.into(),
+            message: message.into(),
+        }
+    }
 }
 
 impl std::fmt::Display for LabelError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "helper label line {}: {}", self.line, self.message)
+        write!(
+            f,
+            "labels at `{}` (key `{}`): {}",
+            self.pointer, self.key, self.message
+        )
     }
 }
 impl std::error::Error for LabelError {}
 
-/// Read a package's `name<TAB>title` side file through its key parser.
-///
-/// The package supplies the interpretation of a name: a canonical member path
-/// for a host package, or a definition name for a built-in package. Duplicate
-/// parsed keys and empty titles are refused rather than silently overwritten.
-pub fn read_labels<K: Ord>(
-    data: &str,
-    mut parse_key: impl FnMut(&str) -> Option<K>,
-) -> Result<BTreeMap<K, MemberDisplay>, LabelError> {
-    let mut labels = BTreeMap::new();
-    for (index, row) in data.lines().enumerate() {
-        let fail = |message: &str| LabelError {
-            line: index + 1,
-            message: message.into(),
-        };
-        let (name, title) = row
-            .split_once('\t')
-            .ok_or_else(|| fail("expected name and title"))?;
-        let name = parse_key(name).ok_or_else(|| fail("invalid display key"))?;
-        if title.trim().is_empty() || title.contains('\t') {
-            return Err(fail("expected one non-empty title"));
-        }
-        if labels.insert(name, MemberDisplay::new(title)).is_some() {
-            return Err(fail("duplicate display key"));
-        }
-    }
-    Ok(labels)
+/// Parsed display facts; the package owner validates member and definition keys.
+#[derive(Debug, Default)]
+pub struct Labels {
+    pub members: BTreeMap<String, MemberDisplay>,
+    pub definitions: BTreeMap<String, MemberDisplay>,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[derive(serde::Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+struct Document {
+    #[serde(default)]
+    members: BTreeMap<String, serde_json::Value>,
+    #[serde(default)]
+    definitions: BTreeMap<String, serde_json::Value>,
+}
 
-    /// HELP-LABEL: duplicate names and empty titles never silently become an entry.
-    #[test]
-    fn side_files_refuse_duplicate_keys_and_empty_titles() {
-        let read = |data| read_labels(data, |key| Some(key.to_owned()));
-        let labels = read("helper\tReviewed title\nother\tOther title\n").unwrap();
-        assert_eq!(labels.len(), 2);
-        assert_eq!(labels["helper"].title, "Reviewed title");
-        assert!(read("helper\tTitle\nhelper\tOther\n").is_err());
-        assert!(read("helper\t  \n").is_err());
-        assert!(read("helper\tOne\tTwo\n").is_err());
-        assert!(read_labels("bad\tTitle", |_| None::<String>).is_err());
-        assert!(
-            read_labels("one\tFirst\ntwo\tSecond", |_| Some(0)).is_err(),
-            "the parsed member identity, rather than the input spelling, owns an entry"
-        );
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Details {
+    title: String,
+    #[serde(default)]
+    comparison: Option<Comparison>,
+    #[serde(default)]
+    reply: bool,
+}
+
+/// Read one JSON labels document. An absent source has no display facts.
+/// Duplicate keys are rejected before any JSON object can discard an entry.
+pub fn read_json(data: &str) -> Result<Labels, LabelError> {
+    if data.is_empty() {
+        return Ok(Labels::default());
+    }
+    let mut failure = None;
+    let mut deserializer = serde_json::Deserializer::from_str(data);
+    use serde::de::DeserializeSeed;
+    let value = UniqueValue {
+        pointer: String::new(),
+        failure: &mut failure,
+    }
+    .deserialize(&mut deserializer)
+    .and_then(|value| {
+        deserializer.end()?;
+        Ok(value)
+    })
+    .map_err(|_| {
+        failure.unwrap_or_else(|| LabelError {
+            pointer: String::new(),
+            key: String::new(),
+            message: "invalid JSON labels document".into(),
+        })
+    })?;
+    let document: Document = decode(value, "")?;
+    let entries = |section: &str, values: BTreeMap<String, serde_json::Value>| {
+        values
+            .into_iter()
+            .map(|(key, value)| {
+                let at = LabelError::at(section, &key, "");
+                let shorthand = value.is_string();
+                let details = match value {
+                    serde_json::Value::String(title) => Details {
+                        title,
+                        comparison: None,
+                        reply: false,
+                    },
+                    value => decode::<Details>(value, &at.pointer)?,
+                };
+                if details.title.trim().is_empty() {
+                    return Err(if shorthand {
+                        LabelError {
+                            message: "expected a non-empty title".into(),
+                            ..at
+                        }
+                    } else {
+                        LabelError::at(&at.pointer, "title", "expected a non-empty title")
+                    });
+                }
+                Ok((
+                    key,
+                    MemberDisplay {
+                        title: details.title,
+                        comparison: details.comparison,
+                        reply: details.reply,
+                    },
+                ))
+            })
+            .collect::<Result<BTreeMap<_, _>, LabelError>>()
+    };
+    Ok(Labels {
+        members: entries("/members", document.members)?,
+        definitions: entries("/definitions", document.definitions)?,
+    })
+}
+
+fn decode<T: serde::de::DeserializeOwned>(
+    value: serde_json::Value,
+    parent: &str,
+) -> Result<T, LabelError> {
+    if !value.is_object() {
+        return Err(LabelError {
+            pointer: parent.into(),
+            key: parent
+                .rsplit('/')
+                .next()
+                .unwrap_or_default()
+                .replace("~1", "/")
+                .replace("~0", "~"),
+            message: "expected a JSON object".into(),
+        });
+    }
+    serde_path_to_error::deserialize(value).map_err(|error| {
+        let mut pointer = parent.to_owned();
+        let mut key = parent
+            .rsplit('/')
+            .next()
+            .unwrap_or_default()
+            .replace("~1", "/")
+            .replace("~0", "~");
+        for segment in error.path() {
+            key = match segment {
+                serde_path_to_error::Segment::Map { key } => key.clone(),
+                serde_path_to_error::Segment::Seq { index } => index.to_string(),
+                serde_path_to_error::Segment::Enum { variant } => variant.clone(),
+                serde_path_to_error::Segment::Unknown => continue,
+            };
+            pointer = LabelError::at(&pointer, &key, "").pointer;
+        }
+        LabelError {
+            pointer,
+            key,
+            message: error.inner().to_string(),
+        }
+    })
+}
+
+/// A JSON value reader that owns each map insertion, retaining the path of
+/// a duplicate before serde_json::Value could replace its first occurrence.
+struct UniqueValue<'a> {
+    pointer: String,
+    failure: &'a mut Option<LabelError>,
+}
+
+impl<'de> serde::de::DeserializeSeed<'de> for UniqueValue<'_> {
+    type Value = serde_json::Value;
+    fn deserialize<D: serde::Deserializer<'de>>(
+        self,
+        deserializer: D,
+    ) -> Result<Self::Value, D::Error> {
+        deserializer.deserialize_any(self)
+    }
+}
+
+impl<'de> serde::de::Visitor<'de> for UniqueValue<'_> {
+    type Value = serde_json::Value;
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a JSON labels value")
+    }
+    fn visit_map<M: serde::de::MapAccess<'de>>(self, mut map: M) -> Result<Self::Value, M::Error> {
+        let mut values = serde_json::Map::new();
+        while let Some(key) = map.next_key::<String>()? {
+            let at = LabelError::at(&self.pointer, &key, "duplicate key");
+            if values.contains_key(&key) {
+                *self.failure = Some(at);
+                return Err(serde::de::Error::custom("duplicate key"));
+            }
+            let value = map.next_value_seed(UniqueValue {
+                pointer: at.pointer,
+                failure: self.failure,
+            })?;
+            values.insert(key, value);
+        }
+        Ok(serde_json::Value::Object(values))
+    }
+    fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
+        Ok(serde_json::Value::String(value.into()))
+    }
+    fn visit_string<E: serde::de::Error>(self, value: String) -> Result<Self::Value, E> {
+        Ok(serde_json::Value::String(value))
+    }
+    fn visit_bool<E: serde::de::Error>(self, value: bool) -> Result<Self::Value, E> {
+        Ok(serde_json::Value::Bool(value))
+    }
+    fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+        Ok(serde_json::Value::Null)
+    }
+    fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<Self::Value, E> {
+        Ok(value.into())
+    }
+    fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<Self::Value, E> {
+        Ok(value.into())
+    }
+    fn visit_f64<E: serde::de::Error>(self, value: f64) -> Result<Self::Value, E> {
+        Ok(serde_json::Value::from(value))
+    }
+    fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+        let mut values = Vec::new();
+        while let Some(value) = seq.next_element_seed(UniqueValue {
+            pointer: format!("{}/{}", self.pointer, values.len()),
+            failure: self.failure,
+        })? {
+            values.push(value);
+        }
+        Ok(serde_json::Value::Array(values))
     }
 }

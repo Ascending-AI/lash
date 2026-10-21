@@ -24,7 +24,7 @@ the meaning of the declarations.
 | Slots | Kernel types apply. Optional parameters include absence; an optional record field uses `?`. A rest slot uses `...` and is the last slot, of list type. |
 | Operations | `operation` is public; `internal operation` is body-only. Each declares a signature and contract, with optional declared intents. Operations do not map to definitions with `=`. |
 | Errors | An error declares its name; the kernel kind is the package path plus that name. |
-| Labels | The separate labels file uses a declared member path, a tab and one nonempty title per row. |
+| Labels | One `.labels.json` document maps declared paths in `members` to nonempty title strings or objects with `title`, optional `comparison` and `reply`. `definitions` labels private definitions under the package roots. Unknown fields, duplicate keys and invalid paths are refused with a JSON pointer. |
 
 A function and an error:
 
