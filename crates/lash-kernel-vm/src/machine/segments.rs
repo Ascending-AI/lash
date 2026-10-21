@@ -276,7 +276,9 @@ impl<const SHARED: bool> PlanRun<'_, SHARED> {
         let Some(slot) = effect else {
             return self.held(Err(fault("a segment perform site has no effect")));
         };
-        let effect = self.machine.operation(self.task, slot);
+        let effect = self
+            .machine
+            .operation_in_link(self.machine.current_link(), slot);
         let effect = self.check(effect.map_err(Interrupt::from))?;
         // A statement's own `perform` reads its arguments as atoms, each a
         // boundary charge of 1 (`K-CHG-002`, `K-CHG-007`); a nested one's

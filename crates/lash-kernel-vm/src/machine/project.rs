@@ -356,17 +356,14 @@ pub(crate) fn project_cell(arena: &mut Arena, cell: ArenaHandle) -> Result<Entit
     entity(arena, cell)
 }
 
-#[cfg(test)]
-thread_local! {
-    /// How many closure sites [`closure_code`] projected on this thread.
-    pub(crate) static PROJECTED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-}
-
-/// The code a closure of `site` runs: its body is the site's first child.
-pub(crate) fn closure_code(exe: &Executable, site: &Site) -> Result<CodeId, HeapFault> {
-    #[cfg(test)]
-    PROJECTED.with(|projected| projected.set(projected.get() + 1));
-    exe.code_at(&site.child(0))
+/// Resolves a closure's lexical body by its function and creation site.
+pub(crate) fn closure_code(
+    exe: &Executable,
+    function: &lash_vocabulary::FunctionId,
+    site: &Site,
+) -> Result<CodeId, HeapFault> {
+    exe.closure_at(function, site)
+        .or_else(|| exe.declared.get(function).copied())
         .ok_or_else(|| malformed("a closure names no admitted code"))
 }
 
@@ -513,11 +510,7 @@ fn open(
             captures,
         }) => {
             let site = site.resolve(pages)?;
-            let code = exe.code(
-                *exe.declared
-                    .get(&callable.function)
-                    .ok_or_else(|| malformed("closure definition is not loaded"))?,
-            );
+            let code = exe.code(closure_code(exe, &callable.function, &site)?);
             let mut named = Vec::with_capacity(captures.len());
             for (name, cell) in captures {
                 named.push((name.resolve(pages)?, cell));
@@ -864,11 +857,11 @@ fn stored(
             }
         }
         Held::Closure(identity, captures) => {
-            let code = exe.code(
-                *exe.declared
-                    .get(&identity.callable.function)
-                    .ok_or_else(|| malformed("closure definition is not loaded"))?,
-            );
+            let code = exe.code(closure_code(
+                exe,
+                &identity.callable.function,
+                &identity.site.site,
+            )?);
             let mut held = Vec::with_capacity(captures.len());
             for (name, cell) in code
                 .captures

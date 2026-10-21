@@ -1121,13 +1121,10 @@ impl KernelMachine {
         let library = self.program.library.clone();
         let mut heap = crate::crossing::CrossingHeap {
             heap: &mut self.heap,
-            functions: &self.functions,
         };
         let mut run = crate::crossing::CrossingRun {
-            document: &document,
             documents: &self.program.documents,
             instances: &self.program.instances,
-            captions: &self.captions,
             catalog: library.registry().as_ref(),
             data: self.limits,
         };

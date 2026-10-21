@@ -104,13 +104,13 @@ pub fn result(result: Result<(), WorkerLibraryRefusal>) -> Result<PoolStarted, P
     Ok(PoolStarted {
         result: EncodedPayload(
             rmp_serde::to_vec_named(&result)
-                .map_err(|error| PoolError::payload(PayloadKind::PoolStart, error))?,
+                .map_err(|error| PoolError::payload(PayloadKind::Bootstrap, error))?,
         ),
     })
 }
 pub(crate) fn installed(reply: PoolStarted, codec: &FrameCodec) -> Result<(), PoolError> {
     codec.check_payload(&reply.result.0)?;
     let result: Result<(), WorkerLibraryRefusal> = rmp_serde::from_slice(&reply.result.0)
-        .map_err(|error| PoolError::payload(PayloadKind::PoolStart, error))?;
+        .map_err(|error| PoolError::payload(PayloadKind::Bootstrap, error))?;
     result.map_err(PoolError::Library)
 }

@@ -271,7 +271,8 @@ impl RemoteMachines {
             instances: wire::encode(
                 PayloadKind::Start,
                 &self.start.instances.values().collect::<Vec<_>>(),
-            )?,
+            )
+            .map_err(worker)?,
             documents: self
                 .start
                 .documents

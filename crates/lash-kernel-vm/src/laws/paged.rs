@@ -16,7 +16,7 @@ fn reopen(embedder: &mut Embedder) -> CheckpointRoot {
 #[test]
 fn a_parked_kir_frame_resumes_from_its_sealed_record() {
     let mut embedder = Embedder::new(
-        "main { let xs = [1] let alias = xs let v = perform echo(7) as Any set alias[0] = v return xs[0] }",
+        "main { let xs = [1] let alias = xs let v = perform 0(7) as Any set alias[0] = v return xs[0] }",
     );
     assert!(matches!(embedder.run(), Step::Parked(_)));
     let root = reopen(&mut embedder);
@@ -31,18 +31,33 @@ fn a_parked_kir_frame_resumes_from_its_sealed_record() {
 #[test]
 fn main_and_entry_keep_their_distinct_checkpoint_roots() {
     use crate::{CellStart, EffectModes, Target};
-    use lash_kernel_doc::{Datum, Name};
+    use lash_kernel_doc::Datum;
+    use lash_vocabulary::Name;
     use tree::{SealWork, Tree};
     for entry in [false, true] {
         let mut embedder = Embedder::new(
-            "entry f(x: Int) -> Any fn f(x) { let v = perform echo(x) as Any return v } main { let v = perform echo(7) as Any return v }",
+            r#"definition "function f(x: Any) -> Any\nkernel 1\nmetering statements\nbody { let v = perform 0(x) as Any return v }"
+main { let v = perform 0(7) as Any return v }"#,
         );
         let mut heap = PagedHeap::fresh(Box::new(embedder.source.clone()), EditEpoch(1));
         heap.set_census(Box::new(Census::restore(heap.certificate()).unwrap()))
             .unwrap();
         // The VM preserves host-validated immutable pins without interpreting
         // their payload. Use a real frozen page and the canonical function table.
-        let pin = heap.freeze_datum(&Datum::Null).unwrap().root;
+        let pin = lash_kernel_state::paged::FunctionRecord {
+            environment: heap.allocate_object(ObjectInit::Record(vec![])).unwrap(),
+            callable: lash_vocabulary::CallableId {
+                link: lash_vocabulary::LinkId::from_bytes([4; 32]),
+                function: *embedder.document.functions.keys().next().unwrap(),
+            },
+            name: lash_kernel_state::paged::NameRef::new(&Name::new("host pin"), heap.pages())
+                .unwrap(),
+            meta: lash_kernel_doc::heap::PageValue::Null,
+            closure: heap.freeze_datum(&Datum::Null).unwrap().root,
+            captures: Default::default(),
+            before: Default::default(),
+            after: Default::default(),
+        };
         let mut functions = Tree::new(false);
         functions
             .write(b"host pin".to_vec(), pin, heap.pages())
@@ -81,12 +96,19 @@ fn main_and_entry_keep_their_distinct_checkpoint_roots() {
                     Vec::new()
                 },
                 session: if entry { None } else { Some(session) },
-                modes: EffectModes::recorded(),
+                modes: EffectModes::new(),
                 host: Vec::new(),
             },
             crate::compile::Layout::default(),
             Box::new(embedder.source.clone()),
-            Box::new(Census::restore(certificate).unwrap()),
+            Box::new(
+                Census::restore(if entry {
+                    AccountingCertificate::FRESH
+                } else {
+                    certificate
+                })
+                .unwrap(),
+            ),
         )
         .unwrap();
         assert!(matches!(embedder.run(), Step::Parked(_)));
@@ -124,7 +146,7 @@ fn main_and_entry_keep_their_distinct_checkpoint_roots() {
 #[test]
 fn an_exhausted_seal_budget_preserves_both_continuations() {
     let mut embedder = Embedder::new(
-        "main { let xs = [1] let v = perform echo(7) as Any set xs[0] = v return xs[0] }",
+        "main { let xs = [1] let v = perform 0(7) as Any set xs[0] = v return xs[0] }",
     );
     assert!(matches!(embedder.run(), Step::Parked(_)));
     let prior = reopen(&mut embedder);
@@ -163,7 +185,7 @@ fn an_exhausted_seal_budget_preserves_both_continuations() {
 #[test]
 fn an_issued_request_survives_a_slice_and_is_reported_once() {
     let mut embedder = Embedder::with(
-        "fn work() { do perform echo(7) as Any } main { let h = spawn call work() do yield let v = join h return 9 }",
+        "definition \"function work() -> Any\\nkernel 1\\nmetering statements\\nbody {  do perform 0(7) as Any  }\"\n main { let h = spawn call work() do yield let v = join h return 9 }",
         Setup {
             slice: 1,
             ..Setup::default()
@@ -201,7 +223,7 @@ fn an_issued_request_survives_a_slice_and_is_reported_once() {
 #[test]
 fn a_committed_outcome_survives_seal_before_semantic_resume() {
     let mut embedder =
-        Embedder::new("main { let xs = [1, 2] let v = perform echo(xs) as Any return v }");
+        Embedder::new("main { let xs = [1, 2] let v = perform 0(xs) as Any return v }");
     assert!(matches!(embedder.run(), Step::Parked(_)));
     embedder.deliver("echo");
     let root = reopen(&mut embedder);
@@ -219,7 +241,7 @@ fn a_committed_outcome_survives_seal_before_semantic_resume() {
 fn a_committed_delivery_waits_behind_other_ready_work() {
     for cold in [false, true] {
         let mut embedder = Embedder::new(
-            "fn work(tag) { let v = perform echo(tag) as Any return v } main { let a = spawn call work(\"a\") let b = spawn call work(\"b\") let handles = [a, b] let values = join all handles return values }",
+            "definition \"function work(tag: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let v = perform 0(tag) as Any return v  }\"\n main { let a = spawn call work(\"a\") let b = spawn call work(\"b\") let handles = [a, b] let values = join all handles return values }",
         );
         assert!(matches!(embedder.run(), Step::Parked(ref park) if park.requests.len()==2));
         embedder.deliver("a");
@@ -276,14 +298,12 @@ fn rejected_and_failed_outcomes_keep_their_distinct_charges_after_open() {
     for cold in [false, true] {
         for rejected in [false, true] {
             let mut embedder = Embedder::new(
-                "effect typed() -> Int contract \"1\" main { try { let v = perform typed() as Int return v } catch e { return 1 } }",
+                "import 4 operation host.typed() -> Int main { try { let v = perform 4() as Int return v } catch e { return 1 } }",
             );
             let Step::Parked(park) = embedder.run() else {
                 panic!("must park");
             };
-            let Request::Effect(request) = &park.requests[0] else {
-                panic!("must perform");
-            };
+            let Request::Effect(request) = &park.requests[0];
             let before = embedder.machine.meters().charged.expect("exact charge");
             let outcome = if rejected {
                 Outcome::Completed(Datum::Text("not an integer".into()))
@@ -321,10 +341,9 @@ fn rejected_and_failed_outcomes_keep_their_distinct_charges_after_open() {
 #[test]
 fn argument_freezing_preserves_a_page_ports_typed_failure() {
     use super::embedder::{ROOMY, census};
-    use crate::{CellStart, EffectModes, PreparedLibrary, Program, StartError, Target};
+    use crate::{CellStart, EffectModes, StartError, Target};
+    use lash_kernel_doc::Datum;
     use lash_kernel_doc::heap::{HeapFault, PageId, PageRef};
-    use lash_kernel_doc::{Datum, FunctionRegistry, parse_document};
-    use std::sync::Arc;
     struct Lost;
     impl PageSource for Lost {
         fn read(&mut self, _: &[PageRef]) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
@@ -334,17 +353,17 @@ fn argument_freezing_preserves_a_page_ports_typed_failure() {
             Err(HeapFault::LeaseLost)
         }
     }
-    let program = Program {
-        closure: PageId([8; 32]),
-        document: Arc::new(parse_document("kernel 1\nnumbers by_spelling\nentry f(x: Any) -> Any\nfn f(x) { return x }\nmain { }").unwrap()),
-        library: PreparedLibrary::new(Arc::new(FunctionRegistry::new())),
-    };
+    let (program, _) = Embedder::new(
+        r#"definition "function f(x: Any) -> Any\nkernel 1\nmetering statements\nbody { return x }"
+main {}"#,
+    )
+    .program(true);
     let start = CellStart {
         owner: PageId([9; 32]),
         target: Target::Entry("f".into()),
-        args: vec![Datum::Int(1.into())],
+        args: vec![Datum::Text("x".repeat(8192))],
         session: None,
-        modes: EffectModes::recorded(),
+        modes: EffectModes::new(),
         host: Vec::new(),
     };
     assert!(matches!(
@@ -365,7 +384,7 @@ fn argument_freezing_preserves_a_page_ports_typed_failure() {
 #[test]
 fn a_megabyte_native_error_survives_a_parked_finally() {
     let mut embedder = Embedder::new(
-        "main { try { let unused = work.error() } finally { do perform echo(7) as Any } }",
+        "main { try { let unused = work.error() } finally { do perform 0(7) as Any } }",
     );
     assert!(matches!(embedder.run(), Step::Parked(_)));
     reopen(&mut embedder);
@@ -422,7 +441,7 @@ fn a_session_carried_under_one_closure_is_adopted_under_another() {
         lash_kernel_doc::heap::PageId([7; 32]),
     ] {
         let mut next = Embedder::new(
-            "main { set ys[0] = 5 let got = num.add(num.add(n, xs[1]), xs[0]) let r = perform echo(1) as Any return got }",
+            "main { set ys[0] = 5 let got = num.add(num.add(n, xs[1]), xs[0]) let r = perform 0(1) as Any return got }",
         );
         let (mut program, _) = next.program(true);
         program.closure = closure;
@@ -435,7 +454,7 @@ fn a_session_carried_under_one_closure_is_adopted_under_another() {
                 target: crate::Target::Main,
                 args: Vec::new(),
                 session: Some(session),
-                modes: crate::EffectModes::recorded(),
+                modes: crate::EffectModes::new(),
                 host: Vec::new(),
             },
             crate::compile::Layout::default(),
@@ -471,13 +490,11 @@ fn a_session_carried_under_one_closure_is_adopted_under_another() {
 #[test]
 fn a_failed_outcomes_number_tokens_are_decoded_before_it_is_frozen() {
     let mut embedder = Embedder::new(
-        "main { let got = null try { do perform echo(1) as Any } catch e { set got = e.data.n } return got }",
+        "main { let got = null try { do perform 0(1) as Any } catch e { set got = e.data.n } return got }",
     );
     assert!(matches!(embedder.run(), Step::Parked(_)));
     let request = embedder.pending.remove(0);
-    let Request::Effect(effect) = &request else {
-        panic!("the cell waits on its effect")
-    };
+    let Request::Effect(effect) = &request;
     embedder
         .machine
         .deliver(
@@ -504,14 +521,15 @@ fn a_failed_outcomes_number_tokens_are_decoded_before_it_is_frozen() {
 fn long_host_binding_names_are_bounded_before_a_checkpoint_is_published() {
     use super::embedder::{ROOMY, census};
     use crate::{CellStart, EffectModes, StartError, Target};
-    use lash_kernel_doc::{Datum, Name};
+    use lash_kernel_doc::Datum;
+    use lash_vocabulary::Name;
     let embedder = Embedder::new("main { }");
     for (names, refused_size) in [
-        (vec![Name::new("h".repeat(3038))], None),
-        (vec![Name::new("h".repeat(3039))], Some(3044)),
+        (vec![Name::new("h".repeat(3004))], None),
+        (vec![Name::new("h".repeat(3005))], Some(3010)),
         (vec![Name::new("é".repeat(2048))], Some(4101)),
-        (vec![Name::new(""); 1520], None),
-        (vec![Name::new(""); 1521], Some(3045)),
+        (vec![Name::new(""); 1503], None),
+        (vec![Name::new(""); 1504], Some(3011)),
     ] {
         let (program, _) = embedder.program(false);
         let result = crate::KernelMachine::start_with_census(
@@ -522,7 +540,7 @@ fn long_host_binding_names_are_bounded_before_a_checkpoint_is_published() {
                 target: Target::Main,
                 args: Vec::new(),
                 session: None,
-                modes: EffectModes::recorded(),
+                modes: EffectModes::new(),
                 host: names.into_iter().map(|name| (name, Datum::Null)).collect(),
             },
             crate::compile::Layout::default(),
@@ -533,7 +551,7 @@ fn long_host_binding_names_are_bounded_before_a_checkpoint_is_published() {
             assert!(
                 matches!(
                     result,
-                    Err(StartError::HostMetadataTooLarge { limit: 3043, actual: size })
+                    Err(StartError::HostMetadataTooLarge { limit: 3009, actual: size })
                         if size == actual
                 ),
                 "oversized host metadata must retain its typed limit and size"
@@ -561,12 +579,14 @@ fn a_cold_resume_allocates_after_the_existing_list_join() {
     use lash_kernel_doc::Datum::List;
     let mut embedder = Embedder::new(
         r#"
-fn work(tag) { let x = perform echo(tag) as Any return x }
-fn gather(h) { let hs = [h] let xs = join all hs return xs }
+definition "function work(tag: Any) -> Any\nkernel 1\nmetering statements\nbody {  let x = perform 0(tag) as Any return x  }"
+
+definition "function gather(h: Any) -> Any\nkernel 1\nmetering statements\nbody {  let hs = [h] let xs = join all hs return xs  }"
+
 main {
     let a = spawn call work("a")
     let first = spawn call gather(a)
-    do perform echo("gate") as Any
+    do perform 0("gate") as Any
     let b = spawn call work("b")
     let hs = [b]
     let second = join all hs
@@ -598,7 +618,7 @@ fn checkpoint_equality_keeps_continuations_and_ignores_allocator_history() {
     use super::embedder::Embedder;
     use lash_kernel_state::kernel_internals::tree::Tree;
     use lash_kernel_state::paged::{ObjectInit, SemanticHeap};
-    let mut run = Embedder::new("main { let a = [1] let b = a do sleep 1 return b }");
+    let mut run = Embedder::new("main { let a = [1] let b = a do perform 0(1) as Any return b }");
     assert!(matches!(run.run(), crate::Step::Parked(_)));
     let (root, _) = run.checkpoint();
     let snapshot = |root: &CheckpointRoot| {
@@ -697,17 +717,13 @@ fn checkpoint_equality_keeps_continuations_and_ignores_allocator_history() {
 fn a_mid_statement_refinement_is_reconciled_before_a_spawn_evicts_a_task() {
     let mut embedder = Embedder::with(
         r#"
-fn w(log, tag, pad) {
-  set log[list.len(log)] = tag
-  do yield
-  set log[list.len(log)] = tag
-  return tag
-}
+definition "function w(log: Any, tag: Any, pad: Any) -> Any\nkernel 1\nmetering statements\nbody { \n  set log[list.len(log)] = tag\n  do yield\n  set log[list.len(log)] = tag\n  return tag\n }"
+
 main {
   let log = []
   let hs = []
   let g = [work.repeat(16777216)]
-  let v = perform echo("park") as Any
+  let v = perform 0("park") as Any
   set g = null
   let i = 1
   while num.lt(i, 64) {

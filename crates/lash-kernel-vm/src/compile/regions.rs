@@ -1096,7 +1096,7 @@ impl Formation<'_> {
         for arg in args {
             shared.reads.extend(Self::atom(arg, gathered)?);
         }
-        let counted = !matches!(action.site.unit, lash_vocabulary::sites::Unit::Library(_));
+        let counted = action.guest;
         let units = 1 + args.len() as u64;
         let mut program = vec![Event::Fixed(Weight::Atomic(1)); 1 + args.len()];
         let walk = match callee {

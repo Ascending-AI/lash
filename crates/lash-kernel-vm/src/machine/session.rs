@@ -246,7 +246,9 @@ pub(crate) fn start(
                     problem: "an entry starts without a session".into(),
                 });
             }
-            let definition = descriptor.as_ref().unwrap();
+            let definition = descriptor
+                .as_ref()
+                .ok_or_else(|| arguments("start descriptor is absent".into()))?;
             let entry = "callable";
             let code = exe.declared.get(&definition.function).copied().or_else(|| {
                 exe.code_at(&lash_vocabulary::sites::Site::new(
@@ -340,8 +342,7 @@ pub(crate) fn start(
         match machine.call_lib_linked(
             TaskId::MAIN,
             &exe,
-            lib,
-            machine.program.link,
+            (lib, machine.program.link),
             0,
             count,
             None,

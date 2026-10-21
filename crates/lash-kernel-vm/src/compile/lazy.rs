@@ -509,7 +509,12 @@ impl Prepared {
                 body,
                 fallback: body.map(|_| Box::default()),
             },
-            (None, None, Some(body)) if deferred => LibRun::Body(body),
+            (None, None, Some(body)) if deferred && !self.layout.declines() => {
+                LibRun::DeferredPlan {
+                    body,
+                    prepared: Box::default(),
+                }
+            }
             (None, None, Some(body)) => match plan {
                 Some(plan) => LibRun::Plan { plan, body },
                 None => LibRun::Body(body),

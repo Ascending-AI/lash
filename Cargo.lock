@@ -3124,6 +3124,7 @@ dependencies = [
  "async-trait",
  "lash-internal-core-execution",
  "lash-internal-core-store",
+ "lash-internal-protocol-types",
  "lash-internal-vm-broker",
  "lash-internal-vm-protocol",
  "lash-internal-vm-releases",

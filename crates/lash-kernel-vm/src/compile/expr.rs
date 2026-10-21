@@ -26,7 +26,6 @@ use lash_kernel_doc::Value;
 use lash_kernel_exec::{
     ActIx, FieldIx, FieldListIx, LocalRef, NameIx, Op, OpRange, Reg, RegRange, SiteIx,
 };
-use lash_vocabulary::sites::Unit;
 
 use super::{CodeId, Constant, LibId, NestedCallee, NestedKind, Stream};
 
@@ -552,7 +551,7 @@ impl<'s> Reader<'s> {
         let invoke = Invoke {
             act,
             occurrence: nested.occurrence,
-            guest: !matches!(nested.site.unit, Unit::Library(_)),
+            guest: nested.guest,
             call: matches!(nested.kind, NestedKind::Call(_)),
             operator: nested.operator,
         };

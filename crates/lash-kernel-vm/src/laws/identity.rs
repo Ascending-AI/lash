@@ -51,7 +51,7 @@ main {
   let before = [1]
   let w = probe.wrap(before)
   let after = map{"k": [w, before]}
-  let held = [w, perform echo("park") as Any]
+  let held = [w, perform 0("park") as Any]
   return (list.len(held), list.len(after["k"]))
 }
 "#;
@@ -100,10 +100,10 @@ main {
     set rows[list.len(rows)] = group
     set i = num.add(i, 1)
   }
-  do perform echo("built") as Any
+  do perform 0("built") as Any
   let g = rows[7]
   set g[3] = [70]
-  do perform echo("changed") as Any
+  do perform 0("changed") as Any
   return list.len(rows)
 }
 "#;

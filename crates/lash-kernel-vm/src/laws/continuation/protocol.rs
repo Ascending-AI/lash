@@ -66,15 +66,7 @@ fn run(text: &str, order: &[&str], expected: &Datum, printed: &[Datum], want: &[
 /// `item`, and runs its `else` when `next` gives the empty tuple.
 #[test]
 fn a_driver_steps_through_next_and_binds_through_item() {
-    const SOURCE: &str = "main { let d = {at: 0, step: fn(d) {\n\
-          if num.lt(d.at, 3) { let v = perform echo(d.at) as Any set d.at = num.add(d.at, 1) \
-          return (v,) }\n\
-          return () }}\n\
-        let out = []\n\
-        for x in d via (open proto.open, next proto.next, item proto.item) {\n\
-          set out[list.len(out)] = x\n\
-        } else { print \"exhausted\" }\n\
-        return out }\n";
+    const SOURCE: &str = "main { let d = {at: 0, step: fn(d) {\nif num.lt(d.at, 3) { let v = perform 0(d.at) as Any set d.at = num.add(d.at, 1) return (v,) }\nreturn () }}\nlet out = []\nfor x in d via (open proto.open, next proto.next, item proto.item) {\nset out[list.len(out)] = x\n} else { print \"exhausted\" }\nreturn out }\n";
     run(
         SOURCE,
         &[],
@@ -95,16 +87,7 @@ fn a_driver_steps_through_next_and_binds_through_item() {
 /// guard.
 #[test]
 fn a_checked_map_spends_its_budget_across_parks() {
-    const SOURCE: &str = "main { let m = map{\"a\": 1, \"b\": 2}\n\
-        let seen = []\n\
-        try {\n\
-          for k in m via (open proto.open, check proto.check) {\n\
-            let echoed = perform echo(k) as Any\n\
-            set seen[list.len(seen)] = echoed\n\
-            set m[text.concat(k, \"!\")] = 0\n\
-          }\n\
-        } catch e { return (seen, e) }\n\
-        return seen }\n";
+    const SOURCE: &str = "main { let m = map{\"a\": 1, \"b\": 2}\nlet seen = []\ntry {\nfor k in m via (open proto.open, check proto.check) {\nlet echoed = perform 0(k) as Any\nset seen[list.len(seen)] = echoed\nset m[text.concat(k, \"!\")] = 0\n}\n} catch e { return (seen, e) }\nreturn seen }\n";
     run(
         SOURCE,
         &[],
@@ -148,7 +131,7 @@ fn a_text_walks_code_points_and_loops_take_continue_break_and_else() {
         for c in \"a\u{e9}\u{1f600}zqxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\" via (open proto.open) {\n\
           set i = num.add(i, 1)\n\
           if num.lt(i, 2) { continue }\n\
-          let echoed = perform echo(c) as Any\n\
+          let echoed = perform 0(c) as Any\n\
           set out[list.len(out)] = echoed\n\
           if num.lt(3, i) { break }\n\
         } else { print \"never\" }\n\

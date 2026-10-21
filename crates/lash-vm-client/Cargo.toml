@@ -33,6 +33,7 @@ perf-witness = ["lash-core-execution/perf-witness"]
 workspace = true
 
 [dependencies]
+lash-protocol-types = { workspace = true }
 lash-vocabulary = { workspace = true }
 lash-kernel-package = { workspace = true }
 lash-vm-releases = { workspace = true }

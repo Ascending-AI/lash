@@ -290,7 +290,7 @@ mod laws {
             for body in [
                 "let held = ([1, 2], [3, 4])",
                 "print ([1, 2], [3, 4])",
-                "let held = (perform echo([1, 2]) as Any, [3, 4])",
+                "let held = (perform 0([1, 2]) as Any, [3, 4])",
                 "let held = [1, 2][false]",
             ] {
                 let mut embedder = Embedder::with(

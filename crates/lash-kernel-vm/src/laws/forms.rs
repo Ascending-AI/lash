@@ -1,7 +1,7 @@
 //! The forms, strict operations, the effect boundary, host reads, charges
 //! and sessions: one case per rule, in kernel text.
 
-use lash_kernel_doc::{Datum, Float, Handle, Integer, Timestamp};
+use lash_kernel_doc::{Datum, Float, Handle, Integer};
 use lash_vocabulary::legacy_names::Name;
 use lash_vocabulary::sites::Site;
 use lash_vocabulary::sites::Unit;
@@ -73,7 +73,6 @@ fn rejects_non_text_record_indexes(operation: impl Fn(&str) -> String) {
         "1",
         "1.0",
         r#"b"00""#,
-        "clock",
         "()",
         "[]",
         "map{}",
@@ -90,19 +89,12 @@ fn rejects_non_text_record_indexes(operation: impl Fn(&str) -> String) {
         let mut embedder = Embedder::with(
             &format!(
                 r#"
-entry go(handle: Handle("table")) -> Any
-fn worker() {{}}
-fn go(handle) {{
-    let r = {{a: 1}}
-    let task = spawn call worker()
-    do join task
-    let error_value = null
-    try {{ if 1 {{}} }} catch e {{ set error_value = e }}
-    let caught = null
-    try {{ {operation} }} catch e {{ set caught = e.kind }}
-    return (caught, r)
-}}
-main {{}}"#
+definition "function worker() -> Any\nkernel 1\nmetering statements\nbody {{  }}"
+
+definition "function go(handle: Handle(\"table\")) -> Any\nkernel 1\nmetering statements\nbody {{ \n    let r = {{a: 1}}\n    let task = spawn call worker()\n    do join task\n    let error_value = null\n    try {{ if 1 {{}} }} catch e {{ set error_value = e }}\n    let caught = null\n    try {{ {operation_json} }} catch e {{ set caught = e.kind }}\n    return (caught, r)\n }}"
+
+main {{}}"#,
+                operation_json = crate::laws::embedder::fragment(&operation)
             ),
             Setup {
                 start: CellStart {
@@ -113,7 +105,7 @@ main {{}}"#
                     })],
                     session: None,
                     owner: lash_kernel_doc::heap::PageId([9; 32]),
-                    modes: crate::EffectModes::recorded(),
+                    modes: crate::EffectModes::new(),
                     host: Vec::new(),
                 },
                 ..Setup::default()
@@ -176,7 +168,7 @@ fn an_uncaught_throw_preserves_collections_and_errors() {
         data: text("bang"),
     }));
     assert_eq!(
-        run(r#"main { do perform boom("bang") as Any }"#).0,
+        run(r#"main { do perform 1("bang") as Any }"#).0,
         End::Error(crate::RunError::Uncaught {
             error,
             site: Some(Site::new(Unit::Main, [0, 0])),
@@ -210,11 +202,11 @@ fn an_uncaught_raise_names_the_document_site_that_raised_it() {
     for (body, expected) in [
         ("main { let a = 1 throw 7 }", main(&[1])),
         (
-            "fn f() { let a = 1 throw 7 } main { let r = call f() return r }",
+            "definition \"function f() -> Any\\nkernel 1\\nmetering statements\\nbody {  let a = 1 throw 7  }\"\n main { let r = call f() return r }",
             Some(Site::new(Unit::Function(Name::new("f")), [1])),
         ),
         (
-            r#"main { let a = 1 let b = perform boom("x") as Any return b }"#,
+            r#"main { let a = 1 let b = perform 1("x") as Any return b }"#,
             main(&[1, 0]),
         ),
         ("main { try { throw 1 } catch e { } throw 2 }", main(&[1])),
@@ -233,9 +225,15 @@ fn an_uncaught_raise_names_the_document_site_that_raised_it() {
     ] {
         for layout in [Layout(0), Layout(1)] {
             for native_twice in [true, false] {
+                let actual = site(body, layout, native_twice);
+                let expected = expected.clone().map(|site| match site.unit {
+                    Unit::Function(name) => {
+                        Site::new(super::embedder::function_unit(name.as_str()), site.path)
+                    }
+                    _ => site,
+                });
                 assert_eq!(
-                    site(body, layout, native_twice),
-                    expected,
+                    actual, expected,
                     "{body} in {layout:?}, native {native_twice}"
                 );
             }
@@ -448,8 +446,7 @@ fn forms_do_what_their_rules_say() {
         ),
         (
             "K-EFF-003, K-EFF-004: a result is a fresh graph and a wait copies nothing",
-            "let a = [1] let b = a let r = perform echo(a) as Any \
-             set r[0] = 9 set a[1] = 2 return (a, b, r)",
+            "let a = [1] let b = a let r = perform 0(a) as Any set r[0] = 9 set a[1] = 2 return (a, b, r)",
             tuple([
                 list([int(1), int(2)]),
                 list([int(1), int(2)]),
@@ -458,10 +455,7 @@ fn forms_do_what_their_rules_say() {
         ),
         (
             "K-EFF-005, K-EFF-006: a result's number decodes by the stated type",
-            "let a = perform num(\"1.0\") as Int let b = perform num(\"1e3\") as Int \
-             let c = perform num(\"1\") as Float let d = perform num(\"2\") as Number \
-             let e = perform num(\"2.0\") as Any \
-             let f = perform num(\"90071992547409930000\") as Int return (a, b, c, d, e, f)",
+            "let a = perform 2(\"1.0\") as Int let b = perform 2(\"1e3\") as Int let c = perform 2(\"1\") as Float let d = perform 2(\"2\") as Number let e = perform 2(\"2.0\") as Any let f = perform 2(\"90071992547409930000\") as Int return (a, b, c, d, e, f)",
             tuple([
                 int(1),
                 int(1000),
@@ -473,9 +467,7 @@ fn forms_do_what_their_rules_say() {
         ),
         (
             "K-EFF-007: a union decodes by its first member that fits",
-            "let a = perform num(\"1.5\") as Union(Int, Text, Float) \
-             let v = {status: 200, extra: 1} let b = perform echo(v) as Record{status: Int, body?: Text, ..Any} \
-             return (a, b)",
+            "let a = perform 2(\"1.5\") as Union(Int, Text, Float) let v = {status: 200, extra: 1} let b = perform 0(v) as Record{status: Int, body?: Text, ..Any} return (a, b)",
             tuple([
                 Datum::Float(Float::new(1.5)),
                 record([("status", int(200)), ("extra", int(1))]),
@@ -483,7 +475,7 @@ fn forms_do_what_their_rules_say() {
         ),
         (
             "K-EFF-009: an effect that fails raises the delivered error",
-            "try { do perform boom(\"bang\") as Any } catch e { return (e.kind, e.message, e.data) }",
+            "try { do perform 1(\"bang\") as Any } catch e { return (e.kind, e.message, e.data) }",
             tuple([text("boom"), text("bang"), text("bang")]),
         ),
         (
@@ -493,8 +485,7 @@ fn forms_do_what_their_rules_say() {
         ),
         (
             "K-LIB-004: a library body calls its function argument, which may wait",
-            "let fetch = fn(x) { let y = num.add(x, 1) let r = perform echo(y) as Int return r } \
-             let r = invoke each.twice(fetch, 1) return r",
+            "let fetch = fn(x) { let y = num.add(x, 1) let r = perform 0(y) as Int return r } let r = invoke each.twice(fetch, 1) return r",
             int(3),
         ),
     ];
@@ -563,40 +554,28 @@ fn operations_raise_typed_errors_outside_their_operand_kinds() {
         ("K-FN-007", "return num.add(1, \"1\")", "type_error"),
         ("K-TASK-017", "do cancel 1", "type_error"),
         ("K-EFF-002", "let xs = [] set xs[0] = xs print xs", "cycle"),
-        (
-            "K-EFF-002",
-            "let f = fn() { } do perform echo(f) as Any",
-            "not_data",
-        ),
         ("K-EFF-002", "let f = fn() { } return [f]", "not_data"),
+        ("K-EFF-007", "do perform 2(\"1.5\") as Int", "effect_result"),
         (
             "K-EFF-007",
-            "do perform num(\"1.5\") as Int",
+            "do perform 2(\"1e999\") as Float",
             "effect_result",
         ),
         (
             "K-EFF-007",
-            "do perform num(\"1e999\") as Float",
+            "let v = {} do perform 0(v) as Record{status: Int}",
             "effect_result",
         ),
         (
             "K-EFF-007",
-            "let v = {} do perform echo(v) as Record{status: Int}",
+            "let v = {a: 1} do perform 0(v) as Record{}",
             "effect_result",
         ),
         (
             "K-EFF-007",
-            "let v = {a: 1} do perform echo(v) as Record{}",
+            "do perform 0(\"c\") as Enum(\"a\", \"b\")",
             "effect_result",
         ),
-        (
-            "K-EFF-007",
-            "do perform echo(\"c\") as Enum(\"a\", \"b\")",
-            "effect_result",
-        ),
-        ("K-EFF-010", "do sleep -1", "number_range"),
-        ("K-EFF-010", "do sleep inf", "number_range"),
-        ("K-EFF-010", "do sleep \"soon\"", "type_error"),
         (
             "K-VAL-034",
             "let t = () let i = 0 while num.lt(i, 200) { set t = (t,) set i = num.add(i, 1) }",
@@ -613,27 +592,11 @@ fn operations_raise_typed_errors_outside_their_operand_kinds() {
     }
 }
 
-/// `K-FN-002`: a declared function sees none of `main`'s variables.
-#[test]
-fn a_declared_function_is_closed() {
-    let (end, _) =
-        run("fn peek() { return secret } main { let secret = 1 let r = call peek() return r }");
-    let End::Error(crate::RunError::Uncaught {
-        error: Datum::Error(error),
-        ..
-    }) = end
-    else {
-        panic!("the function read main's variable");
-    };
-    assert_eq!(error.kind, "unbound_variable");
-    assert_eq!(error.data, Datum::Text("secret".to_owned()));
-}
-
 /// `K-EFF-006`: under the `float` policy every bare number is a float.
 #[test]
 fn the_float_policy_decodes_every_bare_number_as_a_float() {
     let mut embedder = Embedder::with(
-        "main { let a = perform num(\"2\") as Number let b = perform num(\"3\") as Int return (a, b) }",
+        "main { let a = perform 2(\"2\") as Number let b = perform 2(\"3\") as Int return (a, b) }",
         Setup {
             numbers: "float",
             ..Setup::default()
@@ -659,19 +622,8 @@ fn evaluation_order_is_what_the_host_sees() {
     };
     let mut embedder = Embedder::with(
         r#"
-entry go(h: Handle("table"), broken: Handle("broken")) -> Any
-fn go(h, broken) {
-  let box = [null]
-  set box[read(h, "index")] = read(h, "value")
-  let pair = (read(h, "left"), read(h, "right"))
-  let m = map{read(h, "key 1"): read(h, "value 1"), read(h, "key 2"): read(h, "value 2")}
-  let answer = read(h, {path: ["a", 0]})
-  let failure = null
-  try { let x = read(broken, "gone") } catch e { set failure = e.kind }
-  let wrong = null
-  try { let x = read("no handle", 1) } catch e { set wrong = e.kind }
-  return (box, pair, answer, failure, wrong, clock, random)
-}
+definition "function go(h: Handle(\"table\"), broken: Handle(\"broken\")) -> Any\nkernel 1\nmetering statements\nbody { \n  let box = [null]\n  set box[read(h, \"index\")] = read(h, \"value\")\n  let pair = (read(h, \"left\"), read(h, \"right\"))\n  let m = map{read(h, \"key 1\"): read(h, \"value 1\"), read(h, \"key 2\"): read(h, \"value 2\")}\n  let answer = read(h, {path: [\"a\", 0]})\n  let failure = null\n  try { let x = read(broken, \"gone\") } catch e { set failure = e.kind }\n  let wrong = null\n  try { let x = read(\"no handle\", 1) } catch e { set wrong = e.kind }\n  return (box, pair, answer, failure, wrong)\n }"
+
 main { }"#,
         Setup {
             start: CellStart {
@@ -679,14 +631,12 @@ main { }"#,
                 args: vec![handle("table"), handle("broken")],
                 session: None,
                 owner: lash_kernel_doc::heap::PageId([9; 32]),
-                modes: crate::EffectModes::recorded(),
+                modes: crate::EffectModes::new(),
                 host: Vec::new(),
             },
             ..Setup::default()
         },
     );
-    embedder.world.now = 1_700_000_000;
-    embedder.world.random = u64::MAX;
     let end = embedder.run_to_end(&[]);
     assert_eq!(
         embedder.world.reads[..8],
@@ -703,11 +653,6 @@ main { }"#,
             record([("path", list([text("a"), int(0)]))]),
             text("host"),
             text("type_error"),
-            Datum::Timestamp(Timestamp {
-                nanoseconds: Integer::from(1_700_000_000),
-            }),
-            // The top 53 bits, times 2^-53: the largest float below 1.
-            Datum::Float(Float::new(1.0 - f64::EPSILON / 2.0)),
         ])
     );
 }

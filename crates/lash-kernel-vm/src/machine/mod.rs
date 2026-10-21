@@ -297,7 +297,6 @@ struct Storage {
     frames: Vec<Box<Frame>>,
     entry_sites: Vec<Option<lash_kernel_state::paged::SiteRef>>,
     /// Each closure code's site, which every closure of it shares.
-    closure_sites: Vec<Option<Arc<lash_vocabulary::sites::Site>>>,
     /// A spent closure call's capture buffer, which the next one's cells
     /// are copied into.
     captures: Vec<ArenaHandle>,
@@ -624,6 +623,14 @@ impl KernelMachine {
         slot: lash_vocabulary::names::ImportSlot,
     ) -> Result<lash_vocabulary::names::OperationUse, Halt> {
         let link = self.frame(task)?.link;
+        self.operation_in_link(link, slot)
+    }
+
+    fn operation_in_link(
+        &self,
+        link: lash_vocabulary::LinkId,
+        slot: lash_vocabulary::ImportSlot,
+    ) -> Result<lash_vocabulary::OperationUse, Halt> {
         match self
             .program
             .instances

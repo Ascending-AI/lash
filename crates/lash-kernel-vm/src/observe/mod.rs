@@ -35,8 +35,6 @@ use crate::compile::{CodeId, LibId, StmtId};
 
 pub use lash_vocabulary::observation::RunObservation as ObservationMode;
 
-pub use lash_vocabulary::observation::SiteCounts;
-
 /// Document statement starts and empty-block entries in the order they
 /// happened: each entry is one task's consecutive starts, by the block
 /// sites they started at. Library code is never on it.

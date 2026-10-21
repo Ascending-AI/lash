@@ -56,10 +56,10 @@ impl KernelMachine {
         site: &Site,
         target: &Target,
     ) -> Result<Option<SiteRef>, HeapFault> {
-        let library = |unit: &Unit| matches!(unit, Unit::Library(_));
+        let library = |unit: &Unit| !exe.authored_unit(unit);
         let rooted_in_library = match target {
             Target::Library(..) | Target::Export(..) => true,
-            Target::Code(code, _, link) => library(&exe.code(*code).site.unit),
+            Target::Code(code, _, _) => library(&exe.code(*code).site.unit),
         };
         if !library(&site.unit) && !rooted_in_library {
             return Ok(None);

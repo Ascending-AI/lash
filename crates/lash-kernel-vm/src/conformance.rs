@@ -364,9 +364,7 @@ impl Reader {
                     PageValue::Int(IntRef::Paged { summary, .. }) => summary.bits.div_ceil(8),
                     _ => unreachable!(),
                 };
-                let payload = match value {
-                    _ => value.clone(),
-                };
+                let payload = value.clone();
                 self.heap.payload_visit(&payload, 0..len, &mut |chunk| {
                     bytes.extend_from_slice(match chunk {
                         Chunk::Text(t) => t.as_bytes(),

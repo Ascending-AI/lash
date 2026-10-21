@@ -172,7 +172,7 @@ main {
   }
   let a = op.step(bump)
   let t = op.step("ab")
-  let e = perform echo(t) as Any
+  let e = perform 0(t) as Any
   let b = invoke op.step(bump)
   let kind = "none"
   try {
@@ -193,7 +193,7 @@ type Ended = Result<
         bool,
         Vec<(lash_vocabulary::legacy_names::Name, String)>,
     ),
-    End,
+    Box<End>,
 >;
 
 /// What a law compares of a run: how it ended, what it printed, the
@@ -209,7 +209,7 @@ type Observed = (
 fn ended(end: End) -> Ended {
     match end {
         End::Finished(finished) => Ok((finished.result, finished.finish, finished.not_carried)),
-        other => Err(other),
+        other => Err(Box::new(other)),
     }
 }
 
@@ -385,7 +385,7 @@ main {
         let observed = observe(program, bounds, plan);
         assert!(
             matches!(
-                &observed.0,
+                observed.0.as_ref().map_err(|end| end.as_ref()),
                 Err(End::Error(RunError::Bound(BoundExceeded {
                     bound: Bound::Memory,
                     limit,
@@ -483,7 +483,7 @@ fn metered_tests_and_completion_have_plan_independent_bound_events() {
             &plans[0],
         );
         assert!(matches!(
-            bounded.0,
+            bounded.0.as_ref().map_err(|end| end.as_ref()),
             Err(End::Error(RunError::Bound(BoundExceeded {
                 bound: Bound::Charge,
                 ..

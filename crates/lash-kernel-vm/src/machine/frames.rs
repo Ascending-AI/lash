@@ -932,7 +932,7 @@ impl Frames {
         for index in (0..self.len).rev() {
             let statement = match self.cache.iter().find(|(at, _)| *at == index) {
                 Some((_, frame)) => {
-                    if matches!(self.exe.code(frame.code).site.unit, Unit::Library(_)) {
+                    if !self.exe.code(frame.code).charged {
                         continue;
                     }
                     match frame.block_statement(&self.exe, true)? {
@@ -950,7 +950,7 @@ impl Frames {
                     .as_ref()
                     .clone(),
             };
-            if !matches!(statement.unit, Unit::Library(_)) {
+            if self.exe.authored_unit(&statement.unit) {
                 return Ok(Some(statement));
             }
         }
@@ -1318,7 +1318,7 @@ fn continuation(
     // written inside it belongs to the closure's statement.
     let Some((act, nested)) = stream
         .nested_at
-        .get(&full)
+        .get(&(stmt, full))
         .map(|act| (*act, &stream.nested[act.ix()]))
         .filter(|(_, nested)| nested.depth as usize == depth)
     else {

@@ -824,7 +824,9 @@ mod laws {
     /// coordinates does not project occurrences before a slice/park/end.
     #[test]
     fn occurrences_project_only_at_execution_boundaries() {
-        let mut run = Embedder::new("fn work() { return 1 } main { let a = call work() return a }");
+        let mut run = Embedder::new(
+            "definition \"function work() -> Any\\nkernel 1\\nmetering statements\\nbody {  return 1  }\"\n main { let a = call work() return a }",
+        );
         loop {
             assert!(matches!(
                 run.machine.run_slice(&mut run.world, 1).unwrap(),

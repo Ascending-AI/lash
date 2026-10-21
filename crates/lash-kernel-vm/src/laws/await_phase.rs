@@ -44,44 +44,23 @@ fn setup(slice: u64) -> Setup {
 
 /// An in-place tool call awaited `then yield` and one behind a task the
 /// awaiter joins, as TypeScript lowers `await tool()` and `await p`.
-const ARRIVALS: &str = "fn inplace() { let a = perform echo(\"i\") as Any then yield print a return a }\n\
-    fn wait() { let b = perform echo(\"p\") as Any return b }\n\
-    fn promised() { let t = spawn call wait() let b = join t print b return b }\n\
-    main { let x = spawn call inplace() let y = spawn call promised()\n\
-    let tasks = [x, y] let answer = join all tasks return answer }\n";
+const ARRIVALS: &str = "definition \"function inplace() -> Any\\nkernel 1\\nmetering statements\\nbody {  let a = perform 0(\\\"i\\\") as Any then yield print a return a  }\"\n\ndefinition \"function wait() -> Any\\nkernel 1\\nmetering statements\\nbody {  let b = perform 0(\\\"p\\\") as Any return b  }\"\n\ndefinition \"function promised() -> Any\\nkernel 1\\nmetering statements\\nbody {  let t = spawn call wait() let b = join t print b return b  }\"\n\nmain { let x = spawn call inplace() let y = spawn call promised()\nlet tasks = [x, y] let answer = join all tasks return answer }\n";
 
 /// [`ARRIVALS`] with the in-place wait taking no turn.
-const ARRIVALS_PLAIN: &str = "fn inplace() { let a = perform echo(\"i\") as Any print a return a }\n\
-    fn wait() { let b = perform echo(\"p\") as Any return b }\n\
-    fn promised() { let t = spawn call wait() let b = join t print b return b }\n\
-    main { let x = spawn call inplace() let y = spawn call promised()\n\
-    let tasks = [x, y] let answer = join all tasks return answer }\n";
+const ARRIVALS_PLAIN: &str = "definition \"function inplace() -> Any\\nkernel 1\\nmetering statements\\nbody {  let a = perform 0(\\\"i\\\") as Any print a return a  }\"\n\ndefinition \"function wait() -> Any\\nkernel 1\\nmetering statements\\nbody {  let b = perform 0(\\\"p\\\") as Any return b  }\"\n\ndefinition \"function promised() -> Any\\nkernel 1\\nmetering statements\\nbody {  let t = spawn call wait() let b = join t print b return b  }\"\n\nmain { let x = spawn call inplace() let y = spawn call promised()\nlet tasks = [x, y] let answer = join all tasks return answer }\n";
 
 /// A failure delivered to a `then yield` wait inside a `try`, beside a
 /// task whose outcome comes with it.
-const CAUGHT: &str = "fn guarded() { try { let a = perform boom(\"f\") as Any then yield print a }\n\
-    catch e { print \"caught\" } return null }\n\
-    fn other() { let b = perform echo(\"o\") as Any print b return b }\n\
-    main { let x = spawn call guarded() let y = spawn call other()\n\
-    let tasks = [x, y] do join all tasks return null }\n";
+const CAUGHT: &str = "definition \"function guarded() -> Any\\nkernel 1\\nmetering statements\\nbody {  try { let a = perform 1(\\\"f\\\") as Any then yield print a }\\ncatch e { print \\\"caught\\\" } return null  }\"\n\ndefinition \"function other() -> Any\\nkernel 1\\nmetering statements\\nbody {  let b = perform 0(\\\"o\\\") as Any print b return b  }\"\n\nmain { let x = spawn call guarded() let y = spawn call other()\nlet tasks = [x, y] do join all tasks return null }\n";
 
 /// A `then yield` wait nested in an expression, beside another task.
-const NESTED: &str = "fn other() { let b = perform echo(\"o\") as Any print b return b }\n\
-    main { let o = {x: 1} let h = spawn call other()\n\
-    let r = [o.x, perform echo(\"m\") as Any then yield, sleep(1) then yield]\n\
-    print \"main\" let done = join h return r }\n";
+const NESTED: &str = "definition \"function other() -> Any\\nkernel 1\\nmetering statements\\nbody {  let b = perform 0(\\\"o\\\") as Any print b return b  }\"\n\nmain { let o = {x: 1} let h = spawn call other()\nlet r = [o.x, perform 0(\"m\") as Any then yield, perform 0(1) as Any then yield]\nprint \"main\" let done = join h return r }\n";
 
 /// A `cancel` of a task at a `then yield` wait, with a third task ready.
-const CANCELLED: &str = "fn victim() { try { do perform echo(\"v\") as Any then yield } catch e { print \"caught\" }\n\
-    return null }\n\
-    fn bystander() { do yield print \"bystander\" return null }\n\
-    main { let v = spawn call victim() let b = spawn call bystander()\n\
-    do cancel v do yield print \"main\" let both = [v, b] do join all both return null }\n";
+const CANCELLED: &str = "definition \"function victim() -> Any\\nkernel 1\\nmetering statements\\nbody {  try { do perform 0(\\\"v\\\") as Any then yield } catch e { print \\\"caught\\\" }\\nreturn null  }\"\n\ndefinition \"function bystander() -> Any\\nkernel 1\\nmetering statements\\nbody {  do yield print \\\"bystander\\\" return null  }\"\n\nmain { let v = spawn call victim() let b = spawn call bystander()\ndo cancel v do yield print \"main\" let both = [v, b] do join all both return null }\n";
 
 /// An `await` nested in an expression, by a policy that joins.
-const AWAITED: &str = "fn w() { let v = perform echo(\"w\") as Any return v }\n\
-    main { let h = spawn call w() let r = [1, await(h) via policy.join]\n\
-    let again = await h via policy.join return (r, again) }\n";
+const AWAITED: &str = "definition \"function w() -> Any\\nkernel 1\\nmetering statements\\nbody {  let v = perform 0(\\\"w\\\") as Any return v  }\"\n\nmain { let h = spawn call w() let r = [1, await(h) via policy.join]\nlet again = await h via policy.join return (r, again) }\n";
 
 #[derive(Debug, PartialEq)]
 struct Trace {
@@ -239,8 +218,8 @@ fn a_cancel_at_a_then_yield_wait_takes_its_turn() {
 #[test]
 fn a_delivered_state_at_a_wait_without_its_turn_is_refused() {
     for text in [
-        "main { let a = perform echo(\"a\") as Any return a }",
-        "main { let b = [1, perform echo(\"b\") as Any] return b }",
+        "main { let a = perform 0(\"a\") as Any return a }",
+        "main { let b = [1, perform 0(\"b\") as Any] return b }",
     ] {
         let mut embedder = Embedder::with(text, setup(u64::MAX));
         assert!(matches!(embedder.run(), Step::Parked(_)));

@@ -9,14 +9,14 @@ use super::embedder::Embedder;
 use crate::{End, Request, RunError, Step};
 
 /// A closure that states how a host starts it, so it can cross.
-const STARTABLE: &str = "let f = fn(a) start (a: Any) -> Any bare direct { return a }";
+const STARTABLE: &str = "let f = fn(a) presentation (a: Any) -> Any bare direct { return a }";
 
 /// Performs `take(arg)`, `take` declared to take one `input` of type `ty`:
 /// the arguments it requested, or the kind and message of the error it
 /// raised instead, when it requested nothing.
 fn perform(ty: &str, arg: &str) -> Result<Vec<Datum>, (String, String)> {
     let mut embedder = Embedder::new(&format!(
-        "effect take(input: {ty}) -> Any contract \"1\"\nmain {{ {STARTABLE} do perform take({arg}) as Any }}"
+        "import 4 operation host.take(input: {ty}) -> Any\nmain {{ {STARTABLE} do perform 4({arg}) as Any }}"
     ));
     loop {
         match embedder.run() {

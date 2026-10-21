@@ -140,8 +140,7 @@ fn expression_calls_recurse_to_the_call_depth_bound() {
         other => panic!("the chain passed no bound: {other:?}"),
     };
     assert_eq!(refused(run(chain, 100)), (Bound::CallDepth, 100));
-    let under_a_call =
-        "fn g() { let r = deep.d100(0) return r } main { let r = call g() return r }";
+    let under_a_call = "definition \"function g() -> Any\\nkernel 1\\nmetering statements\\nbody {  let r = deep.d100(0) return r  }\"\n main { let r = call g() return r }";
     assert_eq!(result(run(under_a_call, 102)), int(100));
     assert_eq!(refused(run(under_a_call, 101)), (Bound::CallDepth, 101));
 }
@@ -159,9 +158,9 @@ fn long(tag: &str) -> Vec<Datum> {
 #[test]
 fn a_slice_lands_inside_an_expression_callee_and_changes_nothing() {
     let program = r#"main {
-  let w = perform echo("before") as Any
+  let w = perform 0("before") as Any
   let v = [probe.long("a"), probe.long("b")]
-  let z = perform echo("after") as Any
+  let z = perform 0("after") as Any
   print v
   return (w, v, z)
 }"#;
@@ -227,13 +226,8 @@ fn a_slice_lands_inside_an_expression_callee_and_changes_nothing() {
 /// expression or hoisted into statements of their own.
 fn scheduled(callee: &str) -> String {
     format!(
-        r#"fn worker(tag) {{
-  print tag
-  do yield
-  let r = perform echo(tag) as Any
-  print r
-  return r
-}}
+        r#"definition "function worker(tag: Any) -> Any\nkernel 1\nmetering statements\nbody {{ \n  print tag\n  do yield\n  let r = perform 0(tag) as Any\n  print r\n  return r\n }}"
+
 main {{
   let x = spawn call worker("x")
   let y = spawn call worker("y")
@@ -341,10 +335,7 @@ fn a_seal_inside_an_expression_callee_is_exact() {
 /// pushed or returned into, however deep the stack grows.
 #[test]
 fn a_projection_visits_the_changed_frames_and_the_top_however_deep_the_stack() {
-    let program = "fn down(i, n) {\n  if num.lt(i, n) { let a = i let b = [i, n] \
-                   let r = num.add(call down(num.add(i, 1), n), 0) return r }\n  \
-                   let j = 0 while num.lt(j, 6) { set j = num.add(j, 1) } return j\n}\n\
-                   main { let r = call down(0, 40) return r }";
+    let program = "definition \"function down(self: Any, i: Any, n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody { \\n  if num.lt(i, n) { let a = i let b = [i, n] let r = num.add(apply self(self, num.add(i, 1), n), 0) return r }\\n  let j = 0 while num.lt(j, 6) { set j = num.add(j, 1) } return j\\n }\"\n\nmain { let r = call down(&down, 0, 40) return r }";
     let mut embedder = Embedder::with(program, setup(ROOMY, 1));
     crate::machine::take_most_visited_frames();
     let mut slices = 0;

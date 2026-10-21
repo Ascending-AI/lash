@@ -23,7 +23,7 @@ use lash_kernel_doc::heap::{EntityId, HeapFault, PageReader, PageValue};
 use lash_kernel_doc::snapshot::{members, text_of};
 use lash_kernel_doc::{Datum, ErrorDatum, FunctionCatalog};
 use lash_kernel_state::kernel_internals::PagedHeap;
-use lash_kernel_state::paged::{KeyedRoot, SemanticHeap};
+use lash_kernel_state::paged::SemanticHeap;
 use lash_vocabulary::content_ids::LinkId;
 use lash_vocabulary::data_limits::KernelDataLimits;
 use lash_vocabulary::names::{CallableId, DocumentId};
@@ -31,14 +31,11 @@ use lash_vocabulary::types::Type;
 
 pub(crate) struct CrossingHeap<'m> {
     pub heap: &'m mut PagedHeap,
-    pub functions: &'m KeyedRoot,
 }
 
 pub(crate) struct CrossingRun<'a> {
-    pub document: &'a lash_kernel_doc::Document,
     pub documents: &'a BTreeMap<DocumentId, Arc<lash_kernel_doc::Document>>,
     pub instances: &'a BTreeMap<LinkId, crate::interface::PreparedInstance>,
-    pub captions: &'a [lash_kernel_doc::CaptionEntry],
     pub catalog: &'a dyn FunctionCatalog,
     pub data: KernelDataLimits,
 }

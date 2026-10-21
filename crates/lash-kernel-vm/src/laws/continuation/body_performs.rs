@@ -19,13 +19,10 @@
 //!   other at every slice, park and delivery.
 
 use std::collections::BTreeMap;
-use std::sync::OnceLock;
 
 use lash_kernel_dialect::{NamedLibrary, define_functions};
 use lash_kernel_doc::{Datum, FunctionRegistry};
-use lash_kernel_package::Package;
 use lash_vocabulary::legacy_names::FunctionId;
-use lash_vocabulary::legacy_names::Name;
 use lash_vocabulary::sites::Site;
 use lash_vocabulary::sites::Unit;
 
@@ -37,9 +34,6 @@ use crate::{End, Layout, Machine, Outcome, Request, Step};
 #[path = "body_performs_plans.rs"]
 mod plans;
 
-#[rustfmt::skip]
-#[path = "dataframe_plans.rs"]
-mod dataframe_plans;
 
 /// Library functions whose bodies perform, each with only a kernel body
 /// and the completion formula 1, from `body_performs.kernel`, with the
@@ -76,58 +70,6 @@ fn packages(
     out
 }
 
-/// lash's kernel library, natives included, as the helper compiler's
-/// recorder registers it for the `dataframe` fixture's kernel package.
-fn register_kernel(registry: &mut FunctionRegistry) -> Result<(), String> {
-    crate::register_machine_functions(registry).map_err(|error| error.to_string())?;
-    lash_kernel_lib::register_numbers(registry).map_err(|error| error.to_string())?;
-    lash_kernel_lib::register_text_json(registry).map_err(|error| error.to_string())?;
-    lash_kernel_lib::register_collections(registry).map_err(|error| error.to_string())?;
-    lash_kernel_lib::register_brands(registry).map_err(|error| error.to_string())?;
-    Ok(())
-}
-
-/// The `dataframe` fixture (FIG-6917) over a kernel package of lash's
-/// kernel library, registered with the kernel library's natives and with
-/// the plan the helper compiler gives for its `collect_rows`, which
-/// performs `dataframe.run`: `read_text`, `limit` and `collect_rows`.
-fn dataframe(
-    registry: &mut FunctionRegistry,
-    _: &BTreeMap<&'static str, FunctionId>,
-) -> Vec<(&'static str, FunctionId)> {
-    // Built once: every run and reopen registers the same artifacts.
-    static BUILT: OnceLock<(Package, Package, FunctionRegistry)> = OnceLock::new();
-    let (kernel, dataframe, natives) = BUILT.get_or_init(|| {
-        let (kernel, dataframe) =
-            lash_kernel_package::testing::kernel_and_dataframe(&register_kernel).unwrap();
-        let mut natives = FunctionRegistry::new();
-        register_kernel(&mut natives).unwrap();
-        (kernel, dataframe, natives)
-    });
-    for package in [kernel, dataframe] {
-        package
-            .code()
-            .register_into(registry, &|function| {
-                natives
-                    .get(function)
-                    .and_then(|registered| registered.native().cloned())
-            })
-            .unwrap();
-    }
-    assert_eq!(
-        registry.install_plans(dataframe_plans::PLANS).unwrap(),
-        1,
-        "the compiled `collect_rows` plan matches the built fixture"
-    );
-    [
-        "dataframe.data_quanta.read_text",
-        "dataframe.data_quanta.limit",
-        "dataframe.data_quanta.collect_rows",
-    ]
-    .map(|name| (name, dataframe.function(name).unwrap()))
-    .to_vec()
-}
-
 fn base() -> Drive {
     Drive {
         probes: packages,
@@ -143,7 +85,7 @@ fn main_at(index: u32) -> Site {
 
 /// The site of statement `index` of the declared function `name`.
 fn function_at(name: &str, index: u32) -> Site {
-    Site::new(Unit::Function(Name::new(name)), [index])
+    Site::new(crate::laws::embedder::function_unit(name), [index])
 }
 
 /// Runs `text` everywhere under `drive`, delivering by `order`: the
@@ -178,13 +120,7 @@ fn body_performs_resume_exactly_with_their_entering_statement_as_origin() {
 /// that takes one turn, beside a task that prints when it runs.
 #[test]
 fn a_then_yield_body_perform_awaited_by_a_policy_resumes_exactly() {
-    const SOURCE: &str = "fn tick() { print \"tick\" return 0 }\n\
-        main { let h = spawn call tick()\n\
-        let p = invoke pkg.fetch_yield(\"c\")\n\
-        print \"after\"\n\
-        let v = await p via pkg.await\n\
-        let d = join h\n\
-        return v }\n";
+    const SOURCE: &str = "definition \"function tick() -> Any\\nkernel 1\\nmetering statements\\nbody {  print \\\"tick\\\" return 0  }\"\n\nmain { let h = spawn call tick()\nlet p = invoke pkg.fetch_yield(\"c\")\nprint \"after\"\nlet v = await p via pkg.await\nlet d = join h\nreturn v }\n";
     let trace = traced(base(), SOURCE, &["c"]);
     finished(&trace, &text("c"));
     assert_eq!(trace.origins, [main_at(1)]);
@@ -206,13 +142,7 @@ fn a_body_loop_performs_once_per_iteration() {
 /// statement's.
 #[test]
 fn a_cancelled_task_runs_a_waiting_body_finally() {
-    const SOURCE: &str = "fn work(x) { let v = invoke pkg.guarded(x) return v }\n\
-        main { let h = spawn call work(\"e\")\n\
-        do cancel h\n\
-        let r = \"none\"\n\
-        try { let v = join h\n\
-        set r = v } catch e { set r = e.kind }\n\
-        return r }\n";
+    const SOURCE: &str = "definition \"function work(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let v = invoke pkg.guarded(x) return v  }\"\n\nmain { let h = spawn call work(\"e\")\ndo cancel h\nlet r = \"none\"\ntry { let v = join h\nset r = v } catch e { set r = e.kind }\nreturn r }\n";
     let trace = traced(base(), SOURCE, &["cleanup"]);
     finished(&trace, &text("cancelled"));
     assert!(!trace.origins.is_empty(), "{trace:?}");
@@ -259,10 +189,7 @@ fn a_library_spawned_task_performs_under_its_spawners_statement() {
 /// its own statement.
 #[test]
 fn a_recursive_declared_call_performs_under_each_activations_statement() {
-    const SOURCE: &str = "fn rec(n) { let v = invoke pkg.fetch(n)\n\
-        if num.lt(0, n) { let r = call rec(num.add(n, -1)) return [v, r] }\n\
-        return [v] }\n\
-        main { let r = call rec(1) return r }\n";
+    const SOURCE: &str = "definition \"function rec(self: Any, n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let v = invoke pkg.fetch(n)\\nif num.lt(0, n) { let r = apply self(self, num.add(n, -1)) return [v, r] }\\nreturn [v]  }\"\n\nmain { let r = call rec(&rec, 1) return r }\n";
     let trace = traced(base(), SOURCE, &["echo", "echo"]);
     finished(&trace, &list(&[int(1), list(&[int(0)])]));
     assert_eq!(
@@ -335,11 +262,10 @@ fn charged(text: &str, outcome: &Outcome, seal_delivered: bool) -> (u64, Vec<Req
 fn a_body_perform_pays_its_boundary_once() {
     let call = |function: &str, argument: &str| {
         format!(
-            "main {{ let f = fn(x) start (x: Any) -> Any bare direct {{ return x }}\n\
-             do invoke {function}({argument}) return 0 }}\n"
+            "main {{ let f = fn(x) presentation (x: Any) -> Any bare direct {{ return x }}\ndo invoke {function}({argument}) return 0 }}\n"
         )
     };
-    let document = "main { do perform echo(\"s\") as Any return 0 }\n";
+    let document = "main { do perform 0(\"s\") as Any return 0 }\n";
     let large_result = Outcome::Completed(Datum::Text("x".repeat(1000)));
     let null_result = Outcome::Completed(Datum::Null);
     for sealed in [false, true] {
@@ -417,28 +343,6 @@ fn independent(base: Drive, text: &str, order: &[&str]) -> Trace {
     planned
 }
 
-/// PLAN-INDEP (a): the generated plan of the `dataframe` fixture's
-/// `collect_rows`, as the package builder makes it (its slot's shape check
-/// first), performs `dataframe.run` as its body does.
-#[test]
-fn the_dataframe_fixtures_collect_rows_plan_performs_as_its_body() {
-    const SOURCE: &str = "main { let q = invoke dataframe.data_quanta.read_text(\"t\")\n\
-        let l = invoke dataframe.data_quanta.limit(q, 2)\n\
-        let rows = invoke dataframe.data_quanta.collect_rows(l)\n\
-        return rows }\n";
-    let trace = independent(
-        Drive {
-            probes: dataframe,
-            ..base()
-        },
-        SOURCE,
-        &["dataframe.run"],
-    );
-    assert!(trace.end.starts_with("Finished("), "{trace:?}");
-    assert!(trace.end.contains("limit"), "{trace:?}");
-    assert_eq!(trace.origins, [main_at(2)]);
-}
-
 /// PLAN-INDEP (b): statement, wrapped and nested performs, each sealed
 /// after its delivery and before its consumption, in the other layout.
 #[test]
@@ -452,13 +356,7 @@ fn planned_performs_resume_as_their_bodies_across_delivery_before_consumption() 
 /// policy that takes one turn, beside a task that prints when it runs.
 #[test]
 fn a_planned_then_yield_perform_resumes_as_its_body() {
-    const SOURCE: &str = "fn tick() { print \"tick\" return 0 }\n\
-        main { let h = spawn call tick()\n\
-        let p = invoke pkg.fetch_yield(\"c\")\n\
-        print \"after\"\n\
-        let v = await p via pkg.await\n\
-        let d = join h\n\
-        return v }\n";
+    const SOURCE: &str = "definition \"function tick() -> Any\\nkernel 1\\nmetering statements\\nbody {  print \\\"tick\\\" return 0  }\"\n\nmain { let h = spawn call tick()\nlet p = invoke pkg.fetch_yield(\"c\")\nprint \"after\"\nlet v = await p via pkg.await\nlet d = join h\nreturn v }\n";
     let trace = independent(base(), SOURCE, &["c"]);
     finished(&trace, &text("c"));
     assert_eq!(trace.origins, [main_at(1)]);
@@ -481,14 +379,7 @@ fn a_planned_loop_performs_as_its_body_per_iteration() {
 /// declared function's.
 #[test]
 fn a_task_cancelled_in_a_planned_wait_runs_a_waiting_finally() {
-    const SOURCE: &str = "fn work(x) { try { let v = invoke pkg.fetch(x) return v } \
-        finally { do invoke pkg.fetch(\"cleanup\") } }\n\
-        main { let h = spawn call work(\"e\")\n\
-        do cancel h\n\
-        let r = \"none\"\n\
-        try { let v = join h\n\
-        set r = v } catch e { set r = e.kind }\n\
-        return r }\n";
+    const SOURCE: &str = "definition \"function work(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  try { let v = invoke pkg.fetch(x) return v } finally { do invoke pkg.fetch(\\\"cleanup\\\") }  }\"\n\nmain { let h = spawn call work(\"e\")\ndo cancel h\nlet r = \"none\"\ntry { let v = join h\nset r = v } catch e { set r = e.kind }\nreturn r }\n";
     let trace = independent(base(), SOURCE, &["cleanup"]);
     finished(&trace, &text("cancelled"));
 }
@@ -528,10 +419,7 @@ fn a_library_spawned_task_runs_its_plan_as_its_body() {
 /// in a plan under its own statement.
 #[test]
 fn a_recursive_declared_call_performs_through_its_plan_as_its_body() {
-    const SOURCE: &str = "fn rec(n) { let v = invoke pkg.fetch(n)\n\
-        if num.lt(0, n) { let r = call rec(num.add(n, -1)) return [v, r] }\n\
-        return [v] }\n\
-        main { let r = call rec(1) return r }\n";
+    const SOURCE: &str = "definition \"function rec(self: Any, n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let v = invoke pkg.fetch(n)\\nif num.lt(0, n) { let r = apply self(self, num.add(n, -1)) return [v, r] }\\nreturn [v]  }\"\n\nmain { let r = call rec(&rec, 1) return r }\n";
     let trace = independent(base(), SOURCE, &["echo", "echo"]);
     finished(&trace, &list(&[int(1), list(&[int(0)])]));
     assert_ne!(trace.requests[0], trace.requests[1]);

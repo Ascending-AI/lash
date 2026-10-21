@@ -164,6 +164,8 @@ struct Tables {
     /// Each function body by its site, and each block by its own: how a
     /// parked run's coordinates find their place in this layout.
     code_at: BTreeMap<Site, CodeId>,
+    /// Lexical closure bodies by function and creation site.
+    closure_at: BTreeMap<(FunctionId, Site), CodeId>,
     /// Canonical action-site order, independent of the executable layout.
     occurrence_at: BTreeMap<Site, usize>,
     occurrence_keys: Box<[Vec<u8>]>,
@@ -580,6 +582,16 @@ impl Executable {
         }
     }
 
+    pub(crate) fn authored_unit(&self, unit: &Unit) -> bool {
+        match unit {
+            Unit::Library(function) => self
+                .declared
+                .get(function)
+                .is_some_and(|code| self.code(*code).charged),
+            Unit::Main | Unit::Function(_) => true,
+        }
+    }
+
     /// The run-root cleanup of the entry whose body is `code`, when its
     /// start convention declares one (`StartConvention::PyDirect`).
     pub(crate) fn root_cleanup(&self, code: CodeId) -> Option<LinkedHook> {
@@ -689,6 +701,14 @@ impl Executable {
     /// The function body or closure body whose site is `site`.
     pub(crate) fn code_at(&self, site: &Site) -> Option<CodeId> {
         self.tables_of(&site.unit)?.code_at.get(site).copied()
+    }
+
+    /// A closure's lexical body under its defining executable tables.
+    pub(crate) fn closure_at(&self, function: &FunctionId, site: &Site) -> Option<CodeId> {
+        self.tables_of(&site.unit)?
+            .closure_at
+            .get(&(*function, site.clone()))
+            .copied()
     }
 
     /// How many codes, library functions and statements the executable
@@ -829,9 +849,9 @@ pub(crate) struct Stream {
     pub(crate) field_lists: Vec<Box<[String]>>,
     /// The resume entries of the stream's nested actions, by [`ActIx`].
     pub(crate) nested: Vec<Nested>,
-    /// Each resume entry by its action's site: where a saved continuation
-    /// finds its entry under this layout.
-    pub(crate) nested_at: BTreeMap<Site, ActIx>,
+    /// Each resume entry by its compiled statement and action site: where a
+    /// saved continuation finds the entry for this statement's layout.
+    pub(crate) nested_at: BTreeMap<(StmtId, Site), ActIx>,
     /// The charge regions the stream's `Op::Region`s head, by
     /// `RegionIx`: the cold side table of its fixed charge events.
     pub(crate) regions: RegionTable,
@@ -848,6 +868,7 @@ pub(crate) struct Stream {
 /// needs to issue it and to resume its statement at the op after it
 /// (`K-EVAL-008`).
 pub(crate) struct Nested {
+    pub(crate) guest: bool,
     /// The action's site: what its waits, its occurrences and its saved
     /// continuation name.
     pub(crate) site: Site,
@@ -1070,6 +1091,7 @@ impl Form {
 }
 
 pub(crate) struct Action {
+    pub(crate) guest: bool,
     pub(crate) site: Site,
     pub(crate) occurrence: usize,
     pub(crate) kind: ActionKind,
@@ -1152,6 +1174,7 @@ impl Shuffler {
 
 /// The scopes of one code while it is compiled.
 struct Scopes {
+    charged: bool,
     main: bool,
     /// The site of the code's body.
     body: Site,
@@ -1333,7 +1356,7 @@ fn compile_document(
         match unit {
             UnitSource::Main => main = Some(*code),
             UnitSource::Function(name) => {
-                compiler.declared.insert((*name).clone(), *code);
+                compiler.declared.insert(**name, *code);
             }
         }
     }
@@ -1524,6 +1547,25 @@ impl<'a> Compiler<'a> {
     fn finish(mut self) -> Tables {
         self.stream.sites = self.sites;
         self.stream.layout = self.layout;
+        // A content-addressed function can be compiled both as a declaration
+        // and as a lexical closure. Resume entries belong to the compiled
+        // statement, whose register and slot layout they describe.
+        for (index, stmt) in self.stmts.iter().enumerate() {
+            let mut ranges = vec![stmt.ops];
+            if let Form::While { test, .. } = stmt.form {
+                ranges.push(test);
+            }
+            for range in ranges {
+                for op in &self.stream.ops[range.start as usize..range.end() as usize] {
+                    if let Op::Nested { act, .. } = op {
+                        let site = self.stream.nested[act.ix()].site.clone();
+                        self.stream
+                            .nested_at
+                            .insert((StmtId(self.base.stmts + index as u32), site), *act);
+                    }
+                }
+            }
+        }
         let (occurrence_at, occurrence_keys) = self.index_occurrences();
         let base = self.base;
         let codes: Vec<Code> = self.codes.into_iter().flatten().collect();
@@ -1531,6 +1573,19 @@ impl<'a> Compiler<'a> {
             .iter()
             .enumerate()
             .map(|(index, code)| (code.site.clone(), CodeId(base.codes + index as u32)))
+            .collect();
+        let closure_at = codes
+            .iter()
+            .enumerate()
+            .filter_map(|(index, code)| {
+                let Unit::Library(function) = code.site.unit else {
+                    return None;
+                };
+                Some((
+                    (function, code.created.clone()?),
+                    CodeId(base.codes + index as u32),
+                ))
+            })
             .collect();
         let edges = step_edges(&codes, &self.blocks, &self.stmts, base);
         Tables {
@@ -1540,6 +1595,7 @@ impl<'a> Compiler<'a> {
             stream: self.stream,
             edges,
             code_at,
+            closure_at,
             occurrence_at,
             occurrence_keys,
         }

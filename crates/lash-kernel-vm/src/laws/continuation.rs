@@ -113,6 +113,7 @@ struct Drive {
     entry: Option<(&'static str, i64)>,
     /// `echo` bound as a read (`K-EFF-012`).
     reads: bool,
+    cleanup: bool,
     /// A reopening run is also sealed and opened cold after each delivery,
     /// before the delivered task consumes its outcome.
     reopen_delivered: bool,
@@ -145,6 +146,7 @@ impl Drive {
             probes: bodies,
             entry: None,
             reads: false,
+            cleanup: false,
             reopen_delivered: false,
             cancel_at: None,
             layout: Layout(0),
@@ -172,6 +174,8 @@ struct Seen {
 fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
     let mut setup = Setup {
         bounds: drive.bounds,
+        reads: drive.reads,
+        cleanup: drive.cleanup,
         probes: Some(drive.probes),
         layout: drive.layout,
         ..setup(drive.slice)
@@ -181,9 +185,7 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
         setup.start.args = vec![int(arg)];
     }
     if drive.reads {
-        setup.start.modes = crate::EffectModes::reading([
-            lash_vocabulary::legacy_names::EffectName::new("echo").unwrap(),
-        ]);
+        setup.start.modes = crate::EffectModes::new();
     }
     let mut embedder = match Embedder::try_with(text, setup) {
         Ok(embedder) => embedder,
@@ -290,9 +292,8 @@ fn drive(text: &str, order: &[&str], drive: Drive) -> (Trace, Seen) {
         origins: embedder
             .requests
             .iter()
-            .filter_map(|request| match request {
-                Request::Effect(effect) => Some(effect.origin.clone()),
-                Request::Sleep(_) => None,
+            .map(|request| match request {
+                Request::Effect(effect) => effect.origin.clone(),
             })
             .chain(embedder.world.performed.iter().map(|(_, _, at)| at.clone()))
             .collect(),
@@ -361,23 +362,10 @@ fn tuple(datum: &[Datum]) -> Datum {
 }
 
 /// Calls and a wait nested in one call's arguments.
-const NESTED_AWAIT: &str = "fn a() { print \"a\" return 1 }\n\
-    fn c() { let v = perform echo(\"c\") as Any print \"c\" return v }\n\
-    fn observe(p, q, r) { print (p, q, r) return [p, q, r] }\n\
-    main { let x = \"tool\"\n\
-    let r = call observe(call a(), perform echo(x) as Any, call c())\n\
-    return r }\n";
+const NESTED_AWAIT: &str = "definition \"function a() -> Any\\nkernel 1\\nmetering statements\\nbody {  print \\\"a\\\" return 1  }\"\n\ndefinition \"function c() -> Any\\nkernel 1\\nmetering statements\\nbody {  let v = perform 0(\\\"c\\\") as Any print \\\"c\\\" return v  }\"\n\ndefinition \"function observe(p: Any, q: Any, r: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  print (p, q, r) return [p, q, r]  }\"\n\nmain { let x = \"tool\"\nlet r = call observe(call a(), perform 0(x) as Any, call c())\nreturn r }\n";
 
 /// [`NESTED_AWAIT`] with each action a statement of its own.
-const NESTED_AWAIT_HOISTED: &str = "fn a() { print \"a\" return 1 }\n\
-    fn c() { let v = perform echo(\"c\") as Any print \"c\" return v }\n\
-    fn observe(p, q, r) { print (p, q, r) return [p, q, r] }\n\
-    main { let x = \"tool\"\n\
-    let t0 = call a()\n\
-    let t1 = perform echo(x) as Any\n\
-    let t2 = call c()\n\
-    let r = call observe(t0, t1, t2)\n\
-    return r }\n";
+const NESTED_AWAIT_HOISTED: &str = "definition \"function a() -> Any\\nkernel 1\\nmetering statements\\nbody {  print \\\"a\\\" return 1  }\"\n\ndefinition \"function c() -> Any\\nkernel 1\\nmetering statements\\nbody {  let v = perform 0(\\\"c\\\") as Any print \\\"c\\\" return v  }\"\n\ndefinition \"function observe(p: Any, q: Any, r: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  print (p, q, r) return [p, q, r]  }\"\n\nmain { let x = \"tool\"\nlet t0 = call a()\nlet t1 = perform 0(x) as Any\nlet t2 = call c()\nlet r = call observe(t0, t1, t2)\nreturn r }\n";
 
 #[test]
 fn nested_await_resumes_exactly() {
@@ -405,21 +393,9 @@ fn nested_await_resumes_exactly() {
 
 /// A role holds the value its operand had when it was evaluated, while
 /// another task changes the record it was read from during the park.
-const MUTATED_RECEIVER: &str = "fn writer(o) { do perform echo(\"w\") as Any set o.x = 2 return null }\n\
-    main { let o = {x: 1}\n\
-    let h = spawn call writer(o)\n\
-    let r = [o.x, perform echo(\"m\") as Any]\n\
-    let done = join h\n\
-    return (r, o.x) }\n";
+const MUTATED_RECEIVER: &str = "definition \"function writer(o: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  do perform 0(\\\"w\\\") as Any set o.x = 2 return null  }\"\n\nmain { let o = {x: 1}\nlet h = spawn call writer(o)\nlet r = [o.x, perform 0(\"m\") as Any]\nlet done = join h\nreturn (r, o.x) }\n";
 
-const MUTATED_RECEIVER_HOISTED: &str = "fn writer(o) { do perform echo(\"w\") as Any set o.x = 2 return null }\n\
-    main { let o = {x: 1}\n\
-    let h = spawn call writer(o)\n\
-    let t0 = o.x\n\
-    let t1 = perform echo(\"m\") as Any\n\
-    let r = [t0, t1]\n\
-    let done = join h\n\
-    return (r, o.x) }\n";
+const MUTATED_RECEIVER_HOISTED: &str = "definition \"function writer(o: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  do perform 0(\\\"w\\\") as Any set o.x = 2 return null  }\"\n\nmain { let o = {x: 1}\nlet h = spawn call writer(o)\nlet t0 = o.x\nlet t1 = perform 0(\"m\") as Any\nlet r = [t0, t1]\nlet done = join h\nreturn (r, o.x) }\n";
 
 #[test]
 fn parked_role_keeps_the_evaluated_value() {
@@ -436,27 +412,9 @@ fn parked_role_keeps_the_evaluated_value() {
 
 /// A callback that spawns, inside a call inside a call inside an
 /// expression.
-const CALLBACK: &str = "fn work(x) { let v = [perform echo(x) as Any] return v[0] }\n\
-    fn collect(f, xs) { let out = [] for x in xs { let y = apply f(x) set out[list.len(out)] = y } return out }\n\
-    fn gather(hs) { let rs = join all hs return rs }\n\
-    fn tag(t) { print t return t }\n\
-    main { let r = (call tag(\"a\"),\n\
-      call gather(call collect(fn(x) { let h = spawn call work(x) return h }, [1, 2])),\n\
-      call tag(\"b\"))\n\
-    return r }\n";
+const CALLBACK: &str = "definition \"function work(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let v = [perform 0(x) as Any] return v[0]  }\"\n\ndefinition \"function collect(f: Any, xs: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let out = [] for x in xs { let y = apply f(x) set out[list.len(out)] = y } return out  }\"\n\ndefinition \"function gather(hs: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let rs = join all hs return rs  }\"\n\ndefinition \"function tag(t: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  print t return t  }\"\n\nmain { let r = (call tag(\"a\"),\ncall gather(call collect(fn(x) { let h = spawn call work(x) return h }, [1, 2])),\ncall tag(\"b\"))\nreturn r }\n";
 
-const CALLBACK_HOISTED: &str = "fn work(x) { let v = perform echo(x) as Any return v }\n\
-    fn collect(f, xs) { let out = [] for x in xs { let y = apply f(x) set out[list.len(out)] = y } return out }\n\
-    fn gather(hs) { let rs = join all hs return rs }\n\
-    fn tag(t) { print t return t }\n\
-    main { let t0 = call tag(\"a\")\n\
-    let f = fn(x) { let h = spawn call work(x) return h }\n\
-    let xs = [1, 2]\n\
-    let t1 = call collect(f, xs)\n\
-    let t2 = call gather(t1)\n\
-    let t3 = call tag(\"b\")\n\
-    let r = (t0, t2, t3)\n\
-    return r }\n";
+const CALLBACK_HOISTED: &str = "definition \"function work(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let v = perform 0(x) as Any return v  }\"\n\ndefinition \"function collect(f: Any, xs: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let out = [] for x in xs { let y = apply f(x) set out[list.len(out)] = y } return out  }\"\n\ndefinition \"function gather(hs: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let rs = join all hs return rs  }\"\n\ndefinition \"function tag(t: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  print t return t  }\"\n\nmain { let t0 = call tag(\"a\")\nlet f = fn(x) { let h = spawn call work(x) return h }\nlet xs = [1, 2]\nlet t1 = call collect(f, xs)\nlet t2 = call gather(t1)\nlet t3 = call tag(\"b\")\nlet r = (t0, t2, t3)\nreturn r }\n";
 
 #[test]
 fn callback_inside_expression_resumes_exactly() {
@@ -480,24 +438,9 @@ fn callback_inside_expression_resumes_exactly() {
 /// A `spawn` inside an expression: the child runs to its first wait, and
 /// the spawner goes on with the handle before any other ready task
 /// (`K-TASK-002`), keeping what its statement evaluated.
-const SPAWNED: &str = "fn work(x) { print x let v = perform echo(x) as Any return v }\n\
-    fn other() { print \"other\" return 0 }\n\
-    main { let o = spawn call other()\n\
-    let hs = [body.say(\"before\"), spawn call work(\"child\"), body.say(\"after\")]\n\
-    let h = hs[1]\n\
-    let r = join h\n\
-    let d = join o\n\
-    return (hs[0], r, hs[2]) }\n";
+const SPAWNED: &str = "definition \"function work(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  print x let v = perform 0(x) as Any return v  }\"\n\ndefinition \"function other() -> Any\\nkernel 1\\nmetering statements\\nbody {  print \\\"other\\\" return 0  }\"\n\nmain { let o = spawn call other()\nlet hs = [body.say(\"before\"), spawn call work(\"child\"), body.say(\"after\")]\nlet h = hs[1]\nlet r = join h\nlet d = join o\nreturn (hs[0], r, hs[2]) }\n";
 
-const SPAWNED_HOISTED: &str = "fn work(x) { print x let v = perform echo(x) as Any return v }\n\
-    fn other() { print \"other\" return 0 }\n\
-    main { let o = spawn call other()\n\
-    let t0 = body.say(\"before\")\n\
-    let h = spawn call work(\"child\")\n\
-    let t2 = body.say(\"after\")\n\
-    let r = join h\n\
-    let d = join o\n\
-    return (t0, r, t2) }\n";
+const SPAWNED_HOISTED: &str = "definition \"function work(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  print x let v = perform 0(x) as Any return v  }\"\n\ndefinition \"function other() -> Any\\nkernel 1\\nmetering statements\\nbody {  print \\\"other\\\" return 0  }\"\n\nmain { let o = spawn call other()\nlet t0 = body.say(\"before\")\nlet h = spawn call work(\"child\")\nlet t2 = body.say(\"after\")\nlet r = join h\nlet d = join o\nreturn (t0, r, t2) }\n";
 
 #[test]
 fn a_spawn_inside_an_expression_resumes_exactly() {
@@ -517,13 +460,7 @@ fn a_spawn_inside_an_expression_resumes_exactly() {
 /// an assignment's index while the right-hand side waits in register 0,
 /// beside `if` and `let` expressions, and `pair.twice`, whose native
 /// answers on alternate reopens.
-const BODIES: &str = "main { let xs = [9, 0, 0, 0]\n\
-    let i = 0\n\
-    while num.lt(body.inc(i), 4) {\n\
-      set xs[body.inc(i)] = [i, let(j = body.inc(i), if(num.lt(j, 2), body.say(j), j))]\n\
-      set i = body.inc(i)\n\
-    }\n\
-    return (xs, pair.twice(body.inc(1)), [i, perform echo(\"w\") as Any]) }\n";
+const BODIES: &str = "main { let xs = [9, 0, 0, 0]\nlet i = 0\nwhile num.lt(body.inc(i), 4) {\nset xs[body.inc(i)] = [i, let(j = body.inc(i), if(num.lt(j, 2), body.say(j), j))]\nset i = body.inc(i)\n}\nreturn (xs, pair.twice(body.inc(1)), [i, perform 0(\"w\") as Any]) }\n";
 
 #[test]
 fn library_bodies_inside_expressions_resume_exactly() {
@@ -550,43 +487,9 @@ fn library_bodies_inside_expressions_resume_exactly() {
 /// waits, each nested (`K-EVAL-008`): the condition is evaluated afresh at
 /// every header, a park inside it resumes in that evaluation, and the loop
 /// runs its `else` on exhaustion and skips it on `break` (`K-FORM-013`).
-const WHILE_CONDITION: &str = "fn more(i) { let v = perform echo(i) as Any return num.lt(v, 2) }\n\
-    main { let i = 0\n\
-    let seen = []\n\
-    while [body.say(i), perform echo(\"w\") as Any, call more(i)][2] {\n\
-      set seen[list.len(seen)] = i\n\
-      set i = body.inc(i)\n\
-    } else { print \"exhausted\" }\n\
-    let j = 0\n\
-    while [perform echo(\"b\") as Any, call more(j)][1] {\n\
-      set j = body.inc(j)\n\
-      if num.lt(0, j) { break }\n\
-    } else { print \"never\" }\n\
-    return (i, seen, j) }\n";
+const WHILE_CONDITION: &str = "definition \"function more(i: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let v = perform 0(i) as Any return num.lt(v, 2)  }\"\n\nmain { let i = 0\nlet seen = []\nwhile [body.say(i), perform 0(\"w\") as Any, call more(i)][2] {\nset seen[list.len(seen)] = i\nset i = body.inc(i)\n} else { print \"exhausted\" }\nlet j = 0\nwhile [perform 0(\"b\") as Any, call more(j)][1] {\nset j = body.inc(j)\nif num.lt(0, j) { break }\n} else { print \"never\" }\nreturn (i, seen, j) }\n";
 
-const WHILE_CONDITION_HOISTED: &str = "fn more(i) { let v = perform echo(i) as Any return num.lt(v, 2) }\n\
-    main { let i = 0\n\
-    let seen = []\n\
-    let t0 = body.say(i)\n\
-    let t1 = perform echo(\"w\") as Any\n\
-    let go = call more(i)\n\
-    while go {\n\
-      set seen[list.len(seen)] = i\n\
-      set i = body.inc(i)\n\
-      set t0 = body.say(i)\n\
-      set t1 = perform echo(\"w\") as Any\n\
-      set go = call more(i)\n\
-    } else { print \"exhausted\" }\n\
-    let j = 0\n\
-    let u0 = perform echo(\"b\") as Any\n\
-    let more_j = call more(j)\n\
-    while more_j {\n\
-      set j = body.inc(j)\n\
-      if num.lt(0, j) { break }\n\
-      set u0 = perform echo(\"b\") as Any\n\
-      set more_j = call more(j)\n\
-    } else { print \"never\" }\n\
-    return (i, seen, j) }\n";
+const WHILE_CONDITION_HOISTED: &str = "definition \"function more(i: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let v = perform 0(i) as Any return num.lt(v, 2)  }\"\n\nmain { let i = 0\nlet seen = []\nlet t0 = body.say(i)\nlet t1 = perform 0(\"w\") as Any\nlet go = call more(i)\nwhile go {\nset seen[list.len(seen)] = i\nset i = body.inc(i)\nset t0 = body.say(i)\nset t1 = perform 0(\"w\") as Any\nset go = call more(i)\n} else { print \"exhausted\" }\nlet j = 0\nlet u0 = perform 0(\"b\") as Any\nlet more_j = call more(j)\nwhile more_j {\nset j = body.inc(j)\nif num.lt(0, j) { break }\nset u0 = perform 0(\"b\") as Any\nset more_j = call more(j)\n} else { print \"never\" }\nreturn (i, seen, j) }\n";
 
 #[test]
 fn while_condition_actions_resume_exactly() {
@@ -608,38 +511,9 @@ fn while_condition_actions_resume_exactly() {
 /// and the index are evaluated, then the right-hand side waits holding
 /// them as roles. A park between the place and the write evaluates none
 /// of it again.
-const PLACES: &str = "fn key(k) { let v = perform echo(k) as Any return v }\n\
-    fn same(x) { return x }\n\
-    main { let t = [0, 0, 0]\n\
-    let r = {f: 0}\n\
-    set [body.say(\"target\"), t][1][[perform echo(2) as Any, call key(1)][1]] = [body.say(\"value\"), perform echo(\"v\") as Any][1]\n\
-    set [body.say(\"first target\"), t][1][[perform echo(0) as Any, call key(2)][1]] = [body.say(\"first value\"), perform echo(\"w\") as Any][1] place first\n\
-    set t[0] = perform echo(\"x\") as Any place first\n\
-    set [call same(r)][0].f = call key(\"f\") place first\n\
-    return (t, r) }\n";
+const PLACES: &str = "definition \"function key(k: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let v = perform 0(k) as Any return v  }\"\n\ndefinition \"function same(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  return x  }\"\n\nmain { let t = [0, 0, 0]\nlet r = {f: 0}\nset [body.say(\"target\"), t][1][[perform 0(2) as Any, call key(1)][1]] = [body.say(\"value\"), perform 0(\"v\") as Any][1]\nset [body.say(\"first target\"), t][1][[perform 0(0) as Any, call key(2)][1]] = [body.say(\"first value\"), perform 0(\"w\") as Any][1] place first\nset t[0] = perform 0(\"x\") as Any place first\nset [call same(r)][0].f = call key(\"f\") place first\nreturn (t, r) }\n";
 
-const PLACES_HOISTED: &str = "fn key(k) { let v = perform echo(k) as Any return v }\n\
-    fn same(x) { return x }\n\
-    main { let t = [0, 0, 0]\n\
-    let r = {f: 0}\n\
-    let a0 = body.say(\"value\")\n\
-    let a1 = perform echo(\"v\") as Any\n\
-    let a2 = body.say(\"target\")\n\
-    let a3 = perform echo(2) as Any\n\
-    let a4 = call key(1)\n\
-    set [a2, t][1][[a3, a4][1]] = [a0, a1][1]\n\
-    let b0 = body.say(\"first target\")\n\
-    let b1 = perform echo(0) as Any\n\
-    let b2 = call key(2)\n\
-    let b3 = body.say(\"first value\")\n\
-    let b4 = perform echo(\"w\") as Any\n\
-    set [b0, t][1][[b1, b2][1]] = [b3, b4][1]\n\
-    let c0 = perform echo(\"x\") as Any\n\
-    set t[0] = c0\n\
-    let d0 = call same(r)\n\
-    let d1 = call key(\"f\")\n\
-    set [d0][0].f = d1\n\
-    return (t, r) }\n";
+const PLACES_HOISTED: &str = "definition \"function key(k: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let v = perform 0(k) as Any return v  }\"\n\ndefinition \"function same(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  return x  }\"\n\nmain { let t = [0, 0, 0]\nlet r = {f: 0}\nlet a0 = body.say(\"value\")\nlet a1 = perform 0(\"v\") as Any\nlet a2 = body.say(\"target\")\nlet a3 = perform 0(2) as Any\nlet a4 = call key(1)\nset [a2, t][1][[a3, a4][1]] = [a0, a1][1]\nlet b0 = body.say(\"first target\")\nlet b1 = perform 0(0) as Any\nlet b2 = call key(2)\nlet b3 = body.say(\"first value\")\nlet b4 = perform 0(\"w\") as Any\nset [b0, t][1][[b1, b2][1]] = [b3, b4][1]\nlet c0 = perform 0(\"x\") as Any\nset t[0] = c0\nlet d0 = call same(r)\nlet d1 = call key(\"f\")\nset [d0][0].f = d1\nreturn (t, r) }\n";
 
 #[test]
 fn assignment_place_actions_resume_exactly() {
@@ -671,12 +545,7 @@ fn assignment_place_actions_resume_exactly() {
 fn an_assignments_order_decides_what_its_place_reads() {
     let program = |order: &str| {
         format!(
-            "main {{ let a = [0]\n\
-             let b = [0]\n\
-             let u = a\n\
-             let swap = fn() {{ set u = b let x = perform echo(\"s\") as Any return x }}\n\
-             set u[0] = apply swap(){order}\n\
-             return (a, b) }}\n"
+            "main {{ let a = [0]\nlet b = [0]\nlet u = a\nlet swap = fn() {{ set u = b let x = perform 0(\"s\") as Any return x }}\nset u[0] = apply swap(){order}\nreturn (a, b) }}\n"
         )
     };
     let written = list(&[text("s")]);
@@ -703,12 +572,8 @@ fn an_assignments_order_decides_what_its_place_reads() {
 #[test]
 fn a_missing_role_at_a_condition_or_a_place_is_refused() {
     for source in [
-        "main { let i = 0\n\
-         while [i, perform echo(false) as Any][1] { set i = 1 }\n\
-         return i }\n",
-        "main { let t = [0]\n\
-         set t[0] = [1, perform echo(\"w\") as Any][1] place first\n\
-         return t }\n",
+        "main { let i = 0\nwhile [i, perform 0(false) as Any][1] { set i = 1 }\nreturn i }\n",
+        "main { let t = [0]\nset t[0] = [1, perform 0(\"w\") as Any][1] place first\nreturn t }\n",
     ] {
         let mut embedder = park_where(source, |phases| phases == only(PhaseRecord::Waiting));
         let mut dropped = None;
@@ -730,12 +595,7 @@ fn a_missing_role_at_a_condition_or_a_place_is_refused() {
 /// assigns the variable changes the next call's callee, not this one's.
 #[test]
 fn a_nested_call_reads_its_callee_before_its_arguments() {
-    const SOURCE: &str = "fn g(x) { return [\"g\", x] }\n\
-        fn h(x) { return [\"h\", x] }\n\
-        main { let f = &g\n\
-        let swap = fn() { set f = &h let w = perform echo(\"w\") as Any return w }\n\
-        let r = [apply f(apply swap()), apply f(2)]\n\
-        return r }\n";
+    const SOURCE: &str = "definition \"function g(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  return [\\\"g\\\", x]  }\"\n\ndefinition \"function h(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  return [\\\"h\\\", x]  }\"\n\nmain { let f = &g\nlet swap = fn() { set f = &h let w = perform 0(\"w\") as Any return w }\nlet r = [apply f(apply swap()), apply f(2)]\nreturn r }\n";
     let expected = list(&[list(&[text("g"), text("w")]), list(&[text("h"), int(2)])]);
     case(SOURCE, &["w"], &expected, &[], &[PhaseRecord::Called]);
 }
@@ -744,13 +604,7 @@ fn a_nested_call_reads_its_callee_before_its_arguments() {
 /// request with the raise, at the action (`K-TASK-017`).
 #[test]
 fn cancel_at_a_nested_wait_resumes_exactly() {
-    const SOURCE: &str = "fn work(x) { let v = [perform echo(x) as Any] return v[0] }\n\
-        main { let h = spawn call work(0)\n\
-        do cancel h\n\
-        let r = \"none\"\n\
-        try { let v = join h\n\
-        set r = v } catch e { set r = e.kind }\n\
-        return r }\n";
+    const SOURCE: &str = "definition \"function work(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let v = [perform 0(x) as Any] return v[0]  }\"\n\nmain { let h = spawn call work(0)\ndo cancel h\nlet r = \"none\"\ntry { let v = join h\nset r = v } catch e { set r = e.kind }\nreturn r }\n";
     case(
         SOURCE,
         &[],
@@ -765,9 +619,7 @@ fn cancel_at_a_nested_wait_resumes_exactly() {
 /// loop iteration.
 #[test]
 fn each_nested_wait_is_named_by_its_own_site() {
-    const SOURCE: &str = "main { let out = []\n\
-        for i in [0, 1] { set out[list.len(out)] = (perform echo(\"a\") as Any, sleep(1)) }\n\
-        return out }\n";
+    const SOURCE: &str = "main { let out = []\nfor i in [0, 1] { set out[list.len(out)] = (perform 0(\"a\") as Any, perform 0(1) as Any) }\nreturn out }\n";
     let mut embedder = Embedder::with(SOURCE, setup(u64::MAX));
     embedder.run_to_end(&[]);
     let named: Vec<(String, u64, u64)> = embedder
@@ -776,7 +628,6 @@ fn each_nested_wait_is_named_by_its_own_site() {
         .map(|request| {
             let identity = match request {
                 Request::Effect(effect) => &effect.identity,
-                Request::Sleep(sleep) => &sleep.identity,
             };
             let identity = lash_kernel_doc::kernel_internals::effect_parts(identity);
             let iteration = identity.loops.first().map_or(99, |at| at.iteration);
@@ -784,14 +635,14 @@ fn each_nested_wait_is_named_by_its_own_site() {
         })
         .collect();
     let perform = embedder::main_site([1, 1, 0, 2, 0]).to_string();
-    let sleep = embedder::main_site([1, 1, 0, 2, 1]).to_string();
+    let second = embedder::main_site([1, 1, 0, 2, 1]).to_string();
     assert_eq!(
         named,
         [
             (perform.clone(), 0, 0),
-            (sleep.clone(), 0, 0),
+            (second.clone(), 0, 0),
             (perform, 1, 1),
-            (sleep, 1, 1),
+            (second, 1, 1),
         ]
     );
 }
@@ -800,10 +651,7 @@ fn each_nested_wait_is_named_by_its_own_site() {
 /// recursive calls, independent of frames, cold reopens and code layout.
 #[test]
 fn sequential_and_recursive_calls_keep_task_wide_effect_identities() {
-    const SOURCE: &str = "fn work(n) { let v = perform echo(n) as Any\n\
-        if num.lt(0, n) { let r = call work(num.add(n, -1)) return r }\n\
-        return v }\n\
-        main { let a = call work(2) let b = call work(1) return b }\n";
+    const SOURCE: &str = "definition \"function work(self: Any, n: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let v = perform 0(n) as Any\\nif num.lt(0, n) { let r = apply self(self, num.add(n, -1)) return r }\\nreturn v  }\"\n\nmain { let a = call work(&work, 2) let b = call work(&work, 1) return b }\n";
     let mut warm = Embedder::with(SOURCE, setup(u64::MAX));
     warm.run_to_end(&[]);
     let expected: Vec<_> = (0..5)
@@ -818,9 +666,7 @@ fn sequential_and_recursive_calls_keep_task_wide_effect_identities() {
         requests
             .iter()
             .map(|request| {
-                let Request::Effect(effect) = request else {
-                    panic!("{request:?}")
-                };
+                let Request::Effect(effect) = request;
                 lash_kernel_doc::kernel_internals::effect_parts(&effect.identity).clone()
             })
             .collect::<Vec<_>>()
@@ -860,7 +706,7 @@ fn sequential_and_recursive_calls_keep_task_wide_effect_identities() {
     let numbers = (0..70).map(|n| n.to_string()).collect::<Vec<_>>().join(",");
     let source = format!(
         "{} main {{ let hs = [] for i in [{numbers}] {{
-        let h = spawn call work(1) set hs[list.len(hs)] = h
+        let h = spawn call work(&work, 1) set hs[list.len(hs)] = h
         }} do join all hs return 0 }}",
         SOURCE.split("main {").next().unwrap()
     );
@@ -903,18 +749,14 @@ fn sequential_and_recursive_calls_keep_task_wide_effect_identities() {
 /// its loop, as the derived execution site names it.
 #[test]
 fn a_wait_in_a_while_condition_is_named_inside_its_loop() {
-    const SOURCE: &str = "main { let i = 0\n\
-        while [perform echo(\"c\") as Any, num.lt(i, 2)][1] { set i = num.add(i, 1) }\n\
-        return i }\n";
+    const SOURCE: &str = "main { let i = 0\nwhile [perform 0(\"c\") as Any, num.lt(i, 2)][1] { set i = num.add(i, 1) }\nreturn i }\n";
     let mut embedder = Embedder::with(SOURCE, setup(u64::MAX));
     embedder.run_to_end(&[]);
     let named: Vec<(String, u64, Vec<String>)> = embedder
         .requests
         .iter()
         .map(|request| {
-            let Request::Effect(effect) = request else {
-                panic!("{request:?}");
-            };
+            let Request::Effect(effect) = request;
             let identity = lash_kernel_doc::kernel_internals::effect_parts(&effect.identity);
             let loops = identity
                 .loops
@@ -1182,9 +1024,7 @@ fn a_task_state_that_disagrees_is_refused() {
 /// to a site no loop of the frame's statement stands at.
 #[test]
 fn a_loop_moved_past_its_cursor_or_off_its_site_is_refused() {
-    const IN_LOOP: &str = "main { let out = []\n\
-        for x in [1, 2, 3] { let v = perform echo(x) as Any set out[list.len(out)] = v }\n\
-        return out }";
+    const IN_LOOP: &str = "main { let out = []\nfor x in [1, 2, 3] { let v = perform 0(x) as Any set out[list.len(out)] = v }\nreturn out }";
     let parked = || {
         let mut embedder = Embedder::with(IN_LOOP, setup(u64::MAX));
         assert!(matches!(embedder.run(), Step::Parked(_)));
@@ -1227,10 +1067,8 @@ fn a_loop_moved_past_its_cursor_or_off_its_site_is_refused() {
 fn a_continuation_keeps_its_roles_flat_and_spills_a_long_list() {
     for (count, cells) in [(16, None), (17, Some(2)), (40, Some(3))] {
         let operands: String = (0..count).map(|i| format!("{i}, ")).collect();
-        let source = format!(
-            "main {{ let r = [{operands}perform echo(\"w\") as Any]\n\
-             return list.len(r) }}\n"
-        );
+        let source =
+            format!("main {{ let r = [{operands}perform 0(\"w\") as Any]\nreturn list.len(r) }}\n");
         let mut embedder = park_where(&source, |phases| phases == only(PhaseRecord::Waiting));
         let mut saved = None;
         embedder
@@ -1258,17 +1096,9 @@ fn a_continuation_keeps_its_roles_flat_and_spills_a_long_list() {
 
 /// A `join` on one handle and on a list, nested in an expression: the
 /// frame stands joining, its operands kept as roles (`K-EVAL-008`).
-const NESTED_JOIN: &str = "fn w(x) { let v = perform echo(x) as Any return v }\n\
-    main { let h = spawn call w(\"a\") let g = spawn call w(\"b\") let hs = [h, g]\n\
-    let r = [1, join(h), join all(hs)]\n\
-    return r }\n";
+const NESTED_JOIN: &str = "definition \"function w(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let v = perform 0(x) as Any return v  }\"\n\nmain { let h = spawn call w(\"a\") let g = spawn call w(\"b\") let hs = [h, g]\nlet r = [1, join(h), join all(hs)]\nreturn r }\n";
 
-const NESTED_JOIN_HOISTED: &str = "fn w(x) { let v = perform echo(x) as Any return v }\n\
-    main { let h = spawn call w(\"a\") let g = spawn call w(\"b\") let hs = [h, g]\n\
-    let t0 = join h\n\
-    let t1 = join all hs\n\
-    let r = [1, t0, t1]\n\
-    return r }\n";
+const NESTED_JOIN_HOISTED: &str = "definition \"function w(x: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {  let v = perform 0(x) as Any return v  }\"\n\nmain { let h = spawn call w(\"a\") let g = spawn call w(\"b\") let hs = [h, g]\nlet t0 = join h\nlet t1 = join all hs\nlet r = [1, t0, t1]\nreturn r }\n";
 
 #[test]
 fn nested_join_resumes_exactly() {
@@ -1291,13 +1121,15 @@ mod protocol;
 #[test]
 fn do_expressions_resume_after_each_action_without_repeating_operands() {
     case(
-        r#"fn child() { do perform echo("child") as Any return null }
-fn idle() { do yield return null }
+        r#"definition "function child() -> Any\nkernel 1\nmetering statements\nbody {  do perform 0(\"child\") as Any return null  }"
+
+definition "function idle() -> Any\nkernel 1\nmetering statements\nbody {  do yield return null  }"
+
 main {
   do call child()
   let yielded = [yield]
   print yielded
-  do [1, yield, perform echo("x") as Any]
+  do [1, yield, perform 0("x") as Any]
   try { do let(h = spawn call idle(), (cancel(h), join(h))) } catch e {}
   return "done"
 }"#,
@@ -1330,12 +1162,12 @@ fn return_policy(
 #[test]
 fn a_return_policy_runs_after_source_finalizers() {
     let source = r#"
-fn child() { return 7 }
-fn value() { print "evaluated" return spawn call child() }
-fn work() {
-  try { return call value() via body.adopt }
-  finally { print "finally" }
-}
+definition "function child() -> Any\nkernel 1\nmetering statements\nbody {  return 7  }"
+
+definition "function value() -> Any\nkernel 1\nmetering statements\nbody {  print \"evaluated\" return spawn call child()  }"
+
+definition "function work() -> Any\nkernel 1\nmetering statements\nbody { \n  try { return call value() via body.adopt }\n  finally { print \"finally\" }\n }"
+
 main { let value = call work() return value }
 "#;
     exact(
@@ -1354,11 +1186,10 @@ main { let value = call work() return value }
 #[test]
 fn a_finalizer_return_discards_the_interrupted_return_policy() {
     let source = r#"
-fn child() { return 7 }
-fn work(held) {
-  try { return held via body.adopt }
-  finally { print "override" return 9 }
-}
+definition "function child() -> Any\nkernel 1\nmetering statements\nbody {  return 7  }"
+
+definition "function work(held: Any) -> Any\nkernel 1\nmetering statements\nbody { \n  try { return held via body.adopt }\n  finally { print \"override\" return 9 }\n }"
+
 main { let held = spawn call child() let value = call work(held) do join held return value }
 "#;
     exact(
@@ -1378,11 +1209,10 @@ main { let held = spawn call child() let value = call work(held) do join held re
 #[test]
 fn cancellation_during_unwind_discards_the_return_policy() {
     let source = r#"
-fn child() { return 7 }
-fn work(held) {
-  try { return held via body.adopt }
-  finally { print "cleanup" do perform echo("cleanup") as Any }
-}
+definition "function child() -> Any\nkernel 1\nmetering statements\nbody {  return 7  }"
+
+definition "function work(held: Any) -> Any\nkernel 1\nmetering statements\nbody { \n  try { return held via body.adopt }\n  finally { print \"cleanup\" do perform 0(\"cleanup\") as Any }\n }"
+
 main {
   let held = spawn call child()
   let worker = spawn call work(held)
@@ -1410,12 +1240,12 @@ main {
 #[test]
 fn a_return_policy_adopts_once_after_a_cold_cleanup_park() {
     let source = r#"
-fn child() { do perform echo("value") as Any return 7 }
-fn value() { print "evaluated" return spawn call child() }
-fn work() {
-  try { return call value() via body.adopt }
-  finally { do perform echo("cleanup") as Any print "cleaned" }
-}
+definition "function child() -> Any\nkernel 1\nmetering statements\nbody {  do perform 0(\"value\") as Any return 7  }"
+
+definition "function value() -> Any\nkernel 1\nmetering statements\nbody {  print \"evaluated\" return spawn call child()  }"
+
+definition "function work() -> Any\nkernel 1\nmetering statements\nbody { \n  try { return call value() via body.adopt }\n  finally { do perform 0(\"cleanup\") as Any print \"cleaned\" }\n }"
+
 main { let value = call work() return value }
 "#;
     exact(
@@ -1453,6 +1283,7 @@ fn cleanup_probe(
 /// `body.clean`, which returns a value the run discards.
 fn cleaned(n: i64) -> Drive {
     Drive {
+        cleanup: true,
         probes: |registry, ids| cleanup_probe("body.clean", "return \"discarded\"", registry, ids),
         entry: Some(("run", n)),
         ..Drive::new(u64::MAX, false)
@@ -1467,13 +1298,10 @@ fn cleaned(n: i64) -> Drive {
 #[test]
 fn a_root_cleanup_runs_once_after_source_finalizers_and_resumes_exactly() {
     let source = r#"
-entry run(n: Any) -> Any py_direct(body.clean)
-fn child() { do perform echo("child") as Any print "child" }
-fn run(n) {
-  if num.lt(0, n) { let inner = call run(0) print "inner" return inner }
-  try { let h = spawn call child() return 7 }
-  finally { print "finally" }
-}
+definition "function child() -> Any\nkernel 1\nmetering statements\nbody {  do perform 0(\"child\") as Any print \"child\"  }"
+
+definition "function run(self: Any, n: Any) -> Any\nkernel 1\nmetering statements\nbody { \n  if num.lt(0, n) { let inner = apply self(self, 0) print \"inner\" return inner }\n  try { let h = spawn call child() return 7 }\n  finally { print \"finally\" }\n }"
+
 main { }
 "#;
     exact(
@@ -1490,9 +1318,10 @@ main { }
 #[test]
 fn a_root_cleanup_holds_the_raise_and_its_own_raise_replaces_it() {
     let raises = r#"
-entry run(n: Any) -> Any py_direct(body.clean)
-fn child() { do perform echo("child") as Any print "child" }
-fn run(n) { let h = spawn call child() throw "held" }
+definition "function child() -> Any\nkernel 1\nmetering statements\nbody {  do perform 0(\"child\") as Any print \"child\"  }"
+
+definition "function run(n: Any) -> Any\nkernel 1\nmetering statements\nbody {  let h = spawn call child() throw \"held\"  }"
+
 main { }
 "#;
     let printed = [

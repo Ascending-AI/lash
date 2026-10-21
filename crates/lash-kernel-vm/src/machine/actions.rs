@@ -71,7 +71,7 @@ impl KernelMachine {
     ) -> Status {
         let (task, exe, stmt) = (running.task, running.exe, running.id);
         self.observe_action(exe, &action.site);
-        if !matches!(action.site.unit, lash_vocabulary::sites::Unit::Library(_))
+        if action.guest
             && matches!(
                 action.kind,
                 ActionKind::Call { .. }
@@ -128,7 +128,7 @@ impl KernelMachine {
                     self.pin(out)?;
                     return Ok(Flow::Done);
                 }
-                self.issue_effect(task, stmt, &action.site, effect.clone(), copied)?;
+                self.issue_effect(task, stmt, &action.site, effect, copied)?;
                 Ok(Flow::Step)
             }
 
@@ -206,7 +206,7 @@ impl KernelMachine {
         if !matches!(entry.kind, NestedKind::Body(_)) {
             self.observe_action(exe, site);
         }
-        let library = matches!(site.unit, lash_vocabulary::sites::Unit::Library(_));
+        let library = !entry.guest;
         match &entry.kind {
             NestedKind::Call(callee) => {
                 if !library {
@@ -274,7 +274,7 @@ impl KernelMachine {
                     return Ok(Flow::Done);
                 }
                 self.capture(task, entry, act, PhaseRecord::Waiting)?;
-                self.issue_effect(task, stmt, site, effect.clone(), copied)?;
+                self.issue_effect(task, stmt, site, effect, copied)?;
                 Ok(Flow::Step)
             }
             NestedKind::Join => {
@@ -481,7 +481,7 @@ impl KernelMachine {
     ) -> Status {
         let entry = &running.stream.nested[act.ix()];
         self.observe_action(running.exe, &entry.site);
-        if !matches!(entry.site.unit, lash_vocabulary::sites::Unit::Library(_)) {
+        if entry.guest {
             self.enter(running.task, host, &entry.site, entry.occurrence)?;
         }
         let function = running.exe.lib(lib);
@@ -626,7 +626,7 @@ impl KernelMachine {
                 Ok(Flow::Step)
             }
             Target::Library(lib, link) => {
-                self.call_lib_linked(task, exe, lib, link, args, count, Some(stmt))
+                self.call_lib_linked(task, exe, (lib, link), args, count, Some(stmt))
             }
         }
     }
@@ -653,7 +653,7 @@ impl KernelMachine {
                 let target = self.callable_target(exe, callable)?;
                 match target {
                     Target::Library(lib, link) => {
-                        self.call_lib_linked(task, exe, lib, link, args, count, awaiting)
+                        self.call_lib_linked(task, exe, (lib, link), args, count, awaiting)
                     }
                     Target::Code(code, captures, link) => {
                         self.push_frame(
@@ -673,7 +673,7 @@ impl KernelMachine {
                 }
             }
             Target::Library(lib, link) => {
-                self.call_lib_linked(task, exe, lib, link, args, count, awaiting)
+                self.call_lib_linked(task, exe, (lib, link), args, count, awaiting)
             }
             Target::Code(code, captures, link) => {
                 let result = self.push_frame(
@@ -868,11 +868,11 @@ impl KernelMachine {
                 let (code, link) = match found {
                     Ok(found) => found,
                     Err(identity) => {
-                        let code = exe
-                            .declared
-                            .get(&identity.callable.function)
-                            .copied()
-                            .ok_or_else(|| fault("closure definition is not loaded"))?;
+                        let code = super::project::closure_code(
+                            exe,
+                            &identity.callable.function,
+                            &identity.site.site,
+                        )?;
                         let found = LocalCode {
                             executable,
                             code: code.0,
@@ -1198,7 +1198,7 @@ impl KernelMachine {
                 pushed.map(|()| Flow::Step)
             }
             Target::Library(lib, link) => {
-                self.call_lib_linked(child, exe, lib, link, args, count, None)
+                self.call_lib_linked(child, exe, (lib, link), args, count, None)
             }
             Target::Export(..) => Err(fault("an export resolved to another export").into()),
         };
@@ -1531,8 +1531,9 @@ mod laws {
     use super::Target;
     use crate::compile::CodeId;
     use crate::laws::embedder::Embedder;
+    use lash_kernel_doc::Value;
     use lash_kernel_doc::arena::LocalCode;
-    use lash_kernel_doc::{Unit, Value};
+    use lash_vocabulary::sites::Unit;
 
     /// K-FN-005: the code a call found for a closure's site is cached on
     /// the closure for the executable that found it alone. A cache naming
@@ -1546,23 +1547,37 @@ mod laws {
         let exe = std::sync::Arc::clone(&run.machine.exe);
         let mut closures: Vec<CodeId> = (0..exe.code_count() as u32)
             .map(CodeId)
-            .filter(|code| Some(*code) != exe.main && exe.code(*code).site.unit == Unit::Main)
+            .filter(|code| {
+                Some(*code) != exe.main
+                    && exe
+                        .code(*code)
+                        .created
+                        .as_ref()
+                        .is_some_and(|site| site.unit == Unit::Main)
+            })
             .collect();
-        closures.sort_by(|a, b| exe.code(*a).site.path.cmp(&exe.code(*b).site.path));
+        closures.sort_by(|a, b| {
+            exe.code(*a)
+                .created
+                .as_ref()
+                .unwrap()
+                .path
+                .cmp(&exe.code(*b).created.as_ref().unwrap().path)
+        });
         let [f, g] = closures[..] else {
             panic!("the document makes two closures: {closures:?}");
         };
         let closure = run.machine.make_closure(&exe, f, &[]).unwrap();
         let cached = |run: &Embedder| run.machine.arena.borrow().closure(closure).unwrap().2;
         let called = |run: &mut Embedder| match run.machine.target(&exe, Value::Closure(closure)) {
-            Ok(Target::Code(code, _, link)) => code,
+            Ok(Target::Code(code, _, _)) => code,
             _ => panic!("a closure calls its code"),
         };
         let found = LocalCode {
             executable: exe.local(),
             code: f.0,
         };
-        assert_eq!(cached(&run), None);
+        assert_eq!(cached(&run), Some(found));
         assert_eq!(called(&mut run), f);
         assert_eq!(cached(&run), Some(found));
         // A separately allocated executable has its own code numbering,

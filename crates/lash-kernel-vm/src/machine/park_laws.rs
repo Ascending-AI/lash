@@ -15,22 +15,7 @@ fn a_thousand_way_fan_out_delivered_one_at_a_time_reads_linear_wait_pages() {
     };
     let mut embedder = Embedder::with(
         &format!(
-            "fn child(i) {{ let r = perform echo(i) as Any return r }}
-main {{
-  let hs = []
-  let i = 0
-  while num.lt(i, {W}) {{
-    let h = spawn call child(i)
-    set hs[list.len(hs)] = h
-    set i = num.add(i, 1)
-  }}
-  let n = 0
-  for h in hs {{
-    let r = join h
-    set n = num.add(n, 1)
-  }}
-  return n
-}}"
+            "definition \"function child(i: Any) -> Any\\nkernel 1\\nmetering statements\\nbody {{  let r = perform 0(i) as Any return r  }}\"\n\nmain {{\n  let hs = []\n  let i = 0\n  while num.lt(i, {W}) {{\n    let h = spawn call child(i)\n    set hs[list.len(hs)] = h\n    set i = num.add(i, 1)\n  }}\n  let n = 0\n  for h in hs {{\n    let r = join h\n    set n = num.add(n, 1)\n  }}\n  return n\n}}"
         ),
         Setup {
             bounds,

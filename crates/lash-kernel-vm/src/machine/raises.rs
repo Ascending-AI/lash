@@ -20,7 +20,6 @@
 use lash_kernel_doc::TaskId;
 use lash_kernel_exec::ActIx;
 use lash_vocabulary::sites::Site;
-use lash_vocabulary::sites::Unit;
 
 use super::{Control, Frame, Halt, KernelMachine};
 use crate::compile::{ActionKind, BlockId, Executable, Form, NestedKind, StmtId};
@@ -38,7 +37,7 @@ pub(super) enum Coordinate {
 }
 
 fn document(frame: &Frame, exe: &Executable) -> bool {
-    !matches!(exe.code(frame.code).site.unit, Unit::Library(_))
+    exe.code(frame.code).charged
 }
 
 /// Where a raise unwinding through `frame` stands, when it is a document

@@ -15,22 +15,10 @@ use crate::{Bounds, End, Layout, Machine, Request, Step};
 /// call, a guarded native, a native that builds an object, kernel bodies
 /// that call closures, and memory pressure that collects mid-call.
 const PROGRAM: &str = r#"
-fn helper(x) { return num.add(x, 1) }
-fn worker(tag) {
-  let total = 0
-  for step in [1, 2] {
-    try {
-      let got = perform echo(tag) as Any
-      set total = num.add(total, step)
-      let broken = text.concat(total, step)
-    } catch e {
-      print e.kind
-    } finally {
-      print (tag, step)
-    }
-  }
-  return total
-}
+definition "function helper(x: Any) -> Any\nkernel 1\nmetering statements\nbody {  return num.add(x, 1)  }"
+
+definition "function worker(tag: Any) -> Any\nkernel 1\nmetering statements\nbody { \n  let total = 0\n  for step in [1, 2] {\n    try {\n      let got = perform 0(tag) as Any\n      set total = num.add(total, step)\n      let broken = text.concat(total, step)\n    } catch e {\n      print e.kind\n    } finally {\n      print (tag, step)\n    }\n  }\n  return total\n }"
+
 main {
   let a = call helper(1)
   let b = call helper(a)

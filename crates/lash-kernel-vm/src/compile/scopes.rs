@@ -41,6 +41,7 @@ impl Compiler<'_> {
         let enclosing = std::mem::take(&mut self.live);
         let enclosing_depth = self.stmt_depth;
         self.scopes.push(Scopes {
+            charged,
             main,
             body: site.clone(),
             blocks: Vec::new(),
@@ -50,6 +51,7 @@ impl Compiler<'_> {
         });
         let (body, params) = self.block(body, params);
         let scopes = self.scopes.pop().unwrap_or(Scopes {
+            charged,
             main,
             body: site.clone(),
             blocks: Vec::new(),
