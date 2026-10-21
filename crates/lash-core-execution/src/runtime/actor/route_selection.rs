@@ -4,7 +4,7 @@ use lash_core_store::tool_surface::{ExecutionEnvironment, RoutedOperation, UseBi
 use lash_execution_contracts::process::linking::{
     AdmissionRefusal, EnginePortError, LinkInspection, OperationNeed,
 };
-use lash_vocabulary::{claims::*, names::*, package::*};
+use lash_vocabulary::{claims::*, package::*};
 
 /// Candidate order has no authority. Distinct serving candidates for one pin
 /// are ambiguous; equal advertisements are harmless duplicates.
@@ -83,6 +83,7 @@ pub fn select_routes(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash_vocabulary::names::*;
 
     /// L-DISPATCH: one diagnostic name can require two independent contracts.
     #[test]
@@ -106,7 +107,7 @@ mod tests {
             .unwrap();
             AdvertisedRoute {
                 operation: definition.manifest.operation.clone(),
-                route: lash_core_store::tool_surface::OperationRoute::advertised(
+                route: lash_core_store::tool_surface::OperationRoute::admitted(
                     provider,
                     &definition,
                     None,

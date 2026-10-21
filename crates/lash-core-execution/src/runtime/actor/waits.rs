@@ -42,7 +42,7 @@ use super::ActorContext;
 use crate::ExecutionScope;
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::process::ProcessOutcome;
-use lash_protocol_types::ProcessId;
+use lash_vocabulary::identity::ProcessId;
 
 pub use lash_core_effect::Resolution;
 pub use lash_durable::domain::{ResolveAnswer, WaitId, WaitKind, WaitPurpose};
@@ -649,7 +649,7 @@ fn actor_scope(actor: &lash_durable::ActorKey) -> Result<ScopeKey, DurableError>
     // ActorKey validates framing; decode the raw id according to its kind.
     // It has not been escaped as a stored ScopeKey's path component.
     match actor.kind() {
-        ActorKind::Session => lash_protocol_types::SessionId::parse(actor.id())
+        ActorKind::Session => lash_vocabulary::identity::SessionId::parse(actor.id())
             .map(ScopeKey::Session)
             .map_err(|error| {
                 corrupt(&format!(
@@ -757,7 +757,7 @@ mod tests {
     /// session. ActorKey framing alone does not prove a domain identity.
     #[test]
     fn runtime_operation_wait_scope_preserves_actor_identity() {
-        let session = lash_protocol_types::SessionId::parse("session/with%escapes").unwrap();
+        let session = lash_vocabulary::identity::SessionId::parse("session/with%escapes").unwrap();
         assert_eq!(
             actor_scope(&ActorKey::session(session.as_str()).unwrap()).unwrap(),
             ScopeKey::Session(session),

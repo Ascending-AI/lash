@@ -33,16 +33,15 @@ use std::sync::{Arc, Mutex};
 
 use lash_core_store::tool_run::CompletionSource;
 use lash_core_store::tool_run::StateResolution;
+use lash_protocol_types::ExecutionLimit;
 use lash_protocol_types::sync::MutexExt as _;
-use lash_protocol_types::{ExecutionLimit, ExecutionPolicy};
+use lash_vocabulary::tool_contract::ExecutionPolicy;
 
 use lash_core_store::tool_run::{MaterialOwner, MaterialRole};
 
 use crate::ActorContext;
-use crate::ProcessId;
 use crate::RuntimeEffectControllerError;
 use crate::ToolCatalog;
-use crate::ToolId;
 use crate::runtime::actor::round::{
     AdmittedExecution, MemberBody, MemberOutcome, RoundTools, completed_call,
 };
@@ -53,6 +52,8 @@ use lash_execution_contracts::plugin_error::PluginError;
 use lash_execution_contracts::process::ProcessRecord;
 use lash_execution_contracts::process::StepRequest;
 use lash_execution_contracts::waits::ParkDeadline;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::tool_contract::ToolId;
 
 /// A step's admission: what its tool's declaration pins before it runs.
 #[derive(Clone, Debug, PartialEq)]
@@ -221,7 +222,7 @@ pub trait ProcessStepContext: Send + Sync {
     /// The prepared runtime has no engine composition.
     fn requirements(
         &self,
-    ) -> Result<std::collections::BTreeSet<crate::ObligationToken>, PluginError>;
+    ) -> Result<std::collections::BTreeSet<lash_vocabulary::claims::ObligationToken>, PluginError>;
     /// Resolve the call the grant linked at `effect` names for `input`
     /// through the prepared deferred provider: a refusal before the
     /// provider is asked is the call's typed [`crate::DispatchRefusal`].
@@ -428,7 +429,7 @@ pub trait ProcessSteps: Send + Sync {
         process: &ProcessRecord,
         steps: &[StepRequest],
     ) -> Result<
-        Option<std::collections::BTreeSet<crate::ObligationToken>>,
+        Option<std::collections::BTreeSet<lash_vocabulary::claims::ObligationToken>>,
         lash_durable::DurableError,
     > {
         let _ = (runtime, process, steps);
@@ -441,6 +442,22 @@ pub trait ProcessSteps: Send + Sync {
     fn succession(&self, process: &ProcessRecord) -> Option<Arc<dyn super::EngineSuccession>> {
         let _ = process;
         None
+    }
+
+    /// Re-run ordinary target admission after correspondence has carried pins.
+    fn check_successor_links(
+        &self,
+        environment: &Arc<crate::ProcessEnv>,
+        inspection: &lash_execution_contracts::process::linking::LinkInspection,
+        seeds: &[lash_core_store::resolutions::ResolutionSeed],
+    ) -> Result<lash_vocabulary::claims::ClaimRequirements, PluginError> {
+        let _ = (environment, inspection, seeds);
+        Err(
+            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
+                operation: "successor linked admission".into(),
+            }
+            .into(),
+        )
     }
 
     async fn succession_context(

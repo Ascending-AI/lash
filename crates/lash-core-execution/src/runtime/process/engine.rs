@@ -538,8 +538,19 @@ impl ProcessEngineRegistry {
         lash_vocabulary::claims::ClaimRequirements,
         lash_execution_contracts::process::linking::EnginePortError,
     > {
-        self.components()
-            .check_links_with_seeds(env, inspection, seeds)
+        let mut requirements = self
+            .components()
+            .check_links_with_seeds(env, inspection, seeds)?;
+        requirements.extend(&crate::runtime::actor::resolutions::validate_seeds(
+            inspection,
+            env.execution(),
+            seeds,
+            |grant, name, definition, route, registry| {
+                self.components()
+                    .validate_seed_route(env, grant, name, definition, route, registry)
+            },
+        )?);
+        Ok(requirements)
     }
 
     /// Resolve the engine a `ProcessInput::Engine` start names, refusing a kind

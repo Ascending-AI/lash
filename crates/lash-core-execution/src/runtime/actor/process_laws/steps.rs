@@ -126,11 +126,3 @@ impl ProcessSteps for LawSteps {
         })
     }
 }
-
-// --- the rig ----------------------------------------------------------------
-
-/// A runner serving `backend`'s process actors until stopped.
-struct Serving {
-    stop: CancellationToken,
-    task: tokio::task::JoinHandle<Result<Stopped, DurableError>>,
-}

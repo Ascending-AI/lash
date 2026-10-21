@@ -47,9 +47,9 @@ pub use start_staging::{
 pub use steps::{
     ProcessStepTools, ProcessSteps, StepAdmission, StepRefusal, StepRuntime, StepToolsError,
 };
+pub(crate) use succession::carry_refusal;
 pub use succession::request_process_successor;
 pub use succession::succession_context;
-pub(crate) use succession::{carry_refusal, linked_start};
 #[cfg(any(test, feature = "testing"))]
 pub use testing::*;
 mod definition_acquisition;

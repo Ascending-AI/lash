@@ -26,8 +26,7 @@ use std::collections::BTreeMap;
 use lash_core_execution::runtime::actor::round::graph::PinnedMember;
 use lash_core_execution::tool_dispatch::CellCall;
 use lash_core_store::checkpoint_graph::{
-    GraphDecoder, GraphRefusal, GraphStaging, NodeId, NodeKind, TokenCodec, TokenError,
-    TokenReader, TokenWriter,
+    GraphDecoder, GraphRefusal, GraphStaging, NodeId, NodeKind,
 };
 use lash_core_store::effect_opener::EffectOpener;
 use lash_core_store::tool_run::Material;
@@ -35,9 +34,12 @@ use lash_core_store::tool_run::{MaterialOwner, MaterialRef, MaterialRole};
 use lash_durable::DomainWrite;
 use lash_durable::domain::ExecKey;
 use lash_durable::domain::graph::{AdmissionMember, EffectAdmissionWrite, EffectKey};
-use lash_kernel_doc::graph_tokens::{check_ascending, encode_body};
-use lash_kernel_doc::{Datum, EffectId, ErrorDatum};
+use lash_kernel_doc::{Datum, ErrorDatum};
 use lash_vocabulary::names::OperationUse;
+use lash_vocabulary::sites::EffectId;
+use lash_vocabulary::tokens::{
+    TokenCodec, TokenError, TokenReader, TokenWriter, check_ascending, encode_body,
+};
 
 use crate::snapshot::OperationId;
 
@@ -302,7 +304,7 @@ pub struct Admission {
     pub exec: ExecKey,
     pub effect: EffectId,
     /// The machine's number for the wait its outcome is delivered to.
-    pub wait: lash_protocol_types::WaitId,
+    pub wait: lash_vocabulary::sites::WaitId,
     /// The effect performed; none for a sleep.
     pub effect_name: Option<OperationUse>,
     /// Its FrozenRequest.
@@ -333,7 +335,7 @@ impl TokenCodec for Admission {
         input.expect_struct(6)?;
         let exec = ExecKey::parse(input.text()?).map_err(|error| invalid(error.to_string()))?;
         let effect = EffectId::decode(input)?;
-        let wait = lash_protocol_types::WaitId::decode(input)?;
+        let wait = lash_vocabulary::sites::WaitId::decode(input)?;
         let effect_name = Option::decode(input)?;
         let request = NodeId::decode(input)?;
         let (variant, fields) = input.sum()?;
@@ -457,7 +459,7 @@ pub enum MemberStatus {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MemberEntry {
     pub effect: EffectId,
-    pub wait: lash_protocol_types::WaitId,
+    pub wait: lash_vocabulary::sites::WaitId,
     /// Its Admission.
     pub admission: NodeId,
     pub status: MemberStatus,
@@ -507,7 +509,7 @@ impl TokenCodec for EffectMembership {
         for _ in 0..count {
             input.expect_struct(4)?;
             let effect = EffectId::decode(input)?;
-            let wait = lash_protocol_types::WaitId::decode(input)?;
+            let wait = lash_vocabulary::sites::WaitId::decode(input)?;
             let admission = NodeId::decode(input)?;
             let (variant, fields) = input.sum()?;
             TokenReader::expect_fields(fields, 0)?;
@@ -652,7 +654,7 @@ struct Admitted {
 #[derive(Clone, Debug, PartialEq)]
 pub struct FrozenAdmission {
     pub effect: EffectId,
-    pub wait: lash_protocol_types::WaitId,
+    pub wait: lash_vocabulary::sites::WaitId,
     /// The effect performed; none for a sleep.
     pub effect_name: Option<OperationUse>,
     pub request: FrozenRequest,
@@ -887,7 +889,7 @@ pub struct RootParts {
     pub envelope: Option<NodeId>,
     /// What the parked execution owes beyond its admitted calls (S7): its
     /// committed deferred matches' providers and codecs. Empty once ended.
-    pub owed: Vec<lash_core_store::store::plugin_writers::PluginCallbackIdentity>,
+    pub owed: Vec<lash_vocabulary::providers::PluginCallbackIdentity>,
     /// What running the execution requires of a node (FIG-6985). Empty
     /// once ended.
     pub requirements: lash_vocabulary::claims::ClaimRequirements,

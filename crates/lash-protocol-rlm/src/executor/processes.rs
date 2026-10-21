@@ -46,7 +46,7 @@ pub(super) async fn prepare(
     )
     .map_err(|error| error.to_string())?;
     Ok(PreparedExecution {
-        document: IdentifiedDocument::new(root.as_ref().clone()),
+        document: IdentifiedDocument::new(root.clone()),
         content,
         loaded,
     })

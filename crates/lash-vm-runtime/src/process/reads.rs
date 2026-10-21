@@ -13,7 +13,7 @@ pub(super) fn error(kind: &str, message: String, data: serde_json::Value) -> Err
 }
 
 pub(super) fn answer(
-    expected: &lash_kernel_doc::Type,
+    expected: &lash_vocabulary::types::Type,
     answer: Result<serde_json::Value, EngineReadError>,
 ) -> Result<Datum, ErrorDatum> {
     match answer {

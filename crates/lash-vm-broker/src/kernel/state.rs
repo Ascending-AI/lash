@@ -16,13 +16,18 @@
 use lash_core_store::checkpoint_graph::{
     GraphDecoder, GraphRefusal, GraphStaging, NodeId, NodeKind,
 };
-use lash_kernel_doc::graph_tokens::{ChildRef, TokenCodec, TokenError, TokenReader, TokenWriter};
 use lash_kernel_doc::heap::{PageGrant, PageId, PageRef};
-use lash_kernel_doc::{Datum, FrozenDatum, FunctionId, FunctionName, Name, TaskLabel};
+use lash_kernel_doc::{Datum, FrozenDatum};
 use lash_kernel_state::AdmittedWait;
 use lash_kernel_state::paged::{CheckpointHeader, inspect_checkpoint};
 use lash_kernel_vm::{Bound, BoundExceeded, End, Finished, RunError};
-use lash_vm_protocol::{EncodedPayload, KernelRestoreRefusal};
+use lash_protocol_types::engine_fault::KernelRestoreRefusal;
+use lash_vm_protocol::EncodedPayload;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::TaskLabel;
+use lash_vocabulary::tokens::{ChildRef, TokenCodec, TokenError, TokenReader, TokenWriter};
 
 /// Why a run's graph state was not written or not read.
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
@@ -105,7 +110,7 @@ pub enum EndRecord {
     TasksOutstanding {
         unfinished: Vec<TaskLabel>,
         unobserved: Vec<TaskLabel>,
-        sources: Vec<(TaskLabel, lash_kernel_doc::PositionLabel)>,
+        sources: Vec<(TaskLabel, lash_vocabulary::sites::PositionLabel)>,
     },
     Deadlock {
         waiting: Vec<TaskLabel>,
@@ -364,8 +369,8 @@ mod tests {
     fn a_recorded_task_failure_keeps_its_source_body_separate_from_its_spawn() {
         let task = lash_kernel_doc::testkit::spawned_task(
             lash_kernel_doc::testkit::root_task(),
-            lash_kernel_doc::Site::new(
-                lash_kernel_doc::Unit::Library(FunctionId::from_bytes([7; 32])),
+            lash_vocabulary::sites::Site::new(
+                lash_vocabulary::sites::Unit::Library(FunctionId::from_bytes([7; 32])),
                 vec![1, 1],
             ),
             3,
@@ -375,16 +380,20 @@ mod tests {
             unobserved: Vec::new(),
             sources: vec![(
                 task,
-                lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, vec![0, 0, 0]).position(),
+                lash_vocabulary::sites::Site::new(
+                    lash_vocabulary::sites::Unit::Main,
+                    vec![0, 0, 0],
+                )
+                .position(),
             )],
         });
         let mut staging = staging(u64::MAX);
         let record = EndRecord::stage(&end, &mut staging)
             .expect("a task failure stages")
             .expect("a task failure is recorded");
-        let bytes = lash_kernel_doc::graph_tokens::encode_body(&record);
-        let record: EndRecord = lash_kernel_doc::graph_tokens::decode_body(&bytes)
-            .expect("the stored task failure decodes");
+        let bytes = lash_vocabulary::tokens::encode_body(&record);
+        let record: EndRecord =
+            lash_vocabulary::tokens::decode_body(&bytes).expect("the stored task failure decodes");
         let nodes = staging.into_nodes();
         let mut decoder = GraphDecoder::new(&nodes, DecodeLimits::within_total(u64::MAX));
         assert_eq!(record.end(&mut decoder).expect("the end reads back"), end);

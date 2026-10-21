@@ -569,7 +569,7 @@ impl CodeModeExecutionState {
         documents: &lash_vm_runtime::KernelDocuments,
         boundary: &lash_vm_runtime::HostBoundary,
         claim: &lash_core::ReferrerClaim,
-    ) -> Result<(), RelinkError> {
+    ) -> Result<BTreeSet<lash_vocabulary::LinkId>, RelinkError> {
         let mut functions = self.view.functions.clone().unwrap_or_default();
         let mut rewritten = Vec::new();
         let mut dropped = Vec::new();
@@ -772,7 +772,13 @@ impl CodeModeExecutionState {
         } else {
             next
         };
-        Ok(())
+        Ok(self
+            .view
+            .functions
+            .as_ref()
+            .into_iter()
+            .flat_map(|functions| functions.values().map(|function| function.link))
+            .collect())
     }
 
     /// Marks the start of a cell: the session as it stands is what a

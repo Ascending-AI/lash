@@ -1,6 +1,6 @@
-use crate::ProcessId;
-use crate::SessionId;
 use lash_protocol_types::sync::MutexExt;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 use std::sync::Arc;
 
 mod held_response;
@@ -577,7 +577,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// process name and no incarnation. The admitted scope the controller was
     /// built with carries the exact pair, and this is where an execution that
     /// must name its opener (ADR 0099 §1) reads it back.
-    pub fn admitted_process(&self) -> Option<crate::ProcessId> {
+    pub fn admitted_process(&self) -> Option<lash_vocabulary::identity::ProcessId> {
         self.dispatch.effect_controller.admitted_process().cloned()
     }
 
@@ -979,7 +979,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             .map(|exec| exec.provenance.clone())
     }
 
-    fn child_process_observers(&self) -> Vec<crate::SessionId> {
+    fn child_process_observers(&self) -> Vec<lash_vocabulary::identity::SessionId> {
         match self.process_execution.as_ref() {
             Some(exec) => match &exec.provenance.originator {
                 lash_execution_contracts::process::ProcessOriginator::Host { .. } => Vec::new(),
@@ -1001,9 +1001,23 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// The process this context runs inside, with its recorded environment
     /// and settings, when its runtime loaded them.
     pub(crate) fn enclosing_env(&self) -> Option<Arc<crate::EnclosingProcess>> {
-        self.process_execution
-            .as_ref()
-            .and_then(|execution| execution.enclosing.clone())
+        let mut enclosing = self.process_execution.as_ref()?.enclosing.clone()?;
+        // Snapshot pins from this exact process execution at the policy boundary.
+        // Activation construction may precede loading its committed resolution rows.
+        if let Some(linked) = &self.linked_execution {
+            if linked.execution != enclosing.execution {
+                return None;
+            }
+            Arc::make_mut(&mut enclosing).resolutions = linked.resolutions.lock_recover().clone();
+        } else if enclosing.env.execution().uses.values().any(|binding| {
+            matches!(
+                binding,
+                lash_core_store::tool_surface::UseBinding::Deferred(_)
+            )
+        }) {
+            return None;
+        }
+        Some(enclosing)
     }
 
     /// Hold the environment `registration`'s launch names under this
@@ -1097,7 +1111,10 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
-    pub fn callable_tool_manifest_by_id(&self, id: &crate::ToolId) -> Option<crate::ToolManifest> {
+    pub fn callable_tool_manifest_by_id(
+        &self,
+        id: &lash_vocabulary::tool_contract::ToolId,
+    ) -> Option<lash_vocabulary::tool_contract::ToolManifest> {
         crate::tool_dispatch::resolve_callable_manifest_by_id(&self.dispatch, id)
     }
 
@@ -1210,8 +1227,8 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// contract is routed, and raises `operation_contract_changed`.
     pub fn read_route(
         &self,
-        tool: &crate::ToolId,
-        pinned: &lash_kernel_doc::ContractId,
+        tool: &lash_vocabulary::tool_contract::ToolId,
+        pinned: &lash_vocabulary::operations::ContractId,
     ) -> Result<crate::ReadRoute, crate::RuntimeEffectControllerError> {
         self.dispatch
             .routes
@@ -1268,24 +1285,24 @@ impl<'run> RuntimeExecutionContext<'run> {
         &self,
         route: &crate::OperationRoute,
         contract: &lash_vocabulary::operations::ContractId,
-    ) -> Result<crate::ToolExecutionGrant, crate::ToolFailure> {
+    ) -> Result<crate::ToolExecutionGrant, Box<crate::ToolFailure>> {
         let registry = self.dispatch.routes.registry();
         let served = registry.served(&route.provider, &route.tool, self.owner_config());
         match crate::judge(contract, route, served.as_ref()) {
             crate::Judgement::Missing => {
-                return Err(crate::ToolFailure::runtime(
+                return Err(Box::new(crate::ToolFailure::runtime(
                     crate::ToolFailureClass::InvalidRequest,
                     "linked_tool_missing",
                     format!("linked tool {} is no longer served", route.tool),
-                ));
+                )));
             }
             crate::Judgement::ContractChanged { pinned, live } => {
-                return Err(crate::operation_contract_changed(
+                return Err(Box::new(crate::operation_contract_changed(
                     &route.tool.to_string(),
                     &route.tool,
                     &pinned,
                     &live,
-                ));
+                )));
             }
             crate::Judgement::Served => {}
         }
@@ -1305,7 +1322,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// The hooks through which the session's plugins see tool calls'
     /// arguments or results. A read runs no hook, so where one would see it
     /// the call stays recorded.
-    pub fn tool_call_hooks(&self) -> Vec<crate::plugin::PluginCallbackIdentity> {
+    pub fn tool_call_hooks(&self) -> Vec<lash_vocabulary::providers::PluginCallbackIdentity> {
         self.dispatch.composition.tool_call_hooks()
     }
 

@@ -19,18 +19,18 @@ pub fn head_input(open: &[crate::PendingTurnInputRead]) -> Option<&crate::Pendin
 #[must_use]
 pub fn head_input_run(
     head: &crate::PendingTurnInputRead,
-    bound: Option<crate::TurnId>,
-) -> crate::TurnId {
+    bound: Option<lash_vocabulary::identity::TurnId>,
+) -> lash_vocabulary::identity::TurnId {
     bound.unwrap_or_else(|| input_run(&head.input))
 }
 
 /// The run of a shift that starts with `input`: the host's id for it (its
 /// source key) when it has one, else its input id (FIG-3600, ruling Q4).
 #[must_use]
-pub fn input_run(input: &crate::PendingTurnInput) -> crate::TurnId {
+pub fn input_run(input: &crate::PendingTurnInput) -> lash_vocabulary::identity::TurnId {
     input
         .source_key
         .as_deref()
-        .and_then(|source_key| crate::TurnId::parse(source_key).ok())
-        .unwrap_or_else(|| crate::TurnId::from(&input.input_id))
+        .and_then(|source_key| lash_vocabulary::identity::TurnId::parse(source_key).ok())
+        .unwrap_or_else(|| lash_vocabulary::identity::TurnId::from(&input.input_id))
 }

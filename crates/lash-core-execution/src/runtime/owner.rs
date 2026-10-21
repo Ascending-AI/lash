@@ -1,10 +1,10 @@
 //! Who a dispatch runs for.
 
 use crate::FrameNodeId;
-use crate::ProcessId;
-use crate::RuntimeOwner;
-use crate::SessionId;
 use lash_execution_contracts::plugin_error::PluginError;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::RuntimeOwner;
+use lash_vocabulary::identity::SessionId;
 
 /// Who a dispatch runs for: a session on the agent frame its execution was
 /// admitted on, or a process. A process has no frame, and no session of its

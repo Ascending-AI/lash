@@ -68,11 +68,13 @@ use lash_core_store::tool_run::SettledOutput;
 use lash_durable::domain::graph::{HydratedGraph, RootOwner};
 use lash_durable::domain::pages::{CandidateOwner, CandidatePublication};
 use lash_durable::domain::{ExecKey, RunFactWrite, RunSeq, SnapshotRev};
-use lash_durable::{CommitLabel, DomainWrite, DurableError, DurableInstant};
-use lash_kernel_doc::{Datum, DocumentId, EffectId, ErrorDatum, KERNEL_VERSION};
+use lash_durable::{CommitLabel, DomainWrite, DurableError};
+use lash_kernel_doc::{Datum, ErrorDatum, KERNEL_VERSION};
 use lash_kernel_state::paged::CheckpointHeader;
 use lash_kernel_vm::{End, Outcome, WaitId};
+use lash_vocabulary::legacy_names::DocumentId;
 use lash_vocabulary::names::OperationUse;
+use lash_vocabulary::sites::EffectId;
 use tokio_util::sync::CancellationToken;
 
 use super::closure::Closure;
@@ -147,7 +149,7 @@ pub struct HostParts {
     pub envelope: Option<NodeId>,
     /// The callbacks the host's state owes beyond its admitted calls (S7):
     /// a cell's committed deferred matches' providers and codecs.
-    pub owed: Vec<lash_core_store::store::plugin_writers::PluginCallbackIdentity>,
+    pub owed: Vec<lash_vocabulary::providers::PluginCallbackIdentity>,
     /// What the host's static operation links require of a node: their
     /// providers and codecs (FIG-6985). A parked root's requirements
     /// record holds them beside what its code requires.
@@ -318,13 +320,12 @@ pub fn outcome_of(output: &SettledOutput) -> Option<Outcome> {
 /// arguments alone: a resume reads the same records again.
 pub type OutcomeOf<'a> = &'a (dyn Fn(&AdmittedEffect, &SettledOutput) -> Option<Outcome> + Sync);
 
-/// Every wait `ledger` stands on that `folded` and `now` settle, in
+/// Every wait `ledger` stands on that `folded` settles, in
 /// identity order.
 fn settled_in(
     ledger: &EffectLedger,
     exec: &ExecKey,
     folded: &RunFold,
-    now: DurableInstant,
     outcome: OutcomeOf<'_>,
 ) -> Vec<Settled> {
     ledger
@@ -422,7 +423,7 @@ fn ledger_of(
             entry.effect.clone(),
             PendingEffect {
                 wait: entry.wait,
-                effect: admitted.admission.effect_name.clone(),
+                effect: admitted.admission.effect_name,
                 standing,
             },
         );
@@ -658,11 +659,7 @@ impl DurableSnapshotStore {
         if matches!(phase, SavePhase::Ended { .. }) {
             let execution = match &self.exec {
                 ExecKey::Cell(session, turn, cell) => {
-                    lash_core_store::resolutions::ExecutionId::cell(
-                        session,
-                        &turn.to_string(),
-                        cell.as_str(),
-                    )
+                    lash_core_store::resolutions::ExecutionId::cell(session, turn, cell.as_str())
                 }
                 ExecKey::Process(process) => {
                     lash_core_store::resolutions::ExecutionId::process(process)
@@ -721,7 +718,7 @@ impl DurableSnapshotStore {
                         FrozenAdmission {
                             effect: entry.identity.clone(),
                             wait: entry.wait,
-                            effect_name: entry.effect.clone(),
+                            effect_name: entry.effect,
                             request,
                             execution: Some((operation, pin)),
                         },
@@ -732,7 +729,7 @@ impl DurableSnapshotStore {
                 if let Some(operation) = &entry.effect {
                     calls.push(AdmittedCall {
                         effect: entry.identity.clone(),
-                        operation: operation.clone(),
+                        operation: *operation,
                         call: call.clone(),
                         admission: node,
                     });
@@ -757,7 +754,7 @@ impl DurableSnapshotStore {
                         FrozenAdmission {
                             effect: entry.identity.clone(),
                             wait: entry.wait,
-                            effect_name: entry.effect.clone(),
+                            effect_name: entry.effect,
                             request,
                             execution: None,
                         },
@@ -817,8 +814,7 @@ impl DurableSnapshotStore {
                 // What running the parked execution requires: its code's
                 // natives and kernel version, and its links' providers and
                 // codecs (FIG-6985). An ended one requires nothing.
-                requirements =
-                    super::loader::requirements(closure, state.header.kernel, std::iter::empty());
+                requirements.machine = super::loader::requirements(closure, state.header.kernel);
                 requirements.extend(&parts.links);
                 let membership = book.membership(&ledger).map_err(refused)?;
                 for write in book.retire_unnamed(&self.exec, &membership) {
@@ -1243,8 +1239,7 @@ impl DurableSnapshotStore {
         outcome: OutcomeOf<'_>,
     ) -> Result<Vec<Settled>, QuietPointRefusal> {
         let folded = self.members.lock().await.fold().await.map_err(refused)?;
-        let now = self.cx.durable_now().await.map_err(refused)?;
-        Ok(settled_in(ledger, &self.exec, &folded, now, outcome))
+        Ok(settled_in(ledger, &self.exec, &folded, outcome))
     }
 
     /// Run the run's open executions until at least one wait `ledger`
@@ -1287,8 +1282,8 @@ impl DurableSnapshotStore {
             .members
             .lock()
             .await
-            .drive_by(cancel, quiet, &mut |_, folded, now| {
-                let settled = settled_in(ledger, exec, folded, now, outcome);
+            .drive_by(cancel, quiet, &mut |_, folded, _| {
+                let settled = settled_in(ledger, exec, folded, outcome);
                 if !settled.is_empty() || (cancel.is_cancelled() && !ledger.awaits_execution()) {
                     Decide::Answer(settled)
                 } else {

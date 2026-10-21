@@ -14,8 +14,8 @@ use crate::AdmittedScope;
 use crate::Clock;
 use crate::ExecutionScope;
 use crate::RuntimeError;
-use crate::TurnId;
 use lash_execution_contracts::backend::Backend;
+use lash_vocabulary::identity::TurnId;
 
 /// The one effect context of an owned actor.
 ///
@@ -197,7 +197,12 @@ impl ActorContext {
                 probe,
                 dues: Dues::new(),
                 obligations: (owned.actor().kind() == lash_durable::ActorKind::Session)
-                    .then(|| crate::SessionId::try_from(owned.actor().id().to_owned()).ok())
+                    .then(|| {
+                        lash_vocabulary::identity::SessionId::try_from(
+                            owned.actor().id().to_owned(),
+                        )
+                        .ok()
+                    })
                     .flatten()
                     .map(|session| {
                         super::claim_obligations::SessionObligations::claimed(
@@ -862,7 +867,7 @@ impl ActorContext {
 
     /// The process a process scope is.
     #[must_use]
-    pub fn admitted_process(&self) -> Option<&crate::ProcessId> {
+    pub fn admitted_process(&self) -> Option<&lash_vocabulary::identity::ProcessId> {
         self.scope.admitted.process_id()
     }
 

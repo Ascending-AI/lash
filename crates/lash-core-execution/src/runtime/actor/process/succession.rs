@@ -168,7 +168,7 @@ impl ProcessActivation {
         state: Option<&EngineState>,
         fold: Option<&RunFold>,
     ) -> Result<Succession, DurableError> {
-        let ProcessInput::Engine { kind, payload, .. } = current.record.input.as_ref() else {
+        let ProcessInput::Engine { kind, .. } = current.record.input.as_ref() else {
             return Err(corrupt("a successor request", "the process runs no engine"));
         };
         let successor_env = lash_execution_contracts::process::load_process_env(
@@ -229,7 +229,64 @@ impl ProcessActivation {
                 }
             },
         };
-        let (carried, own_formats, correspondence, resolutions, requirements, artifacts) =
+        let carried = match carried {
+            Err(refusal) => Err(refusal),
+            Ok(carried) => (|| -> Result<_, DurableError> {
+                if let Err(message) = validate_pins(&context, &inspection, &carried.2, &carried.3) {
+                    return Ok(Err(ProcessSuccessorRefusal::Engine {
+                        refusal: serde_json::json!({"kind":"incompatible_succession", "message":message}),
+                        message,
+                    }));
+                }
+                let seeds: Vec<_> = carried
+                    .3
+                    .iter()
+                    .map(|record| lash_core_store::resolutions::ResolutionSeed {
+                        use_: record.key.use_,
+                        entry: record.entry.clone(),
+                    })
+                    .collect();
+                let mut known = match self.steps.check_successor_links(
+                    &std::sync::Arc::new(successor_env.clone()),
+                    &inspection,
+                    &seeds,
+                ) {
+                    Ok(known) => known,
+                    Err(crate::PluginError::Package(cause))
+                        if cause.failure_class()
+                            == lash_protocol_types::ToolFailureClass::InvalidRequest =>
+                    {
+                        return Ok(Err(ProcessSuccessorRefusal::Admission { cause }));
+                    }
+                    Err(error) => return Err(unavailable(error)),
+                };
+                for seed in &seeds {
+                    if let Some(debt) = seed.entry.requirements() {
+                        known.extend(debt);
+                    }
+                }
+                let mut supplied = known.clone();
+                supplied.extend(&carried.4);
+                if supplied != *carried.4 {
+                    return Ok(Err(ProcessSuccessorRefusal::Engine {
+                        refusal: serde_json::json!({"kind":"missing_successor_requirements"}),
+                        message: "carry omitted known successor claim debt".into(),
+                    }));
+                }
+                if carried
+                    .5
+                    .iter()
+                    .any(|artifact| !inspection.artifacts.contains(artifact))
+                {
+                    return Ok(Err(ProcessSuccessorRefusal::Engine {
+                        refusal: serde_json::json!({"kind":"unretained_successor_artifact"}),
+                        message: "carry added artifacts outside retained reach".into(),
+                    }));
+                }
+                Ok(Ok(carried))
+            })()?,
+        };
+        let (carried, own_formats, correspondence, resolutions, requirements, _artifacts) =
             match carried {
                 Ok(carried) => carried,
                 Err(refusal) => {
@@ -254,19 +311,6 @@ impl ProcessActivation {
                     return Ok(Succession::Ended(Pass::Again));
                 }
             };
-        validate_pins(&context, &inspection, &correspondence, &resolutions)
-            .map_err(|message| corrupt("successor resolution correspondence", message))?;
-        // Runtime start-artifact acquisition retains the full selected Link DAG;
-        // extra artifacts in a carry must already be retained by that root.
-        if artifacts
-            .iter()
-            .any(|artifact| !inspection.artifacts.contains(artifact))
-        {
-            return Err(corrupt(
-                "successor artifacts",
-                "carry added artifacts outside retained reach",
-            ));
-        }
         let mut registration = crate::runtime::actor::resolutions::registration(
             context.execution.clone(),
             &inspection,
@@ -385,7 +429,7 @@ impl ProcessActivation {
     }
 }
 
-fn validate_pins(
+pub(crate) fn validate_pins(
     context: &lash_execution_contracts::process::SuccessionContext,
     inspection: &lash_execution_contracts::process::linking::LinkInspection,
     correspondence: &lash_execution_contracts::process::UseCorrespondence,

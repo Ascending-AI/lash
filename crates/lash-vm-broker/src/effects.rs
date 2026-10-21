@@ -58,11 +58,11 @@ impl MemberDraft {
     pub fn new(
         admitted_at: lash_durable::DurableInstant,
         call: lash_protocol_types::ToolCallId,
-        tool: lash_protocol_types::ToolId,
+        tool: lash_vocabulary::tool_contract::ToolId,
         request: FrozenRequest,
         opener: &lash_core_store::effect_opener::EffectOpener,
         pin: (
-            lash_protocol_types::ExecutionPolicy,
+            lash_vocabulary::tool_contract::ExecutionPolicy,
             lash_protocol_types::ExecutionLimit,
         ),
         park: Option<lash_execution_contracts::waits::ParkDeadline>,

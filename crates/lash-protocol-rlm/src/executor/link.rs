@@ -97,7 +97,7 @@ pub(super) async fn link_cell(
             deferred: BTreeSet::new(),
         },
     };
-    state
+    let authored = state
         .relink(
             &documents,
             &boundary,
@@ -195,6 +195,7 @@ pub(super) async fn link_cell(
         },
     )
     .map_err(package_error)?;
+    environment.authored.extend(authored);
     environment.authored.insert(fulfilled.inspection.link);
     documents
         .hold(

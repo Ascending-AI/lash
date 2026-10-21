@@ -16,8 +16,8 @@ use std::sync::Arc;
 use lash_protocol_types::sync::MutexExt;
 
 use super::execution_context::RuntimeExecutionContext;
-use crate::ProcessId;
 use lash_core_store::runtime_error::RuntimeEffectControllerError;
+use lash_vocabulary::identity::ProcessId;
 
 pub use lash_core_store::effect_opener::{IncorporationLedger, SettlementSource};
 

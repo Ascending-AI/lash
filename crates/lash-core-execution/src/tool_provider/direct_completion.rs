@@ -3,7 +3,7 @@ use lash_execution_contracts::plugin_error::PluginError;
 
 #[derive(Clone)]
 pub struct ToolDirectCompletionClient<'run> {
-    pub(super) owner: crate::RuntimeOwner,
+    pub(super) owner: lash_vocabulary::identity::RuntimeOwner,
     pub(super) call_id: lash_protocol_types::ToolCallId,
     pub(super) direct_completions: crate::DirectCompletionClient<'run>,
     pub(super) parent_invocation: Option<crate::RuntimeInvocation>,
@@ -22,7 +22,7 @@ impl ToolDirectCompletionClient<'_> {
         usage_source: &str,
     ) -> Result<DirectCompletion, PluginError> {
         match &self.owner {
-            crate::RuntimeOwner::Session(session_id) => {
+            lash_vocabulary::identity::RuntimeOwner::Session(session_id) => {
                 if request.owner.is_none() {
                     request.owner = Some(crate::LlmRequestOwner::Session {
                         session_id: session_id.clone(),
@@ -35,7 +35,7 @@ impl ToolDirectCompletionClient<'_> {
                     });
                 }
             }
-            crate::RuntimeOwner::Process(process_id) => {
+            lash_vocabulary::identity::RuntimeOwner::Process(process_id) => {
                 if request.owner.is_none() {
                     request.owner = Some(crate::LlmRequestOwner::Process {
                         process_id: process_id.clone(),

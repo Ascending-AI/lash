@@ -88,7 +88,7 @@ pub async fn request_process_successor(
         .await?
         .into_identity()
         .definition_id;
-    let mut request = ProcessSuccessorRequest {
+    let request = ProcessSuccessorRequest {
         payload: successor.payload,
         env: successor.env,
         definition_id,
@@ -122,9 +122,6 @@ pub async fn request_process_successor(
         .inspect_link(kind, &start)
         .await
         .map_err(PluginError::from)?;
-    engines
-        .check_links(&std::sync::Arc::new(new_env.clone()), &inspection)
-        .map_err(PluginError::from)?;
     // The stored run carries onto the new payload, or the request is
     // refused now and the process goes on as written.
     let state = crate::runtime::actor::process::stored_engine_state(
@@ -144,8 +141,29 @@ pub async fn request_process_successor(
         &new_env,
     )
     .await?;
-    if let Err(error) = succession.carry(process, &context, state.as_ref()).await {
-        return Err(refused(carry_refusal(error)?));
+    match succession.carry(process, &context, state.as_ref()).await {
+        Err(error) => return Err(refused(carry_refusal(error)?)),
+        Ok(SuccessorCarry::Carried {
+            correspondence,
+            resolutions,
+            ..
+        }) => {
+            crate::runtime::actor::process::validate_successor_pins(&context, &inspection, &correspondence, &resolutions)
+                .map_err(|message| refused(ProcessSuccessorRefusal::Engine {
+                    refusal: serde_json::json!({"kind":"incompatible_succession", "message":message}), message,
+                }))?;
+            let seeds: Vec<_> = resolutions
+                .into_iter()
+                .map(|record| lash_core_store::resolutions::ResolutionSeed {
+                    use_: record.key.use_,
+                    entry: record.entry,
+                })
+                .collect();
+            engines
+                .check_links_with_seeds(&std::sync::Arc::new(new_env.clone()), &inspection, &seeds)
+                .map_err(PluginError::from)?;
+        }
+        Ok(SuccessorCarry::InFlight) => {}
     }
     hold(backend, engines, process, kind, &request).await?;
     let body = serde_json::to_string(&request)
@@ -244,13 +262,6 @@ pub async fn succession_context(
     to: &serde_json::Value,
     environment: &crate::ProcessEnv,
 ) -> Result<lash_execution_contracts::process::SuccessionContext, PluginError> {
-    let target = engines
-        .inspect_code(kind, to)
-        .await
-        .map_err(PluginError::from)?;
-    engines
-        .check_links(&std::sync::Arc::new(environment.clone()), &target)
-        .map_err(PluginError::from)?;
     let record = backend
         .process_registry()
         .get_process(process)

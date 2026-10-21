@@ -45,7 +45,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
 use lash_core::{ExecRequest, ExecResponse, RuntimeExecutionContext};
-use lash_kernel_doc::{Datum, IdentifiedDocument, Name};
+use lash_kernel_doc::{Datum, IdentifiedDocument};
 use lash_kernel_vm::{Bounds, End, Target};
 use lash_protocol_types::sync::MutexExt;
 use lash_vm_broker::kernel::run::PagePlan;
@@ -652,7 +652,12 @@ async fn run_linked_cell(
     let closure = prepared.loaded.closure;
     let program = match lash_kernel_vm::Program::prepare(
         start.link,
-        prepared.content.documents,
+        prepared
+            .content
+            .documents
+            .iter()
+            .map(|(id, document)| (*id, Arc::new(document.clone())))
+            .collect(),
         &prepared.content.links,
         lash_kernel_doc::heap::PageId(closure.reference().0),
         lash_kernel_vm::PreparedLibrary::with_charge(prepared.loaded.registry, bounds.charge),
@@ -671,8 +676,8 @@ async fn run_linked_cell(
     let machines = match lash_vm_client::RemoteMachines::new(
         services.workers.clone(),
         owner,
-        lash_vm_protocol::OwnerEpoch(0),
-        lash_vm_protocol::FrameEpoch(0),
+        lash_protocol_types::engine_fault::OwnerEpoch(0),
+        lash_protocol_types::engine_fault::FrameEpoch(0),
         run_host,
         &document,
         &dialect,
@@ -891,8 +896,7 @@ async fn run_linked_cell(
                 ),
             ),
             End::Error(error) => {
-                let observation =
-                    CellObservation::of_run_error(error, &state.not_carried(), None, &[]);
+                let observation = CellObservation::of_run_error(error, &state.not_carried());
                 respond(lash_core::CellOutcome::Failed(observation.failure(
                     code,
                     source_map.as_ref().filter(|map| {
@@ -1103,7 +1107,10 @@ fn broker_failure(
             // cell's checkpoint.
             if runs_on
                 && let lash_vm_protocol::InfrastructureOutcome::RunRefused { refusal } = &outcome
-                && matches!(refusal, lash_vm_protocol::RunRefusal::Restore { .. })
+                && matches!(
+                    refusal,
+                    lash_protocol_types::engine_fault::RunRefusal::Restore { .. }
+                )
             {
                 let mut refused = lash_core::RuntimeError::new(
                     lash_core::RuntimeErrorCode::VmWorkerFailed,

@@ -387,7 +387,7 @@ fn run_settled(
             }
             // The run consumed every outcome it was handed: a wait the
             // parked run still holds is open, or settled since.
-            let held: std::collections::BTreeSet<lash_protocol_types::WaitId> = state
+            let held: std::collections::BTreeSet<lash_vocabulary::sites::WaitId> = state
                 .waits
                 .keys()
                 .copied()

@@ -30,7 +30,7 @@ use lash_core::tool_dispatch::{CellCall, CellMember, CellMembers};
 use lash_core::{RuntimeExecutionContext, ToolExecutionGrant};
 use lash_core_store::checkpoint_graph::{GraphStaging, NodeId};
 use lash_core_store::tool_surface::{ExecutionEnvironment, UseBinding};
-use lash_kernel_doc::{Datum, EffectId, ErrorDatum};
+use lash_kernel_doc::{Datum, ErrorDatum};
 use lash_kernel_vm::{EffectRequest, Outcome};
 use lash_protocol_types::sync::MutexExt;
 use lash_vm_broker::kernel::graph::{FrozenRequest, Projections};
@@ -40,6 +40,7 @@ use lash_vm_broker::kernel::{
 };
 use lash_vm_broker::{MemberDraft, ParentFault};
 use lash_vocabulary::names::OperationUse;
+use lash_vocabulary::sites::EffectId;
 
 use super::envelope::CellEnvelope;
 use super::host_graph::{HostState, PrintEvent, ProcessEvent};
@@ -201,7 +202,7 @@ pub(super) struct CellHost<'run> {
     pub trace: Option<super::trace::CellTrace>,
     /// The effect identity each open call was performed at: where its
     /// terminal fact is published.
-    pub sites: Mutex<BTreeMap<lash_core::ToolCallId, lash_kernel_doc::EffectId>>,
+    pub sites: Mutex<BTreeMap<lash_core::ToolCallId, lash_vocabulary::sites::EffectId>>,
     /// What every park commits of the cell beside the ledgers and prints.
     pub envelope: CellEnvelope,
     /// The cell's host state as graph nodes, as its last park left it.

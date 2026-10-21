@@ -6,9 +6,9 @@ use lash_durable::domain::ProcessWrite;
 use lash_durable::{ActorTx, DomainWrite};
 
 use super::driver::{Driver, InFlight};
-use crate::ProcessId;
 use lash_core_store::tool_run::SettledOutput;
 use lash_execution_contracts::process::StepRequest;
+use lash_vocabulary::identity::ProcessId;
 
 /// Record `step`'s settled `outcome` on `tx` as an occurrence of the effect
 /// node it runs for, in the transaction that hands it to the engine: once,

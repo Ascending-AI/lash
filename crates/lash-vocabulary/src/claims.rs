@@ -190,21 +190,23 @@ impl PartialEq<ObligationToken> for String {
 use crate::{FunctionId, package::ProviderName};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// Only pure natives and kernel versions required by selected executable reach.
 pub struct NodeRequirements {
     pub natives: BTreeSet<FunctionId>,
     pub kernels: BTreeSet<u32>,
 }
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 /// Exact callback identity qualified by the registry that hosts it.
 pub struct CallbackRequirement {
     pub registry: RegistryKind,
     pub callback: PluginCallbackIdentity,
 }
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// Known machine/provider/codec/callback/component debt. Resolution adds target debt atomically before admission.
 pub struct ClaimRequirements {
@@ -214,7 +216,7 @@ pub struct ClaimRequirements {
     pub callbacks: BTreeSet<CallbackRequirement>,
     pub components: BTreeSet<(ProcessComponentId, FormatVersion)>,
 }
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// Neutral machine and registered execution capabilities offered by one worker.
 pub struct NodeCapabilities {
@@ -354,6 +356,48 @@ impl ClaimRequirements {
     }
 }
 
+impl crate::tokens::TokenCodec for NodeRequirements {
+    fn encode(&self, out: &mut crate::tokens::TokenWriter) {
+        out.seq(2);
+        self.natives.iter().copied().collect::<Vec<_>>().encode(out);
+        self.kernels.iter().copied().collect::<Vec<_>>().encode(out);
+    }
+
+    fn decode(
+        input: &mut crate::tokens::TokenReader<'_>,
+    ) -> Result<Self, crate::tokens::TokenError> {
+        input.expect_struct(2)?;
+        let natives = Vec::<FunctionId>::decode(input)?;
+        crate::tokens::check_ascending(&natives)?;
+        let kernels = Vec::<u32>::decode(input)?;
+        crate::tokens::check_ascending(&kernels)?;
+        Ok(Self {
+            natives: natives.into_iter().collect(),
+            kernels: kernels.into_iter().collect(),
+        })
+    }
+}
+
+impl crate::tokens::TokenCodec for ClaimRequirements {
+    fn encode(&self, out: &mut crate::tokens::TokenWriter) {
+        self.tokens().collect::<Vec<_>>().encode(out);
+    }
+
+    fn decode(
+        input: &mut crate::tokens::TokenReader<'_>,
+    ) -> Result<Self, crate::tokens::TokenError> {
+        let tokens = Vec::<String>::decode(input)?;
+        crate::tokens::check_ascending(&tokens)?;
+        let requirements = ObligationToken::requirements_of(tokens.iter().map(String::as_str));
+        if requirements.tokens().collect::<Vec<_>>() != tokens {
+            return Err(crate::tokens::TokenError::Invalid(
+                "unrecognized or noncanonical claim requirement".into(),
+            ));
+        }
+        Ok(requirements)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -418,47 +462,5 @@ mod tests {
             "callback:process:owner/resolver:lookup",
             &["callback:session:owner/".into()]
         ));
-    }
-}
-
-impl crate::tokens::TokenCodec for NodeRequirements {
-    fn encode(&self, out: &mut crate::tokens::TokenWriter) {
-        out.seq(2);
-        self.natives.iter().copied().collect::<Vec<_>>().encode(out);
-        self.kernels.iter().copied().collect::<Vec<_>>().encode(out);
-    }
-
-    fn decode(
-        input: &mut crate::tokens::TokenReader<'_>,
-    ) -> Result<Self, crate::tokens::TokenError> {
-        input.expect_struct(2)?;
-        let natives = Vec::<FunctionId>::decode(input)?;
-        crate::tokens::check_ascending(&natives)?;
-        let kernels = Vec::<u32>::decode(input)?;
-        crate::tokens::check_ascending(&kernels)?;
-        Ok(Self {
-            natives: natives.into_iter().collect(),
-            kernels: kernels.into_iter().collect(),
-        })
-    }
-}
-
-impl crate::tokens::TokenCodec for ClaimRequirements {
-    fn encode(&self, out: &mut crate::tokens::TokenWriter) {
-        self.tokens().collect::<Vec<_>>().encode(out);
-    }
-
-    fn decode(
-        input: &mut crate::tokens::TokenReader<'_>,
-    ) -> Result<Self, crate::tokens::TokenError> {
-        let tokens = Vec::<String>::decode(input)?;
-        crate::tokens::check_ascending(&tokens)?;
-        let requirements = ObligationToken::requirements_of(tokens.iter().map(String::as_str));
-        if requirements.tokens().collect::<Vec<_>>() != tokens {
-            return Err(crate::tokens::TokenError::Invalid(
-                "unrecognized or noncanonical claim requirement".into(),
-            ));
-        }
-        Ok(requirements)
     }
 }

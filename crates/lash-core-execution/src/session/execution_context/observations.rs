@@ -139,7 +139,7 @@ impl RuntimeExecutionContext<'_> {
         language: impl Into<String>,
         identity: lash_trace::TraceLanguageExecutionIdentity,
         subject: lash_trace::TraceRuntimeSubject,
-        at: lash_protocol_types::EffectId,
+        at: lash_vocabulary::sites::EffectId,
     ) {
         self.language_calls.lock_recover().insert(
             call_id,

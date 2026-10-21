@@ -558,7 +558,7 @@ async fn stage<'a>(
     observers: &[SessionId],
 ) -> Result<PreparedProcessStart<'a>, RuntimeEffectControllerError> {
     let mut submitted_env_ref = registration.input.launch().map(|launch| launch.env.clone());
-    let mut env = stage_env(stores, &claim, submitted_env_ref.clone()).await?;
+    let env = stage_env(stores, &claim, submitted_env_ref.clone()).await?;
     mark(stores.phases, Phase::Environment);
     let (definition, mut registration) = resolve_start_target(
         stores,
@@ -620,31 +620,6 @@ async fn stage<'a>(
                 )
                 .map_err(package_start_error)?,
         );
-        if let Some(launch) = registration.input.launch() {
-            execution_requirements.extend(
-                &crate::runtime::actor::resolutions::validate_seeds(
-                    inspection,
-                    env.execution(),
-                    &launch.initial_resolutions,
-                    |grant, name, definition, route, registry| {
-                        stores.engines.components().validate_seed_route(
-                            &Arc::new(env.clone()),
-                            grant,
-                            name,
-                            definition,
-                            route,
-                            registry,
-                        )
-                    },
-                )
-                .map_err(package_start_error)?,
-            );
-        }
-        registration
-            .requires
-            .extend(execution_requirements.tokens());
-        registration.requires.sort();
-        registration.requires.dedup();
     }
     let engine = stage_engine(
         stores,

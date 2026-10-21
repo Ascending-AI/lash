@@ -23,9 +23,12 @@
 use std::collections::BTreeMap;
 
 use lash_core::{CellDefect, CellFailure, CellFailureKind};
-use lash_kernel_doc::{Datum, Name, SourceMap, TaskLabel};
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::SourceMap;
 use lash_kernel_vm::{Bound, BoundExceeded, RunError};
 use lash_vm_client::service::DialectRefusal;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::TaskLabel;
 
 use crate::dialect::DialectPrompts;
 
@@ -252,16 +255,12 @@ pub(crate) enum CellObservation {
     },
     /// A value no `catch` took ended the cell.
     Uncaught(Datum),
-    /// A package value another release of its package built ended the
-    /// cell at its first member call: the message names both releases by
-    /// their labels (§2.4, C3).
-    StaleValue { message: String },
     /// The cell ended with tasks unfinished, or failed unobserved
     /// (`K-TASK-018`).
     TasksOutstanding {
         unfinished: Vec<TaskLabel>,
         unobserved: Vec<TaskLabel>,
-        sources: Vec<(TaskLabel, lash_kernel_doc::PositionLabel)>,
+        sources: Vec<(TaskLabel, lash_vocabulary::sites::PositionLabel)>,
     },
     /// No task is ready and none waits on anything the host can answer.
     Deadlock { waiting: Vec<TaskLabel> },
@@ -279,25 +278,7 @@ impl CellObservation {
     /// How a run's error ended the cell. An uncaught unbound-variable error
     /// that names a binding the session lost to `K-SES-003` is that rule's
     /// refusal.
-    /// A `package.stale_value` names the two artifacts it compares by the
-    /// release labels `held` holds for them, or one of `surfaces` does.
-    pub(crate) fn of_run_error(
-        error: RunError,
-        not_carried: &BTreeMap<Name, String>,
-        held: Option<&lash_kernel_package::HeldPackages>,
-        surfaces: &[&lash_kernel_package::SurfaceSnapshot],
-    ) -> Self {
-        if let RunError::Uncaught {
-            error: Datum::Error(error),
-            ..
-        } = &error
-            && let Some(held) = held
-            && let Some(stale) = lash_kernel_package::StaleValue::of(error)
-        {
-            return Self::StaleValue {
-                message: stale.message_with(held, surfaces),
-            };
-        }
+    pub(crate) fn of_run_error(error: RunError, not_carried: &BTreeMap<Name, String>) -> Self {
         match error {
             RunError::Uncaught { error: value, .. } => {
                 if let Datum::Error(error) = &value
@@ -334,7 +315,6 @@ impl CellObservation {
             Self::BindingNotCarried { .. } => SESSION_BINDING_NOT_CARRIED.to_owned(),
             Self::Uncaught(Datum::Error(error)) => error.kind.clone(),
             Self::Uncaught(_) => "uncaught".to_owned(),
-            Self::StaleValue { .. } => lash_kernel_package::STALE_VALUE.to_owned(),
             Self::TasksOutstanding { .. } => CELL_TASKS_OUTSTANDING.to_owned(),
             Self::Deadlock { .. } => CELL_DEADLOCK.to_owned(),
             Self::Bound(_) => CELL_BOUND_EXCEEDED.to_owned(),
@@ -354,7 +334,7 @@ impl CellObservation {
     ) -> CellFailure {
         let vocabulary = prompts.prompt_vocabulary();
         let place = |tasks: &[TaskLabel],
-                     sources: &[(TaskLabel, lash_kernel_doc::PositionLabel)]|
+                     sources: &[(TaskLabel, lash_vocabulary::sites::PositionLabel)]|
          -> String {
             tasks
                 .iter()
@@ -411,10 +391,6 @@ impl CellObservation {
             Self::Uncaught(value) => CellFailure::new(
                 CellFailureKind::Program,
                 format!("uncaught {}", datum_text(value)),
-            ),
-            Self::StaleValue { message } => CellFailure::new(
-                CellFailureKind::Program,
-                format!("uncaught {}: {message}", lash_kernel_package::STALE_VALUE),
             ),
             Self::TasksOutstanding {
                 unfinished,
@@ -528,7 +504,7 @@ fn line_column(source: &str, offset: usize) -> (usize, usize) {
 /// A task as a typed label: the site that spawned it and which run of
 /// that site it is.
 pub(crate) fn task_label(task: &TaskLabel) -> String {
-    lash_kernel_doc::ObservationReader::task_label(task)
+    lash_vocabulary::sites::ObservationReader::task_label(task)
 }
 
 /// Which task, for the model: the source line of the async code it runs
@@ -538,12 +514,14 @@ fn task_place(
     task: &TaskLabel,
     source: &str,
     map: Option<&SourceMap>,
-    body: Option<&lash_kernel_doc::PositionLabel>,
+    body: Option<&lash_vocabulary::sites::PositionLabel>,
 ) -> String {
-    if lash_kernel_doc::ObservationReader::task_is_root(task) {
+    if lash_vocabulary::sites::ObservationReader::task_is_root(task) {
         return "the program itself".to_owned();
     }
-    match map.and_then(|map| lash_kernel_doc::ObservationReader::task_source(task, map, body)) {
+    match map
+        .and_then(|map| lash_vocabulary::sites::ObservationReader::task_source(task, map, body))
+    {
         Some(start) => {
             let (line, _) = line_column(source, start);
             let text = source.lines().nth(line - 1).unwrap_or_default().trim();
@@ -624,8 +602,9 @@ mod tests {
             let observation = CellObservation::Bound(BoundExceeded {
                 bound: Bound::Memory,
                 limit: 67_108_864,
-                function: function
-                    .map(|name| lash_kernel_doc::FunctionName::new(name).expect("function name")),
+                function: function.map(|name| {
+                    lash_vocabulary::legacy_names::FunctionName::new(name).expect("function name")
+                }),
             });
             let failure =
                 observation.failure("", None, crate::plugin::RlmChannel::Cell, prompts.as_ref());
@@ -794,7 +773,7 @@ mod tests {
             let End::Error(error) = end else {
                 panic!("bound error");
             };
-            let observation = CellObservation::of_run_error(error, &BTreeMap::new(), None, &[]);
+            let observation = CellObservation::of_run_error(error, &BTreeMap::new());
             let prompts = crate::CellDialect::typescript().prompts();
             let failure =
                 observation.failure("", None, crate::plugin::RlmChannel::Cell, prompts.as_ref());

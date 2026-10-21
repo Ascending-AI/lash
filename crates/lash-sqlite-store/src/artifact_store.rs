@@ -766,6 +766,11 @@ impl lash_execution_contracts::module_artifacts::ModuleArtifactStore for SqliteS
         claim: &ReferrerClaim,
         module_ref: &str,
     ) -> Result<(), ArtifactStoreError> {
+        if lash_durable::packages::is_package_reference(module_ref) {
+            return lash_durable::packages::acquire_content(self, claim, module_ref)
+                .await
+                .map_err(Into::into);
+        }
         if !crate::namespace::is_valid_opaque_key(module_ref) {
             return Err(ArtifactStoreError::Encode(
                 "invalid module reference".into(),

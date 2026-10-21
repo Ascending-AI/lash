@@ -307,10 +307,6 @@ const LAW_FLAKY: &str = "law_flaky";
 const LAW_PARK: &str = "law_park";
 
 /// A law tool's effect name.
-#[expect(
-    clippy::expect_used,
-    reason = "every law tool name is a fixed valid effect name"
-)]
 fn law_use(tool: &str) -> lash_vocabulary::OperationUse {
     lash_vocabulary::OperationUse {
         link: lash_vocabulary::LinkId::from_bytes({
@@ -733,6 +729,14 @@ fn step_output(process: &ProcessId, text: &str) -> Material {
         MaterialRole::AttemptOutput,
         text.to_owned(),
     )
+}
+
+// --- the rig ----------------------------------------------------------------
+
+/// A runner serving `backend`'s process actors until stopped.
+struct Serving {
+    stop: CancellationToken,
+    task: tokio::task::JoinHandle<Result<Stopped, DurableError>>,
 }
 
 fn serve(backend: &Backend) -> Serving {

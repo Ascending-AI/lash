@@ -17,7 +17,8 @@
 //!
 //! [`Float::json_number`]: lash_kernel_doc::Float::json_number
 
-use lash_kernel_doc::{Datum, KernelDataLimits, NumberToken};
+use lash_kernel_doc::{Datum, NumberToken};
+use lash_vocabulary::data_limits::KernelDataLimits;
 
 /// The field a package value holds its brand in
 /// (`lash_kernel_dialect::BRAND_FIELD`).
@@ -412,12 +413,132 @@ impl Reader<'_> {
     }
 }
 
+/// Decode an operation's JSON transport using its declared consumer type.
+/// Timestamp strings carry nanoseconds; byte strings carry lowercase hex.
+/// These are ordinary type encodings, independent of operation names.
+pub fn datum_from_tool_json(
+    value: &serde_json::Value,
+    expected: &lash_vocabulary::types::Type,
+) -> Result<Datum, String> {
+    fn decode(
+        value: &serde_json::Value,
+        expected: &lash_vocabulary::types::Type,
+        depth: usize,
+    ) -> Result<Datum, String> {
+        use lash_kernel_doc::{Bytes, Integer, Timestamp};
+        use lash_vocabulary::types::Type;
+        if depth > KernelDataLimits::standard().document_depth() {
+            return Err("operation result exceeds data depth".into());
+        }
+        let array = || {
+            value
+                .as_array()
+                .ok_or_else(|| "operation result must be an array".to_owned())
+        };
+        match expected {
+            Type::Timestamp => {
+                let text = value.as_str().ok_or_else(|| {
+                    "timestamp transport must be decimal nanoseconds text".to_owned()
+                })?;
+                let nanoseconds = Integer::parse(text).map_err(|error| error.to_string())?;
+                if nanoseconds.to_string() != text {
+                    return Err("timestamp transport is not canonical decimal text".into());
+                }
+                Ok(Datum::Timestamp(Timestamp { nanoseconds }))
+            }
+            Type::Bytes => Ok(Datum::Bytes(
+                Bytes::parse_hex(
+                    value
+                        .as_str()
+                        .ok_or_else(|| "bytes transport must be hexadecimal text".to_owned())?,
+                )
+                .map_err(|error| error.to_string())?,
+            )),
+            Type::List(item) | Type::Set(item) => {
+                let values = array()?
+                    .iter()
+                    .map(|value| decode(value, item, depth + 1))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(if matches!(expected, Type::Set(_)) {
+                    Datum::Set(values)
+                } else {
+                    Datum::List(values)
+                })
+            }
+            Type::Tuple(items) => {
+                let values = array()?;
+                if items.len() != values.len() {
+                    return Err("operation result has the wrong tuple length".into());
+                }
+                Ok(Datum::Tuple(
+                    values
+                        .iter()
+                        .zip(items)
+                        .map(|(value, item)| decode(value, item, depth + 1))
+                        .collect::<Result<_, _>>()?,
+                ))
+            }
+            Type::Record(record) => {
+                let object = value
+                    .as_object()
+                    .ok_or_else(|| "operation result must be an object".to_owned())?;
+                let mut fields = Vec::with_capacity(object.len());
+                for (name, value) in object {
+                    let ty = record
+                        .fields
+                        .iter()
+                        .find(|field| field.name == *name)
+                        .map(|field| &field.ty)
+                        .or(record.rest.as_deref())
+                        .ok_or_else(|| format!("unexpected operation result field `{name}`"))?;
+                    fields.push((name.clone(), decode(value, ty, depth + 1)?));
+                }
+                Ok(Datum::Record(fields))
+            }
+            Type::Map(map) if map.key == Type::Text => {
+                let object = value
+                    .as_object()
+                    .ok_or_else(|| "operation map result must be an object".to_owned())?;
+                Ok(Datum::Map(
+                    object
+                        .iter()
+                        .map(|(key, value)| {
+                            Ok((
+                                Datum::Text(key.clone()),
+                                decode(value, &map.value, depth + 1)?,
+                            ))
+                        })
+                        .collect::<Result<_, String>>()?,
+                ))
+            }
+            Type::Union(variants) => {
+                for variant in variants {
+                    if let Ok(datum) = decode(value, variant, depth + 1) {
+                        let decoder = lash_kernel_doc::Decoder {
+                            max_depth: KernelDataLimits::standard().document_depth(),
+                            policy: lash_kernel_doc::NumberPolicy::BySpelling,
+                            declared: &|_| false,
+                        };
+                        if decoder.decode(&datum, variant).is_ok() {
+                            return Ok(datum);
+                        }
+                    }
+                }
+                Err("operation result fits no declared union variant".into())
+            }
+            _ => datum_from_json(&value.to_string()).map_err(|error| error.to_string()),
+        }
+    }
+    decode(value, expected, 0)
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used)]
     #[test]
     fn typed_tool_scalars_do_not_reinterpret_plain_json_text() {
-        use lash_kernel_doc::{Datum, Type};
+        use lash_kernel_doc::Datum;
+        use lash_vocabulary::types::Type;
         let timestamp = serde_json::json!("1700000000123456789");
         let bytes = serde_json::json!("0000000000000001");
         let Datum::Timestamp(actual) =
@@ -602,122 +723,4 @@ mod tests {
             assert!(datum_from_json(text).is_err(), "`{text}` is refused");
         }
     }
-}
-
-/// Decode an operation's JSON transport using its declared consumer type.
-/// Timestamp strings carry nanoseconds; byte strings carry lowercase hex.
-/// These are ordinary type encodings, independent of operation names.
-pub fn datum_from_tool_json(
-    value: &serde_json::Value,
-    expected: &lash_kernel_doc::Type,
-) -> Result<Datum, String> {
-    fn decode(
-        value: &serde_json::Value,
-        expected: &lash_kernel_doc::Type,
-        depth: usize,
-    ) -> Result<Datum, String> {
-        use lash_kernel_doc::{Bytes, Integer, Timestamp, Type};
-        if depth > KernelDataLimits::standard().document_depth() {
-            return Err("operation result exceeds data depth".into());
-        }
-        let array = || {
-            value
-                .as_array()
-                .ok_or_else(|| "operation result must be an array".to_owned())
-        };
-        match expected {
-            Type::Timestamp => {
-                let text = value.as_str().ok_or_else(|| {
-                    "timestamp transport must be decimal nanoseconds text".to_owned()
-                })?;
-                let nanoseconds = text.parse::<Integer>().map_err(|error| error.to_string())?;
-                if nanoseconds.to_string() != text {
-                    return Err("timestamp transport is not canonical decimal text".into());
-                }
-                Ok(Datum::Timestamp(Timestamp { nanoseconds }))
-            }
-            Type::Bytes => Ok(Datum::Bytes(
-                Bytes::parse_hex(
-                    value
-                        .as_str()
-                        .ok_or_else(|| "bytes transport must be hexadecimal text".to_owned())?,
-                )
-                .map_err(|error| error.to_string())?,
-            )),
-            Type::List(item) | Type::Set(item) => {
-                let values = array()?
-                    .iter()
-                    .map(|value| decode(value, item, depth + 1))
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(if matches!(expected, Type::Set(_)) {
-                    Datum::Set(values)
-                } else {
-                    Datum::List(values)
-                })
-            }
-            Type::Tuple(items) => {
-                let values = array()?;
-                if items.len() != values.len() {
-                    return Err("operation result has the wrong tuple length".into());
-                }
-                Ok(Datum::Tuple(
-                    values
-                        .iter()
-                        .zip(items)
-                        .map(|(value, item)| decode(value, item, depth + 1))
-                        .collect::<Result<_, _>>()?,
-                ))
-            }
-            Type::Record(record) => {
-                let object = value
-                    .as_object()
-                    .ok_or_else(|| "operation result must be an object".to_owned())?;
-                let mut fields = Vec::with_capacity(object.len());
-                for (name, value) in object {
-                    let ty = record
-                        .fields
-                        .iter()
-                        .find(|field| field.name == *name)
-                        .map(|field| &field.ty)
-                        .or(record.rest.as_deref())
-                        .ok_or_else(|| format!("unexpected operation result field `{name}`"))?;
-                    fields.push((name.clone(), decode(value, ty, depth + 1)?));
-                }
-                Ok(Datum::Record(fields))
-            }
-            Type::Map(map) if map.key == Type::Text => {
-                let object = value
-                    .as_object()
-                    .ok_or_else(|| "operation map result must be an object".to_owned())?;
-                Ok(Datum::Map(
-                    object
-                        .iter()
-                        .map(|(key, value)| {
-                            Ok((
-                                Datum::Text(key.clone()),
-                                decode(value, &map.value, depth + 1)?,
-                            ))
-                        })
-                        .collect::<Result<_, String>>()?,
-                ))
-            }
-            Type::Union(variants) => {
-                for variant in variants {
-                    if let Ok(datum) = decode(value, variant, depth + 1) {
-                        let decoder = lash_kernel_doc::Decoder {
-                            max_depth: KernelDataLimits::standard().document_depth(),
-                            policy: lash_kernel_doc::NumberPolicy::BySpelling,
-                            declared: &|_| false,
-                        };
-                        if decoder.decode(&datum, variant).is_ok() {
-                            return Ok(datum);
-                        }
-                    }
-                }
-                Err("operation result fits no declared union variant".into())
-            }
-            _ => datum_from_json(&value.to_string()).map_err(|error| error.to_string()),
-        }
-    }
-    decode(value, expected, 0)
 }

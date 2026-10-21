@@ -818,7 +818,7 @@ pub(super) fn entry_args(
             .find(|param| param.name.as_str() == name)
             .ok_or_else(|| format!("unknown argument {name}"))?;
         let value = lash_vm_broker::kernel::value::datum_from_tool_json(value, &param.ty)?;
-        supplied.insert(lash_kernel_doc::Name::new(name), value);
+        supplied.insert(lash_vocabulary::names::Name::new(name), value);
     }
     if let super::InlineRequest::Linked { start } = &input.code {
         lash_kernel_check::validate_start_input(document, &start.selector, &supplied)

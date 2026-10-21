@@ -1,13 +1,18 @@
 //! Small session descriptors. Bindings, functions, notes and heap are
 //! page roots: the descriptor a session publishes never grows with what
 //! the session holds (FIG-6418).
-use lash_kernel_doc::graph_tokens::{TokenCodec, TokenReader, TokenWriter, encode_body};
 use lash_kernel_doc::heap::{HeapFault, PageRef};
+use lash_vocabulary::tokens::TokenCodec;
+use lash_vocabulary::tokens::TokenReader;
+use lash_vocabulary::tokens::TokenWriter;
+use lash_vocabulary::tokens::encode_body;
 use std::collections::BTreeSet;
 
-use lash_kernel_doc::{FunctionId, NumberPolicy};
+use lash_kernel_doc::NumberPolicy;
 use lash_kernel_state::paged::session::SessionNotes;
 use lash_kernel_state::paged::{PageBody, PageKind, PageSource, SessionRoot};
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::names::FunctionId;
 
 pub(super) struct SessionDescriptor {
     pub dialect: String,

@@ -1,4 +1,4 @@
-use crate::ProcessId;
+use lash_vocabulary::identity::ProcessId;
 use std::sync::Arc;
 use std::time::Duration;
 

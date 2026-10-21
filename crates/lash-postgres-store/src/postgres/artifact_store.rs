@@ -185,12 +185,11 @@ pub(crate) async fn lock_referrer_tx(
     .map(|_| ())
 }
 
-/// Retain exact provenance under the environment's claim and transaction.
-async fn retain_process_env_tx(
+/// Read immutable environment provenance before acquiring its sorted module locks.
+async fn process_env_dependencies_tx(
     tx: &mut sqlx::PgConnection,
     env_ref: &str,
-    referrer: &ArtifactReferrer,
-) -> Result<(), ArtifactStoreError> {
+) -> Result<BTreeSet<String>, ArtifactStoreError> {
     async fn read(
         tx: &mut sqlx::PgConnection,
         namespace: &str,
@@ -225,9 +224,16 @@ async fn retain_process_env_tx(
             &reference, &bytes,
         )?);
     }
+    Ok(found)
+}
+
+async fn lock_env_dependencies_tx(
+    tx: &mut sqlx::PgConnection,
+    found: &BTreeSet<String>,
+) -> Result<(), ArtifactStoreError> {
     // Package writers lock sorted artifact keys. Follow the same order and
     // recheck pointers after locking, since cleanup may have won during reads.
-    for reference in &found {
+    for reference in found {
         lock_artifact_tx(tx, MODULE_ARTIFACT_NAMESPACE, reference).await?;
         let exists: bool =
             crate::observed_sql::query_scalar(artifact_sql().lash_vm_artifacts.exists.sql())
@@ -242,6 +248,17 @@ async fn retain_process_env_tx(
             });
         }
     }
+    Ok(())
+}
+
+/// Retain exact provenance under the environment's claim and transaction.
+async fn retain_process_env_tx(
+    tx: &mut sqlx::PgConnection,
+    env_ref: &str,
+    referrer: &ArtifactReferrer,
+) -> Result<(), ArtifactStoreError> {
+    let found = process_env_dependencies_tx(tx, env_ref).await?;
+    lock_env_dependencies_tx(tx, &found).await?;
     for reference in found {
         crate::observed_sql::query(artifact_sql().edges.insert_edge.sql())
             .bind(MODULE_ARTIFACT_NAMESPACE)
@@ -850,6 +867,19 @@ impl PostgresLashVmArtifactStore {
             .execute(crate::observed_sql::executor(&mut *tx))
             .await
             .map_err(backend)?;
+        if namespace == PROCESS_ENV_NAMESPACE {
+            // Lock the union once: per-environment sorted sets can interleave
+            // in opposite order when two cleanups carry several environments.
+            let mut dependencies = BTreeSet::new();
+            for carry in &cleanup.carries {
+                if !is_fenced_tx(tx, &carry.to).await? {
+                    dependencies.extend(
+                        process_env_dependencies_tx(tx, &carry.artifact.artifact_ref).await?,
+                    );
+                }
+            }
+            lock_env_dependencies_tx(tx, &dependencies).await?;
+        }
         for carry in &cleanup.carries {
             if is_fenced_tx(tx, &carry.to).await? {
                 continue;
@@ -1085,6 +1115,11 @@ impl lash_execution_contracts::module_artifacts::ModuleArtifactStore
         claim: &ReferrerClaim,
         module_ref: &str,
     ) -> Result<(), ArtifactStoreError> {
+        if lash_durable::packages::is_package_reference(module_ref) {
+            return lash_durable::packages::acquire_content(self, claim, module_ref)
+                .await
+                .map_err(Into::into);
+        }
         if !crate::namespace::is_valid_opaque_key(module_ref) {
             return Err(ArtifactStoreError::Encode(
                 "invalid module reference".into(),

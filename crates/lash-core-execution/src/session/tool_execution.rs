@@ -12,7 +12,7 @@ pub struct ToolInvocation {
     /// The call's lash-minted identity: its idempotency key and the root of
     /// every key its attempts, awaits and presentation journal under.
     pub id: crate::ToolCallId,
-    pub tool_id: crate::ToolId,
+    pub tool_id: lash_vocabulary::tool_contract::ToolId,
     pub args: serde_json::Value,
     /// Original native request correlation and replay data, when supplied.
     pub pending: Option<Box<crate::sansio::PendingToolCall>>,
@@ -20,13 +20,17 @@ pub struct ToolInvocation {
     /// The contract the performing code requires of the call's operation;
     /// none for a model round's call, which is pinned to its recorded
     /// definition.
-    pub contract: Option<lash_kernel_doc::ContractId>,
+    pub contract: Option<lash_vocabulary::operations::ContractId>,
     pub child_execution_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
     pub issuing_language_node_id: Option<String>,
 }
 
 impl ToolInvocation {
-    pub fn new(id: crate::ToolCallId, tool_id: crate::ToolId, args: serde_json::Value) -> Self {
+    pub fn new(
+        id: crate::ToolCallId,
+        tool_id: lash_vocabulary::tool_contract::ToolId,
+        args: serde_json::Value,
+    ) -> Self {
         Self {
             id,
             tool_id,
@@ -39,7 +43,10 @@ impl ToolInvocation {
         }
     }
 
-    pub fn from_pending(pending: crate::sansio::PendingToolCall, tool_id: crate::ToolId) -> Self {
+    pub fn from_pending(
+        pending: crate::sansio::PendingToolCall,
+        tool_id: lash_vocabulary::tool_contract::ToolId,
+    ) -> Self {
         let mut invocation = Self::new(pending.call_id.clone(), tool_id, pending.args.clone());
         invocation.pending = Some(Box::new(pending));
         invocation
@@ -163,8 +170,8 @@ impl RuntimeExecutionContext<'_> {
     /// this node; `None` when this node registers no provider under it.
     pub fn binding_formats(
         &self,
-        codec: &crate::plugin::ToolProviderHandle,
-    ) -> Option<&'static [crate::FormatVersion]> {
+        codec: &lash_vocabulary::providers::ToolProviderHandle,
+    ) -> Option<&'static [lash_vocabulary::providers::FormatVersion]> {
         self.dispatch
             .routes
             .registry()
@@ -174,10 +181,10 @@ impl RuntimeExecutionContext<'_> {
 
     pub fn tool_provider(
         &self,
-        tool: &crate::ToolId,
-        granted: Option<&crate::plugin::ToolProviderHandle>,
+        tool: &lash_vocabulary::tool_contract::ToolId,
+        granted: Option<&lash_vocabulary::providers::ToolProviderHandle>,
     ) -> Result<
-        crate::plugin::ToolProviderHandle,
+        lash_vocabulary::providers::ToolProviderHandle,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         self.dispatch
@@ -251,7 +258,7 @@ impl RuntimeExecutionContext<'_> {
     /// one the journal recorded and the live tool is not consulted.
     pub async fn prepare_recorded_tool_call(
         &self,
-        binding: &crate::ToolDefinition,
+        binding: &lash_vocabulary::tool_contract::ToolDefinition,
         pending: crate::sansio::PendingToolCall,
         call_key: &str,
     ) -> ToolPreparationOutcome {
@@ -273,7 +280,10 @@ impl RuntimeExecutionContext<'_> {
     }
 
     /// The catalog entry a model-issued call names, if the catalog holds it.
-    pub fn callable_tool_id_by_name(&self, tool_name: &str) -> Option<crate::ToolId> {
+    pub fn callable_tool_id_by_name(
+        &self,
+        tool_name: &str,
+    ) -> Option<lash_vocabulary::tool_contract::ToolId> {
         self.dispatch
             .tool_catalog
             .entries()
@@ -296,7 +306,7 @@ impl RuntimeExecutionContext<'_> {
     pub async fn complete_tool_call(
         &self,
         ids: ToolCallIds,
-        tool_id: crate::ToolId,
+        tool_id: lash_vocabulary::tool_contract::ToolId,
         replay: Option<crate::llm::types::ProviderReplayMeta>,
         outcome: ToolDispatchOutcome,
         call_key: &str,
@@ -471,7 +481,7 @@ impl RuntimeExecutionContext<'_> {
     pub async fn complete_undispatched_tool_call(
         &self,
         ids: ToolCallIds,
-        tool_id: crate::ToolId,
+        tool_id: lash_vocabulary::tool_contract::ToolId,
         replay: Option<crate::llm::types::ProviderReplayMeta>,
         outcome: ToolDispatchOutcome,
         call_key: &str,
@@ -530,7 +540,7 @@ impl RuntimeExecutionContext<'_> {
 
     pub(crate) async fn await_process_with_cancellation(
         &self,
-        process_id: &crate::ProcessId,
+        process_id: &lash_vocabulary::identity::ProcessId,
         parent_invocation: Option<crate::RuntimeInvocation>,
         cancellation: Option<tokio_util::sync::CancellationToken>,
     ) -> Result<

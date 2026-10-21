@@ -83,9 +83,11 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use lash_core_store::tool_run::{AvailableEvidence, CompletionSource, LimitCause};
+use lash_core_store::tool_run::AvailableEvidence;
+use lash_core_store::tool_run::CompletionSource;
 use lash_durable::domain::{AdmittedId, DomainRefusal, RunFacts, RunSeq};
 use lash_durable::{CommitLabel, DueSource, DurableError, DurableInstant};
+use lash_vocabulary::tool_contract::LimitCause;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument as _;
@@ -1260,7 +1262,7 @@ impl Lifecycle {
         let pinned = execution.policy();
         let honours_capacity = matches!(
             pinned,
-            lash_protocol_types::ExecutionPolicy::Repeatable { .. }
+            lash_vocabulary::tool_contract::ExecutionPolicy::Repeatable { .. }
         ) && self
             .policies
             .permits_repeat(execution.draft().tool(), pinned);

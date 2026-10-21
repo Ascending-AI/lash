@@ -7,7 +7,7 @@ use lash_execution_contracts::park::ProcessParkReason;
 use crate::runtime::actor::waits;
 use lash_execution_contracts::process::ProcessOutcome;
 use lash_protocol_types::CancelOrigin;
-use lash_protocol_types::ProcessId;
+use lash_vocabulary::identity::ProcessId;
 
 /// The terminal of a process cancelled with `origin`: forced when lash
 /// ended it at its grace.

@@ -315,6 +315,20 @@ impl ProcessSteps for WorkerSteps {
             .succession(engine_kind(process)?)
     }
 
+    fn check_successor_links(
+        &self,
+        environment: &Arc<crate::ProcessEnv>,
+        inspection: &lash_execution_contracts::process::linking::LinkInspection,
+        seeds: &[lash_core_store::resolutions::ResolutionSeed],
+    ) -> Result<lash_vocabulary::claims::ClaimRequirements, crate::PluginError> {
+        self.0
+            .config
+            .runtime_host
+            .process_engines
+            .check_links_with_seeds(environment, inspection, seeds)
+            .map_err(Into::into)
+    }
+
     async fn succession_context(
         &self,
         process: &ProcessRecord,
@@ -439,7 +453,7 @@ impl ProcessSteps for WorkerSteps {
         process: &ProcessRecord,
         _steps: &[StepRequest],
     ) -> Result<
-        Option<std::collections::BTreeSet<lash_core::ObligationToken>>,
+        Option<std::collections::BTreeSet<lash_vocabulary::claims::ObligationToken>>,
         lash_core::durable_port::DurableError,
     > {
         if process.env_ref().is_none() {
@@ -749,7 +763,7 @@ impl ProcessSteps for WorkerSteps {
     /// would, so its engine reads the failure as the call's output.
     fn admitted_output(
         &self,
-        process: &lash_core_execution::ProcessId,
+        process: &lash_vocabulary::identity::ProcessId,
         step: &StepRequest,
         call: &lash_core_execution::ToolCallId,
         output: SettledOutput,
@@ -774,7 +788,7 @@ impl ProcessSteps for WorkerSteps {
 
     fn engine_output(
         &self,
-        process: &lash_core_execution::ProcessId,
+        process: &lash_vocabulary::identity::ProcessId,
         step: &StepRequest,
         output: SettledOutput,
     ) -> SettledOutput {

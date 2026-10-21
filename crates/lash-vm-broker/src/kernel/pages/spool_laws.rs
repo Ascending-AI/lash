@@ -5,6 +5,7 @@
     reason = "the crash laws list the staging directory a test owns"
 )]
 
+use lash_protocol_types::engine_fault::PageRefusal;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -15,7 +16,7 @@ use lash_core_store::checkpoint_graph::stage::{
     ManifestEntry, StageFault, StageLeaseId, StageSpool,
 };
 use lash_core_store::checkpoint_graph::{
-    CommitId, EncodedNode, GraphRefusal, MAX_NODE_BYTES, NodeId, NodeKind, TokenWriter,
+    CommitId, EncodedNode, GraphRefusal, MAX_NODE_BYTES, NodeId, NodeKind,
 };
 use lash_durable::domain::ExecKey;
 use lash_durable::domain::graph::RootOwner;
@@ -23,8 +24,10 @@ use lash_durable::domain::pages::{LeaseFence, RootLease, RootLeaseId, StoredPage
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch};
 use lash_kernel_doc::heap::{HeapFault, HostResource, PageGrant, PageId, PageRef};
 use lash_kernel_state::paged::{PageBody, PageKind, PageSource};
-use lash_vm_protocol::page::{PageCapability, PageEnvelope, PageRefusal, PageReply, PageRequest};
-use lash_vm_protocol::{InfrastructureOutcome, ProtocolBounds};
+use lash_protocol_types::engine_fault::InfrastructureOutcome;
+use lash_vm_protocol::ProtocolBounds;
+use lash_vm_protocol::page::{PageCapability, PageEnvelope, PageReply, PageRequest};
+use lash_vocabulary::tokens::TokenWriter;
 
 use lash_core_execution::runtime::SystemClock;
 
@@ -104,9 +107,9 @@ impl CommittedPages for Arc<Committed> {
 fn lease(root: NodeId) -> RootLease {
     RootLease {
         id: RootLeaseId(7),
-        owner: RootOwner::Exec(ExecKey::Process(lash_protocol_types::ProcessId::fixture(
-            "pages",
-        ))),
+        owner: RootOwner::Exec(ExecKey::Process(
+            lash_vocabulary::identity::ProcessId::fixture("pages"),
+        )),
         root,
         fence: LeaseFence::Actor {
             actor: ActorKey::process("pages").expect("actor"),
