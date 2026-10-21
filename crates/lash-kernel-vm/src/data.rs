@@ -9,6 +9,7 @@ use lash_kernel_doc::arena::{ArenaHandle, Body};
 use lash_kernel_doc::heap::{Chunk, HeapFault, IntRef, PageReader, PageValue, TextRef};
 use lash_kernel_doc::{Datum, EntityId, ErrorDatum, Integer, Measure, NativeError, Value};
 use lash_kernel_state::arena::Arena;
+use lash_kernel_state::kernel_internals::{PagedHeap, page_reads};
 use num_traits::ToPrimitive;
 use std::ops::ControlFlow;
 
@@ -450,34 +451,34 @@ impl From<HeapFault> for CopyError {
     }
 }
 
-pub(crate) fn text_copy(heap: &dyn PageReader, text: &TextRef) -> Result<String, HeapFault> {
+pub(crate) fn text_copy(heap: &PagedHeap, text: &TextRef) -> Result<String, HeapFault> {
     // The descriptor certifies the full UTF-8 extent; check String's host
-    // capacity limit before reserving it once, rather than growing per leaf.
+    // capacity limit before copying it.
     let capacity = usize::try_from(text.summary.utf8_bytes)
         .ok()
         .filter(|&bytes| bytes <= isize::MAX as usize)
         .ok_or_else(|| HeapFault::Malformed("text length exceeds host String capacity".into()))?;
-    let mut out = String::with_capacity(capacity);
-    heap.payload_visit(
-        &PageValue::Text(text.clone()),
-        0..text.summary.utf8_bytes,
-        &mut |chunk| {
-            if let Chunk::Text(text) = chunk {
-                out.push_str(text);
-            }
-            ControlFlow::Continue(())
-        },
-    )?;
-    Ok(out)
+    match &text.body {
+        lash_kernel_doc::heap::Payload::Resident(text) => {
+            text.get(..capacity).map(str::to_owned).ok_or_else(|| {
+                HeapFault::Malformed("text range cuts a scalar or exceeds length".into())
+            })
+        }
+        // The host consumes the entire text. Its authenticated siblings are
+        // independent demands, unlike a visitor that can stop at a prefix.
+        lash_kernel_doc::heap::Payload::Paged(_) => {
+            Ok(page_reads::text(heap.pages(), text)?.to_string())
+        }
+    }
 }
 
 /// Copies to the host's Datum tree without allocating guest entities or
 /// reserving guest memory (`K-EFF-002`). Reads stop at the first fault.
-pub(crate) fn copy_page_out(heap: &dyn PageReader, value: &PageValue) -> Result<Datum, CopyError> {
+pub(crate) fn copy_page_out(heap: &PagedHeap, value: &PageValue) -> Result<Datum, CopyError> {
     copy_page(heap, value, heap.value_depth_limit(), &mut Vec::new())
 }
 fn copy_page(
-    heap: &dyn PageReader,
+    heap: &PagedHeap,
     value: &PageValue,
     budget: usize,
     path: &mut Vec<EntityId>,

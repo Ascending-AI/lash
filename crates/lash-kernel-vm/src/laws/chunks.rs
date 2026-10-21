@@ -156,3 +156,98 @@ fn a_point_write_to_a_cold_large_list_reads_and_seals_one_chunk_and_its_path() {
 fn a_point_write_to_a_cold_large_table_reads_and_seals_one_chunk_and_its_path() {
     bounded("work.table");
 }
+
+/// FIG-7085: copying a retained binding to the host consumes its entire
+/// text, so authenticated payload siblings share a bounded port round trip.
+#[test]
+fn a_host_copy_of_a_megabyte_binding_batches_its_payload_siblings() {
+    use lash_kernel_doc::{Datum, Name};
+    use std::cell::RefCell;
+
+    #[derive(Clone, Default)]
+    struct Trips {
+        inner: Source,
+        batches: Rc<RefCell<Vec<Vec<PageRef>>>>,
+    }
+    impl PageSource for Trips {
+        fn read(
+            &mut self,
+            pages: &[PageRef],
+        ) -> Result<Vec<Result<PageAnswer, HeapFault>>, HeapFault> {
+            self.batches.borrow_mut().push(pages.to_vec());
+            self.inner.read(pages)
+        }
+        fn seal(&mut self, body: PageBody) -> Result<PageRef, HeapFault> {
+            self.inner.seal(body)
+        }
+    }
+
+    let source = Trips::default();
+    let name = Name::new("big");
+    // Distinct 4 KiB leaves: content deduplication cannot hide a round trip.
+    let text: String = (0..245)
+        .map(|i| format!("{i:04}{}", "x".repeat(4092)))
+        .collect();
+    let value = Datum::Record(vec![("text".into(), Datum::Text(text))]);
+    let mut editor = crate::SessionEditor::open(None, Box::new(source.clone())).unwrap();
+    editor.set(&name, &value).unwrap();
+    let root = editor.seal().unwrap();
+    source.batches.borrow_mut().clear();
+    let mut cold = crate::SessionEditor::open(Some(&root), Box::new(source.clone())).unwrap();
+    assert_eq!(
+        cold.get(&name).unwrap(),
+        Some(crate::SessionValue::Data(value))
+    );
+
+    let batches = source.batches.borrow();
+    let pages: usize = batches.iter().map(Vec::len).sum();
+    assert!(pages >= 245, "the full payload was read: {pages}");
+    assert!(batches.iter().all(|batch| batch.len() <= 32));
+    assert!(
+        batches.len() <= 16,
+        "{} round trips for {pages} pages",
+        batches.len()
+    );
+    let stored = source.inner.0.borrow();
+    for batch in batches.iter().filter(|batch| batch.len() > 1) {
+        assert!(
+            stored
+                .values()
+                .any(|parent| batch.iter().all(|page| parent.children.contains(page))),
+            "only siblings authenticated by one parent are batched"
+        );
+    }
+}
+
+/// Ordered page faults: a later index's missing page must not outrank a
+/// corrupt leaf in the earlier subtree, even when the indexes share a read.
+#[test]
+fn a_host_text_copy_keeps_the_first_subtrees_fault_ahead_of_a_later_batch_fault() {
+    use lash_kernel_doc::heap::{PageValue, Payload};
+    use lash_kernel_state::kernel_internals::{PagedHeap, stored_pages, tree::Access};
+    use lash_kernel_state::paged::{EditEpoch, PageKind, SemanticHeap};
+
+    let source = Source::default();
+    let access = Access::new(Box::new(source.clone()));
+    let text: String = (0..65)
+        .map(|i| format!("{i:04}{}", "x".repeat(4092)))
+        .collect();
+    let text = stored_pages::text(&access, &text).unwrap();
+    let Payload::Paged(root) = &text.body else {
+        panic!("paged text")
+    };
+    let mut stored = source.0.borrow_mut();
+    let indexes = stored[&root.id].children.clone();
+    assert!(indexes.len() >= 2);
+    assert_eq!(stored[&indexes[0].id].kind, PageKind::PAYLOAD_INDEX);
+    let first_leaf = stored[&indexes[0].id].children[0];
+    stored.get_mut(&first_leaf.id).unwrap().tokens = Arc::from([]);
+    stored.remove(&indexes[1].id);
+    drop(stored);
+
+    let heap = PagedHeap::fresh(Box::new(source), EditEpoch(1));
+    let result = crate::data::copy_page_out(&heap, &PageValue::Text(text));
+    assert!(
+        matches!(result, Err(crate::data::CopyError::Heap(HeapFault::Corrupt { page, .. })) if page == first_leaf.id)
+    );
+}
