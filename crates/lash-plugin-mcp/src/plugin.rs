@@ -231,6 +231,11 @@ impl McpSessionPlugin {
                 }) as Arc<dyn ToolProvider>)
             },
         )?;
+        reg.package_provider_bound(lash_core::tool_provider_key!("servers"), |this, _| {
+            Ok(Arc::new(McpToolProvider {
+                pool: Arc::clone(&this.pool),
+            }))
+        })?;
         let family = lash_core::plugin::prompt::PromptSectionKey::new(
             crate::pool::guidance::McpGuidanceSections::FAMILY,
         )
@@ -623,5 +628,49 @@ mod certification {
                 reason: lash::testing::CertificationUnavailable::NoScenario
             }
         )));
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::plugin::packages::PackageProvider for McpToolProvider {
+    async fn hold(
+        &self,
+        _: &lash_core_store::artifact_referrer::ReferrerClaim,
+        _: &lash_vocabulary::package::PackageAdvertisement,
+    ) -> Result<(), lash_execution_contracts::process::linking::EnginePortError> {
+        Ok(())
+    }
+
+    fn roots(&self) -> std::collections::BTreeSet<lash_vocabulary::names::Segment> {
+        self.pool
+            .advertised_tools()
+            .into_iter()
+            .map(|tool| tool.manifest.operation.package.as_slice()[0].clone())
+            .collect()
+    }
+    fn advertise(
+        &self,
+        config: &lash_core::OwnerConfigView,
+        context: &lash_vocabulary::package::PublicationContext,
+    ) -> Result<Vec<lash_core::plugin::packages::PackageContribution>, PluginError> {
+        let provider = lash_core::plugin::ToolProviderHandle::new(
+            config.registry_kind(),
+            "mcp",
+            lash_core::tool_provider_key!("servers"),
+        );
+        lash_core::plugin::packages::operation_packages(
+            &provider,
+            self.offered(config)?,
+            |tool| {
+                self.pool.link_payload(&tool.manifest.id).map(|payload| {
+                    lash_vocabulary::providers::ExecutionBinding {
+                        codec: provider.clone(),
+                        format: MCP_BINDING_FORMAT,
+                        payload,
+                    }
+                })
+            },
+            context,
+        )
     }
 }

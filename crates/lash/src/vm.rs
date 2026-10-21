@@ -5,8 +5,8 @@
 //! it registers, and the host boundary a document runs against.
 //!
 //! A run executes in a worker process that hosts one kernel machine. The
-//! worker opens its parent's immutable package frame at startup; a document
-//! names functions by identity and carries none.
+//! worker opens its parent's native library at startup. Each run carries
+//! its reached Documents and immutable Link tables.
 //!
 //! RLM builders take the kernel policies `lash::rlm::{Charge, MemoryMeter}`.
 //! A worker's [`RunBounds`] carries their wire mirrors, [`RunCharge`] and
@@ -56,13 +56,12 @@ pub use lash_vm_client::packages::refusal as package_refusal;
 /// fixed system-call allowlist, under which it opens nothing and never maps
 /// memory writable and executable at once, and an address-space ceiling. A
 /// native escape keeps only what that allowlist grants.
-pub use lash_vm_client::service::{
-    DialectRefusal, Service as WorkerService, SourceServiceError, StoredSurface, SurfaceRef,
-};
+pub use lash_vm_client::service::{DialectRefusal, Service as WorkerService, SourceServiceError};
 /// The worker pool [`WorkerService::pool`] starts, which a host prewarms at
 /// startup, and the counts it reports.
 pub use lash_vm_client::{PoolStats as WorkerPoolStats, WorkerPool};
 
+pub use lash_vm_client::packages::{WorkerLibrary, WorkerLibraryRefusal};
 /// Host-selected worker entry, pool bounds, a cell's lifetime caps,
 /// execution deadlines, process confinement and the cgroup placement of
 /// workers.
@@ -71,7 +70,12 @@ pub use lash_vm_client::{
     PageBudgets as WorkerPageBudgets, PoolConfig as WorkerPoolConfig, WorkerCgroup,
     WorkerConfinement, WorkerEntry, WorkerTuning,
 };
-pub use lash_vm_runtime::KernelProcessPluginFactory;
+pub use lash_vm_releases::{HelperRelease, helper_release};
+pub use lash_vm_runtime::{
+    KERNEL_SERVICES_CONFIG, KERNEL_SERVICES_OWNER, KernelDocuments, KernelProcessPluginFactory,
+    KernelServicesComponent, KernelServicesPluginFactory, WorkflowEnvironmentRequest,
+    WorkflowPublishRequest, definition_draft,
+};
 /// The names of the dialects lash ships. A host passes one where it names
 /// the dialect its process documents are written in
 /// ([`KernelProcessPluginFactory::new`]); a session or process records it
@@ -101,9 +105,9 @@ pub use lash_vm_worker::{
 /// projection reads with kernel data, and what a tool is offered as.
 #[cfg(feature = "codemode")]
 pub use lash_vm_runtime::{
-    BoundaryError, HostBoundary, MAX_PROJECTED_TYPE_NODES, MAX_RESOLVED_REFERENCES,
-    ProjectionCatalog, ProjectionProvider, ProjectionRefusal, SchemaConflict,
-    SchemaProjectionRefusal, effect_controls, offered_tool, type_of_schema,
+    HostBoundary, MAX_PROJECTED_TYPE_NODES, MAX_RESOLVED_REFERENCES, ProjectionCatalog,
+    ProjectionProvider, ProjectionRefusal, SchemaConflict, SchemaProjectionRefusal,
+    effect_controls, type_of_schema,
 };
 
 // The vocabulary this module's signatures name (the facade-completeness rule).
@@ -135,8 +139,10 @@ pub use lash_vm_client::{
 pub use lash_vm_runtime::HelperAdoptionRefusal;
 #[cfg(feature = "codemode")]
 pub use lash_vm_runtime::{
-    DocumentRefusal as KernelDocumentRefusal, DocumentStoreError as KernelDocumentStoreError,
-    KernelMigrationRefusal, KernelMigrationSurvey, KernelMigrationSurveyError,
-    ParkedRefusal as KernelParkedRefusal, RefusedKernelCell, RefusedKernelProcess,
-    UnmigratedKernelSession, migrate_function_value,
+    DocumentRefusal as KernelDocumentRefusal, KernelMigrationRefusal, KernelMigrationSurvey,
+    KernelMigrationSurveyError, ParkedRefusal as KernelParkedRefusal, RefusedKernelCell,
+    RefusedKernelProcess, UnmigratedKernelSession, migrate_function_value,
 };
+
+/// Kernel input for an inline start, including a retained captured callable.
+pub use lash_vm_runtime::process::InlineRequest as KernelInlineRequest;

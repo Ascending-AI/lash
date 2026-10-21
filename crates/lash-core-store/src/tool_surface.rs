@@ -82,6 +82,7 @@ impl SurfaceEntry {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RecordedSurface {
+    packages: Box<RecordedPackages>,
     #[serde(
         default,
         skip_serializing_if = "BTreeMap::is_empty",
@@ -174,7 +175,22 @@ impl RecordedSurface {
             ids.insert(entry.tool().clone(), entry.provider().clone());
             tools.insert(operation, entry);
         }
-        Ok(Self { tools, deferred })
+        Ok(Self {
+            tools,
+            deferred,
+            packages: Box::default(),
+        })
+    }
+
+    /// The accepted package namespace and routes captured in this round's write.
+    pub fn packages(&self) -> &RecordedPackages {
+        &self.packages
+    }
+
+    #[must_use]
+    pub fn with_packages(mut self, packages: RecordedPackages) -> Self {
+        self.packages = Box::new(packages);
+        self
     }
 
     /// The offered tools, by operation.
@@ -556,3 +572,36 @@ pub mod linked {
 }
 
 pub use linked::{ExecutionEnvironment, OperationRoute, RouteSource, RoutedOperation, UseBinding};
+
+use lash_vocabulary::package::NamespaceSnapshot;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+/// One qualified operation's definition/route candidate. Selection also keys by contract, provider and tool ID.
+pub struct AdvertisedRoute {
+    pub operation: QualifiedOperation,
+    pub definition: ToolDefinition,
+    pub route: OperationRoute,
+}
+
+/// A coherent node-local advertisement. It is recorded with the model surface,
+/// but its operations never populate model tools.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecordedPackages {
+    /// Trusted consumer identity, never inferred from an advertised publisher.
+    pub consumer: Option<lash_vocabulary::package::PublicationContext>,
+    pub snapshot: NamespaceSnapshot,
+    pub routes: Vec<AdvertisedRoute>,
+}
+
+impl RecordedPackages {
+    /// Exact accepted provenance, projected from its sole recorded owner.
+    pub fn publications(&self) -> Vec<lash_vocabulary::package::PublicationRecord> {
+        self.snapshot
+            .advertisements
+            .iter()
+            .map(|accepted| accepted.publication.clone())
+            .collect()
+    }
+}

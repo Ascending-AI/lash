@@ -425,8 +425,18 @@ impl ProcessFeedSource {
             return Ok(ProcessDocumentIdentity::Unsupported);
         };
         Ok(match provider.document_ref(payload).await? {
-            lash_execution_contracts::process::ProcessDocumentRefRead::Named(reference) => {
-                ProcessDocumentIdentity::Available(reference)
+            lash_execution_contracts::process::ProcessDocumentRefRead::Named { link, selector } => {
+                match selector {
+                    lash_execution_contracts::process::linking::ReachSelector::Start(selector) => {
+                        ProcessDocumentIdentity::Available(lash_vocabulary::names::LinkedStart {
+                            link,
+                            selector,
+                        })
+                    }
+                    // The workflow view supports Main and top-level Exports.
+                    // A captured callable must not be presented as another Export.
+                    _ => ProcessDocumentIdentity::Unsupported,
+                }
             }
             lash_execution_contracts::process::ProcessDocumentRefRead::ArtifactMissing {
                 artifact,

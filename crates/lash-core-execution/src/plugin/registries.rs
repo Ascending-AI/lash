@@ -143,6 +143,8 @@ macro_rules! contribution_table {
 contribution_table! {
     callbacks {
         ToolProvider => [Session, Process];
+        PackageProvider => [Session, Process];
+        DeferredPackageProvider => [Session, Process];
         ToolReads => (follows ToolProvider);
         ToolCatalog => [Session, Process];
         BeforeTurn => [Session];

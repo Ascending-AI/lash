@@ -485,56 +485,6 @@ async fn two_keys_sharing_a_provider_kind_select_their_own_transport(tier: Tier)
 
 /// A permanent package-install refusal must end node startup and reach the
 /// host through node_stopped(), rather than retrying forever (FIG-7058).
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg gate"]
-async fn a_permanent_package_install_failure_stops_the_postgres_node_typed() {
-    let url = lash_postgres_store::testing::required_database_url();
-    let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
-    let storage = lash_postgres_store::testing::connect(database.url())
-        .await
-        .expect("PostgreSQL storage");
-    sqlx::raw_sql(
-        "CREATE FUNCTION refuse_package_labels() RETURNS trigger LANGUAGE plpgsql AS $$
-         BEGIN
-             RAISE EXCEPTION 'package label exceeds the index limit' USING ERRCODE = '54000';
-         END $$;
-         CREATE TRIGGER refuse_package_labels BEFORE INSERT ON lash_package_labels
-             FOR EACH ROW EXECUTE FUNCTION refuse_package_labels();",
-    )
-    .execute(storage.pool())
-    .await
-    .expect("model PostgreSQL's permanent index-size refusal");
-    let double = Double {
-        stores: Arc::new(lash_postgres_store::PostgresStoreSet::new(
-            &storage,
-            Arc::new(lash_core::attachments::UnavailableAttachmentStore),
-        )),
-        _keep: Vec::new(),
-    };
-    let route = Route::new("unused");
-    let core = core(
-        &double,
-        &[Entry {
-            key: GLM,
-            wire_model: "glm-5.3-flash",
-            revision: "r1",
-            route: &route,
-        }],
-        "install-refused-boot",
-    );
-    let stopped = tokio::time::timeout(std::time::Duration::from_secs(5), core.node_stopped())
-        .await
-        .expect("a permanent package-install failure ends node startup");
-    match stopped {
-        Some(Err(lash::durable::DurableError::PackageInstallRefused { sqlstate, message })) => {
-            assert_eq!(sqlstate, "54000");
-            assert_eq!(message, "package label exceeds the index limit");
-        }
-        other => panic!("a typed permanent package-install refusal was expected: {other:?}"),
-    }
-    core.shutdown().await.expect("shutdown");
-}
-
 /// A catalog edit under an unchanged key never reaches a session on its
 /// own: the session's runs keep sending the metadata it recorded, on a
 /// redeployed transport too. Changing the model to the same key re-mints

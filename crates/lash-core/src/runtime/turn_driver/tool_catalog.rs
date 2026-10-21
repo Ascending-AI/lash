@@ -126,12 +126,30 @@ impl RuntimeTurnDriver<'_> {
     pub(super) async fn prepare_execution_environment(
         &self,
     ) -> Result<PreparedExecutionEnvironment, PluginError> {
+        let recorded = self.run_config.surface().is_some() && !self.surface_installed;
         let tool_surface = match self.run_config.surface() {
             Some(recorded) if !self.surface_installed => self
                 .session
                 .install_recorded_tool_surface(Arc::clone(recorded))?,
             _ => self.session.admit_tool_surface()?,
         };
+        // The journal's cleanup owner exists before the first retention await.
+        // Dropping this preparation leaves only edges owned by that same claim.
+        let claim = lash_core_execution::runtime::attachment_delivery::receiving_claim(
+            self.scoped_effect_controller.execution_scope(),
+        )?;
+        let store = self.host.core.backend().package_store();
+        self.session
+            .plugins()
+            .composition()
+            .retain_packages(
+                &claim,
+                tool_surface.surface().packages(),
+                store.as_ref(),
+                recorded,
+            )
+            .await
+            .map_err(|error| PluginError::Package(Box::new(error)))?;
         Ok(PreparedExecutionEnvironment {
             tool_definitions: tool_surface.definitions(),
             surface: tool_surface.surface().as_ref().clone(),

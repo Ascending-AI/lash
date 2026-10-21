@@ -11,7 +11,7 @@ use lash::workflow::view::{ActionObservation, ActionState, WorkflowCoverage, Wor
 use lash::workflow::{
     ProcessWorkflowOverlay, ReplaySegments, SegmentAnswer, WorkflowDocument, WorkflowDocumentRead,
     WorkflowEnvironment, WorkflowExecutionOverlayAccumulator, WorkflowOverlayFact,
-    WorkflowOverlayOccurrence, WorkflowOverlaySettlement, WorkflowOverlayTerminal, WorkflowPublish,
+    WorkflowOverlayOccurrence, WorkflowOverlaySettlement, WorkflowOverlayTerminal,
 };
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt as _;
@@ -22,8 +22,6 @@ use crate::{DisplayDelta, DisplayState, RunEvent, RunPath, RunStatus};
 pub(crate) enum RunError {
     #[error(transparent)]
     Lash(#[from] lash::EmbedError),
-    #[error("{0}")]
-    Refused(lash::workflow::WorkflowAdmissionRefusal),
     #[error(transparent)]
     SourceMap(#[from] lash::workflow::document::SourceMapRefusal),
     #[error(transparent)]
@@ -47,13 +45,9 @@ const HOST_TOOLS: ProcessConfigKey<()> =
 /// environment lash admits the workflow against: the host's tools, from the
 /// one component that provides them.
 pub(crate) fn environment() -> Result<ProcessEnv, RunError> {
-    let host_tools = HOST_TOOLS.tool_provider(lash::tool_provider_key!("tools"));
-    Ok(crate::display::tool_definitions()
-        .iter()
-        .fold(
-            ProcessEnv::builder(lash::MaxToolCalls::new(1024)).component(HOST_TOOLS, &()),
-            |env, tool| env.link_tool(host_tools.clone(), tool),
-        )
+    Ok(ProcessEnv::builder(lash::MaxToolCalls::new(1024))
+        .component(HOST_TOOLS, &())
+        .component(lash::vm::KERNEL_SERVICES_CONFIG, &())
         .build()?)
 }
 
@@ -64,7 +58,7 @@ pub(crate) struct Published {
     pub(crate) definition: ProcessDefinition,
     launch: EngineLaunch,
     pub(crate) pin: HostArtifactPin,
-    pub(crate) reference: lash::workflow::WorkflowDocumentRef,
+    pub(crate) reference: lash::package::LinkedStart,
     pub(crate) source_map: Option<lash::workflow::document::SourceMapId>,
 }
 
@@ -93,30 +87,61 @@ pub(crate) struct Publication {
 
 /// What this host offers a workflow document: its effects with their
 /// signatures, and its library functions.
-pub(crate) async fn workflow_environment(core: &LashCore) -> Result<WorkflowEnvironment, RunError> {
+#[derive(Clone)]
+pub(crate) struct Namespace {
+    pub(crate) packages: lash::package::RecordedPackages,
+    pub(crate) request: lash::workflow::WorkflowEnvironmentRequest,
+}
+pub(crate) async fn namespace(
+    core: &LashCore,
+    pin: &HostArtifactPin,
+) -> Result<Namespace, RunError> {
+    use lash::package::*;
+    let context = PublicationContext {
+        domain: PublicationDomain(core.backend().binding_identity().to_string()),
+        scope: PublicationScope::Host,
+        publisher: PublisherInstance("workflow-graph".into()),
+        root: Segment::new("workflow").unwrap(),
+    };
+    let packages = core
+        .host_artifacts()
+        .process_namespace(pin, &environment()?, context.clone())
+        .await?;
+    let attachment = Attachment {
+        members: Default::default(),
+        deferred: Default::default(),
+        packages: packages
+            .snapshot
+            .advertisements
+            .iter()
+            .filter_map(|accepted| match &accepted.advertisement {
+                PackageAdvertisement::Enumerated(package) => Some(package.path.clone()),
+                _ => None,
+            })
+            .collect(),
+    };
+    Ok(Namespace {
+        request: lash::workflow::WorkflowEnvironmentRequest {
+            snapshot: packages.snapshot.clone(),
+            context,
+            attachment,
+        },
+        packages,
+    })
+}
+pub(crate) async fn workflow_environment(
+    core: &LashCore,
+    pin: &HostArtifactPin,
+) -> Result<WorkflowEnvironment, RunError> {
     core.host_artifacts()
-        .workflow_environment(&environment()?)
+        .workflow_environment(&namespace(core, pin).await?.request)
         .await?
         .ok_or_else(|| RunError::Invalid("this core reads no workflow documents".into()))
 }
 
-/// `document` with the manifest this host admits it under: every effect
-/// carries the signature the host offers it under, and every library
-/// function the code reaches is listed by identity.
-pub(crate) fn complete(
-    mut document: Document,
-    environment: &WorkflowEnvironment,
-) -> Result<Document, RunError> {
-    for (effect, requirement) in &mut document.manifest.effects {
-        *requirement = environment
-            .checker()
-            .effects
-            .get(effect)
-            .ok_or_else(|| RunError::Invalid(format!("this host offers no effect `{effect}`")))?
-            .clone();
-    }
-    document.manifest.functions =
-        lash::workflow::graph::requirements(&document, environment.functions()).functions;
+pub(crate) fn validate_document(document: Document) -> Result<Document, RunError> {
+    lash::workflow::graph::derive(&document, &document.functions)
+        .map_err(|error| RunError::Invalid(error.to_string()))?;
     Ok(document)
 }
 
@@ -126,7 +151,7 @@ pub(crate) async fn publish(
     core: &LashCore,
     draft: &Draft,
     entry: &Name,
-    packages: lash::package::WorkflowPackages,
+    packages: Namespace,
     source: Option<(&lash::workflow::document::SourceMap, &str)>,
 ) -> Result<Publication, RunError> {
     let pin = HostArtifactPin::mint();
@@ -140,48 +165,35 @@ pub(crate) async fn publish(
             .into_engine_settings(),
     );
     let result = async {
-        let offered = artifacts
-            .workflow_environment(&environment)
-            .await?
-            .ok_or_else(|| RunError::Invalid("this core reads no workflow documents".into()))?;
-        let document = draft.document();
-        let graph = lash::workflow::graph::derive(document, offered.functions())
-            .map_err(|refusal| RunError::Invalid(refusal.to_string()))?;
-        let effects =
-            lash::workflow::graph::entry_effects(document, &graph, offered.functions(), entry)
-                .map_err(|refusal| RunError::Invalid(refusal.to_string()))?;
-        // The editor offers all host effects; each published pair links only
-        // the effects its entry calls or spawns, including called functions.
-        let environment = environment.restrict(effects.keys())?;
-        match artifacts
+        let start = artifacts
             .publish_workflow(
                 &pin,
                 &lash::workflow::document::DocumentBytes::from(draft.document().clone()),
-                entry,
-                &environment,
-                packages,
+                &lash::package::StartSelector::Export(entry.clone()),
+                &packages.request,
                 source,
             )
-            .await?
-        {
-            WorkflowPublish::Published(publication) => {
-                let env_ref = artifacts.publish_process_env(&pin, &environment).await?;
-                Ok(Publication {
-                    published: Published {
-                        definition: publication.definition,
-                        reference: publication.reference,
-                        source_map: publication.source_map,
-                        launch: EngineLaunch::new(env_ref, settings),
-                        pin: pin.clone(),
-                    },
-                })
-            }
-            WorkflowPublish::Refused(refusal) => Err(RunError::Refused(refusal)),
-            WorkflowPublish::SourceMapRefused(refusal) => Err(RunError::SourceMap(refusal)),
-            WorkflowPublish::Unsupported { engine_kind } => Err(RunError::Invalid(format!(
-                "engine `{engine_kind}` admits no workflow documents"
-            ))),
-        }
+            .await?;
+        let env = artifacts
+            .link_process_env(&environment, &start, &packages.packages, &BTreeMap::new())
+            .await?;
+        let env_ref = artifacts.publish_process_env(&pin, &env).await?;
+        let draft = lash::vm::definition_draft(&lash::process::KernelProcessDefinition {
+            code: lash::vm::KernelInlineRequest::Linked {
+                start: start.clone(),
+            },
+        })
+        .map_err(|error| RunError::Invalid(error.to_string()))?;
+        let definition = artifacts.publish_definition(&pin, &draft).await?;
+        Ok(Publication {
+            published: Published {
+                definition,
+                reference: start,
+                source_map: source.map(|(map, _)| map.identity()),
+                launch: EngineLaunch::new(env_ref, settings),
+                pin: pin.clone(),
+            },
+        })
     }
     .await;
     if result.is_err() {
@@ -204,10 +216,7 @@ pub(crate) async fn observe(
     // The feed retains everything published while the document is read.
     let mut feed = observed.subscribe_and_recover(snapshot.cursor);
     let document = execution_document(&core, &snapshot.read_view).await?;
-    let packages =
-        lash::package::lash_packages().map_err(|error| RunError::Invalid(error.to_string()))?;
-    let package_view = packages.view();
-    let mut overlay = Overlay::new(&document, process, workflow_version, host, &package_view)?;
+    let mut overlay = Overlay::new(&document, process, workflow_version, host)?;
     let mut workflow = process_overlay(&snapshot.read_view);
     let (mut events, mut terminal) = overlay.snapshot(snapshot.read_view)?;
     loop {
@@ -400,7 +409,7 @@ async fn execution_document(
         )));
     };
     match core.host_artifacts().execution_document(reference).await? {
-        WorkflowDocumentRead::Read(read) => Ok(read.document),
+        WorkflowDocumentRead::Read(read) => Ok(*read),
         unreadable => Err(RunError::Invalid(format!(
             "the run's workflow document cannot be read: {unreadable:?}"
         ))),
@@ -474,13 +483,12 @@ impl Overlay {
         process: lash::ProcessId,
         workflow_version: u64,
         host: Arc<crate::display::HostTools>,
-        packages: &lash::package::PackageView<'_>,
     ) -> Result<Self, RunError> {
         let definition = document.identity().to_string();
         let mut accumulator = WorkflowExecutionOverlayAccumulator::default();
-        accumulator.set_document(lash::workflow::WorkflowOverlayDocument::of(document));
+        accumulator.set_document(lash::workflow::workflow_overlay_document(document));
         Ok(Self {
-            view: lash::workflow::view::derive(document, packages)
+            view: lash::workflow::view::derive(document)
                 .map_err(|error| RunError::Invalid(error.to_string()))?,
             accumulator,
             identities: BTreeMap::new(),
@@ -939,6 +947,7 @@ impl Overlay {
 /// The example's engine and the host tools whose effect ledger it observes.
 #[derive(Clone)]
 pub struct WorkflowHost {
+    pub(crate) pin: HostArtifactPin,
     pub(crate) core: LashCore,
     pub(crate) workers: lash::vm::WorkerService,
     pub(crate) tools: Arc<crate::display::HostTools>,
@@ -957,10 +966,20 @@ pub fn core(backend: lash::Backend) -> lash::Result<WorkflowHost> {
             crate::display::tool_definitions(),
             tools.as_ref().clone(),
         ));
+    let package_provider = Arc::new(lash::package::ToolPackageProvider::new(
+        HOST_TOOLS.component(),
+        lash::tool_provider_key!("tools"),
+        crate::display::tool_definitions()
+            .iter()
+            .map(|tool| tool.manifest.operation.package.as_slice()[0].clone())
+            .collect(),
+        provider.clone(),
+    ));
     let host_tools = lash::plugins::StaticPluginFactory::new(
         lash::plugins::PluginDeclaration::initial(HOST_TOOLS.component()),
         lash::plugins::PluginSpec::new()
-            .with_tool_provider(lash::tool_provider_key!("tools"), provider),
+            .with_tool_provider(lash::tool_provider_key!("tools"), provider)
+            .with_package_provider(lash::tool_provider_key!("tools"), package_provider),
     )
     .as_component(HOST_TOOLS.format())?;
     let workers = lash::vm::WorkerService::default();
@@ -987,6 +1006,7 @@ pub fn core(backend: lash::Backend) -> lash::Result<WorkflowHost> {
             lash::persistence::LeaseIncarnationId::new(uuid::Uuid::new_v4().to_string()),
         ))?;
     Ok(WorkflowHost {
+        pin: HostArtifactPin::mint(),
         core,
         workers,
         tools,
@@ -1017,26 +1037,33 @@ impl CommandClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash::package::{LinkId, LinkedStart, StartSelector};
     use lash::tracing::{
         TraceLanguageExecution, TraceLanguageExecutionIdentity, TraceRuntimeScope,
         TraceRuntimeSubject,
     };
     use lash::workflow::document::{DocumentId, Unit};
-    use lash::workflow::{WorkflowDocumentEntry, WorkflowDocumentRef};
 
     fn overlay() -> Overlay {
-        overlay_for("kernel 1\nnumbers float\nmain { do sleep 1 } fn callee() { do sleep 1 }")
+        overlay_for("kernel 1\nnumbers float\nmain { do yield }")
     }
 
     fn overlay_for(text: &str) -> Overlay {
         let document = lash::workflow::document::parse_document(text).unwrap();
-        let holder = WorkflowDocument::derive(
+        let link = lash::package::Link {
+            document: document.identity(),
+            fills: Default::default(),
+        }
+        .identity();
+        let holder = WorkflowDocument::entered(
             document,
-            lash::workflow::WorkflowDocumentEntry::Main,
-            &lash::workflow::document::FunctionRegistry::default(),
+            LinkedStart {
+                link,
+                selector: StartSelector::Main,
+            },
         )
         .unwrap();
-        let mut view = lash::workflow::view::derive(&holder, &crate::test_packages()).unwrap();
+        let mut view = lash::workflow::view::derive(&holder).unwrap();
         view.document = DocumentId::from_bytes([1; 32]);
         Overlay {
             view,
@@ -1063,9 +1090,9 @@ mod tests {
                 event_key: format!("{occurrence}:{fact:?}"),
                 identity: TraceLanguageExecutionIdentity {
                     scope: TraceRuntimeScope::none(),
-                    document: WorkflowDocumentRef {
-                        document: DocumentId::from_bytes([1; 32]),
-                        entry: WorkflowDocumentEntry::Main,
+                    document: LinkedStart {
+                        link: LinkId::from_bytes([1; 32]),
+                        selector: StartSelector::Main,
                     },
                     entry_name: "main".into(),
                     engine_execution_id: None,
@@ -1114,7 +1141,7 @@ mod tests {
             *at = lash::workflow::document::testkit::with_position(
                 at,
                 Site::new(
-                    Unit::Function(lash::workflow::document::Name::new("callee")),
+                    Unit::Library(lash::workflow::document::parse_definition("function test.callee() -> Null\nkernel 1\nmetering statements\nbody { do yield }").unwrap().identity()),
                     [0, 0],
                 ),
             );
@@ -1126,7 +1153,7 @@ mod tests {
     #[test]
     fn coarse_resume_keeps_the_observed_loop_identity() {
         let mut overlay =
-            overlay_for("kernel 1\nnumbers float\nmain { for item in [1] { do sleep 1 } }");
+            overlay_for("kernel 1\nnumbers float\nmain { for item in [1] { do yield } }");
         let mut running = observation(3, TraceNodeFact::Started { call_id: None });
         let TraceLanguageExecutionPayload::Node { at, .. } = &mut running.execution.payload else {
             panic!("node fixture");

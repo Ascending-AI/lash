@@ -8,6 +8,11 @@ use std::sync::Arc;
 /// Built once per materialization, in owner and registration order.
 pub struct ExecutionComposition {
     inventory: Option<Arc<InstalledInventory>>,
+    pub(super) package_providers:
+        Vec<super::registrar::RegisteredProvider<Arc<dyn super::packages::PackageProvider>>>,
+    pub(super) deferred_package_providers: Vec<
+        super::registrar::RegisteredProvider<Arc<dyn super::packages::DeferredPackageProvider>>,
+    >,
     callbacks: Vec<PluginCallbackIdentity>,
     tool_providers: Vec<super::registrar::RegisteredProvider<Arc<dyn ToolProvider>>>,
     tool_catalog_contributors: Vec<RegisteredHook<ToolCatalogContributor>>,
@@ -19,7 +24,7 @@ pub struct ExecutionComposition {
     presentation_steps: Vec<RegisteredHook<ToolPresentationStep>>,
     prompt: PromptRegistry,
     cell_failure_feedback: Vec<RegisteredHook<CellFailureFeedbackHook>>,
-    tool_registry: Arc<crate::ToolRegistry>,
+    pub(super) tool_registry: Arc<crate::ToolRegistry>,
 }
 
 impl ExecutionComposition {
@@ -29,6 +34,10 @@ impl ExecutionComposition {
     ) -> Self {
         Self {
             inventory: contributions.inventory.clone(),
+            package_providers: std::mem::take(&mut contributions.package_providers),
+            deferred_package_providers: std::mem::take(
+                &mut contributions.deferred_package_providers,
+            ),
             callbacks: contributions
                 .inventory
                 .as_ref()

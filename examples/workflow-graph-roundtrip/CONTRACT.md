@@ -13,7 +13,7 @@ own serialized shapes and pass through unchanged (snake_case).
 | Method | Path | Response |
 | --- | --- | --- |
 | `GET` | `/workflows` | The example catalog: `[{ id, name, description, group, statements, scopes }]` |
-| `GET` | `/environment` | What a document must be written against: `{ effects, functions }` |
+| `GET` | `/environment` | What a document must be written against: `{ namespaces, functions }` |
 | `GET` | `/workflow` | The saved workflow as a `WorkflowView` |
 | `POST` | `/workflow/select` | `{ id }`: save an example's imported document as the next version; its `WorkflowView` |
 | `POST` | `/workflow` | `{ document, entry }`: save a kernel document as the next version; its `WorkflowView` |
@@ -49,12 +49,10 @@ is HTTP 404 `unknown_workflow`; a stale `version` is HTTP 409
 
 ## Environment
 
-`effects` maps each effect name to the signature the host offers it under.
-`functions` maps each library function's name to its identity. `POST
-/workflow` fills both into the manifest of the document it is given, so a
-client writes `effect display.show_message(input: Any) -> Any` and the host contract "1"
-replaces the signature; a library function is called by the identity read
-here.
+`namespaces` projects the accepted package members and their source signatures.
+`functions` maps available library function names to their identities. Source
+import records signature-only Imports. Publication fulfils them against the
+explicit namespace and retains the resulting Link; restarts load that Link.
 
 ## WorkflowView
 

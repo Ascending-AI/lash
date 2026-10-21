@@ -219,6 +219,24 @@ impl SelectedToolsSession {
             lash_core::tool_provider_key!("tools"),
             move |this, _state| Ok(Arc::clone(&this.provider)),
         )?;
+        let owner = reg
+            .declared_owner()
+            .ok_or_else(|| PluginError::Registration("selected tools need an owner".into()))?
+            .to_owned();
+        reg.package_provider_bound(lash_core::tool_provider_key!("tools"), move |this, _| {
+            let roots = this
+                .provider
+                .tool_manifests(&OwnerConfigView::default())?
+                .into_iter()
+                .map(|manifest| manifest.operation.package.as_slice()[0].clone())
+                .collect();
+            Ok(Arc::new(crate::ToolPackageProvider::new(
+                owner.clone(),
+                lash_core::tool_provider_key!("tools"),
+                roots,
+                Arc::clone(&this.provider),
+            )))
+        })?;
         Ok(())
     }
 }

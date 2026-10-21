@@ -252,6 +252,3 @@ roles = ["Assistant", "Event", "Tool", "User"]
 "crates/lash-durable-test/tests/declared_start.rs#assert_refused_before_launch" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "FIG-6518 reads the correlated tool-result status to verify a declared start was refused, independently of presenter wording." }
 
 "crates/lash-durable-test/tests/tool_batches.rs#batch_admission_and_identity_contract" = { reads = 1, outputs = 0, kind = "evidence-read", reason = "FIG-6518 reads the wrapper result status to verify disabled batch dispatch failed, independently of presenter wording." }
-
-"examples/dataframe/src/tests.rs#df_split" = { reads = 0, outputs = 1, kind = "output-read", reason = "DF-SPLIT compares the settled control.finish rows of the real wordcount samples with callback-bearing pipelines reopened on SQLite (FIG-7075)." }
-"examples/dataframe/src/tests.rs#separated_runs" = { reads = 0, outputs = 1, kind = "output-read", reason = "DF-SPLIT reads the settled rows and placement after a crash between two native expression runs (FIG-7075)." }

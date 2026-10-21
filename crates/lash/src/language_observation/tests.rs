@@ -39,9 +39,9 @@ fn record(subject: TraceRuntimeSubject, occurrence: u64) -> TraceRecord {
                 event_key: format!("{subject:?}:{occurrence}"),
                 identity: TraceLanguageExecutionIdentity {
                     scope: TraceRuntimeScope::none(),
-                    document: lash_trace::WorkflowDocumentRef {
-                        document: lash_kernel_doc::DocumentId::from_bytes([7; 32]),
-                        entry: lash_trace::WorkflowDocumentEntry::Main,
+                    document: lash_vocabulary::names::LinkedStart {
+                        link: lash_vocabulary::names::LinkId::from_bytes([7; 32]),
+                        selector: lash_vocabulary::names::StartSelector::Main,
                     },
                     entry_name: "main".into(),
                     engine_execution_id: None,

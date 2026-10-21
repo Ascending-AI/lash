@@ -53,6 +53,7 @@ impl RlmRuntimeState {
         history: Option<&lash_core::SessionReadView>,
         images: bool,
         pages: Option<&lash_core::plugin::SessionPages>,
+        packages: &lash_core_store::tool_surface::RecordedPackages,
     ) -> Result<crate::prompt_sections::RlmPromptFacts, SessionError> {
         let renderer = self.dialect.renderer();
         let recorded = lash_core::RecordedRender::require_available(recorded, renderer.0.id())
@@ -83,12 +84,9 @@ impl RlmRuntimeState {
             None => crate::projection::HistoryIndex::default(),
         };
         let provenance = index.provenance.clone();
-        // The gate is asked once per round: the prompt shows the packages
-        // of its answer, and the round's cell is written under it (P3).
-        let packages = self.dialect.round_packages().await?;
-        let package_surface = self.dialect.package_surface(&packages);
+        let package_surface = self.dialect.package_surface(packages).await?;
         let mut execution = self.execution.lock().await;
-        execution.shows_packages(packages);
+        execution.shows_packages(packages.clone());
         let (bound_variables, globals, inferred_names) = execution
             .prepare_bound_variables_prompt(&exclude, params.preview, provenance, pages)
             .await?
@@ -1210,7 +1208,7 @@ mod tests {
                     crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
                 let render = crate::testing::recorded_test_render();
                 let prompt = state
-                    .prompt_facts(Some(&render), None, true, None)
+                    .prompt_facts(Some(&render), None, true, None, &Default::default())
                     .await
                     .expect("prompt facts")
                     .bound_variables;
@@ -1227,7 +1225,7 @@ mod tests {
                 .expect("execute code");
 
                 let prompt = state
-                    .prompt_facts(Some(&render), None, true, None)
+                    .prompt_facts(Some(&render), None, true, None, &Default::default())
                     .await
                     .expect("prompt facts")
                     .bound_variables;
@@ -1256,7 +1254,7 @@ mod tests {
                 .expect("execute code");
 
                 let prompt = state
-                    .prompt_facts(Some(&render), None, true, None)
+                    .prompt_facts(Some(&render), None, true, None, &Default::default())
                     .await
                     .expect("prompt facts")
                     .bound_variables;
@@ -1293,7 +1291,7 @@ mod tests {
                     .await
                     .expect("execute cell before late cancellation");
                 let rendered = state
-                    .prompt_facts(Some(&render), None, true, None)
+                    .prompt_facts(Some(&render), None, true, None, &Default::default())
                     .await
                     .expect("prompt facts")
                     .bound_variables;
@@ -1304,7 +1302,7 @@ mod tests {
                     .await
                     .expect("cancel second cell");
                 let rendered = state
-                    .prompt_facts(Some(&render), None, true, None)
+                    .prompt_facts(Some(&render), None, true, None, &Default::default())
                     .await
                     .expect("prompt facts")
                     .bound_variables;

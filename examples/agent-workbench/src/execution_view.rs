@@ -23,7 +23,7 @@ use lash::workflow::graph::{
     Target,
 };
 use lash::workflow::{
-    WorkflowDocument, WorkflowDocumentEntry, WorkflowExecutionOverlay, WorkflowOverlayMismatch,
+    StartSelector, WorkflowDocument, WorkflowExecutionOverlay, WorkflowOverlayMismatch,
     WorkflowOverlayOccurrence, WorkflowOverlaySettlement, WorkflowOverlaySite,
     WorkflowOverlaySiteReport,
 };
@@ -67,7 +67,6 @@ pub(crate) struct ExecutionGraphCoverage {
 pub(crate) enum ExecutionGraphNodeKind {
     Call,
     Perform,
-    Sleep,
     Join,
     JoinMany,
     Yield,
@@ -82,7 +81,6 @@ impl From<SiteKind> for ExecutionGraphNodeKind {
             // An `await` calls its dialect's await policy.
             SiteKind::Call | SiteKind::Await => Self::Call,
             SiteKind::Perform => Self::Perform,
-            SiteKind::Sleep => Self::Sleep,
             SiteKind::Join => Self::Join,
             SiteKind::JoinMany => Self::JoinMany,
             SiteKind::Yield => Self::Yield,
@@ -177,24 +175,33 @@ fn reference_label(graph: &Graph, reference: &Reference) -> String {
     }
 }
 
-fn callee_label(graph: &Graph, callee: &CalleeNode) -> String {
+fn callee_label(
+    graph: &Graph,
+    document: &lash::workflow::document::Document,
+    callee: &CalleeNode,
+) -> String {
     match callee {
-        CalleeNode::Declared(name) => name.to_string(),
+        CalleeNode::Import(slot) => document.imports[slot].name.to_string(),
         CalleeNode::Value(reference) => reference_label(graph, reference),
-        CalleeNode::Library(function) => function.to_string(),
+        CalleeNode::Local(function) => document.functions[function].name.to_string(),
     }
 }
 
 /// The workbench's name for the action at `site`: what it calls, performs
 /// or spawns, else the kind of action it is.
-fn site_label(graph: &Graph, site: &ExecutionSite) -> String {
+fn site_label(
+    graph: &Graph,
+    document: &lash::workflow::document::Document,
+    site: &ExecutionSite,
+) -> String {
     match &graph.node(site.node).kind {
-        NodeKind::Action(ActionNode::Perform { effect, .. }) => effect.to_string(),
-        NodeKind::Action(ActionNode::Call { callee, .. }) => callee_label(graph, callee),
-        NodeKind::Action(ActionNode::Spawn { callee, .. }) => {
-            format!("spawn {}", callee_label(graph, callee))
+        NodeKind::Action(ActionNode::Perform { slot, .. }) => {
+            document.imports[slot].name.to_string()
         }
-        NodeKind::Action(ActionNode::Sleep { .. }) => "sleep".to_owned(),
+        NodeKind::Action(ActionNode::Call { callee, .. }) => callee_label(graph, document, callee),
+        NodeKind::Action(ActionNode::Spawn { callee, .. }) => {
+            format!("spawn {}", callee_label(graph, document, callee))
+        }
         NodeKind::Action(ActionNode::Join { .. }) => "join".to_owned(),
         NodeKind::Action(ActionNode::JoinMany { mode, .. }) => match mode {
             JoinMode::All => "join all",
@@ -279,10 +286,10 @@ fn site_edges(graph: &Graph) -> Vec<ExecutionGraphEdge> {
         .collect()
 }
 
-fn entry_function(entry: &WorkflowDocumentEntry) -> Option<String> {
+fn entry_function(entry: &StartSelector) -> Option<String> {
     match entry {
-        WorkflowDocumentEntry::Main => None,
-        WorkflowDocumentEntry::Entry { function } => Some(function.to_string()),
+        StartSelector::Main => None,
+        StartSelector::Export(function) => Some(function.to_string()),
     }
 }
 
@@ -310,7 +317,11 @@ pub(crate) fn draw(
                     node(
                         site.site.to_string(),
                         site.kind.into(),
-                        site_label(graph, site),
+                        site_label(
+                            graph,
+                            document.expect("loaded graph has its document").document(),
+                            site,
+                        ),
                         site.loops.len(),
                         observed
                             .get(&site.site.position())
@@ -341,13 +352,16 @@ pub(crate) fn draw(
         scope: overlay.scope.clone(),
         subject: overlay.subject.clone(),
         attempt: overlay.generation.map(|generation| generation.attempt()),
-        document: identity.document.document.to_string(),
-        entry_kind: match identity.document.entry {
-            WorkflowDocumentEntry::Main => "main",
-            WorkflowDocumentEntry::Entry { .. } => "entry",
+        document: document.map_or_else(
+            || identity.document.link.to_string(),
+            |document| document.identity().to_string(),
+        ),
+        entry_kind: match identity.document.selector {
+            StartSelector::Main => "main",
+            StartSelector::Export(_) => "entry",
         }
         .to_string(),
-        entry_function: entry_function(&identity.document.entry),
+        entry_function: entry_function(&identity.document.selector),
         entry_name: identity.entry_name.clone(),
         status: overlay.status,
         settlement: overlay.settlement,
@@ -370,12 +384,12 @@ pub(crate) fn draw(
                     .child
                     .document
                     .as_ref()
-                    .map(|document| document.document.to_string()),
+                    .map(|document| document.link.to_string()),
                 child_entry_function: child
                     .child
                     .document
                     .as_ref()
-                    .and_then(|document| entry_function(&document.entry)),
+                    .and_then(|document| entry_function(&document.selector)),
                 child_entry_name: None,
             })
             .collect(),

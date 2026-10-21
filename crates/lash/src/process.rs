@@ -68,14 +68,10 @@ pub use lash_execution_contracts::process::DeclaredInlineLaunch;
 pub use lash_execution_contracts::process::DeclaredLaunch;
 pub use lash_execution_contracts::process::EngineLaunch;
 pub use lash_execution_contracts::process::EngineSettings;
-pub use lash_execution_contracts::process::PerformedEffects;
-/// What the package that owns an operation's path declares of it, as a
-/// runner on that path must serve it (PKG-RUNNER).
-pub use lash_execution_contracts::process::{OwnedOperation, OwnedOperations};
 /// Explicit environment choices for a start policy. None is a default:
 /// a host states which it uses.
 pub mod env {
-    pub use lash_core::runtime::env_policy::policy;
+    pub use lash_plugin_process_controls::policy;
 }
 /// The origin of a lifecycle cancellation submitted to a registry.
 pub use lash_core::CancelOrigin;

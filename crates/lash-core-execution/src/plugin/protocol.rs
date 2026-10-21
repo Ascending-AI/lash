@@ -171,6 +171,7 @@ pub struct ProtocolSessionContext<'a> {
     recorded_render: Option<&'a crate::RecordedRender>,
     prompt_history: Option<&'a SessionReadView>,
     session_pages: Option<SessionPages>,
+    packages: Arc<lash_core_store::tool_surface::RecordedPackages>,
 }
 
 /// Where a session's committed execution state stands on the persistent
@@ -206,7 +207,25 @@ impl<'a> ProtocolSessionContext<'a> {
             recorded_render: None,
             prompt_history: None,
             session_pages: None,
+            packages: Arc::new(lash_core_store::tool_surface::RecordedPackages::default()),
         }
+    }
+
+    #[must_use]
+    pub fn with_packages(
+        mut self,
+        packages: Arc<lash_core_store::tool_surface::RecordedPackages>,
+    ) -> Self {
+        self.packages = packages;
+        self
+    }
+    pub fn packages(&self) -> &lash_core_store::tool_surface::RecordedPackages {
+        &self.packages
+    }
+
+    /// Authenticated consumer identity recorded with this round.
+    pub fn publication_context(&self) -> Option<&lash_vocabulary::package::PublicationContext> {
+        self.packages.consumer.as_ref()
     }
 
     /// This context with `pages` as where the session's committed

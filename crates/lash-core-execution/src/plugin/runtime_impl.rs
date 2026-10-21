@@ -9,6 +9,7 @@ use super::*;
 
 #[derive(Clone)]
 pub struct PluginHost {
+    pub(super) package_namespace: Arc<super::packages::HostPackageNamespace>,
     data_limits: crate::runtime::RuntimeDataLimits,
     prompt_render_pool: Option<Arc<super::prompt::PromptRenderPool>>,
     trace_runtime: crate::trace::TraceRuntime,
@@ -183,6 +184,7 @@ impl PluginHost {
         let extensions = PluginExtensions::default();
         let config_registry = Arc::new(std::sync::OnceLock::new());
         Self {
+            package_namespace: Arc::new(super::packages::HostPackageNamespace::default()),
             data_limits: crate::runtime::RuntimeDataLimits::standard(),
             prompt_render_pool: None,
             factories: Arc::new(all_factories),
@@ -251,6 +253,7 @@ impl PluginHost {
 
     pub fn isolated_registry(&self) -> Self {
         Self {
+            package_namespace: Arc::clone(&self.package_namespace),
             data_limits: self.data_limits,
             prompt_render_pool: self.prompt_render_pool.clone(),
             factories: Arc::clone(&self.factories),

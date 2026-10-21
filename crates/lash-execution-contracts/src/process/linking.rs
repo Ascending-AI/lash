@@ -34,19 +34,6 @@ pub enum ReachSelector {
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-/// An advertisement paired with its trusted publication context.
-pub struct AcceptedAdvertisement {
-    pub context: PublicationContext,
-    pub advertisement: PackageAdvertisement,
-}
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-/// Coherent accepted advertisements recorded for a round/start, with no fleet latest pointer.
-pub struct NamespaceSnapshot {
-    pub advertisements: Vec<AcceptedAdvertisement>,
-}
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 /// Immutable document, selected reach, accepted namespace and trusted admission purpose/context.
 pub struct FulfilRequest {
     pub document: DocumentId,

@@ -86,11 +86,68 @@ impl PromptSectionSource for Owner {
     }
 }
 
+struct InventoryPackages;
+#[async_trait::async_trait]
+impl crate::plugin::packages::PackageProvider for InventoryPackages {
+    async fn hold(
+        &self,
+        _: &lash_core_store::artifact_referrer::ReferrerClaim,
+        _: &lash_vocabulary::package::PackageAdvertisement,
+    ) -> Result<(), lash_execution_contracts::process::linking::EnginePortError> {
+        Ok(())
+    }
+
+    fn roots(&self) -> BTreeSet<lash_vocabulary::Segment> {
+        Default::default()
+    }
+    fn advertise(
+        &self,
+        _: &OwnerConfigView,
+        _: &lash_vocabulary::package::PublicationContext,
+    ) -> Result<Vec<crate::plugin::packages::PackageContribution>, PluginError> {
+        Ok(Vec::new())
+    }
+}
+#[async_trait::async_trait]
+impl crate::plugin::packages::DeferredPackageProvider for InventoryPackages {
+    fn validate_grant(
+        &self,
+        grant: &lash_vocabulary::DeferredGrant,
+        registry: RegistryKind,
+    ) -> Result<(), lash_execution_contracts::process::linking::AdmissionRefusal> {
+        Err(
+            lash_execution_contracts::process::linking::AdmissionRefusal::ProviderNotHostable {
+                provider: grant.provider.clone(),
+                registry,
+            },
+        )
+    }
+    async fn resolve(
+        &self,
+        _: &crate::deferred_provider::DeferredResolveContext<'_>,
+        _: &lash_vocabulary::DeferredGrant,
+        _: &lash_vocabulary::QualifiedName,
+    ) -> Result<crate::plugin::packages::DeferredAnswer, crate::plugin::packages::ResolverFault>
+    {
+        Ok(crate::plugin::packages::DeferredAnswer::Unavailable { note: None })
+    }
+}
+
 /// A session plugin that declares one contribution of every callback slot,
 /// every prompt kind, a state reducer and an extension; its provider
 /// `tools`' handle.
 fn every_contribution(reg: &mut PluginRegistrar<Owner>) -> ToolProviderHandle {
     crate::testing::register_inventory_protocol(reg).unwrap();
+    reg.package_provider(
+        crate::tool_provider_key!("packages"),
+        Arc::new(InventoryPackages),
+    )
+    .unwrap();
+    reg.deferred_package_provider(
+        crate::tool_provider_key!("resolver"),
+        Arc::new(InventoryPackages),
+    )
+    .unwrap();
     reg.turn()
         .before(crate::hook_key!("before"), |_, _| {
             Ok(Arc::new(|_| Box::pin(async { Ok(Default::default()) })))

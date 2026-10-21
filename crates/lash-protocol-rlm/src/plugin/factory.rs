@@ -11,6 +11,7 @@ use crate::dialect::{CellDialect, CodeModeDialectServices, SessionDialect};
 
 pub struct RlmProtocolPluginFactory {
     config: RlmProtocolPluginConfig,
+    documents: std::sync::OnceLock<lash_vm_runtime::KernelDocuments>,
     /// The dialects this host has installed, the first being the one a
     /// session it creates records. A session's cells run in the dialect its
     /// record names, whichever of these that is.
@@ -18,7 +19,7 @@ pub struct RlmProtocolPluginFactory {
     workers: lash_vm_client::service::Service,
     /// The library functions the workers were assembled with; `None` is
     /// the embedding lash ships.
-    packages: Option<Arc<lash_kernel_package::HeldPackages>>,
+    library: Option<Arc<lash_vm_client::packages::WorkerLibrary>>,
     /// The host's process preparation owner survives runtime binding.
     process_factory: std::sync::OnceLock<lash_vm_runtime::KernelProcessPluginFactory>,
     #[cfg(test)]
@@ -27,9 +28,6 @@ pub struct RlmProtocolPluginFactory {
     /// stands in for the build before the synthetic successor.
     #[cfg(feature = "synthetic-next")]
     kernel_writes: Option<lash_kernel_doc::KernelVersion>,
-    /// Which package set this host's cells are written under; `None` is
-    /// the node's own (FIG-6918).
-    gate: Option<Arc<dyn super::PackageGate>>,
 }
 
 impl RlmProtocolPluginFactory {
@@ -43,15 +41,15 @@ impl RlmProtocolPluginFactory {
     pub fn new(config: RlmProtocolPluginConfig, dialect: CellDialect) -> Self {
         Self {
             config,
+            documents: std::sync::OnceLock::new(),
             dialects: vec![dialect],
             workers: lash_vm_client::service::Service::default(),
-            packages: None,
+            library: None,
             process_factory: std::sync::OnceLock::new(),
             #[cfg(test)]
             process_factory_preparations: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(feature = "synthetic-next")]
             kernel_writes: None,
-            gate: None,
         }
     }
 
@@ -72,8 +70,8 @@ impl RlmProtocolPluginFactory {
     /// service lowers every cell and hosts every cell's machine.
     pub fn with_worker_service(mut self, workers: lash_vm_client::service::Service) -> Self {
         self.process_factory.take();
-        self.workers = match &self.packages {
-            Some(packages) => workers.with_packages(packages.clone()),
+        self.workers = match &self.library {
+            Some(packages) => workers.with_library(packages.clone()),
             None => workers,
         };
         self
@@ -95,26 +93,11 @@ impl RlmProtocolPluginFactory {
         self
     }
 
-    /// Write this host's cells under the package surface `gate` answers as
-    /// each is lowered: the newest live serving node's own surface whose
-    /// requirements every live serving node meets (FIG-6991). A host whose
-    /// fleet runs one build needs none.
-    #[must_use]
-    pub fn with_package_gate(mut self, gate: Arc<dyn super::PackageGate>) -> Self {
-        self.gate = Some(gate);
-        self
-    }
-
-    /// Whether a package gate is installed.
-    pub fn has_package_gate(&self) -> bool {
-        self.gate.is_some()
-    }
-
     /// Install the same package holdings in the executor and worker pools.
-    pub fn with_packages(mut self, packages: Arc<lash_kernel_package::HeldPackages>) -> Self {
+    pub fn with_library(mut self, packages: Arc<lash_vm_client::packages::WorkerLibrary>) -> Self {
         self.process_factory.take();
-        self.workers = self.workers.with_packages(Arc::clone(&packages));
-        self.packages = Some(packages);
+        self.workers = self.workers.with_library(Arc::clone(&packages));
+        self.library = Some(packages);
         self
     }
 
@@ -123,12 +106,20 @@ impl RlmProtocolPluginFactory {
     /// # Errors
     ///
     /// lash's packages do not assemble: a defect of the build.
-    pub fn packages(
+    pub fn library(
         &self,
-    ) -> Result<Arc<lash_kernel_package::HeldPackages>, lash_vm_runtime::LibraryError> {
-        match &self.packages {
+    ) -> Result<Arc<lash_vm_client::packages::WorkerLibrary>, lash_vm_runtime::LibraryError> {
+        match &self.library {
             Some(packages) => Ok(Arc::clone(packages)),
-            None => lash_vm_runtime::lash_packages(),
+            None => {
+                let release = lash_vm_releases::helper_release()?;
+                lash_vm_client::packages::WorkerLibrary::new(
+                    &release.functions,
+                    release.resolver_roots(),
+                )
+                .map(Arc::new)
+                .map_err(lash_vm_releases::LibraryError::new)
+            }
         }
     }
 
@@ -329,25 +320,14 @@ impl PluginFactory for RlmProtocolPluginFactory {
                     #[cfg(not(feature = "synthetic-next"))]
                     let writes = None;
                     let services = CodeModeDialectServices {
+                        documents: self.documents.get().cloned(),
                         presentation: config.presentation,
                         tool_presentation: config.tool_presentation.clone(),
                         workers: self.workers.clone(),
                         code_renderer: config.code_renderer.clone(),
                         execution_bounds: config.execution_bounds(),
                         channel: config.channel,
-                        kernel: crate::executor::KernelCarry::holding(
-                            self.packages.clone(),
-                            writes,
-                        ),
-                        packages: Some(match &self.gate {
-                            Some(gate) => Arc::clone(gate),
-                            None => {
-                                let held = self
-                                    .packages()
-                                    .map_err(|error| PluginError::Session(error.to_string()))?;
-                                Arc::new(super::OneSet(super::CellPackages::held(&held)))
-                            }
-                        }),
+                        kernel: crate::executor::KernelCarry::holding(self.library.clone(), writes),
                     };
                     let dialect = Arc::new(SessionDialect::new(dialect, services));
 
@@ -412,6 +392,10 @@ impl RlmProtocolPluginFactory {
         &self,
         ctx: &lash_core::plugin::ProcessEngineContributionContext<'_>,
     ) -> Result<lash_core::ProcessEngineRegistration, PluginError> {
+        let _ = self.documents.set(lash_vm_runtime::KernelDocuments::new(
+            ctx.backend().module_artifacts(),
+            ctx.backend().package_store(),
+        ));
         self.process_factory().bind_process_engine(ctx)
     }
 
@@ -506,8 +490,12 @@ mod tests {
                 .load(std::sync::atomic::Ordering::Relaxed),
             1
         );
-        let factory = factory.with_packages(Arc::new(
-            lash_kernel_package::HeldPackages::install([]).expect("empty package set"),
+        let factory = factory.with_library(Arc::new(
+            lash_vm_client::packages::WorkerLibrary::new(
+                &lash_kernel_doc::FunctionRegistry::declarations(),
+                [],
+            )
+            .expect("native declaration library"),
         ));
         for _ in 0..3 {
             let _binding = factory.process_factory();

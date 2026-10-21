@@ -229,24 +229,28 @@ pub mod scenario_contracts;
 #[cfg(feature = "codemode")]
 /// Code mode: kernel execution, worker pools and host boundaries (`codemode`).
 pub mod vm;
-/// Packages (FIG-6917): what a host installs as one keyed artifact of
-/// operations and code beside lash's own six, registered once as a
-/// [`package::HeldPackages`] from which the parent's admission and every
-/// worker's registry are derived. A host builds its package against lash's
-/// (`Package::build(path, release, &sources, &[kernel])`, with `kernel`
-/// from `package::lash_packages` when code mode is enabled), installs both, and gives its workers
-/// natives only, by function identity.
+/// Trusted packages, linked code and explicit host publication.
 #[cfg(any(feature = "codemode", feature = "workflow-view"))]
 pub mod package {
-    /// The rows a node installs before it serves (FIG-6918): for a host
-    /// that runs its own node runner.
-    pub use crate::packages::install_rows;
-    pub use lash_execution_contracts::{CellPackages, PackageGate, WorkflowPackages};
-    pub use lash_kernel_package::*;
-    /// lash's own packages as this build holds them, and why they did not
-    /// assemble: a defect of the build.
     #[cfg(feature = "codemode")]
-    pub use lash_vm_runtime::{LibraryError, lash_packages};
+    pub use crate::packages::ScopedPackagePublisher;
+    pub use lash_core::durable_port::packages::PackageStore;
+    pub use lash_core::plugin::packages::{
+        DeferredAnswer, DeferredPackageProvider, HostPackageNamespace, LinkedProcessStarts,
+        PackageContribution, PackageProvider, PackagePublisher, PublishPackage, ResolverFault,
+        StartLinked,
+    };
+    pub use lash_core_store::packages::{LinkRecord, PackageRecord};
+    pub use lash_core_store::resolutions::ResolutionSeed;
+    pub use lash_core_store::tool_surface::{
+        AdvertisedRoute, ExecutionEnvironment, OperationRoute, RecordedPackages, RouteSource,
+    };
+    pub use lash_execution_contracts::process::linking::{
+        AdmissionRefusal, ContentRef, EnginePortError, FulfilRequest, Fulfilled, LinkInspection,
+        LinkPurpose, ReachSelector,
+    };
+    pub use lash_tool_support::ToolPackageProvider;
+    pub use lash_vocabulary::{claims::*, names::*, package::*};
 }
 /// Standard-lock poison recovery traits for application code.
 pub mod sync {

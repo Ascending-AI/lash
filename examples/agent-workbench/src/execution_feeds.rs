@@ -35,8 +35,8 @@ use lash::process::{
 use lash::sync::MutexExt;
 use lash::tracing::{TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload};
 use lash::workflow::{
-    WorkflowDocument, WorkflowDocumentRead, WorkflowDocumentRef,
-    WorkflowExecutionOverlayAccumulator, WorkflowOverlaySettlement, WorkflowOverlayTerminal,
+    LinkedStart, WorkflowDocument, WorkflowDocumentRead, WorkflowExecutionOverlayAccumulator,
+    WorkflowOverlaySettlement, WorkflowOverlayTerminal,
 };
 use lash::{ProcessId, SessionId};
 
@@ -68,7 +68,7 @@ struct CachedGraph {
     identity: Option<TraceLanguageExecutionIdentity>,
     /// The document the execution names, and the document once lash
     /// answered it.
-    wants: Option<WorkflowDocumentRef>,
+    wants: Option<LinkedStart>,
     document: Option<Arc<WorkflowDocument>>,
     /// The cache's feed count when this graph was last fed.
     fed: u64,
@@ -79,7 +79,7 @@ struct CachedGraph {
 struct CachedProcess {
     following: bool,
     settlement: Option<WorkflowOverlaySettlement>,
-    document: Option<WorkflowDocumentRef>,
+    document: Option<LinkedStart>,
 }
 
 #[derive(Default)]
@@ -90,7 +90,7 @@ struct Cache {
     /// committed settlement and the document its snapshot names together.
     processes: BTreeMap<ProcessId, CachedProcess>,
     /// The documents lash answered, by the reference that names each.
-    documents: BTreeMap<WorkflowDocumentRef, Arc<WorkflowDocument>>,
+    documents: BTreeMap<LinkedStart, Arc<WorkflowDocument>>,
 }
 
 impl Cache {
@@ -167,7 +167,7 @@ impl Cache {
         &mut self,
         source: Source,
         observation: &LanguageExecutionObservation,
-    ) -> Option<WorkflowDocumentRef> {
+    ) -> Option<LinkedStart> {
         let key = observation.execution.graph_key();
         // Steps that arrived before any language observation opened the
         // graph under the process's own key: it is this execution's.
@@ -199,7 +199,7 @@ impl Cache {
     fn step_body_started(
         &mut self,
         observation: &StepBodyStartedObservation,
-    ) -> Option<WorkflowDocumentRef> {
+    ) -> Option<LinkedStart> {
         let process_id = observation.step.process_id.clone();
         let source = Source::Process(process_id.clone());
         // A process runs one execution: its steps belong to the graph its
@@ -220,7 +220,7 @@ impl Cache {
 
     /// Give every graph the document it names, when the cache holds it.
     /// Answers one document some graph names that the cache does not hold.
-    fn attach_documents(&mut self) -> Option<WorkflowDocumentRef> {
+    fn attach_documents(&mut self) -> Option<LinkedStart> {
         let mut missing = None;
         for graph in self.graphs.values_mut() {
             if graph.document.is_some() {
@@ -233,7 +233,7 @@ impl Cache {
                 Some(document) => {
                     graph
                         .accumulator
-                        .set_document(lash::workflow::WorkflowOverlayDocument::of(document));
+                        .set_document(lash::workflow::workflow_overlay_document(document));
                     graph.document = Some(Arc::clone(document));
                 }
                 None => missing = Some(wants.clone()),
@@ -266,7 +266,7 @@ impl Cache {
     }
 
     /// The snapshot of `process_id` names the document it runs.
-    fn names_document(&mut self, process_id: &ProcessId, reference: WorkflowDocumentRef) {
+    fn names_document(&mut self, process_id: &ProcessId, reference: LinkedStart) {
         let source = Source::Process(process_id.clone());
         for graph in self.graphs.values_mut() {
             if graph.source == source && graph.wants.is_none() {
@@ -445,7 +445,7 @@ impl ExecutionGraphs {
     /// Read the document `reference` names from lash and hand it to the
     /// graphs that name it. A document lash cannot answer leaves those
     /// graphs drawn from their observations alone.
-    async fn load(&self, state: &AppState, reference: Option<WorkflowDocumentRef>) {
+    async fn load(&self, state: &AppState, reference: Option<LinkedStart>) {
         let Some(reference) = reference else {
             return;
         };
@@ -456,7 +456,7 @@ impl ExecutionGraphs {
             .await
         {
             Ok(WorkflowDocumentRead::Read(read)) => {
-                self.inner.cache.lock_recover().loaded(read.document);
+                self.inner.cache.lock_recover().loaded(*read);
             }
             Ok(unreadable) => {
                 eprintln!("warning: workbench cannot read a workflow document: {unreadable:?}");
@@ -630,7 +630,7 @@ async fn follow_process(graphs: ExecutionGraphs, state: AppState, process_id: Pr
 mod tests {
     use super::*;
     use lash::tracing::{TraceLanguageExecution, TraceRuntimeScope, TraceRuntimeSubject};
-    use lash::workflow::{WorkflowDocumentEntry, WorkflowOverlayOccurrence};
+    use lash::workflow::{StartSelector, WorkflowOverlayOccurrence};
 
     fn observation(
         process_id: &ProcessId,
@@ -659,13 +659,20 @@ mod tests {
     /// each index is a document of its own.
     fn document(index: usize) -> WorkflowDocument {
         let document = lash::workflow::document::parse_document(&format!(
-            "kernel 1\nnumbers float\n\nmain {{\n  do sleep 1\n  finish {index}\n}}\n"
+            "kernel 1\nnumbers float\n\nmain {{\n  do yield\n  finish {index}\n}}\n"
         ))
         .expect("the document parses");
-        WorkflowDocument::derive(
+        let link = lash::package::Link {
+            document: document.identity(),
+            fills: Default::default(),
+        }
+        .identity();
+        WorkflowDocument::entered(
             document,
-            WorkflowDocumentEntry::Main,
-            &lash::workflow::document::FunctionRegistry::default(),
+            LinkedStart {
+                link,
+                selector: StartSelector::Main,
+            },
         )
         .expect("the document links")
     }

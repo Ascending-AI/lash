@@ -135,6 +135,26 @@ impl PluginSpec {
         self
     }
 
+    pub fn with_package_provider(
+        mut self,
+        key: super::ToolProviderKey,
+        provider: Arc<dyn super::packages::PackageProvider>,
+    ) -> Self {
+        let result = self.registrations.package_provider(key, provider);
+        self.admit(result);
+        self
+    }
+
+    pub fn with_deferred_package_provider(
+        mut self,
+        key: super::ToolProviderKey,
+        provider: Arc<dyn super::packages::DeferredPackageProvider>,
+    ) -> Self {
+        let result = self.registrations.deferred_package_provider(key, provider);
+        self.admit(result);
+        self
+    }
+
     pub fn with_tool_provider(
         mut self,
         key: super::ToolProviderKey,

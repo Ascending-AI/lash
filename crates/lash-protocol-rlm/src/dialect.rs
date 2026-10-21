@@ -294,6 +294,7 @@ impl DialectPromptVocabulary {
 /// dialect's kernel package.
 #[derive(Clone)]
 pub(crate) struct CodeModeDialectServices {
+    pub(crate) documents: Option<lash_vm_runtime::KernelDocuments>,
     pub(crate) presentation: crate::RlmPresentationConfig,
     /// The complete config the session's tool presenter was admitted with.
     pub(crate) tool_presentation: serde_json::Value,
@@ -306,9 +307,6 @@ pub(crate) struct CodeModeDialectServices {
     pub(crate) channel: crate::plugin::RlmChannel,
     /// What a stored kernel definition is carried forward with.
     pub(crate) kernel: crate::executor::KernelCarry,
-    /// Which package set a cell is lowered under; `None` is lash's own
-    /// (FIG-6918).
-    pub(crate) packages: Option<Arc<dyn crate::plugin::PackageGate>>,
 }
 
 /// The label under a discovery session's listed tools: whether the listing
@@ -361,34 +359,54 @@ pub(crate) struct SessionDialect {
 }
 
 impl SessionDialect {
-    /// The package set the session's next round is written under: the
-    /// fleet gate's answer now, or lash's own for a host with no gate.
-    /// An empty serving fleet durably installs and answers the writer's
-    /// own set. This round's cell keeps the surface shown in its prompt;
-    /// a later round asks again.
-    ///
-    /// # Errors
-    ///
-    /// The gate's typed `NoCompatibleSnapshot` for a nonempty incompatible
-    /// fleet, or a retryable survey, installation or surface-load failure.
-    pub(crate) async fn round_packages(&self) -> Result<crate::plugin::CellPackages, SessionError> {
-        match &self.services.packages {
-            Some(gate) => gate
-                .writable()
-                .await
-                .map_err(|error| SessionError::Plugin(error.into())),
-            None => lash_vm_runtime::lash_packages()
-                .map_err(|error| SessionError::Protocol(error.to_string()))
-                .map(|held| crate::plugin::CellPackages::held(&held)),
+    pub(crate) async fn package_surface(
+        &self,
+        packages: &lash_core_store::tool_surface::RecordedPackages,
+    ) -> Result<Option<String>, SessionError> {
+        use lash_vocabulary::package::*;
+        if packages.snapshot.advertisements.is_empty() {
+            return Ok(None);
         }
-    }
-
-    /// The code exports of `packages`, the round's package surface, in the
-    /// session's dialect's spelling (§2.3, P3): `None` when the set
-    /// exports no code.
-    pub(crate) fn package_surface(&self, packages: &crate::plugin::CellPackages) -> Option<String> {
-        let surface = crate::package_surface::render(&packages.view(), self.language().spelling());
-        (!surface.is_empty()).then_some(surface)
+        let Some(documents) = &self.services.documents else {
+            if packages.snapshot.advertisements.iter().any(|accepted| matches!(&accepted.advertisement, PackageAdvertisement::Enumerated(package) if package.members.values().any(|member| matches!(member.kind, MemberKind::Export {..})))) {
+                return Err(SessionError::Plugin(lash_execution_contracts::PluginError::Package(Box::new(lash_execution_contracts::process::linking::EnginePortError::Unavailable { message: "package code documentation has no runtime document provider".into() }))));
+            }
+            return Ok(None);
+        };
+        let attachment = Attachment {
+            members: Default::default(),
+            packages: packages
+                .snapshot
+                .advertisements
+                .iter()
+                .filter_map(|accepted| match &accepted.advertisement {
+                    PackageAdvertisement::Enumerated(package) => Some(package.path.clone()),
+                    _ => None,
+                })
+                .collect(),
+            deferred: Default::default(),
+        };
+        let context = packages.consumer.clone().ok_or_else(|| {
+            SessionError::Plugin(lash_execution_contracts::PluginError::Package(Box::new(
+                lash_execution_contracts::process::linking::EnginePortError::Unavailable {
+                    message: "round has no authenticated package consumer context".into(),
+                },
+            )))
+        })?;
+        let namespaces = documents
+            .namespace(&lash_vm_runtime::WorkflowEnvironmentRequest {
+                snapshot: packages.snapshot.clone(),
+                context,
+                attachment,
+            })
+            .await
+            .map_err(|error| {
+                SessionError::Plugin(lash_execution_contracts::PluginError::Package(Box::new(
+                    error,
+                )))
+            })?;
+        let text = crate::package_surface::render(&namespaces, self.language().spelling());
+        Ok((!text.is_empty()).then_some(text))
     }
 
     pub(crate) fn read_only_variables_prompt(
@@ -421,6 +439,7 @@ impl SessionDialect {
             reserved_names: Vec::new(),
             events: Arc::default(),
             services: CodeModeDialectServices {
+                documents: None,
                 workers: lash_vm_client::service::Service::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
                 code_renderer: Default::default(),
@@ -428,7 +447,6 @@ impl SessionDialect {
                 presentation: crate::RlmPresentationConfig::standard(),
                 tool_presentation,
                 kernel: crate::executor::KernelCarry::default(),
-                packages: None,
             },
         }
     }
@@ -859,7 +877,6 @@ impl DialectSession {
                 channel: self.services.channel,
                 code_renderer: self.services.code_renderer.clone(),
                 prompts: self.dialect.prompts(),
-                packages: self.services.packages.clone(),
                 kernel: self.services.kernel.clone(),
             },
             session_projected_bindings,
@@ -964,7 +981,10 @@ impl DialectSession {
     /// earlier cell wrote.
     /// Notes that the round's prompt shows `packages`: the round's cell is
     /// written under it.
-    pub(crate) fn shows_packages(&mut self, packages: crate::plugin::CellPackages) {
+    pub(crate) fn shows_packages(
+        &mut self,
+        packages: lash_core_store::tool_surface::RecordedPackages,
+    ) {
         self.state.shows_packages(packages);
     }
 
@@ -1275,6 +1295,7 @@ mod tests {
 #[cfg(test)]
 pub(crate) fn test_dialect_services() -> CodeModeDialectServices {
     CodeModeDialectServices {
+        documents: None,
         kernel: crate::executor::KernelCarry::default(),
         presentation: crate::RlmPresentationConfig::standard(),
         tool_presentation: crate::dialect::CellDialect::typescript()
@@ -1286,7 +1307,6 @@ pub(crate) fn test_dialect_services() -> CodeModeDialectServices {
         execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
         code_renderer: Default::default(),
         channel: crate::plugin::RlmChannel::Cell,
-        packages: None,
     }
 }
 

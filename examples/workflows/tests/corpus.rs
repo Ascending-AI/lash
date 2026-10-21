@@ -1,26 +1,15 @@
 fn corpus_tool_signatures() -> anyhow::Result<
     std::collections::BTreeMap<lash_kernel_doc::EffectName, lash_kernel_doc::Signature>,
 > {
-    let mut boundary = lash::vm::HostBoundary::new();
-    for tool in workflow_corpus::tools()? {
-        boundary.offer_operation(
-            tool.manifest.operation.clone(),
-            lash::vm::offered_tool(
-                &tool.manifest,
-                &tool.contract,
-                lash::dialect::OfferedSource::Catalog {
-                    tool: tool.manifest.id.to_string(),
-                },
-            ),
-        )?;
-    }
-    Ok(boundary
-        .operations()
-        .iter()
-        .map(|(operation, offered)| {
+    Ok(workflow_corpus::tools()?
+        .into_iter()
+        .map(|definition| {
             (
-                operation.effect_name(),
-                offered.requirement.signature.clone(),
+                definition.operation().effect_name(),
+                lash_vocabulary::json_schema::tool_signature(
+                    &definition.contract.input_schema.canonical,
+                    &definition.contract.output_schema.canonical,
+                ),
             )
         })
         .collect())
@@ -262,12 +251,8 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
         std::collections::BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
     )]);
     let embedding = lash_vm_worker::built_embedding(&Default::default()).unwrap();
-    let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        &effects,
-        &lash_kernel_doc::ContractId::new("1"),
-        &controls,
-    )
-    .expect("the test's effects are operations");
+    let environment_namespaces = workflow_corpus::corpus_namespaces(&effects, &controls)
+        .expect("the test's effects are operations");
     let environment =
         lash_kernel_dialect::Environment::new(embedding.library(), &environment_namespaces);
     let mut failures = Vec::new();
@@ -294,12 +279,21 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
         let mut entry_cleanup = 0;
         let mut deferred_calls = 0;
         let mut pending = if cell {
-            vec![lash_kernel_doc::Node::Block(&document.main)]
+            vec![lash_kernel_doc::Node::Block(
+                document.main.as_ref().unwrap(),
+            )]
         } else {
             document
-                .entries
-                .keys()
-                .map(|name| lash_kernel_doc::Node::Block(&document.functions[name].body))
+                .exports
+                .values()
+                .filter_map(|export| match export {
+                    lash_kernel_doc::Export::Function(function) => {
+                        Some(lash_kernel_doc::Node::Block(
+                            &document.functions[&function.function].body().unwrap().block,
+                        ))
+                    }
+                    _ => None,
+                })
                 .collect()
         };
         while let Some(node) = pending.pop() {
@@ -313,31 +307,36 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
                         },
                     ],
                 ) = attempt.finally.as_deref()
-                && let ActKind::Call(Callee::Library(function)) = &action.kind
+                && let ActKind::Call(Callee::Import(function)) = &action.kind
                 && document
-                    .manifest
-                    .functions
+                    .imports
                     .get(function)
-                    .is_some_and(|name| name.as_str() == "tasks.cancel_all")
+                    .is_some_and(|import| import.name.to_string() == "tasks.cancel_all")
             {
                 entry_cleanup += 2;
                 pending.push(Node::Block(&attempt.body));
                 continue;
             }
             if let Node::Expr(Expr::Act(action)) = node
-                && let ActKind::Spawn(Callee::Library(function)) = &action.kind
+                && let ActKind::Spawn(Callee::Import(function)) = &action.kind
                 && document
-                    .manifest
-                    .functions
+                    .imports
                     .get(function)
-                    .is_some_and(|name| name.as_str() == "py.task.run")
+                    .is_some_and(|import| import.name.to_string() == "py.task.run")
                 && let [Expr::Closure(closure)] = action.args.as_slice()
-                && closure.params.is_empty()
+                && document.functions[&closure.function]
+                    .signature
+                    .params
+                    .is_empty()
                 && let [
                     Stmt::Return {
                         value: Expr::Act(call),
                     },
-                ] = closure.body.as_slice()
+                ] = document.functions[&closure.function]
+                    .body()
+                    .unwrap()
+                    .block
+                    .as_slice()
             {
                 deferred_calls += 1;
                 pending.extend(call.args.iter().map(Node::Expr));
@@ -350,6 +349,11 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
                     lash_kernel_doc::Stmt::For { .. } | lash_kernel_doc::Stmt::While { .. }
                 )
             ));
+            if let Node::Expr(lash_kernel_doc::Expr::Closure(closure)) = node {
+                pending.push(Node::Block(
+                    &document.functions[&closure.function].body().unwrap().block,
+                ));
+            }
             pending.extend(node.children());
         }
         println!(
@@ -425,12 +429,8 @@ fn every_typescript_corpus_case_has_source_shaped_statements_and_one_body_per_lo
         lash_kernel_doc::EffectName::new("control.finish").unwrap(),
         std::collections::BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
     )]);
-    let env_namespaces = lash_kernel_dialect::Namespaces::of_effects(
-        &effects,
-        &lash_kernel_doc::ContractId::new("1"),
-        &controls,
-    )
-    .expect("the test's effects are operations");
+    let env_namespaces = workflow_corpus::corpus_namespaces(&effects, &controls)
+        .expect("the test's effects are operations");
     let env = lash_kernel_dialect::Environment::new(embedding.library(), &env_namespaces);
     let mut failures = Vec::new();
     let sources = [
@@ -544,13 +544,21 @@ fn every_typescript_corpus_case_has_source_shaped_statements_and_one_body_per_lo
         )
         .unwrap();
         let mut pending: Vec<_> = if cell {
-            vec![Node::Block(&lowered.document.main)]
+            vec![Node::Block(lowered.document.main.as_ref().unwrap())]
         } else {
             lowered
                 .document
-                .entries
-                .keys()
-                .map(|name| Node::Block(&lowered.document.functions[name].body))
+                .exports
+                .values()
+                .filter_map(|export| match export {
+                    lash_kernel_doc::Export::Function(function) => Some(Node::Block(
+                        &lowered.document.functions[&function.function]
+                            .body()
+                            .unwrap()
+                            .block,
+                    )),
+                    _ => None,
+                })
                 .collect()
         };
         let (mut statements, mut loops) = (0, 0);
@@ -561,15 +569,18 @@ fn every_typescript_corpus_case_has_source_shaped_statements_and_one_body_per_lo
                     Stmt::Return {
                         value: lash_kernel_doc::Expr::Act(action),
                     },
-                ] = closure.body.as_slice()
-                && let lash_kernel_doc::ActKind::Call(lash_kernel_doc::Callee::Library(function)) =
+                ] = lowered.document.functions[&closure.function]
+                    .body()
+                    .unwrap()
+                    .block
+                    .as_slice()
+                && let lash_kernel_doc::ActKind::Call(lash_kernel_doc::Callee::Import(function)) =
                     action.kind
                 && lowered
                     .document
-                    .manifest
-                    .functions
+                    .imports
                     .get(&function)
-                    .is_some_and(|name| name.as_str() == "ts.promise.start")
+                    .is_some_and(|import| import.name.to_string() == "ts.promise.start")
                 && matches!(action.args.first(), Some(lash_kernel_doc::Expr::Closure(_)))
             {
                 adapters += 1;
@@ -581,6 +592,14 @@ fn every_typescript_corpus_case_has_source_shaped_statements_and_one_body_per_lo
                 node,
                 Node::Stmt(Stmt::For { .. } | Stmt::While { .. })
             ));
+            if let Node::Expr(lash_kernel_doc::Expr::Closure(closure)) = node {
+                pending.push(Node::Block(
+                    &lowered.document.functions[&closure.function]
+                        .body()
+                        .unwrap()
+                        .block,
+                ));
+            }
             pending.extend(node.children());
         }
         // These are reviewed source counts and measured statement counts,

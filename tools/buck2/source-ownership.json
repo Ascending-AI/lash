@@ -730,6 +730,7 @@
     "unit_test_sources": [
       "src/cell.rs",
       "src/lib.rs",
+      "src/namespace.rs",
       "src/printed.rs",
       "src/readable.rs"
     ],
@@ -1116,11 +1117,9 @@
   },
   "examples/dataframe": {
     "compile_data": [
-      "dataframe.kernel",
-      "dataframe.surface",
-      "dataframe.labels.json",
-      "wordcount.ts",
-      "wordcount.py"
+      "df.ts",
+      "cell.ts",
+      "nightly.ts"
     ]
   }
 }

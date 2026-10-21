@@ -119,8 +119,8 @@ impl Dialect {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnvironmentView {
-    /// Each effect a document may perform, with its signature.
-    pub effects: Value,
+    /// Accepted public package members and operation signatures used for source authoring.
+    pub namespaces: Value,
     /// Each library function by name, with its identity.
     pub functions: BTreeMap<String, String>,
 }

@@ -10,12 +10,14 @@ use lash_kernel_check::{Environment as Checker, WorkflowDocument};
 use lash_kernel_dialect::{CellEnvironment, Environment, Lowered, Mode, PrintOptions};
 use lash_kernel_doc::{
     self as k, Captions, Document, Expr, Name, Node, Site, SourceLanguage, Unit,
-    WorkflowDocumentEntry,
 };
 use lash_kernel_edit::{Draft, Transaction};
 use serde::{Deserialize, Serialize};
 
 mod cell;
+mod namespace;
+use lash_vocabulary::names::{LinkedStart, StartSelector};
+use namespace::FixtureNamespace;
 mod printed;
 mod readable;
 
@@ -191,17 +193,8 @@ pub(crate) fn code_sites(document: &Document) -> Vec<Site> {
         }
     }
     let mut sites = Vec::new();
-    walk(
-        Node::Block(&document.main),
-        Site::new(Unit::Main, vec![]),
-        &mut sites,
-    );
-    for (name, function) in &document.functions {
-        walk(
-            Node::Block(&function.body),
-            Site::new(Unit::Function(name.clone()), vec![]),
-            &mut sites,
-        );
+    for (unit, body) in document.units() {
+        walk(Node::Block(body), Site::new(unit, vec![]), &mut sites);
     }
     sites
 }
@@ -240,6 +233,40 @@ pub fn tools() -> Result<Vec<lash::tools::ToolDefinition>> {
     ])
 }
 
+/// Source-only corpus operation fixtures, projected from explicit Packages.
+pub fn corpus_namespaces(
+    effects: &BTreeMap<k::EffectName, k::Signature>,
+    controls: &BTreeMap<k::EffectName, BTreeSet<lash_kernel_dialect::EffectControl>>,
+) -> Result<lash_kernel_dialect::Namespaces> {
+    let requirements = effects
+        .iter()
+        .map(|(name, signature)| {
+            (
+                name.clone(),
+                k::OperationRequirement::new(signature.clone(), k::ContractId::new("1")),
+            )
+        })
+        .collect();
+    let controls = controls
+        .iter()
+        .map(|(name, kinds)| {
+            let mut controls = lash_vocabulary::TurnControls::none();
+            for kind in kinds {
+                controls = match kind {
+                    lash_kernel_dialect::EffectControl::Finish => {
+                        controls.with_finish(lash_vocabulary::JsonSchema::any())
+                    }
+                    lash_kernel_dialect::EffectControl::SwitchAgentFrame => {
+                        controls.with_switch_agent_frame()
+                    }
+                };
+            }
+            (name.clone(), controls)
+        })
+        .collect();
+    FixtureNamespace::new(requirements, &controls)?.namespaces()
+}
+
 /// Generate review artifacts, checking reproducible import, exact source
 /// reading, SM-ORDER/SM-COVER, closed edit replay and cell crossing structure.
 /// Only entry names and refusal codes are compared between dialects.
@@ -254,28 +281,21 @@ pub fn render(root: &Path) -> Result<BTreeMap<String, String>> {
 )]
 pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<Lifted>)> {
     let mut report = Vec::new();
-    let packages = lash::package::lash_packages()?;
-    let package_view = packages.view();
     let embedding = lash_vm_worker::built_embedding(&Default::default())?;
     let registry = embedding.registry()?;
-    let mut boundary = lash::vm::HostBoundary::new();
-    for tool in tools()? {
-        boundary.offer_operation(
-            tool.manifest.operation.clone(),
-            lash::vm::offered_tool(
-                &tool.manifest,
-                &tool.contract,
-                lash::dialect::OfferedSource::Catalog {
-                    tool: tool.manifest.id.to_string(),
-                },
+    let mut effects = BTreeMap::new();
+    for definition in tools()? {
+        effects.insert(
+            definition.operation().effect_name(),
+            k::OperationRequirement::new(
+                lash_vocabulary::json_schema::tool_signature(
+                    &definition.contract.input_schema.canonical,
+                    &definition.contract.output_schema.canonical,
+                ),
+                definition.contract_id(),
             ),
-        )?;
+        );
     }
-    let mut effects = boundary
-        .operations()
-        .iter()
-        .map(|(operation, offered)| (operation.effect_name(), offered.requirement.clone()))
-        .collect::<BTreeMap<_, _>>();
     // The original source-shape probes name these host effects. They are
     // fixture declarations; the example's offered toolbox stays in tools().
     for name in [
@@ -318,12 +338,12 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
     );
     let controls = BTreeMap::from([(
         k::EffectName::new("control.finish")?,
-        BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
+        lash_vocabulary::TurnControls::finish(lash_vocabulary::JsonSchema::any()),
     )]);
-    let env_namespaces = lash_kernel_dialect::Namespaces::of_requirements(&effects, &controls)?;
+    let namespace = FixtureNamespace::new(effects, &controls)?;
+    let env_namespaces = namespace.namespaces()?;
     let env = Environment::new(embedding.library(), &env_namespaces);
-    let mut checker = Checker::new(registry.as_ref());
-    checker.effects = effects.clone();
+    let checker = Checker::new(registry.as_ref());
     let mut outputs = BTreeMap::new();
     let mut seen = BTreeSet::new();
     for case in catalog(root)? {
@@ -376,8 +396,11 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
             );
             let document = &*lowered.document;
             let entries: Vec<_> = document
-                .entries
-                .keys()
+                .exports
+                .iter()
+                .filter_map(|(name, export)| {
+                    matches!(export, k::Export::Function(_)).then_some(name)
+                })
                 .map(|name| name.as_str().to_owned())
                 .collect();
             ensure!(
@@ -393,27 +416,27 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
                     .context("dialect exceptions must be declared")?,
             )?;
             outputs.insert(format!("{prefix}source-map.{extension}.txt"), map);
-            let declarations = registry.export_declarations();
-            // No parser, live registry or engine is available below this seam:
-            // the same serialized document/declarations a stored read supplies.
             let shipped: Document = serde_json::from_slice(&serde_json::to_vec(document)?)?;
-            let held: k::FunctionDeclarations =
-                serde_json::from_slice(&serde_json::to_vec(&declarations)?)?;
+            let (_, link) = namespace.link(shipped.clone())?;
             let mut kernel = k::print_document(document);
             let mut views = String::new();
             let selected: Vec<_> = if entries.is_empty() {
-                vec![WorkflowDocumentEntry::Main]
+                vec![StartSelector::Main]
             } else {
                 entries
                     .iter()
-                    .map(|name| WorkflowDocumentEntry::Entry {
-                        function: Name::new(name),
-                    })
+                    .map(|name| StartSelector::Export(Name::new(name)))
                     .collect()
             };
             for entry in selected {
-                let checked = WorkflowDocument::derive(shipped.clone(), entry, &held)?;
-                let view = lash_kernel_view::derive(&checked, &package_view)?;
+                let checked = WorkflowDocument::entered(
+                    shipped.clone(),
+                    LinkedStart {
+                        link,
+                        selector: entry,
+                    },
+                )?;
+                let view = lash_kernel_view::derive(&checked)?;
                 writeln!(
                     kernel,
                     "\nunit {:?}: statements={} scopes={} sites={}",
@@ -422,7 +445,7 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
                     view.scopes.len(),
                     code_sites(document).len()
                 )?;
-                views.push_str(&readable::view(&checked, &view, &package_view)?);
+                views.push_str(&readable::view(&checked, &view)?);
                 views.push_str(&readable::captions(&checked, &view, &lowered.captions)?);
             }
             outputs.insert(format!("{prefix}kernel.{extension}.txt"), kernel);
@@ -458,7 +481,7 @@ pub(crate) fn render_with(root: &Path) -> Result<(BTreeMap<String, String>, Vec<
                 outputs.insert(format!("{prefix}edits/1.{extension}.txt"), text);
             }
             if case.mode == CaseMode::Cell {
-                let text = cell::crossing(&lowered, registry.clone())?;
+                let text = cell::crossing(&lowered, registry.clone(), &namespace)?;
                 outputs.insert(format!("{prefix}cell-1.{extension}.txt"), text);
             }
         }
@@ -474,7 +497,7 @@ pub(crate) fn canvas_edit(document: &Document) -> Option<Transaction> {
     let sites = code_sites(document);
     let argument = sites.iter().find(|site| match document.node(site) {
         Some(Node::Expr(Expr::Act(action))) => {
-            matches!(&action.kind, k::ActKind::Perform { .. })
+            matches!(&action.kind, k::ActKind::Call(k::Callee::Import(_)))
                 && action
                     .args
                     .first()
@@ -541,19 +564,14 @@ fn edit(
     #[derive(Serialize, Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Replay {
-        context: BTreeMap<k::EffectName, k::OperationRequirement>,
         transaction: Transaction,
     }
-    let json = serde_json::to_string_pretty(&Replay {
-        context: checker.effects.clone(),
-        transaction,
-    })? + "\n";
+    let json = serde_json::to_string_pretty(&Replay { transaction })? + "\n";
     let replay: Replay = serde_json::from_str(&json)?;
     let mut draft = Draft::open(document.clone())?;
     let applied = draft.apply(&replay.transaction, checker)?;
     let mut repeated = Draft::open(document.clone())?;
-    let mut context = Checker::new(checker.functions);
-    context.effects = replay.context;
+    let context = Checker::new(checker.functions);
     let again = repeated.apply(&replay.transaction, &context)?;
     ensure!(
         draft.document().canonical_bytes() == repeated.document().canonical_bytes()

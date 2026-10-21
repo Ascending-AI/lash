@@ -108,6 +108,10 @@ pub(crate) struct PluginContributions {
     /// Each plugin's pure state reducers, by name (K10).
     pub(crate) state_reducers: BTreeMap<String, BTreeMap<String, super::StateReducer>>,
     pub(crate) tool_providers: Vec<RegisteredProvider<Arc<dyn ToolProvider>>>,
+    pub(crate) package_providers:
+        Vec<RegisteredProvider<Arc<dyn super::packages::PackageProvider>>>,
+    pub(crate) deferred_package_providers:
+        Vec<RegisteredProvider<Arc<dyn super::packages::DeferredPackageProvider>>>,
     /// The readers of the providers whose `Read` tools a cell reads, each
     /// under its provider's identity.
     pub(crate) tool_reads: Vec<RegisteredProvider<Arc<dyn crate::ToolReads>>>,
@@ -164,6 +168,8 @@ impl PluginContributions {
             state_retaining_plugins: _,
             state_reducers: _,
             tool_providers,
+            package_providers,
+            deferred_package_providers,
             tool_reads,
             deferred_provider,
             dispatch_grants: _,
@@ -197,6 +203,11 @@ impl PluginContributions {
             (
                 !tool_providers.is_empty() || deferred_provider.is_some(),
                 CallbackSlot::ToolProvider,
+            ),
+            (!package_providers.is_empty(), CallbackSlot::PackageProvider),
+            (
+                !deferred_package_providers.is_empty(),
+                CallbackSlot::DeferredPackageProvider,
             ),
             (!tool_reads.is_empty(), CallbackSlot::ToolReads),
             (
@@ -973,6 +984,56 @@ impl BoundRegistrar {
 
     pub fn execution(&mut self) -> ExecutionRegistrations<'_> {
         ExecutionRegistrations { reg: self }
+    }
+
+    pub(super) fn add_package_provider(
+        &mut self,
+        key: ToolProviderKey,
+        provider: Arc<dyn super::packages::PackageProvider>,
+    ) -> Result<(), PluginError> {
+        let identity = ToolProviderHandle::new(self.registry, self.owner.clone(), key);
+        if self
+            .contributions
+            .package_providers
+            .iter()
+            .any(|entry| entry.identity == identity)
+        {
+            return Err(PluginError::Registration(format!(
+                "duplicate package provider {identity}"
+            )));
+        }
+        self.contributions
+            .package_providers
+            .push(RegisteredProvider {
+                identity,
+                hook: provider,
+            });
+        Ok(())
+    }
+
+    pub(super) fn add_deferred_package_provider(
+        &mut self,
+        key: ToolProviderKey,
+        provider: Arc<dyn super::packages::DeferredPackageProvider>,
+    ) -> Result<(), PluginError> {
+        let identity = ToolProviderHandle::new(self.registry, self.owner.clone(), key);
+        if self
+            .contributions
+            .deferred_package_providers
+            .iter()
+            .any(|entry| entry.identity == identity)
+        {
+            return Err(PluginError::Registration(format!(
+                "duplicate deferred package provider {identity}"
+            )));
+        }
+        self.contributions
+            .deferred_package_providers
+            .push(RegisteredProvider {
+                identity,
+                hook: provider,
+            });
+        Ok(())
     }
 
     fn add_tool_provider(

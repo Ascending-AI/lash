@@ -11,9 +11,7 @@ fn tools() -> SessionProcessAdminTools {
         lifetime: std::sync::Arc::new(
             lash_execution_contracts::process::lifetime::session_or_starter,
         ),
-        environment: lash_core::runtime::env_policy::policy::refuse(
-            "these laws never reach the environment policy",
-        ),
+        environment: crate::policy::refuse("these laws never reach the environment policy"),
     }
 }
 

@@ -799,99 +799,27 @@ impl Processes {
         }))
     }
 
-    /// Capture the exact environment for a start of a published definition.
-    /// Keeps only the entry's certified called or spawned effects from
-    /// `candidate`, retaining their tool identities, providers and surfaces,
-    /// and preserving the candidate's components, config, model and limits.
-    /// Uses the same capture judgment as model starts. Nothing is published
-    /// or started; publish the returned env before starting the pair.
-    ///
-    /// [`Self::check_link`] and start admission still require LINK-EXACTLY:
-    /// they refuse extra links rather than capturing them.
-    ///
-    /// # Errors
-    ///
-    /// A missing or unreadable definition, uncertified entry effects, or the
-    /// typed [`ProcessEnvRefusal`](lash_core::ProcessEnvRefusal), accessible
-    /// through [`EmbedError::process_env_refusal`].
-    pub async fn capture(
-        &self,
-        definition: &lash_core::ProcessDefinitionId,
-        candidate: &lash_core::ProcessEnv,
-    ) -> Result<lash_core::ProcessEnv> {
-        let engines = &self.core.host_process_engines;
-        let resolved = self
-            .core
-            .host_artifacts()
-            .resolved_definition(definition)
-            .await?
-            .ok_or_else(|| {
-                EmbedError::Runtime(lash_core::RuntimeError::new(
-                    lash_core::RuntimeErrorCode::DefinitionMissing,
-                    format!(
-                        "process definition `{definition}` is not stored: no referrer holds it"
-                    ),
-                ))
-            })?;
-        let payload = resolved.start_payload(&Default::default())?;
-        let refused = |refusal| {
-            EmbedError::Plugin(
-                lash_execution_contracts::plugin_error::PluginError::ProcessEnvRefused { refusal },
-            )
-        };
-        let kind = resolved.draft.engine_kind().as_str();
-        let performed = engines
-            .performed_effects(kind, &payload)
-            .await
-            .map_err(refused)?;
-        engines
-            .capture_env(kind, &payload, &performed, candidate)
-            .await
-            .map_err(refused)
-    }
-
-    /// The link check of a start of the `kind` engine on `payload` under
-    /// `env` (P1): `env` links exactly the effects the payload performs, each
-    /// to a tool that fits it under its policy in `fits` (`Compatible` where
-    /// it states none), and this core's components serve each link with the
-    /// surface it retained. A start checks the same pair under `Compatible`;
-    /// `Exact` is a host's opt-in before it starts. Builds the env's
-    /// components and starts nothing.
-    ///
-    /// # Errors
-    ///
-    /// The pair's typed [`ProcessEnvRefusal`](lash_core::ProcessEnvRefusal).
+    /// Inspect the selected Link and validate its per-use environment through
+    /// the same judgment every process start uses. No policy is chosen here.
     pub async fn check_link(
         &self,
         kind: &str,
-        payload: &serde_json::Value,
+        start: &lash_vocabulary::LinkedStart,
         env: &lash_core::ProcessEnv,
-        fits: &std::collections::BTreeMap<
-            lash_core::EffectName,
-            lash_execution_contracts::process::FitPolicy,
-        >,
-    ) -> Result<()> {
-        let refused = |refusal| {
-            EmbedError::Plugin(
-                lash_execution_contracts::plugin_error::PluginError::ProcessEnvRefused { refusal },
-            )
-        };
+    ) -> Result<lash_vocabulary::claims::ClaimRequirements> {
         let engines = &self.core.host_process_engines;
-        let performed = engines
-            .performed_effects(kind, payload)
-            .await
-            .map_err(refused)?;
+        let inspection = engines.inspect_link(kind, start).await.map_err(|error| {
+            EmbedError::Plugin(lash_execution_contracts::PluginError::Package(Box::new(
+                error,
+            )))
+        })?;
         engines
-            .check_links(
-                kind,
-                payload,
-                &std::sync::Arc::new(env.clone()),
-                &performed,
-                fits,
-            )
-            .await
-            .map_err(refused)?;
-        Ok(())
+            .check_links(&Arc::new(env.clone()), &inspection)
+            .map_err(|error| {
+                EmbedError::Plugin(lash_execution_contracts::PluginError::Package(Box::new(
+                    error,
+                )))
+            })
     }
 
     /// Carry `id` onto the successor pair its host names (D2): the engine

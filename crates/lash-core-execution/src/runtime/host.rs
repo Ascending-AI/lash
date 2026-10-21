@@ -250,6 +250,7 @@ impl DeltaCoalescing {
 
 #[derive(Clone)]
 pub struct RuntimeControlConfig {
+    pub packages: crate::plugin::packages::RecordedPackages,
     /// Readable transcript copies; defaults to the named standard preset.
     pub output_cuts: lash_protocol_types::session_model::RuntimeOutputCuts,
     /// Optional host pool; absence uses the shared standard pool. Every model
@@ -361,6 +362,7 @@ impl RuntimeHostConfig {
                 run_definitions: crate::RunDefinitions::default(),
             },
             control: RuntimeControlConfig {
+                packages: Default::default(),
                 output_cuts: lash_protocol_types::session_model::RuntimeOutputCuts::standard(),
                 prompt_render_pool: None,
                 execution_budgets,

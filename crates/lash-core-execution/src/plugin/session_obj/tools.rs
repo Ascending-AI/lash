@@ -76,6 +76,7 @@ impl PluginSession {
             .map_err(|refusal| PluginError::ToolSurfaceRefused {
                 refusal: Box::new(refusal),
             })?;
+        let surface = surface.with_packages(self.advertised_packages(config)?);
         let catalog = self.surface_catalog(&surface)?;
         Ok(ResolvedToolSurface {
             surface: Arc::new(surface),

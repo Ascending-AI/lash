@@ -282,28 +282,6 @@ impl LashCore {
         backend: Backend,
         factory: crate::rlm::RlmProtocolPluginFactory,
     ) -> LashCoreBuilder {
-        // The node installs and advertises the package code the host
-        // registered, and cells are written under the newest live surface
-        // every live serving node can run (FIG-6993).
-        let factory = match factory.packages() {
-            Ok(packages) => {
-                let hold = Arc::new(crate::packages::NodeInstall::new(packages));
-                // A node built twice over one backend keeps its first
-                // registration; this gate then reads its own set alone.
-                let _ = backend.register_packages(Arc::clone(&hold) as _);
-                if factory.has_package_gate() {
-                    factory
-                } else {
-                    factory.with_package_gate(Arc::new(crate::packages::FleetPackages::new(
-                        backend.clone(),
-                        hold,
-                    )))
-                }
-            }
-            // lash's packages do not assemble: a defect of the build, which
-            // each cell reports when it is lowered.
-            Err(_) => factory,
-        };
         LashCore::builder(backend).protocol_plugin(Arc::new(factory))
     }
 
@@ -344,7 +322,6 @@ impl LashCore {
     /// shuts the core down or drains it, and on its own when its lease is
     /// lost (another node reaped it, or a newer boot of the same owner
     /// replaced it) or the store refused it for good. A permanent package
-    /// installation refusal ends startup with `DurableError::PackageInstallRefused`,
     /// preserving the SQLSTATE; hosts can watch this alongside send outcomes.
     /// A node that went
     /// unrenewed past `self_stop_after` does not stop: it serves again as a
@@ -730,6 +707,7 @@ impl LashCore {
 
 /// Builder for configuring lash core over one [`Backend`].
 pub struct LashCoreBuilder {
+    packages: lash_core_store::tool_surface::RecordedPackages,
     tool_live_policy: lash_core::ToolLivePolicy,
     output_cuts: Option<crate::RuntimeOutputCuts>,
     prompt_render_pool: Option<Arc<lash_core::plugin::prompt::PromptRenderPool>>,
@@ -795,6 +773,13 @@ pub struct LashCoreBuilder {
 }
 
 impl LashCoreBuilder {
+    /// The host's accepted scoped publications and route candidates. Hosts
+    /// retain their exact configured publication roots for this config's life.
+    pub fn packages(mut self, packages: lash_core_store::tool_surface::RecordedPackages) -> Self {
+        self.packages = packages;
+        self
+    }
+
     /// Standard serving preset: this core serves its backend's sessions.
     /// This is the historical product choice, without workload measurements;
     /// `.serve_sessions(false)` selects an observer and producer only.
@@ -819,6 +804,7 @@ impl LashCoreBuilder {
     fn new(backend: Backend) -> Self {
         Self {
             output_cuts: None,
+            packages: Default::default(),
             prompt_render_pool: None,
             protocol_factory: None,
             models: None,
@@ -1235,6 +1221,7 @@ impl LashCoreBuilder {
                 .with_work_limits(core.observation_work_limits),
             )
         });
+        core.control.packages = self.packages.clone();
         core.tool_live = Arc::new(lash_core::ToolLive::new(
             live_replay_store.tool_live_window(),
             process_replay_store.tool_live_window(),
@@ -1284,6 +1271,26 @@ impl LashCoreBuilder {
                 )) as Arc<dyn PluginFactory>
             })
             .collect::<Vec<_>>();
+        #[cfg(feature = "codemode")]
+        {
+            let documents = lash_vm_runtime::KernelDocuments::new(
+                backend.module_artifacts(),
+                backend.package_store(),
+            );
+            plugin_factories.push(Arc::new(lash_vm_runtime::KernelServicesPluginFactory::new(
+                documents.clone(),
+            )));
+            if self
+                .process_components
+                .declaration(lash_vm_runtime::KERNEL_SERVICES_OWNER)
+                .is_none()
+            {
+                self.process_components.register(
+                    Arc::new(lash_vm_runtime::KernelServicesComponent::new(documents)),
+                    lash_vm_runtime::KERNEL_SERVICES_CONFIG,
+                )?;
+            }
+        }
         plugin_factories.extend(self.plugin_stack.into_factories());
         refuse_foreign_backend_factories(
             &backend,
@@ -1328,22 +1335,6 @@ impl LashCoreBuilder {
         let host_process_engines = default_plugin_host
             .install_process_engine_contributions(core.clone(), process_lifecycle_available)?
             .process_engines;
-        // Every builder installs and advertises the code its workers run
-        // before the node starts. RLM may already have registered the
-        // install shared with its gate.
-        #[cfg(feature = "codemode")]
-        if backend.packages().is_none() {
-            let packages = match host_process_engines
-                .document_provider(lash_vm_runtime::LASH_VM_ENGINE_KIND)
-            {
-                Some(provider) => provider.held_packages()?,
-                None => lash_vm_runtime::lash_packages().map_err(|error| {
-                    lash_execution_contracts::PluginError::Registration(error.to_string())
-                })?,
-            };
-            let _ =
-                backend.register_packages(Arc::new(crate::packages::NodeInstall::new(packages)));
-        }
         // What the core's node serves (S7): every callback its installed
         // plugins and process components register, and the config formats
         // its components read. A projection that fails refuses the build,
@@ -1354,13 +1345,30 @@ impl LashCoreBuilder {
         // What its registrations offer running code (FIG-6993): the
         // providers they install and the binding formats each reads.
         let mut offers = installed.offers();
-        offers.extend(
-            &core
-                .process_engines
-                .components()
-                .installed_inventory()
-                .offers(),
-        );
+        let component_offers = core
+            .process_engines
+            .components()
+            .installed_inventory()
+            .offers();
+        offers.providers.extend(component_offers.providers);
+        offers.codecs.extend(component_offers.codecs);
+        offers.callbacks.extend(component_offers.callbacks);
+        offers.components.extend(component_offers.components);
+        for declaration in core.process_engines.components().declarations() {
+            offers.components.extend(
+                declaration
+                    .readable_formats
+                    .iter()
+                    .map(|format| (declaration.id.clone(), *format)),
+            );
+        }
+        for kind in host_process_engines.engine_kinds() {
+            if let Some(provider) = host_process_engines.document_provider(&kind) {
+                let machine = provider.capabilities();
+                offers.machine.natives.extend(machine.natives);
+                offers.machine.kernels.extend(machine.kernels);
+            }
+        }
         serves.extend(
             default_plugin_host
                 .retired_session_plugins()
@@ -1498,6 +1506,12 @@ pub(crate) fn build_plugin_host(
         core.control.execution_budgets.clone(),
         core.tracing.clone(),
     )
+    .with_package_namespace(lash_core::plugin::packages::HostPackageNamespace {
+        domain: lash_vocabulary::package::PublicationDomain(
+            core.backend().binding_identity().to_string(),
+        ),
+        packages: core.control.packages.clone(),
+    })
     .with_prompt_render_pool(core.control.prompt_render_pool.clone())
     .with_data_limits(core.data_limits)
     .with_retired_config_observers(Arc::clone(&core.control.retired_config_observers));

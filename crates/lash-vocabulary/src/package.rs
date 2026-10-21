@@ -183,3 +183,17 @@ pub struct Attachment {
     pub packages: BTreeSet<PackagePath>,
     pub deferred: BTreeSet<PackagePath>,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+/// An advertisement paired with its trusted publication context.
+pub struct AcceptedAdvertisement {
+    pub publication: PublicationRecord,
+    pub advertisement: PackageAdvertisement,
+}
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+/// Coherent accepted advertisements recorded for a round/start, with no fleet latest pointer.
+pub struct NamespaceSnapshot {
+    pub advertisements: Vec<AcceptedAdvertisement>,
+}

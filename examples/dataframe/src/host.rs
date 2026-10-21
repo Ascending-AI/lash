@@ -1,138 +1,214 @@
-//! Host choice: derive attachment from typed requirements before publication.
-use lash::package::{CellPackages, QualifiedOperation};
+//! The host owns IO, publication provenance and process route selection.
+use lash::package::*;
 use lash::process::{HostArtifactPin, HostArtifacts, ProcessEnv};
-use lash::vm::{SurfaceRef, WorkerService};
-use lash::workflow::document::{DocumentBytes, SourceLanguage};
-use lash::workflow::{WorkflowPublication, WorkflowPublish};
-use std::collections::BTreeSet;
+use std::{collections::BTreeMap, sync::Arc};
+
+pub const IO: lash::process::ProcessConfigKey<()> =
+    lash::process::ProcessConfigKey::new("dataframe-io", lash::plugins::FormatVersion::ONE);
+
+pub fn environment_request(
+    packages: &RecordedPackages,
+    context: PublicationContext,
+) -> lash::vm::WorkflowEnvironmentRequest {
+    lash::vm::WorkflowEnvironmentRequest {
+        snapshot: packages.snapshot.clone(),
+        context,
+        attachment: Attachment {
+            members: Default::default(),
+            deferred: Default::default(),
+            packages: packages
+                .snapshot
+                .advertisements
+                .iter()
+                .filter_map(|accepted| match &accepted.advertisement {
+                    PackageAdvertisement::Enumerated(package) => Some(package.path.clone()),
+                    _ => None,
+                })
+                .collect(),
+        },
+    }
+}
 
 pub struct WorkflowCreator {
     pub artifacts: HostArtifacts,
-    pub workers: WorkerService,
-    pub packages: CellPackages,
+    pub workers: lash::vm::WorkerService,
+    pub namespace: RecordedPackages,
     pub environment: ProcessEnv,
+    pub context: PublicationContext,
 }
-
 impl WorkflowCreator {
     pub async fn create(
         &self,
         source: &str,
-        language: SourceLanguage,
+        language: lash::workflow::document::SourceLanguage,
         entry: &str,
         pin: &HostArtifactPin,
-    ) -> Result<WorkflowPublication, String> {
-        let environment = self
+    ) -> Result<LinkedStart, String> {
+        let request = environment_request(&self.namespace, self.context.clone());
+        let names = self
             .artifacts
-            .workflow_environment(&self.environment)
+            .workflow_environment(&request)
             .await
-            .map_err(|e| e.to_string())?
-            .ok_or("no workflow engine")?;
+            .map_err(|error| error.to_string())?
+            .ok_or("workflow engine missing")?;
         let (document, map, _) = self
             .workers
-            .import_workflow(
-                language,
-                source,
-                environment.operations(),
-                SurfaceRef::of(self.packages.digest(), self.packages.stored_wire()),
-                self.packages.surface().selection(),
-                None,
-            )
+            .import_workflow(language, source, names.namespaces(), None)
             .await
-            .map_err(|e| e.to_string())?;
-        let required =
-            lash::workflow::graph::requirements(&document, self.packages.catalog().as_ref());
-        let operations: BTreeSet<_> = required
-            .effects
-            .iter()
-            .chain(required.performs.keys())
-            .filter_map(|effect| QualifiedOperation::from_effect(effect).ok())
-            .collect();
-        let declared = self
-            .packages
-            .surface()
-            .packages()
-            .filter_map(|package| {
-                let names: BTreeSet<_> = operations
-                    .iter()
-                    .filter(|op| &op.package == package.path())
-                    .map(|op| op.name.clone())
-                    .collect();
-                (package.ids().any(|id| required.functions.contains_key(&id)) || !names.is_empty())
-                    .then(|| (package.path().clone(), names))
-            })
-            .collect();
-        match self
-            .artifacts
+            .map_err(|error| error.to_string())?;
+        self.artifacts
             .publish_workflow(
                 pin,
-                &DocumentBytes::from(document),
-                &lash::workflow::document::Name::new(entry),
-                &self.environment,
-                self.packages.declare(declared),
+                &lash::workflow::document::DocumentBytes::from(document),
+                &StartSelector::Export(Name::new(entry)),
+                &request,
                 Some((&map, source)),
             )
             .await
-            .map_err(|e| e.to_string())?
+            .map_err(|error| error.to_string())
+    }
+    pub async fn start(
+        &self,
+        start: LinkedStart,
+        path: &str,
+        key: &str,
+        pin: &HostArtifactPin,
+    ) -> Result<lash::process::ProcessStartReceipt, String> {
+        let env = self
+            .artifacts
+            .link_process_env(&self.environment, &start, &self.namespace, &BTreeMap::new())
+            .await
+            .map_err(|error| error.to_string())?;
+        self.artifacts
+            .start_linked(
+                pin,
+                StartLinked {
+                    start,
+                    args: [("path".into(), serde_json::Value::String(path.into()))].into(),
+                    env,
+                    settings: None,
+                    initial_resolutions: Vec::new(),
+                },
+                key,
+                &environment_request(&self.namespace, self.context.clone()),
+            )
+            .await
+            .map_err(|error| error.to_string())
+    }
+}
+
+#[derive(Clone)]
+struct CsvFiles(Arc<BTreeMap<String, String>>);
+#[lash::async_trait]
+impl lash::tools::StaticToolExecute for CsvFiles {
+    async fn execute(&self, call: lash::tools::ToolCall<'_>) -> lash::tools::ToolAttemptOutcome {
+        match call
+            .args
+            .get("path")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|path| self.0.get(path))
         {
-            WorkflowPublish::Published(published) => Ok(*published),
-            other => Err(format!("{other:?}")),
+            Some(text) => {
+                lash::tools::ToolOutcome::ok(serde_json::Value::String(text.clone())).into()
+            }
+            None => lash::tools::ToolOutcome::failure(lash::tools::ToolFailure::invalid_request(
+                "missing_csv",
+                "the host has no CSV at this path",
+            ))
+            .into(),
         }
     }
 }
 
-pub const DATAFRAME_TOOLS: lash::process::ProcessConfigKey<()> =
-    lash::process::ProcessConfigKey::new("dataframe-host", lash::plugins::FormatVersion::ONE);
-
-/// The provider's process component and links are host configuration, chosen
-/// before publication. The same package holdings go to the workers and engine.
-pub fn build(
+/// `pin` owns all bootstrap/config retention before this function's first
+/// await. The host releases it when it retires this configured library.
+pub async fn build(
     backend: lash::Backend,
     owner: lash::persistence::LeaseOwnerIdentity,
+    pin: &HostArtifactPin,
+    files: BTreeMap<String, String>,
 ) -> Result<(lash::LashCore, WorkflowCreator), String> {
-    use std::sync::Arc;
-    let packages = crate::packages()?;
-    let workers = WorkerService::default().with_packages(packages.clone());
-    let component = lash::plugins::StaticPluginFactory::new(
-        lash::plugins::PluginDeclaration::initial(DATAFRAME_TOOLS.component()),
-        lash::plugins::PluginSpec::new().with_tool_provider(
-            lash::tool_provider_key!("runner"),
-            Arc::new(crate::runner::Runner),
-        ),
-    )
-    .as_component(DATAFRAME_TOOLS.format())
-    .map_err(|e| e.to_string())?;
-    let provider = DATAFRAME_TOOLS.tool_provider(lash::tool_provider_key!("runner"));
-    let environment = crate::runner::definitions()
-        .map_err(|e| e.to_string())?
-        .iter()
-        .fold(
-            ProcessEnv::builder(lash::MaxToolCalls::new(64)).component(DATAFRAME_TOOLS, &()),
-            |env, tool| env.link_tool(provider.clone(), tool),
-        )
+    let tool = lash::tools::ToolDefinition::raw("example:read_csv", "io.read_csv", "Read one host-authorized CSV.", serde_json::json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}), serde_json::json!({"type":"string"})).map_err(|error| error.to_string())?
+        .with_execution(std::time::Duration::from_secs(30)).with_execution_policy(lash::tools::ExecutionPolicy::repeatable(std::num::NonZeroU32::MIN, 0, 0));
+    let provider: Arc<dyn lash::tools::ToolProvider> = Arc::new(
+        lash::tools::StaticToolProvider::new(vec![tool], CsvFiles(Arc::new(files))),
+    );
+    let package_provider = Arc::new(ToolPackageProvider::new(
+        IO.component(),
+        lash::tool_provider_key!("io"),
+        [Segment::new("io").unwrap()].into(),
+        provider.clone(),
+    ));
+    let spec = lash::plugins::PluginSpec::new()
+        .with_tool_provider(lash::tool_provider_key!("io"), provider.clone())
+        .with_package_provider(lash::tool_provider_key!("io"), package_provider);
+    let session_plugin = Arc::new(lash::plugins::StaticPluginFactory::new(
+        lash::plugins::PluginDeclaration::initial(IO.component()),
+        spec,
+    ));
+    let component = Arc::new(
+        session_plugin
+            .as_component(IO.format())
+            .map_err(|error| error.to_string())?,
+    );
+    let workers = lash::vm::WorkerService::default();
+    let environment = ProcessEnv::builder(lash::MaxToolCalls::new(64))
+        .component(IO, &())
+        .component(lash::vm::KERNEL_SERVICES_CONFIG, &())
         .build()
-        .map_err(|e| e.to_string())?;
-    let core = lash::LashCore::standard_builder(backend)
-        .plugin(Arc::new(
-            lash::vm::KernelProcessPluginFactory::new(
+        .map_err(|error| error.to_string())?;
+    let build_core = |packages| {
+        lash::LashCore::standard_builder(backend.clone())
+            .packages(packages)
+            .plugin(session_plugin.clone())
+            .plugin(Arc::new(lash::vm::KernelProcessPluginFactory::new(
                 workers.clone(),
                 lash::vm::TYPESCRIPT_DIALECT,
                 workers.config().run_bounds,
-            )
-            .with_packages(packages.clone()),
-        ))
-        .process_component(Arc::new(component), DATAFRAME_TOOLS)
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .data_retention(lash::DataRetention::standard())
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
-        .execution_budgets(lash::ExecutionBudgets::recommended())
-        .delta_coalescing(lash::DeltaCoalescing::recommended())
-        .build(owner)
-        .map_err(|e| e.to_string())?;
+            )))
+            .process_component(component.clone(), IO)
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .data_retention(lash::DataRetention::standard())
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+            .execution_budgets(lash::ExecutionBudgets::recommended())
+            .delta_coalescing(lash::DeltaCoalescing::recommended())
+            .build(owner.clone())
+            .map_err(|error| error.to_string())
+    };
+    let bootstrap = build_core(RecordedPackages::default())?;
+    let context = PublicationContext {
+        domain: PublicationDomain(backend.binding_identity().to_string()),
+        scope: PublicationScope::Host,
+        publisher: PublisherInstance("dataframe-library".into()),
+        root: Segment::new("df").unwrap(),
+    };
+    let mut namespace = bootstrap
+        .host_artifacts()
+        .process_namespace(pin, &environment, context.clone())
+        .await
+        .map_err(|error| error.to_string())?;
+    let (package, publication) =
+        crate::publish_library(&backend, pin, &workers, &namespace, context.clone()).await?;
+    let accepted = AcceptedAdvertisement {
+        publication,
+        advertisement: PackageAdvertisement::Enumerated(package),
+    };
+    namespace.snapshot.advertisements.push(accepted.clone());
+    let configured = RecordedPackages {
+        consumer: None,
+        snapshot: NamespaceSnapshot {
+            advertisements: vec![accepted],
+        },
+        routes: Vec::new(),
+    };
+    drop(bootstrap);
+    let core = build_core(configured)?;
     let creator = WorkflowCreator {
         artifacts: core.host_artifacts(),
         workers,
-        packages: CellPackages::held(&packages),
+        namespace,
         environment,
+        context,
     };
     Ok((core, creator))
 }
