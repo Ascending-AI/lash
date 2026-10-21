@@ -407,6 +407,79 @@ struct Contention {
     taken: Vec<(ActorKey, Epoch)>,
 }
 
+fn claimer_config() -> crate::PostgresHostConfig {
+    let mut config = crate::testing::fixture_config();
+    // This law asserts disjoint claims, not the production 500 ms checkout
+    // SLA. A loaded executor can delay SQLx's spawned connection-return task
+    // past that deadline with no transaction or lock holding the connection.
+    // Keep one scheduler connection and the SQL lock/statement guards, but
+    // allow scheduling and checkout to complete within the test's bound.
+    config.roles.scheduler.acquire_timeout = Duration::from_secs(30);
+    config.guards.scheduler.operation_deadline = Some(Duration::from_secs(60));
+    config
+}
+
+/// A delayed executor must not turn the disjoint-claim oracle into a test
+/// of the production checkout deadline. SQLx returns a dropped connection
+/// through a spawned task, even when its backend is idle with no locks.
+#[tokio::test]
+async fn a_hot_set_claimer_survives_executor_delay_while_its_connection_returns() {
+    use std::future::Future;
+    use std::task::Poll;
+
+    let Some((database, storage)) =
+        storage("a_hot_set_claimer_survives_executor_delay_while_its_connection_returns").await
+    else {
+        return;
+    };
+    let store = crate::testing::connect_with(database.url(), &claimer_config())
+        .await
+        .expect("open a claimer's store")
+        .durable_store();
+    let target = actor("delayed-claimer");
+    create(&store, std::slice::from_ref(&target)).await;
+    let lease = node(&store, "delayed-claimer").await;
+    assert_eq!(store.pools.scheduler.options().get_max_connections(), 1);
+    let mut connection = store
+        .pools
+        .scheduler
+        .acquire()
+        .await
+        .expect("hold the sole connection");
+    let pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *connection)
+        .await
+        .expect("identify the held backend");
+    let idle: bool = sqlx::query_scalar(
+        "SELECT state = 'idle' AND xact_start IS NULL AND wait_event_type IS DISTINCT FROM 'Lock'
+         FROM pg_stat_activity WHERE pid = $1",
+    )
+    .bind(pid)
+    .fetch_one(storage.pool())
+    .await
+    .expect("inspect the backend from a separate connection");
+    assert!(idle, "the held connection has no transaction or lock wait");
+
+    let mut claim = Box::pin(store.claim(&lease, 1));
+    std::future::poll_fn(|cx| {
+        assert!(
+            claim.as_mut().poll(cx).is_pending(),
+            "claim awaits the pool permit"
+        );
+        Poll::Ready(())
+    })
+    .await;
+    drop(connection);
+    // This current-thread executor cannot run SQLx's return task during the
+    // pause. No competing SQL transaction or lock can cause this wait.
+    std::thread::sleep(Duration::from_millis(750));
+    let claimed = claim
+        .await
+        .expect("a delayed claimer still takes its actor");
+    assert_eq!(claimed.len(), 1);
+    assert_eq!(claimed[0].actor, target);
+}
+
 /// Contention wrote nothing. Retry the same request or immutable commit;
 /// every other refusal still fails the law, including an ownership fence.
 async fn retry_contended<T, F>(
@@ -462,7 +535,7 @@ async fn sixteen_claimers_on_a_hot_set_take_disjoint_actors() {
     for lease in leases {
         // Each claimer is a node with a pool of its own, as in a deployment.
         // Finish fallible setup before starting the lock-wait sampler.
-        let store = crate::testing::connect(database.url())
+        let store = crate::testing::connect_with(database.url(), &claimer_config())
             .await
             .expect("open a claimer's store")
             .durable_store();
