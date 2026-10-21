@@ -419,6 +419,12 @@ fn transact(
         tx,
         fleet,
         writable: writer.fence.writable(),
+        wake_capture: writer
+            .node_wakes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .map(crate::durable::NodeWakeWriter::capture),
     };
     let mut ran: Vec<Ran> = Vec::with_capacity(members.len());
     let mut kept = 0_usize;

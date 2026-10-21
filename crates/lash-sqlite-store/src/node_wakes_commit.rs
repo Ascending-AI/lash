@@ -110,6 +110,14 @@ impl NodeWakeWriter {
 }
 
 impl Capture {
+    /// The owner revision advanced without changing follow facts. Remove
+    /// its generic revision hint inside this member; mail routing and other
+    /// actors' appended logs remain captured. A refused member still drops
+    /// its whole capture through the writer's normal rollback path.
+    pub(crate) fn unchanged_follow(&self, actor: &ActorKey) {
+        self.lock().appended.remove(actor);
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, Captured> {
         self.0
             .lock()

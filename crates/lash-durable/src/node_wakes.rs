@@ -43,7 +43,7 @@ pub struct WakeBatch {
     pub ready: BTreeSet<NodeId>,
     /// Owned actors that took mail, under the node that owns each.
     pub owned: BTreeMap<NodeId, BTreeSet<ActorKey>>,
-    /// Actors whose event logs grew, and sessions whose owners committed:
+    /// Actors whose event logs grew, and sessions whose follow facts may have changed:
     /// every listening node and observer hears each.
     pub appended: BTreeSet<ActorKey>,
 }
@@ -64,7 +64,7 @@ pub enum NodeWakeEvent {
     Ready,
     /// These actors, owned by this node, took mail.
     Owned(Vec<ActorKey>),
-    /// These actors' event logs grew, or their sessions' owners committed,
+    /// These actors' event logs grew, or their sessions' follow facts may have changed,
     /// on whichever node committed.
     Appended(Vec<ActorKey>),
     /// A key exceeded the wake envelope's byte bound. Poll claimable

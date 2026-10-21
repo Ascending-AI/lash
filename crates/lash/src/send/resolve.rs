@@ -86,16 +86,59 @@ pub(super) fn committed(
 /// resolution to the next: a fork or release can rebind the input, so each
 /// resolution reads its binding afresh.
 pub(super) async fn resolve(parts: &SendParts, subject: &Subject) -> Result<Resolution> {
+    resolve_facts(
+        parts,
+        facts(
+            parts,
+            subject,
+            None,
+            lash_core::facade_support::FollowRead::First,
+        )
+        .await?,
+    )
+    .await
+}
+
+pub(super) async fn facts(
+    parts: &SendParts,
+    subject: &Subject,
+    watch: Option<&mut lash_durable::runner::KeyWatch>,
+    trigger: lash_core::facade_support::FollowRead,
+) -> Result<FollowFacts> {
+    if matches!(trigger, lash_core::facade_support::FollowRead::First) && watch.is_some() {
+        // Form the cohort before claiming its read. Already runnable hint
+        // delivery and sibling subscribers get one executor pass, so the
+        // read consumes the newest hint instead of immediately rereading it.
+        tokio::task::yield_now().await;
+    }
     let subject = match subject {
         Subject::Input(receipt) => FollowSubject::Input(receipt.input_id.clone()),
         Subject::Run(run) => FollowSubject::Run(run.clone()),
     };
-    match parts
-        .store
-        .follow_facts(&subject)
-        .await
-        .map_err(store_error)?
-    {
+    match watch {
+        Some(watch) if !matches!(trigger, lash_core::facade_support::FollowRead::Timer) => {
+            watch
+                .read_follow_facts(&parts.store, &subject, |heard| {
+                    lash_core::facade_support::witness_follow_heard(heard);
+                    lash_core::facade_support::witness_follow_read(trigger);
+                })
+                .await
+        }
+        watch => {
+            // A fallback poll must start a fresh snapshot even if an old
+            // read still has waiters: its hint could have been lost.
+            if let Some(watch) = watch {
+                lash_core::facade_support::witness_follow_heard(watch.seen());
+            }
+            lash_core::facade_support::witness_follow_read(trigger);
+            parts.store.follow_facts(&subject).await
+        }
+    }
+    .map_err(store_error)
+}
+
+pub(super) async fn resolve_facts(parts: &SendParts, facts: FollowFacts) -> Result<Resolution> {
+    match facts {
         FollowFacts::Input(input) => resolve_input(parts, input).await,
         FollowFacts::Run(run) => resolve_run(parts, run).await,
     }

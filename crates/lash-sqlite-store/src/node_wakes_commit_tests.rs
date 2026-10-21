@@ -3,6 +3,79 @@
 use super::*;
 use lash_durable::laws::node_wakes::{Claims, CountingStore};
 
+/// FOLLOW-FACT-CHANGES: an owner revision that changes none of a
+/// follower's facts needs no new snapshot; a park still wakes its readers.
+#[tokio::test]
+async fn unchanged_follow_facts_do_not_publish_another_read_hint() {
+    let tier = SqliteTier::open().await;
+    let store = tier.stores.durable_store();
+    let key = actor("unchanged-follow");
+    create(&store, &key).await;
+    let node = store
+        .register_node(&lash_durable::NodeSpec {
+            node: NodeId::new("follow-owner"),
+            decodes: vec![formats()],
+            serves: Vec::new(),
+            capabilities: Default::default(),
+            ttl_millis: 15_000,
+        })
+        .await
+        .unwrap();
+    let claimed = store.claim(&node, 1).await.unwrap().pop().unwrap();
+    let clear = || {
+        store.conn.write(|tx| {
+            tx.execute("DELETE FROM node_wakes", [])?;
+            Ok(())
+        })
+    };
+    clear().await.unwrap();
+    let tx = store.begin(&key, claimed.epoch).await.unwrap();
+    store.commit(tx, CommitLabel::MODEL_START).await.unwrap();
+    let hints = || {
+        store.conn.read(|c| {
+            c.query_row(
+                "SELECT COUNT(*) FROM node_wakes WHERE node_id IS NULL",
+                [],
+                |row| row.get::<_, u64>(0),
+            )
+        })
+    };
+    assert_eq!(
+        hints().await.unwrap(),
+        0,
+        "an unchanged follow snapshot is not hinted again"
+    );
+    let mut tx = store.begin(&key, claimed.epoch).await.unwrap();
+    tx.give_up(lash_durable::Release::Idle);
+    store
+        .commit(tx, CommitLabel::SESSION_RELEASE)
+        .await
+        .unwrap();
+    assert_eq!(
+        hints().await.unwrap(),
+        0,
+        "an idle release leaves follow facts unchanged"
+    );
+    let mut wake = MailTx::new();
+    wake.wake(key.clone());
+    store
+        .commit_mail(wake, CommitLabel::MAIL_SESSION)
+        .await
+        .unwrap();
+    let claimed = store.claim(&node, 1).await.unwrap().pop().unwrap();
+    let mut tx = store.begin(&key, claimed.epoch).await.unwrap();
+    tx.write(lash_durable::DomainWrite::ActorPark {
+        reason_json: Some("{}".to_owned()),
+    });
+    tx.give_up(lash_durable::Release::Parked);
+    store.commit(tx, CommitLabel::MODEL_START).await.unwrap();
+    assert_eq!(
+        hints().await.unwrap(),
+        1,
+        "the park's changed facts must wake readers"
+    );
+}
+
 /// WAKE-FINAL-FACTS: routing uses the member's final owner, including an
 /// owner change after the mail write, without capture-table reads or writes.
 #[tokio::test]

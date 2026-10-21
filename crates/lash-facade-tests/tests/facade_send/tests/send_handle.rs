@@ -198,6 +198,143 @@ async fn a_settled_follow_resolves_from_one_store_read() -> Result<()> {
     Ok(())
 }
 
+/// FOLLOW-COALESCE: equivalent live readers share an in-flight snapshot;
+/// a settlement hinted after that snapshot still wakes both promptly.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn equivalent_followers_share_a_read_and_keep_a_racing_completion() -> Result<()> {
+    use lash_core::testing::runtime_helpers::LayeredBackend;
+    use lash_core::testing::{Script, StoreOp};
+
+    let directory = tempfile::tempdir().expect("SQLite law directory");
+    let stores = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::open(
+            directory.path().join("follow.db"),
+            lash_sqlite_store::SqliteSynchronous::Full,
+        )
+        .await
+        .expect("SQLite follower law store"),
+    );
+    use lash_execution_contracts::backend::StoreSet as _;
+    let wakes = stores.wake_sink();
+    let reads = Script::new();
+    let backend = lash_conformance::backend_over(stores);
+    let backend = LayeredBackend::over(backend)
+        .map_session_store_factory(|inner| reads.wrap("shared-follower", inner))
+        .into_backend();
+    let read_store = backend.session_store_factory();
+    let release = Arc::new(Notify::new());
+    let calls = Arc::new(AtomicUsize::new(0));
+    let hour = std::time::Duration::from_secs(3600);
+    let replay = Arc::new(lash_core::facade_support::InMemoryLiveReplayStore::new(
+        lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard(),
+    ));
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .serve_test_llm_profile(
+            scripted_provider(Arc::clone(&release), Arc::clone(&calls)),
+            mock_llm_profile_spec(),
+        )
+        .live_replay_store(replay.clone())
+        .observer_pacing(lash::ObserverPacing {
+            follow: lash::PollPacing::new(hour, hour).expect("valid pacing"),
+            ..lash::ObserverPacing::standard()
+        })
+        .build(lash_facade_tests::runtime_lease_owner())?;
+    let fixture = Fixture {
+        core,
+        release,
+        calls,
+    };
+    let session = created_session(&fixture.core, SessionId::fixture("shared-follow"))
+        .await
+        .open()
+        .await?;
+    let run = lash_core::TurnId::from("shared-follow-run");
+    let sent = session.send(TurnInput::text(HELD)).id(run.clone()).await?;
+    provider_called(&fixture, 1).await;
+    let input = sent.input_id().clone();
+    let subject = lash_core::store::FollowSubject::Input(input);
+    let actor = lash_core::durable_port::ActorKey::session("shared-follow").expect("session actor");
+    let mut first_watch = wakes.observe(actor.clone(), None).await;
+    let mut second_watch = wakes.observe(actor.clone(), None).await;
+    let mut third_watch = wakes.observe(actor.clone(), None).await;
+    let store =
+        lash_core::store::SessionStore::new(read_store, SessionId::fixture("shared-follow"))?;
+    let snapshot = reads.on(StoreOp::follow_facts).after().pause();
+    let transferred = reads.on(StoreOp::follow_facts).nth(2).after().pause();
+    {
+        let mut first = Box::pin(first_watch.read_follow_facts(&store, &subject, |_| {}));
+        snapshot.reached_by(&mut first, 1).await;
+        let mut second = Box::pin(second_watch.read_follow_facts(&store, &subject, |_| {}));
+        assert!(futures_util::poll!(&mut second).is_pending());
+        assert_eq!(
+            reads.calls(StoreOp::follow_facts),
+            1,
+            "equivalent existing waiters share one snapshot"
+        );
+        drop(first);
+        snapshot.open_all();
+        transferred.reached_by(&mut second, 1).await;
+        let mut third = Box::pin(third_watch.read_follow_facts(&store, &subject, |_| {}));
+        assert!(futures_util::poll!(&mut third).is_pending());
+        assert_eq!(
+            reads.calls(StoreOp::follow_facts),
+            2,
+            "a dropped initializer transfers one read to its waiter"
+        );
+        // A subscriber arriving after the snapshot began must read afresh,
+        // even while older readers share that snapshot under the same hint.
+        let mut late = wakes.observe(actor.clone(), None).await;
+        late.read_follow_facts(&store, &subject, |_| {}).await?;
+        assert_eq!(
+            reads.calls(StoreOp::follow_facts),
+            3,
+            "late subscribers never inherit an older snapshot"
+        );
+        fixture.release.notify_one();
+        let completion = tokio::time::timeout(std::time::Duration::from_secs(5), sent.outcome())
+            .await
+            .expect("the worker completes while the older snapshot is held")?;
+        assert_eq!(completion.status(), lash::TurnStatus::Answered);
+        wakes.wake(&lash_core::durable_port::Woken {
+            actor: actor.clone(),
+            state: lash_core::durable_port::ActorState::Ready,
+            owner: None,
+        });
+        transferred.open_all();
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            tokio::try_join!(second, third)
+        })
+        .await
+        .expect("shared reads finish promptly")?;
+    }
+    for watch in [&mut second_watch, &mut third_watch] {
+        tokio::time::timeout(std::time::Duration::from_secs(5), watch.changed())
+            .await
+            .expect("a completion after the snapshot must leave its wake pending");
+        let (completed, _) = watch
+            .committed_turn(&subject)
+            .expect("the acknowledged completion survives later hints");
+        assert_eq!(completed, run);
+    }
+    let before_fresh = reads.calls(StoreOp::follow_facts);
+    let mut fresh = wakes.observe(actor, None).await;
+    assert!(
+        fresh.committed_turn(&subject).is_none(),
+        "a new subscriber cannot use an earlier handoff"
+    );
+    fresh.read_follow_facts(&store, &subject, |_| {}).await?;
+    assert_eq!(
+        reads.calls(StoreOp::follow_facts),
+        before_fresh + 1,
+        "handoffs never replace a new subscriber's fresh read"
+    );
+    reads
+        .finish()
+        .expect("the snapshot barriers were exercised");
+    fixture.core.shutdown().await?;
+    Ok(())
+}
+
 /// FIG-6017: settled answers read only run evidence. Session windows are
 /// loaded only when the host explicitly asks for a committed-head view.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

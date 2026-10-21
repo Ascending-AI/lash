@@ -642,4 +642,4 @@ mod tests;
 mod commit;
 #[path = "node_wakes_doorbell.rs"]
 mod doorbell;
-pub(crate) use commit::NodeWakeWriter;
+pub(crate) use commit::{Capture, NodeWakeWriter};

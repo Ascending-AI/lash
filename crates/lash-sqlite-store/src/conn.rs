@@ -338,6 +338,7 @@ pub(crate) struct FencedTx<'c> {
     pub(crate) operational: crate::SqliteOperationalSettings,
     pub(crate) configs: Arc<lash_core_store::store_backend_support::ConfigCache>,
     tx: Transaction<'c>,
+    pub(crate) wake_capture: Option<crate::durable::Capture>,
     fleet: FleetFormat,
     /// The build's writable range for `F`: the fleet is finalized at this
     /// build's epoch when `fleet` is its top.

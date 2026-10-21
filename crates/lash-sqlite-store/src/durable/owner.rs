@@ -182,6 +182,12 @@ pub(super) fn apply_owner(
             }
         }
     };
+    if write.actor().kind() == lash_durable::ActorKind::Session
+        && !write.changes_follow_facts()
+        && let Some(capture) = &tx.wake_capture
+    {
+        capture.unchanged_follow(write.actor());
+    }
     commit(ActorCommit {
         root_leases,
         revision: StateRevision(revision),

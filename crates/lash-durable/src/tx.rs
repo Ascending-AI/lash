@@ -260,6 +260,39 @@ impl ActorTx {
         &self.domain
     }
 
+    /// Whether this commit can change a send follower's authoritative
+    /// snapshot. Phase roots, receipts and tool facts alone leave its input
+    /// binding, terminal, session standing and park unchanged. Classify the
+    /// writes once here, for both local notification and backend capture.
+    #[must_use]
+    pub fn changes_follow_facts(&self) -> bool {
+        self.ack.is_some()
+            || self.release.is_some_and(|release| release != Release::Idle)
+            || self.domain.iter().any(|write| match write {
+                DomainWrite::Turn(turn) => match turn {
+                    TurnWrite::Admit { .. } | TurnWrite::Terminal { .. } => true,
+                    TurnWrite::Advance { .. }
+                    | TurnWrite::AddToolCalls { .. }
+                    | TurnWrite::Answer { .. }
+                    | TurnWrite::Namespaces { .. }
+                    | TurnWrite::Working { .. } => false,
+                },
+                DomainWrite::SessionCommit(_)
+                | DomainWrite::SessionClose(_)
+                | DomainWrite::ActorPark { .. }
+                | DomainWrite::SessionMail(_)
+                // Keep wakes for cross-actor delivery and scope changes.
+                | DomainWrite::Wait(_)
+                | DomainWrite::Process(_) => true,
+                DomainWrite::RunFact(_)
+                | DomainWrite::ExecRoot(_)
+                | DomainWrite::EffectAdmission(_)
+                | DomainWrite::Prompt(_)
+                | DomainWrite::ModelCall(_)
+                | DomainWrite::ModelCallPin(_) => false,
+            })
+    }
+
     /// Write `write` when this transaction commits, after the fence and the
     /// writes recorded before it.
     pub fn write(&mut self, write: DomainWrite) -> &mut Self {

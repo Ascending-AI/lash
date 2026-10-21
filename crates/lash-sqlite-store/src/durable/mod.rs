@@ -121,7 +121,7 @@ pub(super) use node_wake_sql::{
     NODE_WAKE_SESSION_REVISION,
 };
 pub(crate) use node_wakes::TABLES as NODE_WAKES_TABLES;
-pub(crate) use node_wakes::{NodeWakeWriter, SqliteNodeWakes};
+pub(crate) use node_wakes::{Capture, NodeWakeWriter, SqliteNodeWakes};
 
 // The domain tables I0 creates in the durable core database (FIG-5194);
 // each domain's own lane adds its tables beside them.

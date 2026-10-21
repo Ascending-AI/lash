@@ -8,9 +8,10 @@
 //!
 //! Where a listener of this process hears every process's commits (a node
 //! this process serves, or the store set's observer, FIG-7055), the
-//! session's change hints are what wake a resolution: every owner commit of
-//! the session, on whichever node, names the session to every listener. Each
-//! drained hint costs one fresh authoritative read, and a hint that arrives
+//! session's change hints are what wake a resolution: owner commits that can
+//! change follow facts, on whichever node, name the session to every listener.
+//! Equivalent concurrent readers share one authoritative snapshot. Phase-only
+//! writes leave those facts unchanged and need no new read. A hint that arrives
 //! during a read leaves the session dirty for the next. A timed read at the
 //! follow poll's ceiling stays, for a hint that was lost.
 //!
@@ -418,17 +419,14 @@ pub(super) async fn follow(
     loop {
         if resolve_now {
             observation.take_ready(ctx, &mut adoption, tap).await;
-            if let Some(changes) = &mut changes {
-                lash_core::facade_support::witness_follow_heard(changes.seen());
-            }
             let resolution = match changes
                 .as_ref()
                 .and_then(|watch| resolve::committed(watch, subject))
             {
                 Some(committed) => committed,
                 None => {
-                    lash_core::facade_support::witness_follow_read(read);
-                    resolve::resolve(&ctx.parts, subject).await?
+                    let facts = resolve::facts(&ctx.parts, subject, changes.as_mut(), read).await?;
+                    resolve::resolve_facts(&ctx.parts, facts).await?
                 }
             };
             match resolution {
@@ -603,11 +601,9 @@ pub(super) async fn follow(
     }
 }
 
-/// Watch `ctx`'s session for committed changes, when a listener of this
-/// process hears every process's: a node it serves, or the store set's
-/// observer, opened through the node wakes the engine publishes through.
-/// `None` when none listens: the follower then reads on the replay's events
-/// and its polls.
+/// Watch `ctx`'s session and share concurrent reads when a listener hears
+/// every process. Otherwise each resolution starts a fresh read through
+/// the follower's replay-event and polling schedules.
 async fn watch_session(ctx: &SendContext) -> Option<KeyWatch> {
     let actor = lash_durable::ActorKey::session(ctx.parts.session_id.as_str()).ok()?;
     let backend = ctx.parts.effect_host.backend();

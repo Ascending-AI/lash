@@ -4,7 +4,9 @@
 // an actor created ready, one whose mail grew, one an owner release, a reap
 // or a hand-back readied (FIG-7044), a process whose event log grew, and a
 // session whose owner committed, which passes the owner fence and so bumps
-// its state revision (FIG-7055). Capture carries the values with their key.
+// its state revision (FIG-7055). The owner discards that session hint when
+// ActorTx::changes_follow_facts proves its snapshot unchanged (FIG-7111).
+// Capture carries the values with their key.
 // Later updates refresh captured facts; deletion drops a captured actor.
 pub(crate) const NODE_WAKE_CAPTURE: &str = "
 CREATE TEMP TRIGGER lash_capture_created AFTER INSERT ON main.actors

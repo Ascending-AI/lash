@@ -14,9 +14,9 @@
 //! release committed, ready actors it released and processes it started, so
 //! the claim loop claims when work is due instead of finding it by a claim;
 //! and read-only subscribers watch actors' committed changes by key
-//! ([`WakeSink::observe`], [`KeyWatch`]). A session's owner commit is named
-//! to every listening process, so a subscriber in a process that serves no
-//! node hears it through the sink's observer, a listener that holds no lease
+//! ([`WakeSink::observe`], [`KeyWatch`]). A session owner commit that can
+//! change follow facts is named to every listening process. A subscriber
+//! in a process that serves no node hears it through the sink's observer, a listener that holds no lease
 //! (FIG-7055). Every one of them is a hint: it asks for a fresh
 //! authoritative read and answers nothing itself.
 
@@ -26,7 +26,9 @@ use crate::ids::{ActorKey, ActorKind, DurableInstant, NodeId};
 use crate::node_wakes::{NodeWakeEvent, NodeWakeFeed, NodeWakes, WakeBatch};
 use crate::port::{ActorCommit, ActorState, MailCommit, Owner, Woken};
 use crate::tx::{ActorTx, Release};
-use lash_core_store::store::{FollowSubject, RunCommittedOutcome};
+use lash_core_store::store::{
+    FollowFacts, FollowSubject, RunCommittedOutcome, SessionStore, StoreError,
+};
 use lash_protocol_types::{InputId, TurnId};
 use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -371,10 +373,17 @@ impl Hints {
     /// process it started is woken ready (FIG-7044).
     pub fn owner_committed(&self, effects: &CommitEffects, receipt: &ActorCommit) {
         let effects = &effects.0;
-        self.changed(&effects.actor);
-        if effects.actor.kind() == ActorKind::Session {
-            // What a session's followers read moved: every listening
-            // process hears it (FIG-7055).
+        // A listening session follower hears the transport's copy. Sending
+        // a local hint as well makes a read race its echo and read the same
+        // commit twice. The immutable turn terminal still hands over at once.
+        if effects.actor.kind() != ActorKind::Session
+            || (effects.changes_follow_facts && !self.inner.publishing.load(Ordering::Acquire))
+        {
+            self.changed(&effects.actor);
+        }
+        if effects.actor.kind() == ActorKind::Session && effects.changes_follow_facts {
+            // What a session's followers read may have moved: every
+            // listening process hears the same one notification (FIG-7111).
             self.queue(|batch| {
                 batch.appended.insert(effects.actor.clone());
             });
@@ -808,6 +817,7 @@ struct Effects {
     actor: ActorKey,
     release: Option<Release>,
     started: Vec<ActorKey>,
+    changes_follow_facts: bool,
 }
 
 impl CommitEffects {
@@ -828,6 +838,7 @@ impl CommitEffects {
             actor: tx.actor().clone(),
             release: tx.release(),
             started,
+            changes_follow_facts: tx.changes_follow_facts(),
         }))
     }
 }
@@ -842,7 +853,29 @@ struct Watches {
 #[derive(Default)]
 struct Notice {
     generation: u64,
-    settled: Option<Arc<SettledTurn>>,
+    settled: Option<SettledNotice>,
+    reads: Mutex<FollowReads>,
+}
+
+#[derive(Default)]
+struct FollowReads {
+    started: u64,
+    active: Vec<Weak<FollowRead>>,
+}
+
+/// Only concurrent readers retain a snapshot. Neither a later subscriber
+/// nor a fallback poll can reuse it after its readers have gone away.
+struct FollowRead {
+    store: SessionStore,
+    subject: FollowSubject,
+    generation: u64,
+    started: u64,
+    facts: tokio::sync::OnceCell<FollowFacts>,
+}
+
+struct SettledNotice {
+    handed_at: u64,
+    turn: Arc<SettledTurn>,
 }
 
 struct SettledTurn {
@@ -861,8 +894,11 @@ impl Watches {
             .and_then(Weak::upgrade);
         if let Some(sender) = sender {
             sender.send_modify(|notice| {
-                notice.settled = Some(Arc::new(settled));
                 notice.generation += 1;
+                notice.settled = Some(SettledNotice {
+                    handed_at: notice.generation,
+                    turn: Arc::new(settled),
+                });
             });
         }
     }
@@ -879,9 +915,15 @@ impl Watches {
             }
         };
         let changes = sender.subscribe();
-        let seen_through = changes.borrow().generation;
+        let (seen_through, subscribed_reads) = {
+            let notice = changes.borrow();
+            let reads = notice.reads.lock().unwrap_or_else(PoisonError::into_inner);
+            (notice.generation, reads.started)
+        };
         KeyWatch {
+            subscribed_reads,
             seen_through,
+            subscribed_through: seen_through,
             changes,
             _sender: sender,
             every_process: false,
@@ -898,7 +940,6 @@ impl Watches {
         if let Some(sender) = sender {
             sender.send_modify(|notice| {
                 notice.generation += 1;
-                notice.settled = None;
             });
         }
     }
@@ -914,7 +955,6 @@ impl Watches {
         for sender in senders {
             sender.send_modify(|notice| {
                 notice.generation += 1;
-                notice.settled = None;
             });
         }
     }
@@ -956,22 +996,86 @@ pub struct KeyWatch {
     changes: watch::Receiver<Notice>,
     _sender: Arc<watch::Sender<Notice>>,
     seen_through: u64,
+    subscribed_through: u64,
+    subscribed_reads: u64,
     every_process: bool,
 }
 
 impl KeyWatch {
     /// A terminal handed over by the commit that settled this exact subject.
-    /// Missing evidence always falls back to the authoritative store read;
-    /// no mutable binding, park or cancellation is cached here.
+    /// Only watches present for the handoff may use it. Missing evidence
+    /// always falls back to the authoritative store read; no mutable binding,
+    /// park or cancellation is cached here.
     #[must_use]
     pub fn committed_turn(&self, subject: &FollowSubject) -> Option<(TurnId, RunCommittedOutcome)> {
         let notice = self.changes.borrow();
-        let settled = notice.settled.as_ref()?;
+        let handed = notice.settled.as_ref()?;
+        // Only a subscriber present for the handoff can use it. A later
+        // subscriber reads afresh, including after session deletion. For
+        // existing waiters the acknowledged terminal is immutable: later
+        // hints, release or lost-listener recovery cannot retract it.
+        if handed.handed_at <= self.subscribed_through {
+            return None;
+        }
+        let settled = &handed.turn;
         let matches = match subject {
             FollowSubject::Input(input) => settled.inputs.contains(input),
             FollowSubject::Run(run) => run == settled.run,
         };
         matches.then(|| (settled.run.clone(), settled.outcome.clone()))
+    }
+
+    /// Share one in-flight authoritative read with readers of this exact
+    /// store, subject and hint generation, started after this subscription.
+    /// A new subscriber never joins a snapshot taken before it arrived.
+    /// `reading` runs only for a real
+    /// store read, after all currently heard hints are consumed. A hint
+    /// arriving during that read remains dirty for the next resolution.
+    ///
+    /// The watch owns the read registry and readers own its entries. Dropping
+    /// the initializing future releases the OnceCell's initialization claim,
+    /// so another waiter can take it; no spawned task outlives its readers.
+    ///
+    /// # Errors
+    /// The authoritative store read's error. Failed reads are never cached.
+    pub async fn read_follow_facts(
+        &mut self,
+        store: &SessionStore,
+        subject: &FollowSubject,
+        reading: impl FnOnce(u64) + Send,
+    ) -> Result<FollowFacts, StoreError> {
+        let heard = self.seen();
+        let read = {
+            let notice = self.changes.borrow();
+            let mut reads = notice.reads.lock().unwrap_or_else(PoisonError::into_inner);
+            reads.active.retain(|read| read.strong_count() > 0);
+            let existing = reads.active.iter().filter_map(Weak::upgrade).find(|read| {
+                read.started > self.subscribed_reads
+                    && read.generation == self.seen_through
+                    && read.subject == *subject
+                    && read.store.session_id() == store.session_id()
+                    && Arc::ptr_eq(read.store.store(), store.store())
+            });
+            existing.unwrap_or_else(|| {
+                reads.started += 1;
+                let read = Arc::new(FollowRead {
+                    started: reads.started,
+                    store: store.clone(),
+                    subject: subject.clone(),
+                    generation: self.seen_through,
+                    facts: tokio::sync::OnceCell::new(),
+                });
+                reads.active.push(Arc::downgrade(&read));
+                read
+            })
+        };
+        read.facts
+            .get_or_try_init(|| async {
+                reading(heard);
+                store.follow_facts(subject).await
+            })
+            .await
+            .cloned()
     }
 
     /// Wait until the actor may have changed since the subscription, or
