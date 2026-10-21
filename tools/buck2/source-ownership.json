@@ -980,6 +980,7 @@
         "tests/facade_send/tests/mod.rs",
         "tests/facade_send/tests/send_handle.rs",
         "tests/facade_send/tests/send_handle/arrival.rs",
+        "tests/facade_send/tests/send_handle/cross_node.rs",
         "tests/facade_send/tests/send_handle/forsake.rs"
       ]
     }

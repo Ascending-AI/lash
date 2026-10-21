@@ -2,8 +2,10 @@
 
 // Connection-local buffers capture producers without a second dispatch list:
 // an actor created ready, one whose mail grew, one an owner release, a reap
-// or a hand-back readied (FIG-7044), and a process whose event log grew. Each
-// capture sets the writer's capture mark (`CaptureMark::register`).
+// or a hand-back readied (FIG-7044), a process whose event log grew, and a
+// session whose owner committed, which passes the owner fence and so bumps
+// its state revision (FIG-7055). Each capture sets the writer's capture mark
+// (`CaptureMark::register`).
 pub(crate) const NODE_WAKE_CAPTURE: &str = "
 CREATE TEMP TABLE lash_woken (actor TEXT PRIMARY KEY);
 CREATE TEMP TABLE lash_appended (actor TEXT PRIMARY KEY);
@@ -24,6 +26,11 @@ CREATE TEMP TRIGGER lash_capture_readied AFTER UPDATE OF state ON main.actors
 END;
 CREATE TEMP TRIGGER lash_capture_appended AFTER INSERT ON main.process_events BEGIN
     INSERT OR IGNORE INTO lash_appended VALUES ('p/' || NEW.process_id);
+    SELECT lash_wake_captured();
+END;
+CREATE TEMP TRIGGER lash_capture_session_commit AFTER UPDATE OF state_revision ON main.actors
+    WHEN NEW.kind = 'session' BEGIN
+    INSERT OR IGNORE INTO lash_appended VALUES (NEW.actor_key);
     SELECT lash_wake_captured();
 END;
 ";

@@ -210,6 +210,10 @@ impl NodeWakes for LedgerNodeWakes {
         self.inner.listen(lease).await
     }
 
+    async fn observe(&self) -> Result<Box<dyn NodeWakeFeed>, DurableError> {
+        self.inner.observe().await
+    }
+
     async fn liveness(&self) -> Result<Vec<BootLiveness>, DurableError> {
         self.inner.liveness().await
     }

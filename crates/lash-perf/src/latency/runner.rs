@@ -442,6 +442,7 @@ pub(crate) async fn run_case(
     eprintln!("durability-window {} begin", spec.name);
     let work_start = collector.snapshot();
     let wakes_before = lash_core::perf_witness::wakes::counts();
+    let follows_before = lash_core::perf_witness::wakes::follow_counts();
     let started = Instant::now();
     let per_lane = spec.samples.div_ceil(spec.lanes);
     let lane_count = spec.samples.div_ceil(per_lane);
@@ -472,6 +473,7 @@ pub(crate) async fn run_case(
     eprintln!("durability-window {} end", spec.name);
     let mut workers = worker_delta(&work_start, &work_end);
     let wakes = lash_core::perf_witness::wakes::counts().since(wakes_before);
+    let follows = lash_core::perf_witness::wakes::follow_counts().since(follows_before);
     topology.shutdown().await?;
     let mut witness = collector.snapshot();
     if spec.topology == Topology::CrossWorker {
@@ -507,6 +509,7 @@ pub(crate) async fn run_case(
     if spec.topology == Topology::SameProcess {
         report.session_wakes = Some(wakes);
     }
+    report.follow_resolves = Some(follows);
     Ok((report, samples))
 }
 
@@ -1196,6 +1199,11 @@ pub(crate) struct CaseReport {
     /// reached. Same-process cases only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) session_wakes: Option<lash_core::perf_witness::wakes::Counts>,
+    /// What started this process's send followers' resolutions (FIG-7055):
+    /// the first read of each follow, a committed-change hint, a live
+    /// replay event or a timer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) follow_resolves: Option<lash_core::perf_witness::wakes::FollowCounts>,
 }
 
 impl CaseReport {
@@ -1241,6 +1249,7 @@ impl CaseReport {
             cold: (!cold.is_empty()).then(|| phases_of(&cold)),
             warm: (!warm.is_empty()).then(|| phases_of(&warm)),
             session_wakes: None,
+            follow_resolves: None,
         }
     }
 }

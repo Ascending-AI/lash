@@ -24,6 +24,11 @@
 //!   the datagram endpoint its listener bound for the database, so
 //!   a wake between nodes on one machine waits for no poll (FIG-7044). The
 //!   poll stays the fallback for a ring that never came.
+//! - **Observer.** A process that serves no node opens an observer
+//!   ([`NodeWakes::observe`], FIG-7055): a listener of its own that reads
+//!   only the rows every node hears, binds a doorbell endpoint of its own so
+//!   a ring to every node reaches it, and holds no lock: no reaper sees it
+//!   and it fences nothing.
 //! - **Liveness.** The listener holds its boot's liveness lock, a file lock
 //!   beside the database ([`crate::liveness_locks`]), for as long as it
 //!   lives. The kernel drops it when the listener's process dies, however it
@@ -82,6 +87,14 @@ const TAIL: &str = "SELECT COALESCE(MAX(seq), 0) FROM node_wakes";
 /// Node `?2`'s hints and every node's past cursor `?1`, in publish order.
 const PAST: &str = "SELECT seq, actors FROM node_wakes
     WHERE seq > ?1 AND (node_id = ?2 OR node_id IS NULL) ORDER BY seq";
+
+/// Every node's hints past cursor `?1`, in publish order: what an observer
+/// hears.
+const PAST_EVERY_NODE: &str = "SELECT seq, actors FROM node_wakes
+    WHERE seq > ?1 AND node_id IS NULL ORDER BY seq";
+
+/// Numbers this process's observers' doorbell endpoints.
+static OBSERVERS: AtomicU64 = AtomicU64::new(0);
 
 /// The rings of this process's listeners, one per database, so a publish
 /// here wakes them without a poll. Entries are weak: a database nobody
@@ -198,10 +211,10 @@ impl SqliteNodeWakes {
     }
 }
 
-/// One listener session: its boot's lock and its connection, and where its
-/// reads have reached.
+/// One listener session: its boot's lock (an observer holds none) and its
+/// connection, and where its reads have reached.
 struct Session {
-    lock: HeldLock,
+    lock: Option<HeldLock>,
     connection: rusqlite::Connection,
     /// The data version the connection last reported.
     version: i64,
@@ -213,8 +226,9 @@ struct Session {
 struct Opener {
     target: DatabaseTarget,
     locks: LivenessLocks,
-    lock: String,
-    node: String,
+    /// The node's boot lock and the node, for a node's listener; `None` for
+    /// an observer.
+    node: Option<(String, String)>,
     policy: crate::SqliteOperationalSettings,
 }
 
@@ -232,21 +246,9 @@ impl Opener {
     /// so the first poll reads past a cursor that may already include it.
     /// Gives up when `stop` is set.
     fn open(&self, stop: &AtomicBool) -> Result<Session, DurableError> {
-        let deadline = Instant::now() + self.policy.wake_lock_timeout;
-        let lock = loop {
-            match self.locks.try_hold(&self.lock) {
-                Ok(Some(lock)) => break lock,
-                Ok(None) if Instant::now() < deadline && !stop.load(Ordering::Acquire) => {
-                    std::thread::sleep(self.policy.lock_poll);
-                }
-                Ok(None) => {
-                    return Err(unavailable(format!(
-                        "the liveness lock `{}` stayed held for {:?}",
-                        self.lock, self.policy.wake_lock_timeout
-                    )));
-                }
-                Err(error) => return Err(lock_failure(&error)),
-            }
+        let lock = match &self.node {
+            Some((lock, _)) => Some(self.hold(lock, stop)?),
+            None => None,
         };
         let connection = rusqlite::Connection::open_with_flags(
             self.target.read_only_uri(),
@@ -274,15 +276,37 @@ impl Opener {
     }
 }
 
+impl Opener {
+    fn hold(&self, lock: &str, stop: &AtomicBool) -> Result<HeldLock, DurableError> {
+        let deadline = Instant::now() + self.policy.wake_lock_timeout;
+        loop {
+            match self.locks.try_hold(lock) {
+                Ok(Some(held)) => return Ok(held),
+                Ok(None) if Instant::now() < deadline && !stop.load(Ordering::Acquire) => {
+                    std::thread::sleep(self.policy.lock_poll);
+                }
+                Ok(None) => {
+                    return Err(unavailable(format!(
+                        "the liveness lock `{lock}` stayed held for {:?}",
+                        self.policy.wake_lock_timeout
+                    )));
+                }
+                Err(error) => return Err(lock_failure(&error)),
+            }
+        }
+    }
+}
+
 fn data_version(connection: &rusqlite::Connection) -> rusqlite::Result<i64> {
     connection.query_row("PRAGMA data_version", [], |row| row.get(0))
 }
 
 impl Session {
-    /// This node's hints committed since the last poll. `None` when the
-    /// session is lost: its lock file was deleted, or its connection failed.
-    fn poll(&mut self, node: &str) -> Option<Vec<NodeWakeEvent>> {
-        if !self.lock.intact() {
+    /// Node `node`'s hints committed since the last poll, or with none an
+    /// observer's: every node's. `None` when the session is lost: its lock
+    /// file was deleted, or its connection failed.
+    fn poll(&mut self, node: Option<&str>) -> Option<Vec<NodeWakeEvent>> {
+        if self.lock.as_ref().is_some_and(|lock| !lock.intact()) {
             return None;
         }
         let version = data_version(&self.connection).ok()?;
@@ -290,17 +314,26 @@ impl Session {
             return Some(Vec::new());
         }
         self.version = version;
-        let rows = self
-            .connection
-            .prepare_cached(PAST)
-            .and_then(|mut statement| {
-                statement
-                    .query_map(rusqlite::params![self.cursor, node], |row| {
-                        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-                    })?
-                    .collect::<rusqlite::Result<Vec<_>>>()
-            })
-            .ok()?;
+        let row = |row: &rusqlite::Row<'_>| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?));
+        let rows = match node {
+            Some(node) => self
+                .connection
+                .prepare_cached(PAST)
+                .and_then(|mut statement| {
+                    statement
+                        .query_map(rusqlite::params![self.cursor, node], row)?
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                }),
+            None => self
+                .connection
+                .prepare_cached(PAST_EVERY_NODE)
+                .and_then(|mut statement| {
+                    statement
+                        .query_map([self.cursor], row)?
+                        .collect::<rusqlite::Result<Vec<_>>>()
+                }),
+        }
+        .ok()?;
         let mut events = Vec::with_capacity(rows.len());
         for (seq, actors) in rows {
             self.cursor = self.cursor.max(seq);
@@ -312,7 +345,9 @@ impl Session {
     /// End the session: give the lock up and delete its file, and close the
     /// connection.
     fn close(self) {
-        self.lock.release();
+        if let Some(lock) = self.lock {
+            lock.release();
+        }
     }
 }
 
@@ -402,7 +437,7 @@ fn listen_on(
         if stop.load(Ordering::Acquire) {
             break 'serve;
         }
-        if let Some(events) = session.poll(&opener.node) {
+        if let Some(events) = session.poll(opener.node.as_ref().map(|(_, node)| node.as_str())) {
             for event in events {
                 if wakes.send(event).is_err() {
                     break 'serve;
@@ -504,39 +539,23 @@ impl NodeWakes for SqliteNodeWakes {
     }
 
     async fn listen(&self, lease: &NodeLease) -> Result<Box<dyn NodeWakeFeed>, DurableError> {
-        let opener = Opener {
-            target: self.target.clone(),
-            locks: self.locks.clone(),
-            lock: boot_lock(&lease.owner.boot),
-            node: lease.owner.node.as_str().to_owned(),
-            policy: self.store.conn.operational,
-        };
-        let (send, wakes) = mpsc::unbounded_channel();
-        let (opened, open) = oneshot::channel();
-        let lost = Arc::new(AtomicU64::new(0));
-        let stop = Arc::new(AtomicBool::new(false));
-        let feed = SqliteFeed {
-            wakes,
-            lost: Arc::clone(&lost),
-            stop: Arc::clone(&stop),
-            ring: Arc::clone(&self.ring),
-            _answering: self.doorbell.answer(lease.owner.node.as_str()),
-        };
-        let ring = Arc::clone(&self.ring);
-        std::thread::Builder::new()
-            .name("lash-sqlite-wakes".into())
-            .spawn(move || listen_on(&opener, &ring, &send, &lost, &stop, opened))
-            .map_err(|error| {
-                unavailable(format!("a node's wake listener could not start: {error}"))
-            })?;
-        // Dropped before the thread answers (the runner's startup bound
-        // passed), the feed stops the thread, which then ends its session.
-        open.await
-            .unwrap_or_else(|_| Err(unavailable("a node's wake listener ended".to_owned())))?;
+        let node = lease.owner.node.as_str();
+        let feed = self
+            .open_listener(Some((boot_lock(&lease.owner.boot), node.to_owned())), node)
+            .await?;
         // Boots that died or were never released left their lock files; a
         // free lock is the same answer as no file.
         let _ = self.locks.sweep("boot-");
-        Ok(Box::new(feed))
+        Ok(feed)
+    }
+
+    async fn observe(&self) -> Result<Box<dyn NodeWakeFeed>, DurableError> {
+        let endpoint = format!(
+            "observer-{}-{}",
+            std::process::id(),
+            OBSERVERS.fetch_add(1, Ordering::Relaxed)
+        );
+        self.open_listener(None, &endpoint).await
     }
 
     async fn liveness(&self) -> Result<Vec<BootLiveness>, DurableError> {
@@ -551,6 +570,47 @@ impl NodeWakes for SqliteNodeWakes {
         self.store
             .reap_released(self.locks.clone(), reaper, boot)
             .await
+    }
+}
+
+impl SqliteNodeWakes {
+    /// Start a listener on a thread of its own, answering the doorbell
+    /// endpoint `endpoint`: node `node`'s, holding its boot's lock, or with
+    /// none an observer's. Returns once its first session is open.
+    async fn open_listener(
+        &self,
+        node: Option<(String, String)>,
+        endpoint: &str,
+    ) -> Result<Box<dyn NodeWakeFeed>, DurableError> {
+        let opener = Opener {
+            target: self.target.clone(),
+            locks: self.locks.clone(),
+            node,
+            policy: self.store.conn.operational,
+        };
+        let (send, wakes) = mpsc::unbounded_channel();
+        let (opened, open) = oneshot::channel();
+        let lost = Arc::new(AtomicU64::new(0));
+        let stop = Arc::new(AtomicBool::new(false));
+        let feed = SqliteFeed {
+            wakes,
+            lost: Arc::clone(&lost),
+            stop: Arc::clone(&stop),
+            ring: Arc::clone(&self.ring),
+            _answering: self.doorbell.answer(endpoint),
+        };
+        let ring = Arc::clone(&self.ring);
+        std::thread::Builder::new()
+            .name("lash-sqlite-wakes".into())
+            .spawn(move || listen_on(&opener, &ring, &send, &lost, &stop, opened))
+            .map_err(|error| {
+                unavailable(format!("a node's wake listener could not start: {error}"))
+            })?;
+        // Dropped before the thread answers (the runner's startup bound
+        // passed), the feed stops the thread, which then ends its session.
+        open.await
+            .unwrap_or_else(|_| Err(unavailable("a node's wake listener ended".to_owned())))?;
+        Ok(Box::new(feed))
     }
 }
 

@@ -12,7 +12,10 @@
 //! - **Appended logs.** An actor whose event log a commit grew is named to
 //!   every listening node, whoever owns it: a node cannot know which nodes
 //!   follow the log. Each node tells its own followers, which re-read the
-//!   log. A lost hint costs a follower its own slow re-read.
+//!   log. A lost hint costs a follower its own slow re-read. A session whose
+//!   owner committed is named the same way, to every listener and every
+//!   observer, a listener of a process that serves no node (FIG-7055): its
+//!   send followers read the session again.
 //! - **Liveness.** A node's [`NodeWakeFeed`] holds its boot's liveness lock
 //!   for as long as the feed's session lives. A watcher that saw a boot's
 //!   lock held, and later sees it free while the boot is still registered,
@@ -40,7 +43,8 @@ pub struct WakeBatch {
     pub ready: BTreeSet<NodeId>,
     /// Owned actors that took mail, under the node that owns each.
     pub owned: BTreeMap<NodeId, BTreeSet<ActorKey>>,
-    /// Actors whose event logs grew: every listening node hears each.
+    /// Actors whose event logs grew, and sessions whose owners committed:
+    /// every listening node and observer hears each.
     pub appended: BTreeSet<ActorKey>,
 }
 
@@ -60,7 +64,8 @@ pub enum NodeWakeEvent {
     Ready,
     /// These actors, owned by this node, took mail.
     Owned(Vec<ActorKey>),
-    /// These actors' event logs grew, on whichever node committed.
+    /// These actors' event logs grew, or their sessions' owners committed,
+    /// on whichever node committed.
     Appended(Vec<ActorKey>),
     /// A key exceeded the wake envelope's byte bound. Poll claimable
     /// actors and every owned actor's mailbox; their durable rows carry
@@ -102,6 +107,15 @@ pub trait NodeWakes: Send + Sync + 'static {
     /// once both are in place, so a scan that follows misses no hint sent
     /// after it.
     async fn listen(&self, lease: &NodeLease) -> Result<Box<dyn NodeWakeFeed>, DurableError>;
+
+    /// Open an observer: a listener of what every node hears, the actors
+    /// whose logs grew and the sessions whose owners committed, for a
+    /// process that serves no node (FIG-7055). It joins no node's channel,
+    /// holds no lease and no liveness lock, so it grants no execution
+    /// authority and no reaper sees it. Returns once it listens, so a read
+    /// that follows misses no hint sent after it. A lost session reports
+    /// [`NodeWakeEvent::Resubscribed`].
+    async fn observe(&self) -> Result<Box<dyn NodeWakeFeed>, DurableError>;
 
     /// Every registered boot's liveness lock, held or free, now.
     async fn liveness(&self) -> Result<Vec<BootLiveness>, DurableError>;

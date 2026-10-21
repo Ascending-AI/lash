@@ -84,6 +84,7 @@ node_wake_laws!(
     a_released_liveness_lock_is_reaped_at_once_and_fences_the_zombie,
     a_lost_listener_session_resubscribes_holding_its_lock,
     an_appended_log_is_named_to_every_listening_node,
+    a_session_owner_commit_reaches_an_observer_that_holds_no_lease,
     mail_from_another_node_reaches_a_hot_owner_through_its_hint,
     mail_for_an_oversized_key_reaches_a_hot_owner_through_a_store_scan_hint,
     a_dead_node_is_reaped_through_its_lock_long_before_its_lease_lapses,
@@ -370,6 +371,10 @@ impl NodeWakes for ObservedWakes {
             evidence: self.evidence.clone(),
             drop_owned: self.drop_owned,
         }))
+    }
+
+    async fn observe(&self) -> Result<Box<dyn NodeWakeFeed>, DurableError> {
+        self.inner.observe().await
     }
 
     async fn liveness(&self) -> Result<Vec<BootLiveness>, DurableError> {

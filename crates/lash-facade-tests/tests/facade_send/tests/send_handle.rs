@@ -5,6 +5,7 @@ use futures_util::StreamExt;
 use tokio::sync::Notify;
 
 mod arrival;
+mod cross_node;
 mod forsake;
 
 /// FIG-6311: absence is provisional; a recorded refusal retains its reason.

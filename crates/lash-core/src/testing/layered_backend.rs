@@ -162,6 +162,7 @@ impl LayeredBackend {
             definition_store: inner_stores.definition_store(),
             durable: None,
             wakes: None,
+            node_wakes: inner_stores.node_wakes(),
             inner: inner_stores,
             clock: self.clock,
             session_store_factory: self.session_store_factory,
@@ -202,6 +203,7 @@ impl LayeredStores {
             artifact_cleanup: inner.artifact_cleanup(),
             durable: None,
             wakes: None,
+            node_wakes: inner.node_wakes(),
             inner,
         })
     }
@@ -227,6 +229,16 @@ impl LayeredStores {
     /// would be.
     pub fn lose_wakes(mut self) -> Self {
         self.0.wakes = Some(lash_durable::runner::WakeSink::default());
+        self
+    }
+
+    /// Replace the node wakes with `layer` over the inner store set's, when
+    /// it has any.
+    pub fn map_node_wakes(
+        mut self,
+        layer: impl FnOnce(Arc<dyn lash_durable::NodeWakes>) -> Arc<dyn lash_durable::NodeWakes>,
+    ) -> Self {
+        self.0.node_wakes = self.0.node_wakes.map(layer);
         self
     }
 
@@ -337,6 +349,8 @@ struct LayeredStoreSet {
     durable: Option<Arc<dyn lash_durable::DurableStore>>,
     /// The wake sink in place of the inner store set's, when layered.
     wakes: Option<lash_durable::runner::WakeSink>,
+    /// The node wakes, the inner store set's unless layered.
+    node_wakes: Option<Arc<dyn lash_durable::NodeWakes>>,
     binding: StoreBindingId,
     clock: Arc<dyn Clock>,
     session_store_factory: Arc<dyn DeploymentStore>,
@@ -360,7 +374,7 @@ impl StoreSet for LayeredStoreSet {
     }
 
     fn node_wakes(&self) -> Option<Arc<dyn lash_durable::NodeWakes>> {
-        self.inner.node_wakes()
+        self.node_wakes.clone()
     }
 
     fn wake_sink(&self) -> lash_durable::runner::WakeSink {

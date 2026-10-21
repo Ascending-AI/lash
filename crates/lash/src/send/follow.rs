@@ -1,17 +1,29 @@
 //! Following one input or run to its answer (FIG-3600 S5b, D1 §1.3–§1.5).
 //!
-//! A follower subscribes to the session's live replay from its cursor, adopts
-//! the activity of the run that applies its subject, and resolves the
-//! subject from the store on every wake: a commit or queue change on the
-//! observation, and a bounded poll. Events the replay already holds wake one
-//! resolution between them, not one each: a follower that replays a
+//! A follower subscribes to its session's committed changes and to the
+//! session's live replay from its cursor, adopts the activity of the run
+//! that applies its subject, and resolves the subject from the store on
+//! every wake. Answers always come from the store, even when the replay
+//! window is gone or another node executes the run (FIG-4345).
+//!
+//! Where a listener of this process hears every process's commits (a node
+//! this process serves, or the store set's observer, FIG-7055), the
+//! session's change hints are what wake a resolution: every owner commit of
+//! the session, on whichever node, names the session to every listener. Each
+//! drained hint costs one fresh authoritative read, and a hint that arrives
+//! during a read leaves the session dirty for the next. A timed read at the
+//! follow poll's ceiling stays, for a hint that was lost.
+//!
+//! Where none listens (a store that lives in one process, or a host that
+//! publishes no node wakes), the replay's commit and queue changes and a
+//! bounded poll wake the resolutions. Events the replay already holds wake
+//! one resolution between them, not one each: a follower that replays a
 //! session's retained history reads the store once for all of it (FIG-5915).
 //! Once it knows its run, the terminal polling schedule also wakes that
 //! resolution path. Both schedules share the same durable read: no separate
 //! SQL waiter races resolution and gets abandoned when the answer arrives.
 //! Until adoption, a follower with no resident runtime resolves its input at
-//! the poll floor (FIG-3981). Answers always come from the store, even when
-//! the replay window is gone or another node executes the run (FIG-4345).
+//! the poll floor (FIG-3981).
 //!
 //! That a run ended is the store's fact alone: its terminal. A follower that
 //! reads it answers at once, with what the replay holds past its cursor, and
@@ -30,8 +42,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::{FutureExt as _, StreamExt};
-use lash_core::facade_support::LiveReplayGap;
 use lash_core::facade_support::TurnOutcome;
+use lash_core::facade_support::{FollowRead, LiveReplayGap};
 use lash_core::runtime::TurnInputAcceptanceReceipt;
 use lash_core::store::PhysicalTurn;
 use lash_core::{
@@ -39,6 +51,7 @@ use lash_core::{
     SessionCursor, SessionObservationEvent, SessionObservationEventPayload, SessionRevision,
     TurnActivity, TurnEvent, TurnId,
 };
+use lash_durable::runner::KeyWatch;
 use tokio::sync::mpsc;
 
 use super::resolve::{self, Resolution};
@@ -374,6 +387,8 @@ pub(super) async fn follow(
     window: Option<Duration>,
 ) -> Result<Followed> {
     let deadline = window.map(|window| tokio::time::Instant::now() + window);
+    // Subscribed before the first read, so no change after it is missed.
+    let mut changes = watch_session(ctx).await;
     let mut adoption = Adoption::new(subject, ctx.parts.observer_pacing.follow_buffer.get());
     let observed_before = from.observed;
     let mut observation = Observation::subscribe(ctx, from, tap).await;
@@ -384,7 +399,13 @@ pub(super) async fn follow(
     let mut terminal_poll = terminal_pacing.initial();
     let mut terminal_at = None;
     let pacing = ctx.parts.observer_pacing.follow;
-    let mut poll = pacing.initial();
+    // A hinted follower's timed read is loss recovery alone: at the
+    // ceiling, from its last read.
+    let mut poll = if changes.is_some() {
+        pacing.maximum()
+    } else {
+        pacing.initial()
+    };
     // The store poll is due `poll` after the last resolve, and the floor
     // read ticks at the floor, whatever wakes in between: a wake that
     // resolves nothing (another run's activity) delays neither.
@@ -392,10 +413,15 @@ pub(super) async fn follow(
     let mut floor_ticks = tokio::time::interval_at(poll_at, pacing.initial());
     floor_ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut resolve_now = true;
+    let mut read = FollowRead::First;
     let mut last_pass = false;
     loop {
         if resolve_now {
             observation.take_ready(ctx, &mut adoption, tap).await;
+            if let Some(changes) = &mut changes {
+                lash_core::facade_support::witness_follow_heard(changes.seen());
+            }
+            lash_core::facade_support::witness_follow_read(read);
             match resolve::resolve(&ctx.parts, subject).await? {
                 Resolution::OperationSettled { run, outcome } => {
                     adoption.adopt(run.clone(), tap).await;
@@ -467,7 +493,8 @@ pub(super) async fn follow(
                     // A fresh authoritative read satisfies both schedules.
                     // The terminal schedule wakes this same path instead of
                     // starting a competing SQL read inside the select below.
-                    if adoption.run.is_some() {
+                    // A hinted follower hears its run's terminal commit.
+                    if adoption.run.is_some() && changes.is_none() {
                         terminal_at = Some(tokio::time::Instant::now() + terminal_poll);
                     }
                 }
@@ -494,7 +521,7 @@ pub(super) async fn follow(
         resolve_now = true;
         // Wait for the first wake. A follower that resolves at the floor
         // has no slower poll to wait for.
-        let floor = at_floor(ctx, subject, &adoption);
+        let floor = changes.is_none() && at_floor(ctx, subject, &adoption);
         let tick = async {
             if floor {
                 floor_ticks.tick().await;
@@ -522,11 +549,17 @@ pub(super) async fn follow(
             }
         };
         tokio::select! {
+            () = changed(&mut changes) => read = FollowRead::Hint,
             event = next_event(&mut observation.replay) => {
+                read = FollowRead::Event;
+                // A hinted follower's events are activity alone: the
+                // commits they report are hinted.
+                resolve_now = changes.is_none();
                 match event {
                     Some(Ok(event)) => {
                         observation.last_cursor = event.cursor.clone();
-                        resolve_now = adoption.observe(&event, tap).await;
+                        let wakes = adoption.observe(&event, tap).await;
+                        resolve_now &= wakes;
                         if resolve_now {
                             poll = pacing.initial();
                         }
@@ -543,16 +576,45 @@ pub(super) async fn follow(
                 }
             }
             () = terminal_tick => {
+                read = FollowRead::Timer;
                 terminal_poll = terminal_pacing.next(terminal_poll);
             }
-            () = tick => {}
+            () = tick => read = FollowRead::Timer,
             () = polled => {
-                poll = pacing.next(poll);
+                read = FollowRead::Timer;
+                if changes.is_none() {
+                    poll = pacing.next(poll);
+                }
             }
             () = closes => {
+                read = FollowRead::Timer;
                 last_pass = true;
             }
         }
+    }
+}
+
+/// Watch `ctx`'s session for committed changes, when a listener of this
+/// process hears every process's: a node it serves, or the store set's
+/// observer, opened through the node wakes the engine publishes through.
+/// `None` when none listens: the follower then reads on the replay's events
+/// and its polls.
+async fn watch_session(ctx: &SendContext) -> Option<KeyWatch> {
+    let actor = lash_durable::ActorKey::session(ctx.parts.session_id.as_str()).ok()?;
+    let backend = ctx.parts.effect_host.backend();
+    let stores = backend.stores();
+    let transport = (backend.config().settings().notifier == lash_durable::Notifier::AfterCommit)
+        .then(|| stores.node_wakes())
+        .flatten();
+    let watch = stores.wake_sink().observe(actor, transport).await;
+    watch.hears_every_process().then_some(watch)
+}
+
+/// The next change `changes` hears; never, without a watch.
+async fn changed(changes: &mut Option<KeyWatch>) {
+    match changes {
+        Some(changes) => changes.changed().await,
+        None => std::future::pending().await,
     }
 }
 

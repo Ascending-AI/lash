@@ -534,6 +534,10 @@ impl NodeWakes for RecordedNodeWakes {
         self.inner.listen(lease).await
     }
 
+    async fn observe(&self) -> Result<Box<dyn NodeWakeFeed>, DurableError> {
+        self.inner.observe().await
+    }
+
     async fn liveness(&self) -> Result<Vec<BootLiveness>, DurableError> {
         let probed = self.inner.liveness().await;
         if let Ok(boots) = &probed {

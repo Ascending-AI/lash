@@ -2,8 +2,10 @@
 //! the claim that took the session, and each wait an owner ended before its
 //! next pass, by whether a wake hint or the claim poll ended it. A pass that
 //! found work after the poll ended its wait ran on mail no hint reached: the
-//! fallback admitted it. Counters are process-wide and only grow; a reader
-//! takes the difference of two [`counts`].
+//! fallback admitted it. It also counts a send follower's resolutions by
+//! what started each ([`ResolveTrigger`], FIG-7055). Counters are
+//! process-wide and only grow; a reader takes the difference of two
+//! [`counts`] or [`follow_counts`].
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -79,5 +81,79 @@ pub fn counts() -> Counts {
         work_on_poll: WORK_ON_POLL.load(Ordering::Relaxed),
         idle_on_hint: IDLE_ON_HINT.load(Ordering::Relaxed),
         idle_on_poll: IDLE_ON_POLL.load(Ordering::Relaxed),
+    }
+}
+
+static FOLLOW_FIRST: AtomicU64 = AtomicU64::new(0);
+static FOLLOW_ON_HINT: AtomicU64 = AtomicU64::new(0);
+static FOLLOW_ON_EVENT: AtomicU64 = AtomicU64::new(0);
+static FOLLOW_ON_TIMER: AtomicU64 = AtomicU64::new(0);
+static FOLLOW_HEARD: AtomicU64 = AtomicU64::new(0);
+
+/// What started one of a send follower's authoritative resolutions
+/// (FIG-7055).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResolveTrigger {
+    /// The follow's first read.
+    First,
+    /// A committed-change hint for the followed session.
+    Hint,
+    /// An event of this process's live replay.
+    Event,
+    /// A timed read: the poll, the floor, the terminal schedule or the
+    /// window's close.
+    Timer,
+}
+
+/// Send followers' resolutions at one instant, by what started each.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct FollowCounts {
+    pub first: u64,
+    pub on_hint: u64,
+    pub on_event: u64,
+    pub on_timer: u64,
+    /// Changes of the followed sessions that followers' watches heard
+    /// before a read: the hints a hinted follower took.
+    pub heard: u64,
+}
+
+impl FollowCounts {
+    /// What was counted between `earlier` and `self`.
+    #[must_use]
+    pub fn since(self, earlier: Self) -> Self {
+        Self {
+            first: self.first.saturating_sub(earlier.first),
+            on_hint: self.on_hint.saturating_sub(earlier.on_hint),
+            on_event: self.on_event.saturating_sub(earlier.on_event),
+            on_timer: self.on_timer.saturating_sub(earlier.on_timer),
+            heard: self.heard.saturating_sub(earlier.heard),
+        }
+    }
+}
+
+/// Count one follower resolution, by what started it.
+pub fn record_resolve(trigger: ResolveTrigger) {
+    let counter = match trigger {
+        ResolveTrigger::First => &FOLLOW_FIRST,
+        ResolveTrigger::Hint => &FOLLOW_ON_HINT,
+        ResolveTrigger::Event => &FOLLOW_ON_EVENT,
+        ResolveTrigger::Timer => &FOLLOW_ON_TIMER,
+    };
+    counter.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Count `changes` a follower's watch heard before its next read.
+pub fn record_heard(changes: u64) {
+    FOLLOW_HEARD.fetch_add(changes, Ordering::Relaxed);
+}
+
+/// The follower counters now.
+pub fn follow_counts() -> FollowCounts {
+    FollowCounts {
+        first: FOLLOW_FIRST.load(Ordering::Relaxed),
+        on_hint: FOLLOW_ON_HINT.load(Ordering::Relaxed),
+        on_event: FOLLOW_ON_EVENT.load(Ordering::Relaxed),
+        on_timer: FOLLOW_ON_TIMER.load(Ordering::Relaxed),
+        heard: FOLLOW_HEARD.load(Ordering::Relaxed),
     }
 }

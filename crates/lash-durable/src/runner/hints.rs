@@ -14,20 +14,23 @@
 //! release committed, ready actors it released and processes it started, so
 //! the claim loop claims when work is due instead of finding it by a claim;
 //! and read-only subscribers watch actors' committed changes by key
-//! ([`WakeSink::watch`], [`KeyWatch`]). Every one of them is a hint: it asks
-//! for a fresh authoritative read and answers nothing itself.
+//! ([`WakeSink::observe`], [`KeyWatch`]). A session's owner commit is named
+//! to every listening process, so a subscriber in a process that serves no
+//! node hears it through the sink's observer, a listener that holds no lease
+//! (FIG-7055). Every one of them is a hint: it asks for a fresh
+//! authoritative read and answers nothing itself.
 
 use super::Wake;
 use crate::domain::{DomainWrite, ProcessWrite};
-use crate::ids::{ActorKey, DurableInstant, NodeId};
-use crate::node_wakes::WakeBatch;
+use crate::ids::{ActorKey, ActorKind, DurableInstant, NodeId};
+use crate::node_wakes::{NodeWakeEvent, NodeWakeFeed, NodeWakes, WakeBatch};
 use crate::port::{ActorCommit, ActorState, MailCommit, Owner, Woken};
 use crate::tx::{ActorTx, Release};
 use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::Instant;
-use tokio::sync::{Notify, watch};
+use tokio::sync::{Notify, oneshot, watch};
 
 /// Where a store set's producer commits hand what they woke, after the
 /// commit: the session work a host writes beside the session's wake (ADR
@@ -49,6 +52,11 @@ struct WakeSinkInner {
     next: AtomicU64,
     /// The keys read-only subscribers watch.
     watches: Arc<Watches>,
+    /// The observer's stop, while it listens: dropping it ends the
+    /// observer.
+    observer: Mutex<Option<oneshot::Sender<()>>>,
+    /// Serializes opening the observer.
+    opening: tokio::sync::Mutex<()>,
 }
 
 impl WakeSink {
@@ -56,6 +64,8 @@ impl WakeSink {
     #[must_use = "the node hears the sink's wakes only while the attachment lives"]
     pub fn attach(&self, hints: &Hints) -> WakeAttachment {
         let id = self.inner.next.fetch_add(1, Ordering::Relaxed);
+        // The node's listener hears what the observer heard.
+        self.observer().take();
         *hints
             .inner
             .watches
@@ -69,12 +79,59 @@ impl WakeSink {
     }
 
     /// Watch `actor`'s committed changes: what this process's commits
-    /// change and what its serving nodes' listeners hear. Subscribe before
-    /// the authoritative read the watch is to refresh, so no change after
-    /// that read is missed.
-    #[must_use]
-    pub fn watch(&self, actor: ActorKey) -> KeyWatch {
-        self.inner.watches.subscribe(actor)
+    /// change and what its listeners hear of other processes' commits.
+    /// Subscribe before the authoritative read the watch is to refresh, so
+    /// no change after that read is missed.
+    ///
+    /// `transport` is the store set's node wakes, when its nodes publish
+    /// through them. While a node of this process is attached, its listener
+    /// hears every process; while none is, the sink opens its observer
+    /// through `transport`, a listener of what every node hears that holds
+    /// no lease and no liveness lock, and returns once it listens. The
+    /// watch says whether either listens
+    /// ([`KeyWatch::hears_every_process`]).
+    pub async fn observe(
+        &self,
+        actor: ActorKey,
+        transport: Option<Arc<dyn NodeWakes>>,
+    ) -> KeyWatch {
+        let mut watch = self.inner.watches.subscribe(actor);
+        watch.every_process = match transport {
+            Some(transport) => self.listening(transport.as_ref()).await,
+            None => false,
+        };
+        watch
+    }
+
+    /// Whether a listener of this process hears what every node hears: an
+    /// attached node's, or the observer, opened through `transport` now if
+    /// neither listens.
+    async fn listening(&self, transport: &dyn NodeWakes) -> bool {
+        let _opening = self.inner.opening.lock().await;
+        if !self.nodes().is_empty()
+            || self
+                .observer()
+                .as_ref()
+                .is_some_and(|stop| !stop.is_closed())
+        {
+            return true;
+        }
+        let Ok(feed) = transport.observe().await else {
+            // No listener: the subscriber's own fallback reads find the
+            // changes.
+            return false;
+        };
+        let (stop, stopped) = oneshot::channel();
+        tokio::spawn(relay(feed, Arc::downgrade(&self.inner.watches), stopped));
+        *self.observer() = Some(stop);
+        true
+    }
+
+    fn observer(&self) -> std::sync::MutexGuard<'_, Option<oneshot::Sender<()>>> {
+        self.inner
+            .observer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Deliver one actor a committed producer transaction woke.
@@ -292,6 +349,13 @@ impl Hints {
     pub fn owner_committed(&self, effects: &CommitEffects, receipt: &ActorCommit) {
         let effects = &effects.0;
         self.changed(&effects.actor);
+        if effects.actor.kind() == ActorKind::Session {
+            // What a session's followers read moved: every listening
+            // process hears it (FIG-7055).
+            self.queue(|batch| {
+                batch.appended.insert(effects.actor.clone());
+            });
+        }
         match (receipt.state, effects.release) {
             (ActorState::Ready, _) => self.wake(&Woken {
                 actor: effects.actor.clone(),
@@ -764,9 +828,13 @@ impl Watches {
                 sender
             }
         };
+        let changes = sender.subscribe();
+        let seen_through = *changes.borrow();
         KeyWatch {
-            changes: sender.subscribe(),
+            seen_through,
+            changes,
             _sender: sender,
+            every_process: false,
         }
     }
 
@@ -796,21 +864,70 @@ impl Watches {
     }
 }
 
+/// Hand what the observer's `feed` hears to `watches` until `stop` drops
+/// or the watches are gone.
+async fn relay(
+    mut feed: Box<dyn NodeWakeFeed>,
+    watches: Weak<Watches>,
+    mut stop: oneshot::Receiver<()>,
+) {
+    loop {
+        let event = tokio::select! {
+            biased;
+            _ = &mut stop => return,
+            event = feed.next() => event,
+        };
+        let Some(watches) = watches.upgrade() else {
+            return;
+        };
+        match event {
+            NodeWakeEvent::Appended(actors) | NodeWakeEvent::Owned(actors) => {
+                for actor in &actors {
+                    watches.changed(actor);
+                }
+            }
+            NodeWakeEvent::PollStore | NodeWakeEvent::Resubscribed => watches.all_changed(),
+            NodeWakeEvent::Ready => {}
+        }
+    }
+}
+
 /// One subscriber's watch on an actor's committed changes
-/// ([`WakeSink::watch`]). A change is a hint to read the actor's state
+/// ([`WakeSink::observe`]). A change is a hint to read the actor's state
 /// again, never the state: a lost or late change costs the subscriber its
 /// own fallback read, and many changes coalesce into one.
 pub struct KeyWatch {
     changes: watch::Receiver<u64>,
     _sender: Arc<watch::Sender<u64>>,
+    seen_through: u64,
+    every_process: bool,
 }
 
 impl KeyWatch {
     /// Wait until the actor may have changed since the subscription, or
-    /// since the last wait returned. Cancel-safe.
+    /// since the last wait returned or [`KeyWatch::seen`]. Cancel-safe.
     pub async fn changed(&mut self) {
         // The watch holds its sender, so the channel never closes.
         let _ = self.changes.changed().await;
+    }
+
+    /// Take every change heard so far as seen: call it right before the
+    /// authoritative read the watch refreshes, so only a change after that
+    /// read wakes [`KeyWatch::changed`] again. Answers how many changes it
+    /// took as seen: those heard since the last call, or the subscription.
+    pub fn seen(&mut self) -> u64 {
+        let generation = *self.changes.borrow_and_update();
+        let heard = generation.saturating_sub(self.seen_through);
+        self.seen_through = generation;
+        heard
+    }
+
+    /// Whether the watch hears other processes' commits: a listener of this
+    /// process heard every node's hints when it was taken. Without one, it
+    /// hears only this process's commits.
+    #[must_use]
+    pub fn hears_every_process(&self) -> bool {
+        self.every_process
     }
 
     /// How many changes the watch has heard of: two reads that see one
@@ -825,6 +942,7 @@ impl std::fmt::Debug for KeyWatch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("KeyWatch")
             .field("generation", &self.generation())
+            .field("every_process", &self.every_process)
             .finish()
     }
 }

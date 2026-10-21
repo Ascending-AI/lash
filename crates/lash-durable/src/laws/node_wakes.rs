@@ -228,6 +228,64 @@ pub async fn an_appended_log_is_named_to_every_listening_node(
     Ok(())
 }
 
+/// FIG-7055: a session whose owner committed is named to an observer, the
+/// listener of a process that serves no node, so a send follower there
+/// hears its session's commits without a poll. The observer joins no
+/// node's channel and holds no liveness lock: no reaper sees it and it
+/// grants no execution authority. Every poll is out of reach, so only the
+/// owner commit's own hint can reach the observer.
+pub async fn a_session_owner_commit_reaches_an_observer_that_holds_no_lease(
+    tier: &dyn NodeWakeTier,
+) -> LawOutcome {
+    let (store, node_wakes) = tier.open().await;
+    let observed = actor("observed")?;
+    create(store.as_ref(), &observed).await?;
+    let mut owner = start(tier, "owner", under(quiet())).await;
+    eventually(|| async {
+        Ok(owner_of(store.as_ref(), &observed).await?.as_deref() == Some("owner"))
+    })
+    .await?;
+    let writer = start(tier, "writer", under(quiet())).await;
+    listening(node_wakes.as_ref(), "writer").await?;
+    owner.waiting().await?;
+
+    let (_reader, observing) = tier.open().await;
+    let mut observer = observing.observe().await?;
+    let commit = store
+        .commit_mail(mail(&observed), CommitLabel::MAIL_SESSION)
+        .await?;
+    writer.hints.woke(&commit);
+    // The owner acknowledges the mail in an owner commit.
+    owner.arrived().await?;
+    let heard = tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            match observer.next().await {
+                NodeWakeEvent::Appended(actors) if actors.contains(&observed) => break Ok(()),
+                NodeWakeEvent::Appended(_) => {}
+                other => break Err(other),
+            }
+        }
+    })
+    .await;
+    ensure!(
+        matches!(heard, Ok(Ok(()))),
+        "the observer did not hear the session's owner commit: {heard:?}"
+    );
+    let boots = liveness(observing.as_ref()).await?;
+    ensure!(
+        boots
+            .iter()
+            .all(|boot| ["owner", "writer"].contains(&boot.boot.node.as_str())),
+        "the observer registered a boot of its own: {boots:?}"
+    );
+    ensure!(
+        observer.session() == 0,
+        "the observer lost {} sessions",
+        observer.session()
+    );
+    Ok(())
+}
+
 /// O1: mail written on node B to an actor hot on node A reaches A through
 /// B's after-commit hint. The owner has finished its initial mailbox read,
 /// and its fallback poll is effectively disabled, so only the hint can deliver.

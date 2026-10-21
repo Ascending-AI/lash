@@ -99,6 +99,8 @@ node_wake_laws!(
         crate::testing::fixture_config(),
     a_lost_listener_session_resubscribes_holding_its_lock => crate::testing::fixture_config(),
     an_appended_log_is_named_to_every_listening_node => crate::testing::fixture_config(),
+    a_session_owner_commit_reaches_an_observer_that_holds_no_lease =>
+        crate::testing::fixture_config(),
     mail_for_an_oversized_key_reaches_a_hot_owner_through_a_store_scan_hint =>
         crate::testing::fixture_config(),
     mail_from_another_node_reaches_a_hot_owner_through_its_hint =>

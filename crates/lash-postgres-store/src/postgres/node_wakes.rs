@@ -17,6 +17,11 @@
 //!   reports [`NodeWakeEvent::Resubscribed`], so the runner rescans after it. Its
 //!   reconnects back off under the host's `signals.reconnect` policy, and a
 //!   store opens at most `roles.served_nodes` listeners at once.
+//! - **Observer.** A process that serves no node opens an observer
+//!   ([`NodeWakes::observe`], FIG-7055): a connection of its own that
+//!   subscribes to the appended-log channel alone and takes no lock, so no
+//!   reaper sees it and it holds no served-node slot. It reconnects as a
+//!   listener does.
 //! - **Liveness.** A boot's lock is free exactly when no session of it
 //!   lives. A crashed node's session ends with its process, so a watcher
 //!   sees the lock free within one probe and reaps the boot at once. A node
@@ -101,18 +106,21 @@ impl PostgresNodeWakes {
     }
 }
 
-/// How one boot's listener (re)opens its session.
+/// How one boot's listener, or an observer, (re)opens its session.
 struct Session {
     /// A pool of one listener-role connection that the listener alone
     /// uses.
     pool: PgPool,
-    channel: String,
-    boot: String,
+    /// The node's channel and boot, for a node's listener; `None` for an
+    /// observer, which hears the appended-log channel alone and holds no
+    /// lock.
+    node: Option<(String, String)>,
     /// How long one open may take, connecting and the lock wait included.
     open_within: Duration,
     reconnect: ReconnectPolicy,
-    /// The served-node slot this listener occupies until its session ends.
-    _slot: OwnedSemaphorePermit,
+    /// The served-node slot a node's listener occupies until its session
+    /// ends.
+    _slot: Option<OwnedSemaphorePermit>,
 }
 
 impl Session {
@@ -121,13 +129,18 @@ impl Session {
     async fn open(&self) -> Result<PgListener, sqlx::Error> {
         let open = async {
             let mut listener = PgListener::connect_with(&self.pool).await?;
-            listener
-                .listen_all([self.channel.as_str(), APPENDED_CHANNEL])
-                .await?;
-            crate::observed_sql::query(SQL.postgres.hold_liveness.sql())
-                .bind(&self.boot)
-                .execute(crate::observed_sql::executor(&mut listener))
-                .await?;
+            match &self.node {
+                Some((channel, boot)) => {
+                    listener
+                        .listen_all([channel.as_str(), APPENDED_CHANNEL])
+                        .await?;
+                    crate::observed_sql::query(SQL.postgres.hold_liveness.sql())
+                        .bind(boot)
+                        .execute(crate::observed_sql::executor(&mut listener))
+                        .await?;
+                }
+                None => listener.listen(APPENDED_CHANNEL).await?,
+            }
             Ok(listener)
         };
         tokio::time::timeout(self.open_within, open)
@@ -265,7 +278,43 @@ impl NodeWakes for PostgresNodeWakes {
                 node: lease.owner.node.clone(),
                 served_nodes: pools.served_nodes,
             })?;
-        let session = Session {
+        let session = self.session(
+            Some((
+                node_channel(&lease.owner.node),
+                lease.owner.boot.as_str().to_owned(),
+            )),
+            Some(slot),
+        );
+        Self::start(session).await
+    }
+
+    async fn observe(&self) -> Result<Box<dyn NodeWakeFeed>, DurableError> {
+        Self::start(self.session(None, None)).await
+    }
+
+    async fn liveness(&self) -> Result<Vec<BootLiveness>, DurableError> {
+        self.store.liveness().await
+    }
+
+    async fn reap_released(
+        &self,
+        reaper: &NodeLease,
+        boot: &Owner,
+    ) -> Result<Vec<Reaped>, DurableError> {
+        self.store.reap_released(reaper, boot).await
+    }
+}
+
+impl PostgresNodeWakes {
+    /// A listener session over a pool of one listener-role connection.
+    fn session(
+        &self,
+        node: Option<(String, String)>,
+        slot: Option<OwnedSemaphorePermit>,
+    ) -> Session {
+        let pools = &self.store.pools;
+        let open_within = pools.listener_policy.acquire_timeout;
+        Session {
             pool: PgPoolOptions::new()
                 .max_connections(1)
                 .min_connections(0)
@@ -273,12 +322,15 @@ impl NodeWakes for PostgresNodeWakes {
                 .idle_timeout(None)
                 .max_lifetime(None)
                 .connect_lazy_with(pools.listener.clone()),
-            channel: node_channel(&lease.owner.node),
-            boot: lease.owner.boot.as_str().to_owned(),
+            node,
             open_within,
             reconnect: pools.reconnect,
             _slot: slot,
-        };
+        }
+    }
+
+    /// Open `session` and forward its wake events on a task of its own.
+    async fn start(session: Session) -> Result<Box<dyn NodeWakeFeed>, DurableError> {
         let listener = match session.open().await {
             Ok(listener) => listener,
             Err(error) => {
@@ -295,18 +347,6 @@ impl NodeWakes for PostgresNodeWakes {
             lost,
             shutdown: Some(shutdown),
         }))
-    }
-
-    async fn liveness(&self) -> Result<Vec<BootLiveness>, DurableError> {
-        self.store.liveness().await
-    }
-
-    async fn reap_released(
-        &self,
-        reaper: &NodeLease,
-        boot: &Owner,
-    ) -> Result<Vec<Reaped>, DurableError> {
-        self.store.reap_released(reaper, boot).await
     }
 }
 

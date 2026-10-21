@@ -760,6 +760,10 @@ impl NodeWakes for ObservedWakes {
         self.inner.listen(lease).await
     }
 
+    async fn observe(&self) -> Result<Box<dyn crate::NodeWakeFeed>, DurableError> {
+        self.inner.observe().await
+    }
+
     async fn liveness(&self) -> Result<Vec<BootLiveness>, DurableError> {
         let boots = self.inner.liveness().await?;
         let _ = self.evidence.send(WakeEvidence::Watched(boots.clone()));

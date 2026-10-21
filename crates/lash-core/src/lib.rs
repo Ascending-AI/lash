@@ -155,6 +155,46 @@ pub mod facade_support {
         TraceStanding,
     };
     pub use lash_core_ids::operational_metrics::StoreObserver;
+
+    /// What started a send follower's authoritative read (FIG-7055).
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum FollowRead {
+        /// The follow's first read.
+        First,
+        /// A committed-change hint for the followed session.
+        Hint,
+        /// An event of this process's live replay.
+        Event,
+        /// A timed read: the poll, the floor, the terminal schedule or the
+        /// window's close.
+        Timer,
+    }
+
+    /// Count, for the perf witness, one send-follower read and what started
+    /// it.
+    pub fn witness_follow_read(read: FollowRead) {
+        #[cfg(feature = "perf-witness")]
+        {
+            use lash_core_ids::perf_witness::wakes::{ResolveTrigger, record_resolve};
+            record_resolve(match read {
+                FollowRead::First => ResolveTrigger::First,
+                FollowRead::Hint => ResolveTrigger::Hint,
+                FollowRead::Event => ResolveTrigger::Event,
+                FollowRead::Timer => ResolveTrigger::Timer,
+            });
+        }
+        #[cfg(not(feature = "perf-witness"))]
+        let _ = read;
+    }
+
+    /// Count, for the perf witness, the `changes` a send follower's watch
+    /// heard before its next read: the hints it took.
+    pub fn witness_follow_heard(changes: u64) {
+        #[cfg(feature = "perf-witness")]
+        lash_core_ids::perf_witness::wakes::record_heard(changes);
+        #[cfg(not(feature = "perf-witness"))]
+        let _ = changes;
+    }
     pub use lash_core_llm::core_internal::ProviderCompletionSideband;
     /// Apply the canonical runtime invocation projection to an existing trace
     /// context. Durable hosts use this instead of maintaining a second
