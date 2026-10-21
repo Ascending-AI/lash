@@ -695,18 +695,22 @@ impl PageStore for SqliteDurableStore {
                 actor: tx.actor().clone(),
             });
         }
+        let prepared = super::owner::prepare(tx, true, self.conn.fleet());
+        let queued = std::sync::Arc::clone(&prepared);
         let blob_profile = self.blob_profile;
         let summary = candidate.manifest.summary();
         let mut candidate = candidate;
         let actor = lash_core_ids::operational_metrics::sql::with_owner(
-            tx.actor().as_str().to_owned(),
-            tx.epoch().0,
-            tx.revision().0,
+            prepared.write.actor().as_str().to_owned(),
+            prepared.write.epoch().0,
+            prepared.write.revision().0,
             self.write(label, move |connection, now| {
-                apply_owner(connection, tx, now, blob_profile, Some(&mut candidate))
+                apply_owner(connection, &queued, now, blob_profile, Some(&mut candidate))
             }),
         )
-        .await?;
+        .await;
+        drop(prepared);
+        let actor = actor?;
         Ok(CandidateReceipt {
             actor,
             root: summary.root,

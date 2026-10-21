@@ -14,6 +14,11 @@ use lash_core_store::store::Retention;
 use lash_core_store::store::Target;
 use lash_core_store::store_backend_support::TargetResolution;
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static CONFIG_ENCODINGS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
 /// Record revision `head_revision` of `session_id` in the transaction that
 /// publishes it. `head_json` is the head document the revision was published
 /// with, including config commands applied since its frame opened.
@@ -25,6 +30,8 @@ pub(crate) fn record_revision_conn(
     checkpoint_ref: Option<&str>,
     head_json: &str,
 ) -> Result<(), StoreError> {
+    #[cfg(test)]
+    CONFIG_ENCODINGS.with(|count| count.set(count.get() + 1));
     let mut staging = lash_core_store::checkpoint_graph::GraphStaging::new(
         lash_core_store::checkpoint_graph::EncodeBudget::new(
             lash_core_store::checkpoint_graph::ExplicitLimit::new(u64::MAX),
@@ -56,6 +63,27 @@ pub(crate) fn record_revision_conn(
                 message: error.to_string(),
             })?;
     }
+    record_revision_root_conn(
+        tx,
+        session_id,
+        head_revision,
+        leaf_node_id,
+        checkpoint_ref,
+        config_ref.as_str(),
+    )
+}
+
+/// Publish an already validated config root in the transaction that holds it.
+/// Its immutable closure stays rooted by the prior revision until this new
+/// revision owns it; no encoding or second lookup is necessary.
+pub(crate) fn record_revision_root_conn(
+    tx: &Connection,
+    session_id: &SessionId,
+    head_revision: i64,
+    leaf_node_id: Option<&str>,
+    checkpoint_ref: Option<&str>,
+    config_ref: &str,
+) -> Result<(), StoreError> {
     crate::conn::cached_execute(
         tx,
         session_sql().revisions.insert.sql(),
@@ -64,7 +92,7 @@ pub(crate) fn record_revision_conn(
             head_revision,
             leaf_node_id,
             checkpoint_ref.map(crate::codec::SqlHash),
-            crate::codec::SqlHash(config_ref.as_str()),
+            crate::codec::SqlHash(config_ref),
         ],
     )
     .map_err(sqlite_error)?;

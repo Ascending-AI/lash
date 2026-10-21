@@ -498,3 +498,68 @@ async fn a_cold_head_read_keeps_its_snapshot_while_the_old_config_is_peeled() {
     assert_eq!(moved.head_revision, next, "the next read sees the move");
     assert_eq!(moved.config.config_revision, 1);
 }
+
+/// CONFIG-PUBLICATION-REUSE: an equal, already validated config keeps its
+/// content identity without encoding it again; changed content is installed
+/// even when the caller keeps its config revision unchanged.
+#[tokio::test]
+async fn head_publication_reuses_only_equal_validated_configuration() {
+    let store = crate::test_support::sqlite_memory_store().await.unwrap();
+    let session = SessionId::from("config-publication-reuse");
+    let mut state = durable_state(&store, &session).await;
+    let encodings = || async {
+        store
+            .conn
+            .call(|_| Ok(crate::revisions::CONFIG_ENCODINGS.with(std::cell::Cell::get)))
+            .await
+            .unwrap()
+    };
+    let before = encodings().await;
+    let original = store
+        .load_session_head_meta(&session)
+        .await
+        .unwrap()
+        .unwrap()
+        .config;
+    let receipt = store
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
+        .await
+        .unwrap();
+    assert_eq!(
+        encodings().await,
+        before,
+        "equal validated config must not be encoded again"
+    );
+    state.head_revision = receipt.head_revision;
+    state.policy.max_tool_calls = lash_core_execution::MaxToolCalls::new(7);
+    assert_eq!(
+        state.config_revision, original.config_revision,
+        "the config revision alone is not identity"
+    );
+    let receipt = store
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
+        .await
+        .unwrap();
+    assert_eq!(encodings().await, before + 1);
+    let next = store
+        .load_session_head_meta(&session)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(next.head_revision, receipt.head_revision);
+    assert_ne!(next.config, original);
+    assert_eq!(
+        next.config.max_tool_calls,
+        lash_core_execution::MaxToolCalls::new(7)
+    );
+    state.head_revision = receipt.head_revision;
+    store
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state))
+        .await
+        .unwrap();
+    assert_eq!(
+        encodings().await,
+        before + 1,
+        "the new config becomes reusable in its own right"
+    );
+}

@@ -172,13 +172,14 @@ pub struct SqliteConnectionPolicy {
     /// [`SqliteSynchronous`]. Stated by the host; it has no default.
     pub synchronous: SqliteSynchronous,
     /// WAL pages a file store's commits leave before its background worker
-    /// checkpoints and truncates the WAL, off the committing thread. The
+    /// checkpoints and resets the WAL, off the committing thread. The
     /// default is SQLite's 1,000-page autocheckpoint setting; `0` disables
     /// automatic checkpointing. Lower it to bound WAL growth, or raise it
     /// when checkpoint overhead matters more than reader lag.
     pub wal_autocheckpoint_pages: u32,
     /// SQLite cache-size pragma value, preserving SQLite's sign overload. The
-    /// default is SQLite's `-2000` value (approximately 2,000 KiB); negative
+    /// default is `-32768` (32 MiB), measured on the 16-lane writer load;
+    /// negative
     /// values count KiB and positive values count pages, so change it to match
     /// the deployment's memory budget and page size.
     pub cache_size: i32,
@@ -188,16 +189,16 @@ pub struct SqliteConnectionPolicy {
 
 impl SqliteConnectionPolicy {
     /// Standard production: four readers, 15 s busy timeout, 1000-page WAL
-    /// checkpoint and -2000 KiB cache, plus standard operational settings.
-    /// WAL/cache follow SQLite conventions; no universal workload measurement
-    /// backs the reader count or busy budget. The host states durability.
+    /// checkpoint and 32 MiB writer cache, plus standard operational settings.
+    /// The cache reduced measured writer service on the 16-lane load (FIG-7110);
+    /// no universal measurement backs the reader count or busy budget. The host states durability.
     pub fn standard(synchronous: SqliteSynchronous) -> Self {
         Self {
             read_connections: std::num::NonZeroUsize::new(4).unwrap_or(std::num::NonZeroUsize::MIN),
             busy_timeout: Duration::from_millis(BUSY_TIMEOUT_MS as u64),
             synchronous,
             wal_autocheckpoint_pages: 1_000,
-            cache_size: -2_000,
+            cache_size: -32_768,
             operational: crate::SqliteOperationalSettings::standard(),
         }
     }
@@ -1331,14 +1332,10 @@ mod tests {
         let dir = tempfile::tempdir().expect("checkpoint test tempdir");
         let path = dir.path().join("core.db");
         let target = DatabaseTarget::File(path.clone());
-        let writer = installed(
-            &target,
-            SqliteConnectionPolicy {
-                wal_autocheckpoint_pages: 16,
-                ..SqliteConnectionPolicy::standard(SqliteSynchronous::Normal)
-            },
-        )
-        .await;
+        let mut policy = SqliteConnectionPolicy::standard(SqliteSynchronous::Normal);
+        policy.wal_autocheckpoint_pages = 16;
+        policy.operational.wal_retained_bytes = 0;
+        let writer = installed(&target, policy).await;
         writer
             .write(|tx| {
                 tx.execute_batch("CREATE TABLE payloads (body BLOB NOT NULL)")?;

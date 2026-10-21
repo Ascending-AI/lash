@@ -36,15 +36,11 @@ lash_store_sql::statements! {
         held_texts = "SELECT hash FROM prompt_texts
              WHERE hash IN (SELECT unhex(value) FROM json_each(?1))";
 
-        /// Store each `[hash, text]` leaf and `[hash, text, children]`
-        /// index node of the JSON array `?1`, returning each address
-        /// stored. The caller binds only addresses it found unstored under
-        /// the one writer, so every element is a new row.
-        insert_texts = "INSERT INTO prompt_texts (hash, text, children)
-             SELECT unhex(json_extract(value, '$[0]')), json_extract(value, '$[1]'),
-                    json_extract(value, '$[2]')
-               FROM json_each(?1)
-             RETURNING hash";
+        /// Store one fresh immutable text, binding its body directly rather
+        /// than escaping it into JSON and parsing it again inside SQLite.
+        /// Children retain their canonical JSON-array spelling; returned
+        /// addresses retain the original decoding and width validation.
+        insert_texts = "INSERT INTO prompt_texts (hash, text, children) VALUES (unhex(?1), ?2, ?3) RETURNING hash";
 
         /// Root each text of the `[part, hash]` pairs of the JSON array `?4`
         /// under that part of call `?3` of owner `?2` in session `?1`.
@@ -103,17 +99,6 @@ lash_store_sql::statements! {
 
         /// The reusable prefix currently owned by this session.
         read_prefix = "SELECT hash FROM prompt_prefixes WHERE session_id = ?1";
-
-        /// Candidates whose last root or immutable parent was released.
-        unreferenced_texts = "SELECT stored.hash FROM prompt_texts AS stored
-             WHERE stored.hash IN (SELECT unhex(value) FROM json_each(?1))
-               AND NOT EXISTS (
-                   SELECT 1 FROM prompt_snapshot_texts AS edge WHERE edge.hash = stored.hash
-               ) AND NOT EXISTS (
-                   SELECT 1 FROM prompt_prefixes AS prefix WHERE prefix.hash = stored.hash
-               ) AND NOT EXISTS (
-                   SELECT 1 FROM prompt_text_edges AS edge WHERE edge.child = stored.hash
-               )";
 
         /// Reclaim every text in the JSON array `?1` no root references any
         /// more, returning each with its children.
@@ -260,11 +245,29 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &PromptWrit
                 frontier = next;
             }
             if !unheld.is_empty() {
-                let bodies: Vec<_> = unheld
-                    .iter()
-                    .map(|(hash, text)| stored_text(hash, text))
-                    .collect();
-                hash_set(tx, SQLITE_SQL.insert_texts.sql(), [encode(&bodies)?])?;
+                let mut insert = tx.prepare_cached(SQLITE_SQL.insert_texts.sql())?;
+                let mut address_error = None;
+                for (hash, text) in &unheld {
+                    let children: BTreeSet<&str> =
+                        text.children.iter().map(String::as_str).collect();
+                    let children = (!children.is_empty())
+                        .then(|| encode(&children))
+                        .transpose()?;
+                    let mut inserted =
+                        insert.query(rusqlite::params![hash, &*text.text, children])?;
+                    while let Some(row) = inserted.next()? {
+                        if address_error.is_none()
+                            && let Err(error) = crate::codec::hash_column(row, 0)
+                        {
+                            address_error = Some(error);
+                        }
+                    }
+                }
+                // The original INSERT completed all rows before validating
+                // RETURNING addresses. SQL refusals still take precedence.
+                if let Some(error) = address_error {
+                    return Err(error);
+                }
                 let paths: BTreeSet<_> = unheld
                     .iter()
                     .flat_map(|(hash, text)| {
@@ -441,17 +444,9 @@ fn edges<'a>(
 fn reclaim(tx: &Connection, released: &BTreeSet<String>) -> rusqlite::Result<()> {
     let mut frontier = released.clone();
     while !frontier.is_empty() {
-        // Admission can leave the old root held by an open call, and
-        // settlement can release the current session prefix. Neither
-        // needs a write or a traversal of its retained closure.
-        frontier = hash_set(
-            tx,
-            SQLITE_SQL.unreferenced_texts.sql(),
-            [encode(&frontier)?],
-        )?;
-        if frontier.is_empty() {
-            break;
-        }
+        // Reclassify and delete under the one writer in the same statement.
+        // Retained candidates return nothing; removed parents answer their
+        // own children, without first reading and discarding the same rows.
         // A reclaimed parent's edges go with it, which may leave its
         // children unreferenced on the next level.
         let reclaimed = tx
@@ -476,18 +471,6 @@ fn reclaim(tx: &Connection, released: &BTreeSet<String>) -> rusqlite::Result<()>
         }
     }
     Ok(())
-}
-
-/// One text's `insert_texts` element: `[hash, text]` for a leaf, and
-/// `[hash, text, children]` for an index node, its children in address
-/// order as its row stores them.
-fn stored_text(hash: &str, text: &PromptText) -> serde_json::Value {
-    let children: BTreeSet<&str> = text.children.iter().map(String::as_str).collect();
-    if children.is_empty() {
-        serde_json::json!([hash, &*text.text])
-    } else {
-        serde_json::json!([hash, &*text.text, children])
-    }
 }
 
 /// The children a text's row stores.

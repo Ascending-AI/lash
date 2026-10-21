@@ -1,0 +1,4 @@
+[env]
+# Separate connection caches: the workspace uses neither SQLite heap limits nor
+# process-wide cache release. Keep SQLITE_THREADSAFE and all status counters.
+LIBSQLITE3_FLAGS = "-USQLITE_ENABLE_MEMORY_MANAGEMENT"

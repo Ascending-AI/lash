@@ -1,13 +1,82 @@
 //! The fenced owner commit, including its page lease handoffs.
 use super::*;
+use lash_core_store::checkpoint_graph::GraphRefusal;
+use lash_durable::domain::graph_commit::CheckedGraph;
+
+/// Session plans are keyed by declared session/head and exact encoded content;
+/// no list position supplies identity. Application keeps the original write
+/// order and reaches every refusal under the original fences.
+pub(super) type PreparedSessions = std::collections::BTreeMap<
+    (lash_protocol_types::SessionId, u64),
+    std::collections::BTreeMap<
+        String,
+        Result<lash_core_store::store::RuntimeCommitPlanner, DurableError>,
+    >,
+>;
+
+/// One immutable attempt, retained by the awaiting caller so its graph,
+/// request bodies and plans are released off the database worker on success.
+pub(super) struct PreparedOwner {
+    pub(super) write: ActorTx,
+    graph: Result<Option<CheckedGraph>, GraphRefusal>,
+    sessions: PreparedSessions,
+    fleet: lash_core_store::store::FleetFormat,
+}
+
+pub(super) fn prepare(
+    write: ActorTx,
+    candidate: bool,
+    fleet: lash_core_store::store::FleetFormat,
+) -> Arc<PreparedOwner> {
+    let graph = prepare_graph(&write, candidate);
+    let mut sessions = PreparedSessions::new();
+    for domain in write.domain() {
+        if let DomainWrite::SessionCommit(write) = domain {
+            sessions
+                .entry((write.session.clone(), write.expected_head))
+                .or_default()
+                .entry(write.commit_json.clone())
+                .or_insert_with(|| turns::prepare_session_commit(write, fleet));
+        }
+    }
+    Arc::new(PreparedOwner {
+        write,
+        graph,
+        sessions,
+        fleet,
+    })
+}
+
+/// Pure validation and sizing need no database lock. Keep their result
+/// private to this attempted commit: the writer still applies refusals
+/// after its fleet fence, actor fence and current-turn read, in that order.
+fn prepare_graph(write: &ActorTx, candidate: bool) -> Result<Option<CheckedGraph>, GraphRefusal> {
+    let publications: Vec<_> = write
+        .domain()
+        .iter()
+        .flat_map(DomainWrite::publications)
+        .collect();
+    if !candidate && write.graph().is_empty() && write.reads().is_empty() && publications.is_empty()
+    {
+        return Ok(None);
+    }
+    let checked = check_graph(write.graph(), write.reads(), &publications)?;
+    // Candidate pages are bounded by their staging quota instead.
+    if let Some(budget) = write.budget() {
+        let measured = measure_owner_commit(write.graph(), write.domain())?;
+        budget.admit(&measured)?;
+    }
+    Ok(Some(checked))
+}
 
 pub(super) fn apply_owner(
     tx: &FencedTx<'_>,
-    write: ActorTx,
+    prepared: &PreparedOwner,
     now: DurableInstant,
     blob_profile: crate::BuiltinBlobProfile,
     candidate: Option<&mut CandidatePublication>,
 ) -> Flow<ActorCommit> {
+    let write = &prepared.write;
     let fleet = tx.fleet();
     let actor = write.actor().as_str().to_owned();
     let fence = tx
@@ -37,32 +106,14 @@ pub(super) fn apply_owner(
         }
         lash_durable::ActorKind::Process => (None, None),
     };
-    let publications: Vec<_> = write
-        .domain()
-        .iter()
-        .flat_map(DomainWrite::publications)
-        .collect();
-    if candidate.is_some()
-        || !write.graph().is_empty()
-        || !write.reads().is_empty()
-        || !publications.is_empty()
-    {
-        let checked = match check_graph(write.graph(), write.reads(), &publications) {
-            Ok(checked) => checked,
-            Err(refusal) => return refuse(DurableError::from(refusal)),
-        };
-        // The budget admits the commit's own graph and writes; a
-        // candidate's pages are bounded by its staging quota instead.
-        if let Some(budget) = write.budget() {
-            let admitted = measure_owner_commit(write.graph(), write.domain())
-                .and_then(|measured| budget.admit(&measured));
-            if let Err(refusal) = admitted {
-                return refuse(DurableError::from(refusal));
-            }
-        }
+    let checked = match &prepared.graph {
+        Ok(checked) => checked,
+        Err(refusal) => return refuse(DurableError::from(refusal.clone())),
+    };
+    if let Some(checked) = checked {
         let installed = match candidate {
-            None => graph::install(tx, &checked)?.map(drop),
-            Some(candidate) => pages::install_candidate(tx, write.domain(), &checked, candidate)?,
+            None => graph::install(tx, checked)?.map(drop),
+            Some(candidate) => pages::install_candidate(tx, write.domain(), checked, candidate)?,
         };
         if let Err(refusal) = installed {
             return refuse(DurableError::from(refusal));
@@ -78,7 +129,9 @@ pub(super) fn apply_owner(
         open_roots: turns::OpenRoots::read(open_roots),
     };
     for domain in write.domain() {
-        if let Err(refusal) = apply_domain(tx, &committing, domain)? {
+        if let Err(refusal) =
+            apply_domain(tx, &committing, domain, &prepared.sessions, prepared.fleet)?
+        {
             return refuse(refusal);
         }
     }

@@ -506,26 +506,20 @@ pub(super) fn apply(
     }
 }
 
-pub(super) fn apply_session_commit(
-    tx: &crate::conn::FencedTx<'_>,
-    commit: &Committing<'_>,
+/// Request-only decoding and identity work, before writer enqueue. Its
+/// refusal is returned only when the fenced domain application reaches it.
+pub(super) fn prepare_session_commit(
     write: &SessionCommitWrite,
-) -> Answer<()> {
-    commit.open_roots.forget();
-    let refused = |error: &lash_core_store::store::StoreError| {
-        Ok(Err(DurableError::session_commit(
-            write.session.clone(),
-            error,
-        )))
-    };
+    fleet: lash_core_store::store::FleetFormat,
+) -> Result<lash_core_store::store::RuntimeCommitPlanner, DurableError> {
     let runtime_commit = match lash_core_store::store::decode_session_commit(&write.commit_json) {
         Ok(runtime_commit) => runtime_commit,
-        Err(error) => return refused(&error),
+        Err(error) => return Err(DurableError::session_commit(write.session.clone(), &error)),
     };
     if runtime_commit.session_id != write.session
         || runtime_commit.expected_head_revision != write.expected_head
     {
-        return refuse(DomainRefusal::SessionCommitRefused {
+        return Err(DurableError::Domain(DomainRefusal::SessionCommitRefused {
             session: write.session.clone(),
             code: lash_core_store::runtime_error::RuntimeErrorCode::StoreRefused,
             cause: None,
@@ -536,17 +530,47 @@ pub(super) fn apply_session_commit(
                 write.session,
                 write.expected_head
             ),
-        });
+        }));
     }
-    let planner =
-        match lash_core_store::store::RuntimeCommitPlanner::prepare(runtime_commit, tx.fleet()) {
-            Ok(planner) => planner,
-            Err(error) => return refused(&error),
-        };
+    let planner = match lash_core_store::store::RuntimeCommitPlanner::prepare(runtime_commit, fleet)
+    {
+        Ok(planner) => planner,
+        Err(error) => return Err(DurableError::session_commit(write.session.clone(), &error)),
+    };
+    Ok(planner)
+}
+
+pub(super) fn apply_session_commit(
+    tx: &crate::conn::FencedTx<'_>,
+    commit: &Committing<'_>,
+    write: &SessionCommitWrite,
+    prepared: &Result<lash_core_store::store::RuntimeCommitPlanner, DurableError>,
+    planned_under: lash_core_store::store::FleetFormat,
+) -> Answer<()> {
+    commit.open_roots.forget();
+    // A fleet move changes the versions a plan emits. Reclassify against
+    // the fleet read by this transaction, just as the public store does.
+    let replanned;
+    let prepared = if tx.fleet() == planned_under {
+        prepared
+    } else {
+        replanned = prepare_session_commit(write, tx.fleet());
+        &replanned
+    };
+    let planner = match prepared {
+        Ok(planner) => planner,
+        Err(error) => return Ok(Err(error.clone())),
+    };
+    let refused = |error: &lash_core_store::store::StoreError| {
+        Ok(Err(DurableError::session_commit(
+            write.session.clone(),
+            error,
+        )))
+    };
     let now = integer::<u64>(commit.now.0)?;
     match crate::persistence::session_commit::apply_runtime_commit_conn(
         tx,
-        &planner,
+        planner,
         head_writer(commit.actor, &write.session),
         commit.blob_profile,
         now,

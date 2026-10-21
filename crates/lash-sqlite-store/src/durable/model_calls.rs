@@ -35,7 +35,8 @@ pub(super) fn apply(
     commit: &Committing<'_>,
     write: &ModelCallWrite,
 ) -> Answer<()> {
-    tx.prepare_cached(SQL.append.sql())?
+    let inserted = tx
+        .prepare_cached(SQL.append.sql())?
         .execute(rusqlite::params![
             write.key.session.as_str(),
             write.key.call.owner_column(),
@@ -45,19 +46,23 @@ pub(super) fn apply(
             commit.now.0,
             commit.epoch.0,
         ])?;
-    let retained: String = tx.prepare_cached(SQL.root.sql())?.query_row(
-        [
-            write.key.session.as_str(),
-            &write.key.call.owner_column(),
-            &write.key.call.call_column(),
-        ],
-        |row| crate::codec::hash_column(row, 0),
-    )?;
-    if retained != write.record.to_hex() {
-        return Ok(Err(super::corrupt(
-            "model call",
-            "a sealed call cannot be replaced",
-        )));
+    // A successful insert owns this exact record. Only a replay can find
+    // an older sealed row, whose immutable identity must then match.
+    if inserted == 0 {
+        let retained: String = tx.prepare_cached(SQL.root.sql())?.query_row(
+            [
+                write.key.session.as_str(),
+                &write.key.call.owner_column(),
+                &write.key.call.call_column(),
+            ],
+            |row| crate::codec::hash_column(row, 0),
+        )?;
+        if retained != write.record.to_hex() {
+            return Ok(Err(super::corrupt(
+                "model call",
+                "a sealed call cannot be replaced",
+            )));
+        }
     }
     tx.prepare_cached(SQL.retire_pin.sql())?.execute([
         write.key.session.as_str(),

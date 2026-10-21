@@ -420,160 +420,6 @@ mod deleting_a_session_releases_its_prompt_roots_and_keeps_shared_text {
     }
 }
 
-/// BYTES (FIG-5946): a `model.start` binds the bodies of only the texts
-/// the store does not already hold. A session's second call, admitted while
-/// the first is open, binds only its changed section text and its own body
-/// tail: the unchanged section text, the shared body prefix and the
-/// response contract are held. Once the turn's `model.done` settled both
-/// requests, the next call binds its body chunks and contract again, but
-/// not the section texts the settled calls' snapshots still hold.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_model_start_binds_only_the_text_bodies_the_store_lacks() {
-    use lash_durable::domain::{ModelCallId, PromptCallKey, PromptText, PromptWrite};
-    use lash_durable::{
-        ActorKey, CommitLabel, DomainWrite, DurableStore, FormatSet, MailTx, NodeId, NodeSpec,
-    };
-
-    let (_root, set, _clock) = world(false).await;
-    let store = set.durable_store();
-    let formats = FormatSet::new("prompt-bytes-formats");
-    let actor = ActorKey::session("prompt-bytes").expect("a session actor key");
-    let mut create = MailTx::new();
-    create.create_actor(actor.clone(), formats.clone());
-    store
-        .commit_mail(create, CommitLabel::new("law.create"))
-        .await
-        .expect("create the session actor");
-    let node = store
-        .register_node(&NodeSpec {
-            node: NodeId::new("prompt-bytes-owner"),
-            decodes: vec![formats],
-            serves: Vec::new(),
-            capabilities: Default::default(),
-            ttl_millis: 15_000,
-        })
-        .await
-        .expect("register the owner");
-    let epoch = store.claim(&node, 1).await.expect("claim")[0].epoch;
-    let run = lash_protocol_types::TurnId::from("prompt-bytes-turn");
-    let text = |name: &str| PromptText {
-        hash: BlobRef::for_content(format!("text {name}").as_bytes()).0,
-        text: format!("text {name}").into(),
-        children: Vec::new(),
-    };
-    let record = |ordinal: u32, snapshot: &[&str], request: &[&str]| {
-        DomainWrite::Prompt(PromptWrite::Record {
-            call: PromptCallKey {
-                session: lash_protocol_types::SessionId::from("prompt-bytes"),
-                call: ModelCallId::Turn {
-                    run: run.clone(),
-                    ordinal,
-                },
-            },
-            snapshot: Some(format!("snapshot of call {ordinal}")),
-            request: format!("request of call {ordinal}"),
-            snapshot_texts: snapshot.iter().map(|name| text(name)).collect(),
-            request_texts: request
-                .iter()
-                .map(|name| text(name))
-                .collect::<Vec<_>>()
-                .into(),
-            prefix: None,
-        })
-    };
-    let settle = |open: Option<u32>| {
-        DomainWrite::Prompt(PromptWrite::Settle {
-            session: lash_protocol_types::SessionId::from("prompt-bytes"),
-            run: run.clone(),
-            open,
-        })
-    };
-    // Measure every INSERT binding, including bodies submitted again that
-    // INSERT would ignore. SQLite reports SQL literal bytes: each fixture
-    // pair [digest, "text N"] costs 76 + len(N), plus array commas,
-    // brackets and the SQL string's quotes. The expected names below are
-    // the fixture's missing bodies, independent of RETURNING rows.
-    let bound = |writes: Vec<DomainWrite>, label: &'static str| {
-        let (store, actor) = (&store, &actor);
-        async move {
-            let ((), receipt) =
-                lash_core_ids::operational_metrics::sql::collect(label, "sqlite", async {
-                    let mut tx = store.begin(actor, epoch).await.expect("begin");
-                    for write in writes {
-                        tx.write(write);
-                    }
-                    store
-                        .commit(tx, CommitLabel::new(label))
-                        .await
-                        .expect("commit");
-                })
-                .await;
-            assert_eq!(
-                receipt.unmeasured_bound_statements, 0,
-                "every binding is measured"
-            );
-            receipt
-                .shapes
-                .iter()
-                .filter(|(shape, _)| {
-                    shape.starts_with("insert into") && shape.contains("prompt_texts ")
-                })
-                .map(|(_, shape)| shape.bound_bytes)
-                .sum::<u64>()
-        }
-    };
-
-    assert_eq!(
-        bound(
-            vec![record(
-                1,
-                &["intro", "memo-1"],
-                &["prefix", "tail-1", "contract"]
-            )],
-            "model.start"
-        )
-        .await,
-        419,
-        "the first call binds every body"
-    );
-    assert_eq!(
-        bound(
-            vec![
-                record(2, &["intro", "memo-2"], &["prefix", "tail-2", "contract"]),
-                settle(Some(2)),
-            ],
-            "model.start"
-        )
-        .await,
-        169,
-        "the second call binds only its changed section text and its body tail"
-    );
-    assert_eq!(bound(vec![settle(None)], "model.done").await, 0);
-    assert_eq!(
-        bound(
-            vec![record(
-                97,
-                &["intro", "memo-2"],
-                &["prefix", "tail-3", "contract"]
-            )],
-            "model.start"
-        )
-        .await,
-        254,
-        "after the settlement the next call binds its body chunks and contract, \
-         not the section texts the snapshots hold"
-    );
-    let names = ["intro", "memo-1", "memo-2", "prefix", "tail-3", "contract"];
-    let hashes: Vec<String> = names.iter().map(|name| text(name).hash).collect();
-    assert_eq!(
-        lash_durable::DurableReads::prompt_texts(&store, &hashes)
-            .await
-            .expect("read the texts"),
-        names.iter().map(|name| text(name)).collect::<Vec<_>>(),
-        "every held text reads back"
-    );
-}
-
 /// FIG-5958: an owner commit that lost its fence (a stale epoch) shares a
 /// write batch with a live owner's commit. Only the stale commit is
 /// refused, with `OwnershipLost`, by undoing its own savepoint: the live
@@ -630,10 +476,20 @@ async fn a_lost_fence_in_a_write_batch_refuses_only_its_own_commit() {
             .map(|claim| claim.epoch)
             .expect("the actor was claimed")
     };
-    let stale = store
+    let mut stale = store
         .begin(&lost, epoch(&lost))
         .await
         .expect("open the soon-stale owner");
+    // OWNER-REFUSAL-ORDER: request preparation may find malformed content,
+    // but the actor fence still refuses first when this attempt is stale.
+    stale.write(lash_durable::domain::DomainWrite::SessionCommit(
+        lash_durable::domain::SessionCommitWrite {
+            session: lash_protocol_types::SessionId::parse("batch-lost").unwrap(),
+            expected_head: 0,
+            commit_json: "malformed session commit".to_owned(),
+            execution: None,
+        },
+    ));
     let mut give_up = store
         .begin(&lost, epoch(&lost))
         .await

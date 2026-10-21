@@ -279,6 +279,12 @@ pub(crate) fn select_session_head_row(
 }
 
 impl SessionHeadRow {
+    /// The immutable config identity this row's hydration validates in the
+    /// caller's snapshot. Reuse it only after hydration succeeds.
+    pub(crate) fn config_ref(&self) -> Option<&str> {
+        self.head_json.as_deref()
+    }
+
     pub(crate) fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
         Ok(Self {
             head_json: optional_hash_column(row, 0)?,

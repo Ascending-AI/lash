@@ -360,11 +360,9 @@ pub(crate) fn apply_runtime_commit_conn(
         .map_err(sqlite_error)?;
     ensure_session_not_deleted_conn(tx, &commit.session_id)?;
     let admitted = tx
-        .query_row(
-            session_sql().meta_sqlite.exists_materialized.sql(),
-            params![commit.session_id.as_str()],
-            |_| Ok(()),
-        )
+        .prepare_cached(session_sql().meta_sqlite.exists_materialized.sql())
+        .map_err(sqlite_error)?
+        .query_row(params![commit.session_id.as_str()], |_| Ok(()))
         .optional()
         .map_err(sqlite_error)?
         .is_some();
@@ -373,17 +371,26 @@ pub(crate) fn apply_runtime_commit_conn(
             session_id: commit.session_id.clone(),
         });
     }
-    let existing = try_load_session_head_meta_from_conn(
-        tx,
-        &commit.session_id,
-        fleet,
-        Some(crate::codec::ConfigRead::Uncommitted(&tx.configs)),
-    )?;
+    let row = crate::codec::select_session_head_row(tx, &commit.session_id)?;
+    let prior_config = row
+        .as_ref()
+        .and_then(|row| row.config_ref().map(str::to_owned));
+    let existing = row
+        .map(|row| {
+            row.hydrate(
+                tx,
+                &commit.session_id,
+                fleet,
+                Some(crate::codec::ConfigRead::Uncommitted(&tx.configs)),
+            )
+        })
+        .transpose()?;
     planner.validate_node_derivation()?;
     {
         let prior: Option<PriorReceiptRow> = tx
+            .prepare_cached(session_sql().turn_commits.select_receipt.sql())
+            .map_err(sqlite_error)?
             .query_row(
-                session_sql().turn_commits.select_receipt.sql(),
                 params![commit.session_id.as_str(), planner.operation_key()],
                 |row| {
                     Ok((
@@ -447,42 +454,40 @@ pub(crate) fn apply_runtime_commit_conn(
     let parent_leaf = old_leaf_node_id
         .as_deref()
         .map(|leaf_node_id| {
-            tx.query_row(
-                session_sql().graph_sqlite.select_parent_facts.sql(),
-                params![leaf_node_id],
-                |row| {
+            tx.prepare_cached(session_sql().graph_sqlite.select_parent_facts.sql())
+                .map_err(sqlite_error)?
+                .query_row(params![leaf_node_id], |row| {
                     Ok((
                         row.get::<_, i64>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
                     ))
-                },
-            )
-            .optional()
-            .map_err(sqlite_error)?
-            .map(
-                |(generation, frame_node_id, owner)| -> Result<_, StoreError> {
-                    let generation = u64::try_from(generation).map_err(|_| {
-                        stored_data_corrupt(
-                            "SessionGraph node",
-                            format!("negative generation {generation}"),
-                        )
-                    })?;
-                    Ok((
-                        lash_core_store::store::ParentNodeFacts {
-                            node_id: leaf_node_id.to_string().try_into()?,
-                            generation,
-                            frame_node_id: frame_node_id.try_into()?,
-                        },
-                        lash_core_store::store_backend_support::PathNode {
-                            node_id: leaf_node_id.to_string().try_into()?,
-                            owner_session_id: owner.try_into()?,
-                            generation,
-                        },
-                    ))
-                },
-            )
-            .transpose()
+                })
+                .optional()
+                .map_err(sqlite_error)?
+                .map(
+                    |(generation, frame_node_id, owner)| -> Result<_, StoreError> {
+                        let generation = u64::try_from(generation).map_err(|_| {
+                            stored_data_corrupt(
+                                "SessionGraph node",
+                                format!("negative generation {generation}"),
+                            )
+                        })?;
+                        Ok((
+                            lash_core_store::store::ParentNodeFacts {
+                                node_id: leaf_node_id.to_string().try_into()?,
+                                generation,
+                                frame_node_id: frame_node_id.try_into()?,
+                            },
+                            lash_core_store::store_backend_support::PathNode {
+                                node_id: leaf_node_id.to_string().try_into()?,
+                                owner_session_id: owner.try_into()?,
+                                generation,
+                            },
+                        ))
+                    },
+                )
+                .transpose()
         })
         .transpose()?
         .flatten();
@@ -497,8 +502,9 @@ pub(crate) fn apply_runtime_commit_conn(
         (None, _) => true,
         (Some(_), None) => false,
         (Some(required), Some(parent)) => match tx
+            .prepare_cached(session_sql().graph_sqlite.select_readable_ancestor.sql())
+            .map_err(sqlite_error)?
             .query_row(
-                session_sql().graph_sqlite.select_readable_ancestor.sql(),
                 params![
                     required,
                     commit.session_id.as_str(),
@@ -589,11 +595,11 @@ pub(crate) fn apply_runtime_commit_conn(
     // was built on, and if the earlier read is ever moved out
     // of this transaction it will not be.
     let published_revision = tx
-        .query_row(
-            session_sql().head.select_revision.sql(),
-            params![commit.session_id.as_str()],
-            |row| row.get::<_, i64>(0),
-        )
+        .prepare_cached(session_sql().head.select_revision.sql())
+        .map_err(sqlite_error)?
+        .query_row(params![commit.session_id.as_str()], |row| {
+            row.get::<_, i64>(0)
+        })
         .optional()
         .map_err(sqlite_error)?
         .map(|revision| u64_from_sql("SessionHeadMeta", "head_revision", revision))
@@ -636,18 +642,33 @@ pub(crate) fn apply_runtime_commit_conn(
     } else {
         end_frames_tx(tx, &commit.session_id, &left, None, now)?;
     }
-    let head_json = encode_json(&meta.payload())?;
     // The published head is a retained revision from this
     // transaction on. Recording it reads no pin: a pin
     // resolves to it by query whenever something asks.
-    crate::revisions::record_revision_conn(
-        tx,
-        &commit.session_id,
-        sql_head_revision,
-        meta.leaf_node_id.as_deref(),
-        meta.checkpoint_ref.as_ref().map(BlobRef::as_str),
-        &head_json,
-    )?;
+    if let (Some(existing), Some(root)) = (&existing, prior_config.as_deref())
+        && existing.schema_version == meta.schema_version
+        && existing.config == meta.config
+    {
+        // The head read validated this exact config under the writer's
+        // snapshot. None of the writes above replaces its owning revision.
+        crate::revisions::record_revision_root_conn(
+            tx,
+            &commit.session_id,
+            sql_head_revision,
+            meta.leaf_node_id.as_deref(),
+            meta.checkpoint_ref.as_ref().map(BlobRef::as_str),
+            root,
+        )?;
+    } else {
+        crate::revisions::record_revision_conn(
+            tx,
+            &commit.session_id,
+            sql_head_revision,
+            meta.leaf_node_id.as_deref(),
+            meta.checkpoint_ref.as_ref().map(BlobRef::as_str),
+            &encode_json(&meta.payload())?,
+        )?;
+    }
     let changed = crate::conn::cached_execute(
         tx,
         session_sql().head_sqlite.upsert_cas.sql(),
@@ -721,14 +742,14 @@ pub(crate) fn apply_runtime_commit_conn(
         stored_checkpoint.checkpoint_ref,
         stored_checkpoint.manifest,
         now,
-        tx.query_row(
+        tx.prepare_cached(
             crate::turn_ingress::turn_ingress_sql()
                 .family
                 .has_admissible_work
                 .sql(),
-            [commit.session_id.as_str()],
-            |row| row.get::<_, bool>(0),
         )
+        .map_err(sqlite_error)?
+        .query_row([commit.session_id.as_str()], |row| row.get::<_, bool>(0))
         .map_err(sqlite_error)?,
     );
     result.turn_cancel_input_outcome = turn_cancel_input_outcome;

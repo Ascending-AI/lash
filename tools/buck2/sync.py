@@ -865,6 +865,18 @@ def profile_bzl(canonical: dict) -> str:
     )
 
 
+def native_build_env_bzl() -> str:
+    # Cargo owns native compilation flags. Project only the named build-script
+    # inputs, never the invoking host's environment, into the remote action.
+    config = tomllib.loads((ROOT / ".cargo/config.toml").read_text())
+    rows = {
+        "libsqlite3-sys": {
+            "LIBSQLITE3_FLAGS": config["env"]["LIBSQLITE3_FLAGS"],
+        },
+    }
+    return GENERATED_HEADER + "NATIVE_BUILD_ENV = " + json.dumps(rows, indent=4, sort_keys=True) + "\n"
+
+
 def inventory_payload(model_payload: dict, workspace_bzl: str, feature_bzl: str) -> dict:
     def list_value(name: str, text: str) -> list[str]:
         match = re.search(rf"{name} = (\[.*?\])\n", text, re.S)
@@ -1536,6 +1548,7 @@ def main() -> int:
     outputs[ROOT / "third-party/rust/BUCK"] = third_party_buck
     outputs[BUCK2 / "deps.bzl"] = deps_bzl(dependency_table(canonical, targets))
     outputs[BUCK2 / "profile.bzl"] = profile_bzl(canonical)
+    outputs[BUCK2 / "native_build_env.bzl"] = native_build_env_bzl()
     outputs.update(model_outputs(canonical, targets))
     inventory = json.loads(outputs[BUCK2 / "target-inventory.json"])
     inventory["third_party_path_patches"] = [

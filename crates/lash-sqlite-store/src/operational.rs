@@ -5,7 +5,7 @@ use std::time::Duration;
 
 /// Operational policy applied by a store's connections, listeners and transactions.
 /// File handles sharing a checkpoint worker use the smallest checkpoint interval,
-/// busy timeout and page threshold requested during that worker's lifetime.
+/// busy timeout, page threshold and WAL retention bound requested during its lifetime.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SqliteOperationalSettings {
     /// Statements cached per writer/reader/listener; zero disables caching.
@@ -14,12 +14,17 @@ pub struct SqliteOperationalSettings {
     pub readonly_busy_timeout: Duration,
     /// Read-only page cache; negative KiB or positive pages, as SQLite defines it.
     pub readonly_cache_size: i32,
-    /// Retry pacing for a WAL truncation a writer or reader blocked
+    /// Retry pacing for a WAL reset a writer or reader blocked
     /// (must be positive). Write volume, not this interval, starts each
     /// checkpoint (FIG-6907).
     pub checkpoint_interval: Duration,
     /// Checkpoint connection's busy timeout; zero refuses contention immediately.
     pub checkpoint_busy_timeout: Duration,
+    /// Allocated WAL bytes a successful background checkpoint may retain for
+    /// reuse. Above this bound it truncates; zero always truncates. A live
+    /// reader can delay reclamation. This bounds idle disk retention without
+    /// refusing writes or changing synchronous durability. Default: 32 MiB.
+    pub wal_retained_bytes: u64,
     /// First WAL-conversion retry wait (must be positive).
     pub wal_retry_initial: Duration,
     /// Largest WAL-conversion retry wait (at least the initial wait).
@@ -65,7 +70,8 @@ impl Default for SqliteOperationalSettings {
 impl SqliteOperationalSettings {
     /// Standard production preset: 256 cached statements (FIG-3975 found
     /// the previous 16-entry cache evicted the store's statement mix).
-    /// Readonly: 1 s busy / -500 KiB cache. Checkpoint: 100 ms retry / 20 ms busy.
+    /// Readonly: 1 s busy / -500 KiB cache. Checkpoint: 100 ms retry / 20 ms busy,
+    /// retaining up to 32 MiB of checkpointed WAL allocation for reuse (FIG-7110).
     /// WAL retry: 1–50 ms. Locks: 8 attempts / 10 ms poll. Wakes: 25 ms poll,
     /// 10 s retention, 5 s lock wait, 25 ms–1 s reopen. Migration poll: 10 ms.
     /// Working chunks: checkpoint refs and occupied ids 16,384, inserts 512,
@@ -81,6 +87,7 @@ impl SqliteOperationalSettings {
             readonly_cache_size: -500,
             checkpoint_interval: Duration::from_millis(100),
             checkpoint_busy_timeout: Duration::from_millis(20),
+            wal_retained_bytes: 32 * 1024 * 1024,
             wal_retry_initial: Duration::from_millis(1),
             wal_retry_max: Duration::from_millis(50),
             liveness_lock_attempts: count(8),

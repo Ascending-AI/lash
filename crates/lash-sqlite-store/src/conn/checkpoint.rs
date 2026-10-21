@@ -8,9 +8,11 @@
 //! file wakes and checkpoints on its one connection, opened at its first
 //! checkpoint and kept: first `PASSIVE`, which copies committed frames into
 //! the database while writers and readers go on, and then, while the WAL
-//! still holds the threshold, `TRUNCATE` with the in-process gates held,
-//! which empties it. A `TRUNCATE` that a busy writer or another process's
-//! reader blocked is retried each checkpoint interval without another
+//! still holds the threshold, `RESTART` with the in-process gates held.
+//! The next write reuses the checkpointed WAL allocation. If that allocation
+//! exceeds the host's retention bound, `TRUNCATE` releases it instead. A
+//! reset that a busy writer or another process's reader blocked is retried
+//! each checkpoint interval without another
 //! write; nothing else wakes the worker.
 //!
 //! Checkpointing moves only committed frames and changes no commit's
@@ -45,6 +47,8 @@ pub(super) struct CheckpointState {
     write_gate: Arc<Mutex<()>>,
     read_gate: Arc<RwLock<()>>,
     threshold_pages: std::sync::atomic::AtomicU64,
+    retained_bytes: std::sync::atomic::AtomicU64,
+    wal_path: PathBuf,
     busy_timeout: Mutex<Duration>,
     /// The worker's connection, opened at its first checkpoint.
     connection: Mutex<Option<rusqlite::Connection>>,
@@ -64,7 +68,7 @@ impl Drop for CheckpointState {
 struct Signal {
     wake: Mutex<Wake>,
     ready: Condvar,
-    /// The pause between retries of a blocked `TRUNCATE`.
+    /// The pause between retries of a blocked WAL reset.
     interval: Mutex<Duration>,
 }
 
@@ -128,7 +132,7 @@ impl CheckpointState {
         }
     }
 
-    /// Checkpoint once; whether a blocked `TRUNCATE` should be retried
+    /// Checkpoint once; whether a blocked WAL reset should be retried
     /// without another commit.
     fn checkpoint(&self) -> rusqlite::Result<bool> {
         #[cfg(test)]
@@ -189,8 +193,25 @@ impl CheckpointState {
         let Ok(_write_gate) = self.write_gate.try_lock() else {
             return Ok(true);
         };
+        // SQLite documents TRUNCATE as RESTART plus physical truncation.
+        // Both fully checkpoint before allowing the next writer to reset.
+        // Reuse bounded allocation instead of repeatedly freeing and growing
+        // the same WAL extents. Metadata failure chooses the reclaiming mode.
+        let retained = self
+            .retained_bytes
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let within_bound = retained > 0
+            && self
+                .wal_path
+                .metadata()
+                .is_ok_and(|metadata| metadata.len() <= retained);
+        let reset = if within_bound {
+            "PRAGMA wal_checkpoint(RESTART)"
+        } else {
+            "PRAGMA wal_checkpoint(TRUNCATE)"
+        };
         let busy: i64 = connection
-            .prepare_cached("PRAGMA wal_checkpoint(TRUNCATE)")?
+            .prepare_cached(reset)?
             .query_row([], |row| row.get(0))?;
         Ok(busy != 0)
     }
@@ -214,6 +235,10 @@ pub(super) fn checkpoint_state(
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let key = target.canonical_name();
     if let Some(state) = states.get(&key).and_then(Weak::upgrade) {
+        state.retained_bytes.fetch_min(
+            policy.wal_retained_bytes,
+            std::sync::atomic::Ordering::Relaxed,
+        );
         state.threshold_pages.fetch_min(
             u64::from(threshold_pages),
             std::sync::atomic::Ordering::Relaxed,
@@ -238,8 +263,12 @@ pub(super) fn checkpoint_state(
         ready: Condvar::new(),
         interval: Mutex::new(policy.checkpoint_interval),
     });
+    let mut wal_path = path.as_os_str().to_os_string();
+    wal_path.push("-wal");
     let state = Arc::new(CheckpointState {
         path: path.to_owned(),
+        wal_path: wal_path.into(),
+        retained_bytes: std::sync::atomic::AtomicU64::new(policy.wal_retained_bytes),
         write_gate: Arc::clone(write_gate),
         read_gate: Arc::clone(read_gate),
         threshold_pages: std::sync::atomic::AtomicU64::new(u64::from(threshold_pages)),

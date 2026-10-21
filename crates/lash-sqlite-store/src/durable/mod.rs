@@ -781,10 +781,30 @@ pub(crate) fn wake_session_tx(
 }
 
 /// Apply one owner-commit domain write by its domain's module.
-fn apply_domain(tx: &FencedTx<'_>, committing: &Committing<'_>, write: &DomainWrite) -> Answer<()> {
+fn apply_domain(
+    tx: &FencedTx<'_>,
+    committing: &Committing<'_>,
+    write: &DomainWrite,
+    sessions: &owner::PreparedSessions,
+    planned_under: lash_core_store::store::FleetFormat,
+) -> Answer<()> {
     match write {
         DomainWrite::Turn(write) => turns::apply(tx, committing, write),
-        DomainWrite::SessionCommit(write) => turns::apply_session_commit(tx, committing, write),
+        DomainWrite::SessionCommit(write) => turns::apply_session_commit(
+            tx,
+            committing,
+            write,
+            sessions
+                .get(&(write.session.clone(), write.expected_head))
+                .and_then(|contents| contents.get(write.commit_json.as_str()))
+                .ok_or_else(|| {
+                    crate::sqlite_conversion_error(crate::stored_data_corrupt(
+                        "prepared owner commit",
+                        "missing exact session/head/content",
+                    ))
+                })?,
+            planned_under,
+        ),
         DomainWrite::RunFact(write) => run_records::apply(tx, committing, write),
         DomainWrite::ExecRoot(write) => snapshots::apply(tx, committing, write),
         DomainWrite::EffectAdmission(write) => graph::apply_admission(tx, committing, write),
@@ -1355,16 +1375,20 @@ impl DurableStore for SqliteDurableStore {
                 actor: tx.actor().clone(),
             });
         }
+        let prepared = owner::prepare(tx, false, self.conn.fleet());
+        let queued = Arc::clone(&prepared);
         let blob_profile = self.blob_profile;
-        lash_core_ids::operational_metrics::sql::with_owner(
-            tx.actor().as_str().to_owned(),
-            tx.epoch().0,
-            tx.revision().0,
+        let answer = lash_core_ids::operational_metrics::sql::with_owner(
+            prepared.write.actor().as_str().to_owned(),
+            prepared.write.epoch().0,
+            prepared.write.revision().0,
             self.write(label, move |connection, now| {
-                apply_owner(connection, tx, now, blob_profile, None)
+                apply_owner(connection, &queued, now, blob_profile, None)
             }),
         )
-        .await
+        .await;
+        drop(prepared);
+        answer
     }
 
     async fn commit_mail(

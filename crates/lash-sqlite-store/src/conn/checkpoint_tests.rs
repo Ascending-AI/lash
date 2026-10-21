@@ -19,10 +19,11 @@ async fn the_wal_is_checkpointed_by_volume_off_the_committing_thread() {
     let dir = tempfile::tempdir().expect("checkpoint volume tempdir");
     let path = dir.path().join("core.db");
     let target = DatabaseTarget::File(path.clone());
-    let policy = SqliteConnectionPolicy {
+    let mut policy = SqliteConnectionPolicy {
         wal_autocheckpoint_pages: 64,
         ..SqliteConnectionPolicy::standard(SqliteSynchronous::Normal)
     };
+    policy.operational.wal_retained_bytes = 2 * 1024 * 1024;
     let interval = policy.operational.checkpoint_interval;
     let writer = installed(&target, policy).await;
     let worker = super::state_for_testing(&target).expect("the file's checkpoint worker");
@@ -49,35 +50,76 @@ async fn the_wal_is_checkpointed_by_volume_off_the_committing_thread() {
         .expect("read the writer's autocheckpoint");
     assert_eq!(autocheckpoint, 0, "no commit checkpoints on the writer");
 
-    for _ in 0..40 {
-        writer
-            .write(|tx| {
-                tx.execute("INSERT INTO rows VALUES (?1)", [vec![7_u8; 8192]])
-                    .map(drop)
-            })
-            .await
-            .expect("commit a large row");
-    }
+    writer
+        .write(|tx| {
+            tx.execute("INSERT INTO rows VALUES (?1)", [vec![7_u8; 1024 * 1024]])
+                .map(drop)
+        })
+        .await
+        .expect("one commit exceeds the checkpoint threshold");
     // The WAL index header's `mxFrame` (bytes 16..20 of the `-shm` file, in
-    // native byte order) counts the frames the WAL holds: the burst wrote
-    // well past the threshold; once idle, a checkpoint has brought it under,
-    // whether it truncated the WAL or the writer restarted it.
+    // native byte order) counts committed frames. nBackfill (96..100)
+    // reaches it once every committed frame is checkpointed, even when
+    // RESTART retains the allocation and no later write resets mxFrame.
     let mut shm = path.into_os_string();
     shm.push("-shm");
     let shm = std::path::PathBuf::from(shm);
-    let frames = || {
-        std::fs::read(&shm)
-            .ok()
-            .and_then(|index| index.get(16..20).map(<[u8]>::to_vec))
-            .and_then(|bytes| bytes.try_into().ok())
-            .map(u32::from_ne_bytes)
+    let checkpointed = || {
+        std::fs::read(&shm).ok().is_some_and(|index| {
+            let frames = u32::from_ne_bytes(index[16..20].try_into().unwrap());
+            let backfilled = u32::from_ne_bytes(index[96..100].try_into().unwrap());
+            frames == backfilled
+        })
     };
     tokio::time::timeout(Duration::from_secs(3), async {
-        while !frames().is_some_and(|frames| frames < 64) {
+        while !checkpointed() {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
     .await
-    .expect("a WAL past its threshold is checkpointed without another write");
+    .expect("the threshold commit is checkpointed without another write");
+    drop(
+        worker
+            .connection
+            .lock()
+            .expect("checkpoint attempt completed"),
+    );
+    let mut wal_name = target.file_path().unwrap().as_os_str().to_os_string();
+    wal_name.push("-wal");
+    let wal_path = std::path::PathBuf::from(wal_name);
+    let retained = std::fs::metadata(&wal_path).unwrap().len();
+    assert!(
+        retained > 0,
+        "WAL-BOUNDED-REUSE retains checkpointed allocation for reuse"
+    );
+    assert!(retained <= policy.operational.wal_retained_bytes);
     assert!(worker.runs.load(std::sync::atomic::Ordering::Relaxed) >= 1);
+    writer
+        .write(|tx| {
+            tx.execute(
+                "INSERT INTO rows VALUES (?1)",
+                [vec![8_u8; 4 * 1024 * 1024]],
+            )
+            .map(drop)
+        })
+        .await
+        .expect("a commit exceeds the retained allocation bound");
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while !checkpointed() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the oversized WAL is checkpointed without another write");
+    drop(
+        worker
+            .connection
+            .lock()
+            .expect("checkpoint reset completed"),
+    );
+    assert_eq!(
+        std::fs::metadata(&wal_path).unwrap().len(),
+        0,
+        "WAL-BOUNDED-REUSE truncates allocation above the host bound"
+    );
 }

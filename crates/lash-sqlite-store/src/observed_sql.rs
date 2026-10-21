@@ -129,7 +129,14 @@ unsafe extern "C" fn trace(
         if sql_ptr.is_null() {
             return;
         }
-        let sql = CStr::from_ptr(sql_ptr).to_string_lossy();
+        let raw_sql = CStr::from_ptr(sql_ptr);
+        // SQLite retains the UTF-8 SQL supplied by rusqlite. Validate it in
+        // one pass; use lossy decoding only for an invalid external string.
+        // Every callback still feeds the same observers and counters below.
+        let sql = match raw_sql.to_str() {
+            Ok(sql) => std::borrow::Cow::Borrowed(sql),
+            Err(_) => raw_sql.to_string_lossy(),
+        };
         let window = Window::current();
         match code {
             ffi::SQLITE_TRACE_STMT => {

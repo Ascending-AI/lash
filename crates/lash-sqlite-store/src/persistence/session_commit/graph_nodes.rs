@@ -26,7 +26,7 @@ pub(super) fn occupied_node_ids_conn(
             StoreError::Backend(format!("failed to encode commit node id batch: {error}"))
         })?;
         let mut statement = tx
-            .prepare(session_sql().graph_sqlite.select_occupied.sql())
+            .prepare_cached(session_sql().graph_sqlite.select_occupied.sql())
             .map_err(sqlite_error)?;
         let rows = statement
             .query_map(params![encoded], |row| row.get::<_, String>(0))
@@ -82,12 +82,12 @@ pub(super) fn insert_graph_nodes_conn(
         let encoded = serde_json::to_string(&rows).map_err(|error| {
             StoreError::Backend(format!("failed to encode commit node batch: {error}"))
         })?;
-        if tx
-            .execute(
-                session_sql().graph_sqlite.insert_batch.sql(),
-                params![encoded],
-            )
-            .is_err()
+        if crate::conn::cached_execute(
+            tx,
+            session_sql().graph_sqlite.insert_batch.sql(),
+            params![encoded],
+        )
+        .is_err()
         {
             insert_graph_nodes_one_at_a_time(tx, session_id, nodes, facts, plan)?;
         }

@@ -4,6 +4,7 @@ load("@prelude//rust:cargo_buildscript.bzl", _prelude_buildscript_run = "buildsc
 load("@prelude//rust:cargo_package.bzl", "cargo", "get_reindeer_platforms")
 load("@prelude//utils:selects.bzl", "selects")
 load(":exec_sizes.bzl", "HELPER_BUDGET")
+load(":native_build_env.bzl", "NATIVE_BUILD_ENV")
 load(":platforms.bzl", "LOCAL_HELPER_CONSTRAINT", "pool_constraint")
 load(":profile.bzl", "THIRD_PARTY_OPT_LEVELS")
 
@@ -113,6 +114,7 @@ def third_party_buildscript_run(name, package_name, env = {}, **kwargs):
         "exec_compatible_with": kwargs.get("exec_compatible_with", []) + [pool_constraint(cpu, memory)],
     })
     action_env = dict(env)
+    action_env.update(NATIVE_BUILD_ENV.get(package_name, {}))
     action_env.update({
         "KILN_ACTION_CPU_COUNT": str(cpu),
         "KILN_ACTION_MEMORY_KB": str(memory),
