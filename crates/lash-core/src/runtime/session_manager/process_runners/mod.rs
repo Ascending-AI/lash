@@ -75,6 +75,7 @@ impl RuntimeSessionServices {
         Ok(crate::runtime::ProcessStepTools {
             catalog,
             effects,
+            reads: engine.composition.effect_reads(Arc::clone(&engine.env)),
             tools,
             context: Arc::new(self.clone()),
         })

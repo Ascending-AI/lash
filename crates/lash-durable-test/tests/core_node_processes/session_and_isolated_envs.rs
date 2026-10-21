@@ -7,7 +7,7 @@ use super::*;
 
 /// One boot of a node over `stores`, named `boot` so that each boot is a
 /// new incarnation: a cold worker that holds nothing of an earlier one.
-fn booted(
+pub(super) fn booted(
     stores: &Arc<dyn StoreSet>,
     engines: Vec<Arc<dyn lash_execution_contracts::process::ProcessEngine>>,
     boot: &str,

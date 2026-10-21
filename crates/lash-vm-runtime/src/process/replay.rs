@@ -131,6 +131,7 @@ pub struct ReplayFault(String);
 struct ReplayHost {
     now_ms: Option<i64>,
     random: std::sync::Mutex<std::collections::VecDeque<u64>>,
+    effects: std::sync::Mutex<std::collections::VecDeque<super::state::EffectRead>>,
     clock_read: AtomicBool,
     diverged: AtomicBool,
 }
@@ -139,6 +140,7 @@ impl ReplayHost {
     fn of(reads: &HostReads) -> Self {
         Self {
             now_ms: reads.now_ms,
+            effects: std::sync::Mutex::new(reads.effects.iter().cloned().collect()),
             random: std::sync::Mutex::new(reads.random.iter().copied().collect()),
             clock_read: AtomicBool::new(false),
             diverged: AtomicBool::new(false),
@@ -156,7 +158,11 @@ impl ReplayHost {
             .random
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        draws.is_empty()
+        self.effects
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
+            && draws.is_empty()
             && self.clock_read.load(Ordering::Relaxed) == self.now_ms.is_some()
             && !self.diverged.load(Ordering::Relaxed)
     }
@@ -201,13 +207,24 @@ impl RunHost for ReplayHost {
     async fn perform(
         &self,
         effect: &lash_kernel_doc::EffectName,
-        _args: &[Datum],
-        _site: &lash_kernel_doc::PositionLabel,
-        _origin: &lash_kernel_doc::Site,
+        args: &[Datum],
+        site: &lash_kernel_doc::PositionLabel,
+        origin: &lash_kernel_doc::Site,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
-        Err(self.diverge(&format!(
-            "a kernel process binds no read, and the segment performed `{effect}` as one"
-        )))
+        let read = self
+            .effects
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .pop_front()
+            .ok_or_else(|| self.diverge("the segment read beyond its operation tape"))?;
+        if read.effect != *effect
+            || read.args != args
+            || read.site != *site
+            || read.origin != *origin
+        {
+            return Err(self.diverge("the segment's operation read differs from its tape"));
+        }
+        Ok(read.answer)
     }
 
     fn print(&self, _value: Datum) -> Result<(), ParentFault> {
@@ -515,7 +532,7 @@ impl KernelProcessEngine {
                 target: Target::Entry(input.entry.clone()),
                 args,
                 session: None,
-                modes: lash_kernel_vm::EffectModes::recorded(),
+                modes: lash_kernel_vm::EffectModes::reading(reads.read_effects.iter().cloned()),
                 host: Vec::new(),
                 save: None,
             },

@@ -337,15 +337,32 @@ pub(crate) struct KernelRunInput {
 
 /// What the host's reads answered one run segment, recorded at
 /// `observe: counts` (FIG-6370): the clock instant it read, at most one
-/// since the segment's clock is constant, and each random draw in order. A
-/// replay answers the same reads from it.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// since the segment's clock is constant, each random draw, and each operation
+/// read with its input and answer. A diagnostic replay answers from this tape;
+/// a live continuation never does.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct HostReads {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) now_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) random: Vec<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) effects: Vec<EffectRead>,
+    /// The complete binding, including operations this segment never called.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub(crate) read_effects: std::collections::BTreeSet<lash_kernel_doc::EffectName>,
+}
+
+/// One diagnostic read: replay must ask the same use with the same input.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct EffectRead {
+    pub(crate) effect: lash_kernel_doc::EffectName,
+    pub(crate) args: Vec<lash_kernel_doc::Datum>,
+    pub(crate) site: lash_kernel_doc::PositionLabel,
+    pub(crate) origin: lash_kernel_doc::Site,
+    pub(crate) answer: Result<lash_kernel_doc::Datum, lash_kernel_doc::ErrorDatum>,
 }
 
 /// Where one run segment started, recorded at `observe: counts` beside its

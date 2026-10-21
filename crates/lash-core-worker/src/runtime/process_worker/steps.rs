@@ -791,6 +791,7 @@ impl DurableProcessWorker {
             process: process.id.clone(),
             engine_settings: process.engine_settings().cloned(),
             effects,
+            reads: Arc::clone(&tools.reads),
             now: cx.now(),
             clock: Arc::clone(cx.clock()),
             projection_providers: Some(Arc::clone(backend.projection_providers())),

@@ -327,6 +327,8 @@ pub struct EngineStepRun {
     pub effects: std::sync::Arc<
         std::collections::BTreeMap<lash_kernel_doc::EffectName, crate::OperationLink>,
     >,
+    /// The readers registered by the process's recorded components.
+    pub reads: std::sync::Arc<dyn EngineEffectReads>,
     /// The activation's clock reading when the body started.
     pub now: DurableInstant,
     /// The activation's clock, for a body that waits.
@@ -342,6 +344,45 @@ pub struct EngineStepRun {
     /// publishes pages ([`EngineStepAnswer::Paged`]); None on a store that
     /// holds no heap pages.
     pub pages: Option<StepPages>,
+}
+
+/// Answers a process's read-mode operations from its recorded environment.
+/// Reads admit no step and are repeated when an uncommitted run is retried.
+#[async_trait::async_trait]
+pub trait EngineEffectReads: Send + Sync {
+    /// Read the route pinned by `effect` and `contract`. The caller supplies
+    /// plain tool input (or its projection refusal) and its parent deadline; the route also applies the
+    /// tool's execution bound and the process cancellation.
+    ///
+    /// # Errors
+    /// An unavailable reader or codec faults the run. A tool's own refusal
+    /// stays a typed, catchable read error.
+    async fn read(
+        &self,
+        effect: &lash_kernel_doc::EffectName,
+        contract: &lash_kernel_doc::ContractId,
+        input: Result<serde_json::Value, String>,
+        cancel: &tokio_util::sync::CancellationToken,
+        deadline: std::time::Instant,
+    ) -> Result<Result<serde_json::Value, EngineReadError>, crate::plugin_error::PluginError>;
+}
+
+/// A catchable refusal of an inline process read.
+#[derive(Debug)]
+pub enum EngineReadError {
+    /// The guest operands cannot be projected into one tool input record.
+    Arguments(String),
+    /// The pinned contract or input does not fit the tool.
+    Tool(Box<crate::ToolFailure>),
+    /// The reader's own error, with its original data.
+    Reader {
+        message: String,
+        data: serde_json::Value,
+    },
+    /// The process stopped during the read.
+    Cancelled,
+    /// The tool or parent deadline elapsed.
+    TimedOut,
 }
 
 /// What an engine step reads and stages heap pages under: the store's page

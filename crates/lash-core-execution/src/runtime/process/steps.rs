@@ -167,6 +167,8 @@ pub struct ProcessStepTools {
     /// The effects the process's env links: what each step's effect path
     /// runs.
     pub effects: Arc<std::collections::BTreeMap<lash_kernel_doc::EffectName, crate::OperationLink>>,
+    /// The inline readers over the same recorded routes and component config.
+    pub reads: Arc<dyn lash_execution_contracts::process::EngineEffectReads>,
     /// The round tools over it, owned by the process.
     pub tools: Arc<dyn RoundTools>,
     /// The same composition and namespaces the round tools run under.

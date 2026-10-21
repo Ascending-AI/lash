@@ -378,7 +378,6 @@ pub use lash_execution_contracts::process::EngineStatusProjection;
 pub use lash_execution_contracts::process::EngineStepAnswer;
 pub use lash_execution_contracts::process::EngineStepKind;
 pub use lash_execution_contracts::process::EngineStepRefusal;
-pub use lash_execution_contracts::process::EngineStepRun;
 pub use lash_execution_contracts::process::EngineSteps;
 /// How a host process engine carries a process onto a successor pair its
 /// host names (FIG-6121, D2).
@@ -407,6 +406,7 @@ pub use lash_execution_contracts::process::StepPublication;
 pub use lash_execution_contracts::process::StepRequest;
 pub use lash_execution_contracts::process::SuccessionError;
 pub use lash_execution_contracts::process::SuccessorCarry;
+pub use lash_execution_contracts::process::{EngineEffectReads, EngineReadError, EngineStepRun};
 pub use lash_execution_contracts::session_types::PluginOwned;
 pub use lash_execution_contracts::state_commands::StateCommands;
 pub use lash_plugin_standard_compaction::{

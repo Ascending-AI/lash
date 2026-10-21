@@ -1,10 +1,4 @@
-//! A workflow process performs a component's `Read` tool (FIG-6273).
-//!
-//! A process component may supply a `Read` tool with the reader its
-//! provider registers, as a session plugin may. A workflow process's
-//! `perform` of it is a linked effect like any other: admitted and executed
-//! as a durable process step, whose result is stable across replay. Only a
-//! code cell reads inline (ADR 0144), since a cell reruns as a whole.
+//! A sessionless workflow reads through its recorded component routes.
 
 use super::*;
 
@@ -59,6 +53,7 @@ fn looked_up(args: &serde_json::Value) -> serde_json::Value {
 struct Answered {
     bodies: AtomicUsize,
     reads: AtomicUsize,
+    gates: AtomicUsize,
 }
 
 struct LookupBody(Arc<Answered>);
@@ -79,8 +74,15 @@ impl lash::tools::ToolReads for LookupReads {
         &self,
         call: lash::tools::ReadCall<'_>,
     ) -> Result<serde_json::Value, lash::tools::ReadError> {
-        self.0.reads.fetch_add(1, Ordering::SeqCst);
-        Ok(looked_up(call.args))
+        if call.args["topic"] == "gate" {
+            if self.0.gates.fetch_add(1, Ordering::SeqCst) == 0 {
+                call.cancel.cancelled().await;
+                return Err(lash::tools::ReadError::new("the first unsaved run stopped"));
+            }
+            return Ok(serde_json::json!({ "open": true }));
+        }
+        let draw = self.0.reads.fetch_add(1, Ordering::SeqCst) + 1;
+        Ok(serde_json::json!({ "topic": call.args["topic"], "draw": draw }))
     }
 }
 
@@ -107,53 +109,173 @@ fn knowledge_component(
     )
 }
 
-/// PROCESS-PERFORMS-A-READ-TOOL: a kernel process whose environment links a
-/// component's `Read` tool performs it as an ordinary durable step: the
-/// step is admitted, its tool runs once, and the process ends with its
-/// answer.
-async fn a_workflow_process_performs_a_components_read_tool_as_a_step(tier: Tier) {
+/// PROCESS-READ-COLD: reads use the recorded route without a session, and
+/// a cold continuation draws a fresh answer rather than consuming its tape.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_sessionless_workflow_reads_fresh_after_a_cold_resume_on_sqlite_memory() {
+    let (stores, _keep) = stores(Tier::SqliteMemory).await;
     let answered = Arc::new(Answered::default());
-    let component = knowledge_component(&answered);
-    let deployment = deploy_with(tier, Vec::new(), move |backend| {
-        rlm_core(backend).process_component(component, KNOWLEDGE)
-    })
-    .await;
-    let payload = kernel_process::payload(&deployment.backend, LOOKUP, "lookup").await;
+    let build = |backend: &lash::Backend| {
+        let workers = lash::vm::WorkerService::default();
+        let bounds = workers.config().run_bounds;
+        lash::LashCore::standard_builder(backend.clone())
+            .plugin(Arc::new(lash_vm_runtime::KernelProcessPluginFactory::new(
+                workers,
+                "typescript",
+                bounds,
+            )))
+            .process_component(knowledge_component(&answered), KNOWLEDGE)
+    };
+    let (backend, first) =
+        super::session_and_isolated_envs::booted(&stores, Vec::new(), "read-first", build);
+    let source = LOOKUP.replace(
+        "  return got",
+        "  let gate = perform tools.lookup({topic: \"gate\"}) as Any\n  do sleep 5000\n  let again = perform tools.lookup(input) as Any\n  return [got, again]",
+    );
+    let payload = kernel_process::payload(&backend, &source, "lookup").await;
     let process = start_under(
-        &deployment.core,
+        &first,
         &environment_of(vec![(KNOWLEDGE, lookup_definition())], &[KNOWLEDGE]),
         lash_vm_runtime::LASH_VM_ENGINE_KIND,
         payload,
-        |request| request,
+        |mut request| {
+            if let lash_execution_contracts::process::ProcessStartTarget::Input(
+                lash_execution_contracts::process::ProcessInput::Engine { launch, .. },
+            ) = &mut request.input
+            {
+                let settings = lash_vm_runtime::KernelRecordedSettings::from_engine_settings(
+                    launch.settings.as_ref().unwrap(),
+                )
+                .unwrap();
+                launch.settings = Some(
+                    settings
+                        .observing(lash_kernel_vm::ObservationMode::Counts)
+                        .into_engine_settings(),
+                );
+            }
+            request
+        },
     )
     .await;
-    let output = ended(&deployment.core, &process).await;
+    tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            let steps = lash_core_execution::runtime::process::steps::read_process_steps(
+                &first.effect_host(),
+                &process,
+            )
+            .await
+            .unwrap();
+            for step in &steps {
+                if let Some(text) = step.outcome.as_ref().and_then(|outcome| outcome.payload()) {
+                    assert!(
+                        !text.contains("binds no read"),
+                        "the process read host faulted: {text}"
+                    );
+                }
+            }
+            if answered.gates.load(Ordering::SeqCst) == 1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the read answered before the unsaved run blocked");
+    assert_eq!(answered.reads.load(Ordering::SeqCst), 1);
+    first
+        .shutdown()
+        .await
+        .expect("the first node stops before saving the read");
+    drop(first);
+    drop(backend);
+    let (backend, first) =
+        super::session_and_isolated_envs::booted(&stores, Vec::new(), "read-redrawn", build);
+    tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            let record = backend
+                .process_registry()
+                .get_process(&process)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(
+                record.terminal().is_none(),
+                "the process ended before parking: {:?}",
+                record.terminal()
+            );
+            let steps = lash_core_execution::runtime::process::steps::read_process_steps(
+                &first.effect_host(),
+                &process,
+            )
+            .await
+            .expect("the process steps read");
+            for step in &steps {
+                if let Some(text) = step.outcome.as_ref().and_then(|outcome| outcome.payload()) {
+                    assert!(
+                        !text.contains("binds no read"),
+                        "the process read host faulted: {text}"
+                    );
+                }
+            }
+            if steps.iter().any(|step| {
+                step.outcome
+                    .as_ref()
+                    .and_then(|outcome| outcome.payload())
+                    .is_some_and(|text| text.contains("until_ms"))
+            }) {
+                break;
+            }
+            if answered.bodies.load(Ordering::SeqCst) != 0 {
+                panic!("a read-mode perform ran a durable body instead of its reader");
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the first read parks");
+    assert_eq!(
+        answered.reads.load(Ordering::SeqCst),
+        2,
+        "the unsaved read was redrawn"
+    );
+    first
+        .shutdown()
+        .await
+        .expect("the redrawn run stops at its park");
+    drop(first);
+    drop(backend);
+    let (_, fresh) =
+        super::session_and_isolated_envs::booted(&stores, Vec::new(), "read-fresh", build);
+    let output = ended(&fresh, &process).await;
     assert_eq!(
         success(&output),
-        looked_up(&serde_json::json!({ "topic": "lash" }))
+        serde_json::json!([
+            { "topic": "lash", "draw": 2 }, { "topic": "lash", "draw": 3 }
+        ])
+    );
+    assert_eq!(answered.reads.load(Ordering::SeqCst), 3);
+    assert_eq!(answered.bodies.load(Ordering::SeqCst), 0);
+    let replayed = fresh
+        .processes()
+        .replay(&process, lash::workflow::ReplaySegments::All)
+        .await
+        .unwrap();
+    assert_eq!(
+        replayed.len(),
+        2,
+        "both sides of the park replay: {replayed:?}"
+    );
+    assert!(
+        replayed.iter().all(|segment| matches!(
+            segment.answer,
+            lash::workflow::SegmentAnswer::Verified { .. }
+        )),
+        "{replayed:?}"
     );
     assert_eq!(
-        (
-            answered.bodies.load(Ordering::SeqCst),
-            answered.reads.load(Ordering::SeqCst)
-        ),
-        (1, 0),
-        "the perform ran as one step, not an inline read"
+        answered.reads.load(Ordering::SeqCst),
+        3,
+        "diagnostic replay never calls a reader"
     );
-    let facts = deployment
-        .backend
-        .durable()
-        .run_facts(&lash_durable::domain::OwnerKey::Process(process))
-        .await
-        .expect("the process's run facts are read");
-    let tool = LOOKUP_TOOL.as_bytes();
-    assert!(
-        facts
-            .nodes
-            .values()
-            .any(|node| node.bytes.windows(tool.len()).any(|window| window == tool)),
-        "the lookup's step is recorded: {facts:?}"
-    );
+    fresh.shutdown().await.expect("the fresh node stops");
 }
-
-on_every_tier!(a_workflow_process_performs_a_components_read_tool_as_a_step);

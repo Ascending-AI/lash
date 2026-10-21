@@ -4,7 +4,7 @@
 //! function a host may start, with a typed signature. The process names the
 //! document by identity, so a running instance keeps the document it was
 //! admitted under. Its body runs as a kernel machine in a worker; every
-//! `perform` is one durable step, every `sleep` a durable timer, and a body
+//! recorded `perform` is one durable step, while a read is answered inline; every `sleep` a durable timer, and a body
 //! that fans out waits on all of them at once ([`advance`]).
 //!
 //! Starting and awaiting a process are effects like any other: the host
@@ -20,6 +20,7 @@ mod migrate;
 mod page_carry;
 mod pages;
 pub use page_carry::{carry_parked_checkpoint, carry_snapshot};
+mod reads;
 mod replay;
 mod run;
 mod state;

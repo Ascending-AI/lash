@@ -44,7 +44,7 @@ deferred, isolated or must declare intents or end a turn declares `Once` or
 `Repeatable`: a manifest that declares `Read` with any of those is refused.
 A serialized policy this build does not know refuses to decode.
 
-### 2. Only code cells read
+### 2. Code cells and workflow processes read
 
 A `Read` tool's provider registers a reader beside itself
 (`ToolProviderRegistration::with_reads`). The reader gets the manifest the
@@ -58,10 +58,14 @@ call that is not planned as a read (§3). On the recorded route a `Read` call
 that was interrupted runs again at its ordinal, and a reported failure is
 never retried.
 
-A workflow process never reads inline: its `perform` of a `Read` tool is a
-linked effect, admitted and executed as a durable process step like any
-other, because a step's result must stay stable across replay and only a code
-cell, which reruns as a whole, may read again.
+A workflow process derives its read modes from its recorded environment's
+operation routes (FIG-7099). A read-mode `perform` calls the reader registered
+by that route's process component, without a session or a durable tool step.
+An uncommitted stretch runs again from its last park and redraws its reads;
+its next committed park keeps the resulting heap. Counted process segments
+retain read answers and modes only as diagnostic tapes for explicit replay.
+Live execution never consumes those tapes. Recorded operations still run as
+durable process steps.
 
 ### 3. A cell plans its reads, and owes their providers
 

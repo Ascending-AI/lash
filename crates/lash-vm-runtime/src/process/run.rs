@@ -1,7 +1,7 @@
 //! The `kernel_run` engine step: resume the saved run, hand it what
 //! settled, and run it until no task is ready.
 //!
-//! The step performs nothing. It answers the CheckpointRoot the machine
+//! The step performs only reads. It answers the CheckpointRoot the machine
 //! sealed at its park with the waits it asked for there: the step's outcome
 //! publishes the root's pages and owns them (FIG-6193, P1), and the process
 //! activation commits the waits, with the admission of each wait's step,
@@ -130,6 +130,13 @@ struct StepHost {
     providers: ProjectionCatalog,
     observe: lash_kernel_vm::ObservationMode,
     reads: std::sync::Mutex<HostReads>,
+    effect_reads: Arc<dyn lash_execution_contracts::process::EngineEffectReads>,
+    required: std::collections::BTreeMap<
+        lash_kernel_doc::EffectName,
+        lash_kernel_doc::OperationRequirement,
+    >,
+    cancel: CancellationToken,
+    parent_wait: std::time::Duration,
     /// The live deltas this segment reported, which name their trace facts.
     deltas: std::sync::atomic::AtomicU64,
     /// What names this segment's live facts: its start.
@@ -202,17 +209,47 @@ impl RunHost for StepHost {
         Ok(self.providers.answer(handle, request).await)
     }
 
-    /// A process binds no read: its every effect is a recorded step.
+    /// Read through the runner the process's environment recorded.
     async fn perform(
         &self,
         effect: &lash_kernel_doc::EffectName,
-        _args: &[Datum],
-        _site: &lash_kernel_doc::PositionLabel,
-        _origin: &lash_kernel_doc::Site,
+        args: &[Datum],
+        site: &lash_kernel_doc::PositionLabel,
+        origin: &lash_kernel_doc::Site,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
-        Err(ParentFault(format!(
-            "a kernel process binds no read, and its run performed `{effect}` as one"
-        )))
+        let requirement = self.required.get(effect).ok_or_else(|| {
+            ParentFault(format!("the process reads undeclared effect `{effect}`"))
+        })?;
+        let input = crate::tool_input(
+            args,
+            |input| {
+                datum_to_json(input)
+                    .map_err(|error| error.to_string())
+                    .and_then(|text| serde_json::from_str(&text).map_err(|error| error.to_string()))
+            },
+            |count| {
+                format!(
+                    "the effect `{effect}` takes one input record, and {count} arguments were passed"
+                )
+            },
+        );
+        let deadline = std::time::Instant::now() + self.parent_wait;
+        let answer = super::reads::answer(
+            self.effect_reads
+                .read(effect, &requirement.contract, input, &self.cancel, deadline)
+                .await
+                .map_err(|error| ParentFault(error.to_string()))?,
+        );
+        if self.observe == lash_kernel_vm::ObservationMode::Counts {
+            self.taped().effects.push(super::state::EffectRead {
+                effect: effect.clone(),
+                args: args.to_vec(),
+                site: site.clone(),
+                origin: origin.clone(),
+                answer: answer.clone(),
+            });
+        }
+        Ok(answer)
     }
 
     fn print(&self, _value: Datum) -> Result<(), ParentFault> {
@@ -346,13 +383,26 @@ async fn kernel_run(
         .iter()
         .map(|delivery| (delivery.wait, delivery.identity.clone()))
         .collect();
+    let modes = lash_kernel_vm::EffectModes::reading(
+        run.effects
+            .iter()
+            .filter(|(_, link)| link.policy == lash_core::ExecutionPolicy::Read)
+            .map(|(effect, _)| effect.clone()),
+    );
     let host = Arc::new(StepHost {
         trace: trace.clone(),
         now_ms: run.now.0,
         random: Arc::clone(&engine.random),
         providers: ProjectionCatalog::of_backend(run.projection_providers.as_deref()),
         observe: settings.observe,
-        reads: std::sync::Mutex::default(),
+        reads: std::sync::Mutex::new(HostReads {
+            read_effects: modes.reads().clone(),
+            ..HostReads::default()
+        }),
+        effect_reads: Arc::clone(&run.reads),
+        required: document.manifest.effects.clone(),
+        cancel: stop.clone(),
+        parent_wait: engine.workers.config().tuning.parent_wait,
         deltas: std::sync::atomic::AtomicU64::new(0),
         segment: input
             .parked
@@ -371,7 +421,7 @@ async fn kernel_run(
             target: Target::Entry(process_input.entry.clone()),
             args,
             session: None,
-            modes: lash_kernel_vm::EffectModes::recorded(),
+            modes,
             host: Vec::new(),
             save: None,
         },

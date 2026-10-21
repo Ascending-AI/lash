@@ -23,6 +23,7 @@ use super::*;
 use crate::{ProcessId, SessionId, ToolProvider};
 
 mod declaration;
+mod reads;
 pub use declaration::ProcessComponentDeclaration;
 
 /// A process component as a host installs it.
@@ -817,6 +818,7 @@ impl ProcessParts {
 /// What a process's components make: its execution composition, the tool
 /// registry its providers route through, its owners in env order, and what
 /// its step state reduces and admits by (FIG-5268).
+#[derive(Clone)]
 pub struct ProcessComposition {
     pub composition: Arc<ExecutionComposition>,
     pub registry: Arc<crate::ToolRegistry>,

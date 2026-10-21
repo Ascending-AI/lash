@@ -46,10 +46,11 @@ pub use engine::{
     SettledRan,
 };
 pub use engine_state::{
-    CapacityCause, CapacityVerdict, EngineAction, EngineEvent, EngineState, EngineStateFormat,
-    EngineStateMigration, EngineStateRefusal, EngineStatus, EngineStatusProjection,
-    EngineStepAnswer, EngineStepKind, EngineStepRefusal, EngineStepRun, EngineSteps, EngineWake,
-    KeyName, StepCandidate, StepManifest, StepName, StepPages, StepPublication, StepRequest,
+    CapacityCause, CapacityVerdict, EngineAction, EngineEffectReads, EngineEvent, EngineReadError,
+    EngineState, EngineStateFormat, EngineStateMigration, EngineStateRefusal, EngineStatus,
+    EngineStatusProjection, EngineStepAnswer, EngineStepKind, EngineStepRefusal, EngineStepRun,
+    EngineSteps, EngineWake, KeyName, StepCandidate, StepManifest, StepName, StepPages,
+    StepPublication, StepRequest,
 };
 pub use events::{
     AbandonEvidence, AbandonWriter, ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEvent,
