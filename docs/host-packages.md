@@ -16,6 +16,10 @@ production service or a test fake serving the same contract.
 plugins. [Workflow hosting](workflow-hosts.md) covers importing, publishing,
 editing and observing the documents that call packages.
 
+For an end-to-end authoring procedure, use the
+[making-packages skill](../skills/making-packages/SKILL.md) in the
+[host development skills library](../skills/README.md).
+
 ## A dataframe pipeline in two dialects
 
 The [dataframe fixture](../crates/lash-kernel-package/src/testing/dataframe.surface)
@@ -444,11 +448,14 @@ it to run. A rollback to a build that lacks a needed native or kernel leaves
 that work parked and named by the strand report until a node offering it is
 live.
 
-Adoption relinks a published document or an unparked process to the
+Adoption relinks a published document or a process to the
 successor's functions of the same names. It refuses a changed operation
-requirement with `operation_contract_changed`. Parked adoption currently
-refuses `state_not_carried`: no migrator carries its heap pages. That run
-stays on its pinned identities. Publishing a replacement document alone
+requirement with `operation_contract_changed`. Parked adoption carries heap
+pages through the successor's correspondence; an uncarryable coordinate or
+unavailable pinned code refuses with a typed carry refusal and preserves the
+original run. The [paged carry laws](../crates/lash-vm-runtime/src/process/page_carry_tests.rs)
+cover frame, closure, spawn-origin and pinned-snapshot behavior.
+Publishing a replacement document alone
 does not adopt an already-running process. The
 [workflow host guide](workflow-hosts.md) describes the successor request.
 
