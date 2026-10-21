@@ -98,23 +98,169 @@ fn message_item(
     RequestSegment::item(&tree, slot)
 }
 
-/// An immutable lowered history. The source Arcs keep identities alive and
-/// the matching prefix's segments keep all their derived admission facts.
-/// Only this call's changed suffix is lowered. The whole value is replaced
-/// in the bounded cache, so growth and branches stay inside its budget.
+/// Each immutable chunk owns its sources and derived items together. An
+/// append shares complete chunks and copies at most this many records from
+/// the final chunk. A branch keeps only its matching prefix, so a rejected
+/// oversized suffix cannot remain reachable through an earlier cache entry.
+const HISTORY_CHUNK_MESSAGES: usize = 32;
+
+#[derive(Clone)]
+struct LoweredMessage {
+    source: LlmMessage,
+    item: RequestSegment,
+}
+
+struct HistoryChunk {
+    previous: Option<Arc<HistoryChunk>>,
+    messages: Vec<LoweredMessage>,
+    end: usize,
+    bytes: usize,
+}
+
+impl Clone for HistoryChunk {
+    fn clone(&self) -> Self {
+        let mut messages = Vec::with_capacity(HISTORY_CHUNK_MESSAGES);
+        messages.extend_from_slice(&self.messages);
+        Self {
+            previous: self.previous.clone(),
+            messages,
+            end: self.end,
+            bytes: self.bytes,
+        }
+    }
+}
+
+impl Drop for HistoryChunk {
+    fn drop(&mut self) {
+        // Releasing a long history must not recurse through its chunk chain.
+        let mut previous = self.previous.take();
+        while let Some(chunk) = previous {
+            match Arc::try_unwrap(chunk) {
+                Ok(mut chunk) => previous = chunk.previous.take(),
+                Err(_) => break,
+            }
+        }
+    }
+}
+
+/// The bounded segment cache owns the latest immutable history. Calls and
+/// concurrent branches can hold earlier snapshots without copying history.
 #[derive(Default)]
 struct LoweredHistory {
-    sources: Vec<LlmMessage>,
-    items: Vec<RequestSegment>,
+    tail: Option<Arc<HistoryChunk>>,
 }
 
 impl LoweredUnit for LoweredHistory {
     fn retained_bytes(&self) -> usize {
-        self.items.iter().map(RequestSegment::literal_len).sum()
+        self.tail.as_ref().map_or(0, |tail| tail.bytes)
     }
 }
 
 impl LoweredHistory {
+    fn len(&self) -> usize {
+        self.tail.as_ref().map_or(0, |tail| tail.end)
+    }
+
+    fn records(&self) -> impl Iterator<Item = &LoweredMessage> {
+        let mut chunks = Vec::with_capacity(self.len().div_ceil(HISTORY_CHUNK_MESSAGES));
+        let mut chunk = self.tail.as_deref();
+        while let Some(held) = chunk {
+            chunks.push(held);
+            chunk = held.previous.as_deref();
+        }
+        chunks
+            .into_iter()
+            .rev()
+            .flat_map(|chunk| chunk.messages.iter())
+    }
+
+    fn shared_prefix(&self, messages: &[LlmMessage]) -> usize {
+        let mut shared = messages.len().min(self.len());
+        let mut chunk = self.tail.as_deref();
+        while let Some(held) = chunk {
+            let start = held.end - held.messages.len();
+            if start < shared {
+                let end = held.end.min(shared);
+                let matched = held
+                    .messages
+                    .iter()
+                    .zip(&messages[start..end])
+                    .take_while(|(held, message)| {
+                        held.source.role == message.role
+                            && held.source.starts_user_segment == message.starts_user_segment
+                            && Arc::ptr_eq(&held.source.blocks, &message.blocks)
+                    })
+                    .count();
+                if matched < end - start {
+                    shared = start + matched;
+                }
+            }
+            chunk = held.previous.as_deref();
+        }
+        shared
+    }
+
+    fn items(&self) -> impl Iterator<Item = &RequestSegment> {
+        self.records().map(|record| &record.item)
+    }
+
+    fn prefix(&self, len: usize) -> Self {
+        let mut chunk = self.tail.as_ref();
+        while let Some(held) = chunk {
+            let start = held.end - held.messages.len();
+            if len == held.end {
+                return Self {
+                    tail: Some(held.clone()),
+                };
+            }
+            if len > start {
+                let mut messages = Vec::with_capacity(HISTORY_CHUNK_MESSAGES);
+                messages.extend_from_slice(&held.messages[..len - start]);
+                let bytes = held.previous.as_ref().map_or(0, |previous| previous.bytes)
+                    + messages
+                        .iter()
+                        .map(|message| message.item.literal_len())
+                        .sum::<usize>();
+                return Self {
+                    tail: Some(Arc::new(HistoryChunk {
+                        previous: held.previous.clone(),
+                        messages,
+                        end: len,
+                        bytes,
+                    })),
+                };
+            }
+            chunk = held.previous.as_ref();
+        }
+        Self::default()
+    }
+
+    fn push(&mut self, source: LlmMessage, item: RequestSegment) {
+        let end = self.len();
+        let bytes = self.retained_bytes();
+        let previous = if self
+            .tail
+            .as_ref()
+            .is_some_and(|tail| tail.messages.len() == HISTORY_CHUNK_MESSAGES)
+        {
+            self.tail.take()
+        } else {
+            None
+        };
+        let tail = self.tail.get_or_insert_with(|| {
+            Arc::new(HistoryChunk {
+                end,
+                bytes,
+                previous,
+                messages: Vec::with_capacity(HISTORY_CHUNK_MESSAGES),
+            })
+        });
+        let tail = Arc::make_mut(tail);
+        tail.end += 1;
+        tail.bytes += item.literal_len();
+        tail.messages.push(LoweredMessage { source, item });
+    }
+
     fn extend(
         prior: Option<Arc<Self>>,
         messages: &[LlmMessage],
@@ -123,35 +269,33 @@ impl LoweredHistory {
             AttachmentPosition,
         ) -> Result<AttachmentSlot, TemplateError>,
     ) -> Result<Arc<Self>, TemplateError> {
-        let shared = prior.as_ref().map_or(0, |prior| {
-            prior
-                .sources
-                .iter()
-                .zip(messages)
-                .take_while(|(held, message)| {
-                    held.role == message.role
-                        && held.starts_user_segment == message.starts_user_segment
-                        && Arc::ptr_eq(&held.blocks, &message.blocks)
-                })
-                .count()
-        });
+        let shared = prior
+            .as_ref()
+            .map_or(0, |prior| prior.shared_prefix(messages));
         if let Some(prior) = &prior
             && shared == messages.len()
-            && shared == prior.sources.len()
+            && shared == prior.len()
         {
             return Ok(Arc::clone(prior));
         }
-        let mut items = Vec::with_capacity(messages.len());
-        if let Some(prior) = prior {
-            items.extend(prior.items[..shared].iter().cloned());
-        }
+        Self::from_suffix(prior.as_deref(), shared, messages, slot)
+    }
+
+    fn from_suffix(
+        prior: Option<&Self>,
+        shared: usize,
+        messages: &[LlmMessage],
+        slot: &mut impl FnMut(
+            &crate::AttachmentRef,
+            AttachmentPosition,
+        ) -> Result<AttachmentSlot, TemplateError>,
+    ) -> Result<Arc<Self>, TemplateError> {
+        let mut history = prior.map_or_else(Self::default, |prior| prior.prefix(shared));
         for message in &messages[shared..] {
-            items.push(message_item(message, slot)?);
+            let item = message_item(message, slot)?;
+            history.push(message.clone(), item);
         }
-        Ok(Arc::new(Self {
-            sources: messages.to_vec(),
-            items,
-        }))
+        Ok(Arc::new(history))
     }
 }
 
@@ -227,7 +371,7 @@ impl RecordedRequestTemplate {
             builder.literal(":");
             if key == "messages" {
                 builder.literal("[");
-                for item in &history.items {
+                for item in history.items() {
                     builder.segment(item);
                 }
                 builder.literal("]");
@@ -386,4 +530,168 @@ fn messages_array_at(envelope: &str, splice: usize) -> bool {
         .strip_prefix('[')
         .is_some_and(|rest| rest.trim().is_empty())
         && after.trim_start().starts_with(']')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm::types::LlmRole;
+    use allocation_counter::Measurement;
+
+    /// LOWERED-APPEND: carrying a validated prefix copies at most one
+    /// bounded tail chunk, independently of the retained history depth.
+    #[test]
+    fn carrying_a_validated_canonical_prefix_has_bounded_allocation() {
+        let counts = [1, 10, 1000].map(|len| {
+            let messages: Vec<_> = (0..=len)
+                .map(|index| LlmMessage::text(LlmRole::User, format!("message {index:04}")))
+                .collect();
+            let mut slot = |_: &crate::AttachmentRef, _: AttachmentPosition| {
+                panic!("this history has no attachments")
+            };
+            let prior = LoweredHistory::extend(None, &messages[..len], &mut slot).unwrap();
+            let measurement = Measurement::start();
+            let next = LoweredHistory::extend(Some(prior.clone()), &messages, &mut slot).unwrap();
+            let counts = measurement.finish();
+            assert_eq!(prior.items().count(), len);
+            assert_eq!(next.items().count(), len + 1);
+            for (held, next) in prior.items().zip(next.items()) {
+                assert!(RequestSegment::same(held, next));
+            }
+            let rebuilt = LoweredHistory::extend(None, &messages, &mut slot).unwrap();
+            assert_eq!(next.retained_bytes(), rebuilt.retained_bytes());
+            for (next, rebuilt) in next.items().zip(rebuilt.items()) {
+                assert_eq!(next.text_lossy(), rebuilt.text_lossy());
+            }
+            // Edits and compaction may cut through any chunk. They keep
+            // only the matching prefix, without changing a held snapshot.
+            for edit in [0, len / 2, len - 1] {
+                let mut branch = messages.clone();
+                branch[edit] = LlmMessage::text(LlmRole::Assistant, "rewritten");
+                let changed =
+                    LoweredHistory::extend(Some(prior.clone()), &branch, &mut slot).unwrap();
+                let rebuilt = LoweredHistory::extend(None, &branch, &mut slot).unwrap();
+                assert_eq!(changed.retained_bytes(), rebuilt.retained_bytes());
+                for (changed, rebuilt) in changed.items().zip(rebuilt.items()) {
+                    assert_eq!(changed.text_lossy(), rebuilt.text_lossy());
+                }
+                for (held, changed) in prior.items().zip(changed.items()).take(edit) {
+                    assert!(RequestSegment::same(held, changed));
+                }
+            }
+            for end in [0, 1, len / 2] {
+                let compacted =
+                    LoweredHistory::extend(Some(prior.clone()), &messages[..end], &mut slot)
+                        .unwrap();
+                assert_eq!(compacted.items().count(), end);
+                assert_eq!(
+                    compacted.retained_bytes(),
+                    prior
+                        .items()
+                        .take(end)
+                        .map(RequestSegment::literal_len)
+                        .sum::<usize>()
+                );
+                for (held, compacted) in prior.items().zip(compacted.items()) {
+                    assert!(RequestSegment::same(held, compacted));
+                }
+            }
+            assert_eq!(prior.items().count(), len);
+            counts
+        });
+        eprintln!("canonical prefix carry at 1, 10 and 1000 messages: {counts:?}");
+        assert!(
+            counts
+                .iter()
+                .all(|count| count.allocated <= counts[0].allocated),
+            "carrying an unchanged prefix must not copy its history vectors: {counts:?}"
+        );
+        assert!(
+            counts
+                .iter()
+                .all(|count| count.allocations <= counts[0].allocations)
+        );
+    }
+
+    pub(crate) mod allocation_counter {
+        //! Allocation requests on the measuring thread.
+        use std::alloc::{GlobalAlloc, Layout, System};
+        use std::cell::Cell;
+
+        #[derive(Clone, Copy, Debug, Default)]
+        pub(crate) struct Counts {
+            pub(crate) allocated: usize,
+            pub(crate) allocations: usize,
+        }
+
+        thread_local! {
+            static COUNTS: Cell<Option<Counts>> = const { Cell::new(None) };
+        }
+
+        fn charge(bytes: usize) {
+            let _ = COUNTS.try_with(|cell| {
+                if let Some(mut counts) = cell.get() {
+                    counts.allocated += bytes;
+                    counts.allocations += 1;
+                    cell.set(Some(counts));
+                }
+            });
+        }
+
+        struct Counter;
+
+        #[global_allocator]
+        static ALLOCATOR: Counter = Counter;
+
+        #[expect(
+            unsafe_code,
+            reason = "test allocator forwards the unchanged GlobalAlloc contract to System"
+        )]
+        unsafe impl GlobalAlloc for Counter {
+            unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+                charge(layout.size());
+                // SAFETY: The caller supplies a valid layout; System receives it unchanged.
+                unsafe { System.alloc(layout) }
+            }
+
+            unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+                charge(layout.size());
+                // SAFETY: The caller supplies a valid layout; System receives it unchanged.
+                unsafe { System.alloc_zeroed(layout) }
+            }
+
+            unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+                // SAFETY: Allocations came from System with the same layout.
+                unsafe { System.dealloc(ptr, layout) }
+            }
+
+            unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+                charge(new_size);
+                // SAFETY: The pointer, layout and new size keep the caller's contract.
+                unsafe { System.realloc(ptr, layout, new_size) }
+            }
+        }
+
+        pub(crate) struct Measurement;
+
+        impl Measurement {
+            pub(crate) fn start() -> Self {
+                COUNTS.with(|cell| {
+                    assert!(cell.get().is_none(), "allocation measurements cannot nest");
+                    cell.set(Some(Counts::default()));
+                });
+                Self
+            }
+
+            pub(crate) fn finish(self) -> Counts {
+                COUNTS.with(|cell| cell.take().expect("active allocation measurement"))
+            }
+        }
+
+        impl Drop for Measurement {
+            fn drop(&mut self) {
+                COUNTS.with(|cell| cell.set(None));
+            }
+        }
+    }
 }

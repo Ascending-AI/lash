@@ -130,8 +130,13 @@ any caller that wants the plain body) writes the same units with
   The cache carries the lowered history under the first message's retained
   identity and the lowering context. Each call compares message identities
   (blocks, role and user-segment marker), keeps the matching prefix's items
-  and lowers only the changed suffix. Replacing the immutable history also
-  updates its cache byte charge; an oversized history is not retained.
+  and lowers only the changed suffix. Immutable chunks own each source with
+  its derived item; appends share complete chunks and copy at most the final
+  32 records. Each chunk carries its cumulative literal-byte charge, so cache
+  accounting does not recount the prefix. Branches retain only their matching
+  prefix, and an oversized suffix cannot stay reachable through an earlier
+  cached history. Replacing the history updates its cache byte charge; an
+  oversized history is not retained.
   Cache loss rebuilds from the request before admission. Recorded bodies
   own their segments independently, so later branches cannot change an
   admitted request and a resend needs no cache.
