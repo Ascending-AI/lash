@@ -444,7 +444,7 @@ mod tests {
             _session_id: &lash_core::SessionId,
             _request: lash_core::AppendSessionNodesRequest,
         ) -> Result<
-            lash_core::AppendSessionNodesOutcome,
+            lash_core::SessionGraphAppendResult,
             lash_execution_contracts::plugin_error::PluginError,
         > {
             Err(

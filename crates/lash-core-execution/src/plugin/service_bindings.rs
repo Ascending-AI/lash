@@ -68,7 +68,7 @@ pub trait SessionGraphAppendPort: Send + Sync {
         &self,
         _session_id: &SessionId,
         _request: AppendSessionNodesRequest,
-    ) -> Result<AppendSessionNodesOutcome, PluginError>;
+    ) -> Result<SessionGraphAppendResult, PluginError>;
 }
 
 #[async_trait::async_trait]
@@ -316,7 +316,7 @@ impl ServiceBindings {
         &self,
         _session_id: &SessionId,
         _request: AppendSessionNodesRequest,
-    ) -> Result<AppendSessionNodesOutcome, PluginError> {
+    ) -> Result<SessionGraphAppendResult, PluginError> {
         let service = self.append_session_nodes.as_ref().ok_or_else(|| {
             PluginError::Preflight(PreflightIssue::MissingService {
                 owner: "invocation".into(),
@@ -838,7 +838,7 @@ impl SessionGraphAppendPort for SessionGraphServiceBindings {
         &self,
         _session_id: &SessionId,
         _request: AppendSessionNodesRequest,
-    ) -> Result<AppendSessionNodesOutcome, PluginError> {
+    ) -> Result<SessionGraphAppendResult, PluginError> {
         self.0.append_session_nodes(_session_id, _request).await
     }
 }
@@ -848,7 +848,7 @@ impl SessionGraphService for ServiceBindings {
         &self,
         _session_id: &SessionId,
         _request: AppendSessionNodesRequest,
-    ) -> Result<AppendSessionNodesOutcome, PluginError> {
+    ) -> Result<SessionGraphAppendResult, PluginError> {
         let service = self.append_session_nodes.as_ref().ok_or_else(|| {
             PluginError::Preflight(PreflightIssue::MissingService {
                 owner: "invocation".into(),

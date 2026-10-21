@@ -34,15 +34,15 @@ pub struct AppendSessionNodesRequest {
     ///
     /// # Accepted
     ///
-    /// The runtime reloads the durable head first, then accepts the append if
-    /// the named node is anywhere on the resulting active path — the leaf or
-    /// any ancestor of it. An append whose base was overtaken while it was
+    /// Application checks the current head at the owner's turn boundary, or
+    /// the current turn draft for an in-turn call. The append applies if the
+    /// named node is anywhere on that active path — the leaf or any ancestor. An append whose base was overtaken while it was
     /// being derived is therefore accepted.
     ///
     /// # Where the nodes land
     ///
     /// **Not at the named node.** The append is always built from the *current*
-    /// leaf: the first new node's parent is the leaf as of that reload, and
+    /// leaf: the first new node's parent is the leaf at application, and
     /// history stays linear. A caller that named an ancestor gets its nodes
     /// appended *after* content it never read. Nothing forks, and nothing
     /// already committed is lost or reordered — but the position of the
@@ -77,7 +77,8 @@ pub struct AppendSessionNodesRequest {
     pub requires_ancestor_node_id: Option<crate::NodeId>,
 }
 
-/// Outcome of `SessionGraphService::append_session_nodes`.
+/// The result of applying an append. A service returns this inside
+/// [`SessionGraphAppendResult::Applied`]; pending acceptance is separate.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum AppendSessionNodesOutcome {
@@ -89,7 +90,7 @@ pub enum AppendSessionNodesOutcome {
     /// leaf elsewhere.
     ///
     /// The first appended node parents on whatever the leaf was when the
-    /// runtime reloaded the head, which is not necessarily
+    /// owner applied the append, which is not necessarily
     /// [`AppendSessionNodesRequest::requires_ancestor_node_id`]; see that field.
     Appended {
         node_ids: Vec<crate::NodeId>,
@@ -109,5 +110,19 @@ pub enum AppendSessionNodesOutcome {
         /// Echo of the request's `requires_ancestor_node_id`, so a caller with
         /// several derivations in flight can tell which one lost its base.
         required_node_id: crate::NodeId,
+    },
+}
+
+/// An append's service response. Outside a turn, acceptance is durable before
+/// `Pending` returns; the session owner applies it at a turn boundary. Inside
+/// a turn, `Applied` describes the turn draft, durable with that turn's commit.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum SessionGraphAppendResult {
+    Applied {
+        outcome: AppendSessionNodesOutcome,
+    },
+    Pending {
+        receipt: crate::queued_work_vocabulary::SessionCommandReceipt,
     },
 }

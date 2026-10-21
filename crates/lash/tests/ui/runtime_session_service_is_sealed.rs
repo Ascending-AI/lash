@@ -1,5 +1,5 @@
 use lash::plugins::{PluginError, SessionGraphService};
-use lash::plugins::{AppendSessionNodesOutcome, AppendSessionNodesRequest};
+use lash::plugins::{SessionGraphAppendResult, AppendSessionNodesRequest};
 
 struct HostService;
 
@@ -9,7 +9,7 @@ impl SessionGraphService for HostService {
         &self,
         _: &lash::SessionId,
         _: AppendSessionNodesRequest,
-    ) -> Result<AppendSessionNodesOutcome, PluginError> {
+    ) -> Result<SessionGraphAppendResult, PluginError> {
         Err(PluginError::Session(String::new()))
     }
 }

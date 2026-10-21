@@ -103,13 +103,13 @@ impl crate::plugin::SessionGraphService for RuntimeSessionGraphService {
         &self,
         session_id: &SessionId,
         request: crate::AppendSessionNodesRequest,
-    ) -> Result<crate::AppendSessionNodesOutcome, lash_execution_contracts::plugin_error::PluginError>
+    ) -> Result<crate::SessionGraphAppendResult, lash_execution_contracts::plugin_error::PluginError>
     {
-        Box::pin(self.services.current.append_session_nodes(
-            &self.services.processes,
-            session_id,
-            request,
-        ))
+        Box::pin(
+            self.services
+                .current
+                .append_session_nodes(session_id, request),
+        )
         .await
     }
     async fn emit_trace_event(

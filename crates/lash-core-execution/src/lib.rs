@@ -668,6 +668,7 @@ pub use plugin::PluginTransitionRequest;
 pub use plugin::ProcessEngineContributionContext;
 pub use plugin::ProtocolBeforeLlmCallContext;
 pub use plugin::ProtocolLlmCallAction;
+pub use plugin::SessionGraphAppendResult;
 pub use plugin::SessionGraphService;
 pub use plugin::SessionReadView;
 pub use plugin::SessionStateService;

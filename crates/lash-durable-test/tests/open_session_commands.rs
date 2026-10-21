@@ -552,3 +552,452 @@ async fn a_terminally_refused_command_commit_settles_with_its_cause_on_postgres(
     )
     .await;
 }
+
+async fn owner_service_runtime(
+    world: &World,
+    store: lash_core::store::SessionStore,
+) -> lash_core::facade_support::LashRuntime {
+    let state = lash_core::store::load_session_window_state(
+        &store,
+        lash_core::store::WindowSelector::Current,
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .state;
+    let env = lash_core::facade_support::RuntimeEnvironment::builder(
+        lash_core::testing::runtime_helpers::test_runtime_host_config(&world.backend),
+    )
+    .with_plugin_host(Arc::new(lash_core::plugin::PluginHost::new(
+        vec![Arc::new(lash::plugins::StandardProtocolPluginFactory::new())],
+        lash_core::ExecutionBudgets::recommended(),
+        lash_core::trace::TraceRuntime::new(Arc::new(lash_core::facade_support::SystemClock)),
+    )))
+    .build();
+    lash_core::facade_support::LashRuntime::from_environment(
+        &env,
+        state.effective_policy().clone(),
+        state,
+        Some(store),
+        lash_core::testing::runtime_lease_owner(),
+    )
+    .await
+    .unwrap()
+}
+
+async fn settle_service_append(
+    live: &lash::LashSession,
+    result: lash::plugins::SessionGraphAppendResult,
+) -> lash_core::AppendSessionNodesOutcome {
+    match result {
+        lash::plugins::SessionGraphAppendResult::Applied { outcome } => outcome,
+        lash::plugins::SessionGraphAppendResult::Pending { receipt } => {
+            let settlement = live.admin().commands().settle(receipt).await.unwrap();
+            let lash_core::runtime::SessionCommandSettlement::Applied {
+                outcome: lash_core::runtime::SessionCommandOutcome::AppendSessionNodes { outcome },
+                ..
+            } = settlement
+            else {
+                panic!("{settlement:?}");
+            };
+            outcome
+        }
+    }
+}
+
+/// LO-OWNER-ONLY: an outside service accepts a command while its owner is
+/// blocked in a model callback, rather than writing the claimed head itself.
+async fn lo_owner_only_service_append(tier: Tier) {
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    let model = lash_core::testing::TestProvider::builder()
+        .kind("owner-only")
+        .requires_streaming(true)
+        .complete({
+            let entered = Arc::clone(&entered);
+            let release = Arc::clone(&release);
+            move |request| {
+                let entered = Arc::clone(&entered);
+                let release = Arc::clone(&release);
+                async move {
+                    entered.notify_one();
+                    release.acquire().await.unwrap().forget();
+                    Ok(served::text(&request, "done"))
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let Some(world) = World::with_model(tier, Vec::new(), model, |backend| {
+        lash::LashCore::standard_builder(backend.clone())
+    })
+    .await
+    else {
+        return;
+    };
+    let durable = world.session("owner-only", served::spec(8)).await;
+    let id = durable.session_id().clone();
+    let catalog = world.backend.session_store_factory();
+    let recording = Arc::new(
+        lash_core::testing::runtime_helpers::RecordingStore::over_session(
+            catalog.clone(),
+            id.clone(),
+        ),
+    );
+    let store = lash_core::store::SessionStore::new(recording.clone(), id.clone()).unwrap();
+    let mut runtime = owner_service_runtime(&world, store.clone()).await;
+    let service = runtime.session_graph_service().unwrap();
+    let running = tokio::spawn(async move {
+        durable
+            .send(lash::TurnInput::text("hold-owner"))
+            .output()
+            .await
+            .unwrap()
+    });
+    tokio::time::timeout(served::WATCHDOG, entered.notified())
+        .await
+        .unwrap();
+    let request = lash_core::AppendSessionNodesRequest {
+        operation_id: "outside-append".to_owned(),
+        requires_ancestor_node_id: None,
+        nodes: vec![lash_core::SessionAppendNode::plugin(
+            "owner-only",
+            serde_json::json!({"note": 1}),
+        )],
+    };
+    let actor = lash_durable::ActorKey::session(id.as_str()).unwrap();
+    assert_eq!(
+        world
+            .backend
+            .durable()
+            .actor(&actor)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        lash_durable::ActorState::Owned
+    );
+    let before = store.load_session_head_meta().await.unwrap().unwrap();
+    let accepted = tokio::time::timeout(
+        served::WATCHDOG,
+        service.append_session_nodes(&id, request.clone()),
+    )
+    .await
+    .expect("acceptance must not await the blocked owner");
+    let queued = store.list_queued_work().await.unwrap();
+    assert_eq!(
+        queued.len(),
+        1,
+        "the service must enqueue one command: {accepted:?}"
+    );
+    assert_eq!(
+        store
+            .load_session_head_meta()
+            .await
+            .unwrap()
+            .unwrap()
+            .head_revision,
+        before.head_revision,
+        "acceptance cannot move the owner's head"
+    );
+    let accepted = accepted.unwrap();
+    let lash::plugins::SessionGraphAppendResult::Pending { receipt } = &accepted else {
+        panic!("a blocked owner leaves a pending receipt: {accepted:?}");
+    };
+    assert_eq!(&receipt.batch_id, &queued[0].batch_id);
+    let retry = service
+        .append_session_nodes(&id, request.clone())
+        .await
+        .unwrap();
+    assert_eq!(retry, accepted);
+    assert_eq!(store.list_queued_work().await.unwrap().len(), 1);
+    let mut changed = request.clone();
+    changed.nodes.push(lash_core::SessionAppendNode::plugin(
+        "owner-only",
+        serde_json::json!({"note": 2}),
+    ));
+    assert!(matches!(
+        service.append_session_nodes(&id, changed).await,
+        Err(
+            lash_execution_contracts::plugin_error::PluginError::AppendOperationIdentityConflict { .. }
+        )
+    ));
+    // No append-induced background refresh is owed on the originating runtime.
+    let reloads = recording.load_session_head_meta_count();
+    runtime.await_background_work().await.unwrap();
+    assert_eq!(
+        recording.load_session_head_meta_count() - reloads,
+        0,
+        "own_head_reload=0: no bypass-induced refresh"
+    );
+    release.add_permits(1);
+    served::assert_answered(
+        "held owner",
+        &tokio::time::timeout(served::WATCHDOG, running)
+            .await
+            .unwrap()
+            .unwrap(),
+    );
+    let live = world.core.session(id.clone()).open().await.unwrap();
+    let receipt = lash::SessionCommandReceipt {
+        session_id: id.clone(),
+        batch_id: queued[0].batch_id.clone(),
+        source_key: lash_core::facade_support::SessionCommand::AppendSessionNodes {
+            request: Box::new(request.clone()),
+        }
+        .source_key(&request.operation_id),
+    };
+    let settled = live.admin().commands().settle(receipt).await.unwrap();
+    let lash_core::runtime::SessionCommandSettlement::Applied {
+        outcome: lash_core::runtime::SessionCommandOutcome::AppendSessionNodes { outcome },
+        ..
+    } = settled
+    else {
+        panic!("the owner applies the append once: {settled:?}");
+    };
+    let lash_core::AppendSessionNodesOutcome::Appended {
+        node_ids,
+        leaf_node_id,
+    } = &outcome
+    else {
+        panic!("{outcome:?}");
+    };
+    assert_eq!(node_ids.len(), 1);
+    assert_eq!(leaf_node_id.as_ref(), node_ids.last());
+    assert_eq!(
+        service
+            .append_session_nodes(&id, request.clone())
+            .await
+            .unwrap(),
+        lash::plugins::SessionGraphAppendResult::Applied {
+            outcome: outcome.clone()
+        }
+    );
+    assert!(store.list_queued_work().await.unwrap().is_empty());
+    let state = lash_core::store::load_session_window_state(
+        &store,
+        lash_core::store::WindowSelector::Current,
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .state;
+    assert_eq!(
+        state
+            .session_graph
+            .nodes
+            .iter()
+            .filter(|node| matches!(&node.payload,
+        lash_core::SessionNodePayload::Plugin { plugin_type, .. } if plugin_type == "owner-only"))
+            .count(),
+        1
+    );
+    // A derivation naming an ancestor survives an intervening append.
+    let ancestor = node_ids[0].clone();
+    let mut advanced = request.clone();
+    advanced.operation_id = "advanced-ancestor".to_owned();
+    advanced.requires_ancestor_node_id = Some(ancestor.clone());
+    let advance = live
+        .admin()
+        .state()
+        .append_session_nodes(advanced)
+        .await
+        .unwrap()
+        .settle_with(
+            &live.admin().commands(),
+            lash::testing::admin_fixture_outcome,
+        )
+        .await
+        .unwrap();
+    let lash_core::AppendSessionNodesOutcome::Appended {
+        node_ids: advanced_ids,
+        ..
+    } = advance
+    else {
+        panic!("{advance:?}");
+    };
+    let mut derived = request.clone();
+    derived.operation_id = "service-derived".to_owned();
+    derived.requires_ancestor_node_id = Some(ancestor.clone());
+    assert_eq!(
+        world
+            .backend
+            .durable()
+            .actor(&actor)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        lash_durable::ActorState::Owned,
+        "the idle session remains claimed"
+    );
+    let derived = settle_service_append(
+        &live,
+        service.append_session_nodes(&id, derived).await.unwrap(),
+    )
+    .await;
+    let lash_core::AppendSessionNodesOutcome::Appended {
+        node_ids: derived_ids,
+        ..
+    } = derived
+    else {
+        panic!("{derived:?}");
+    };
+    let read = lash_core::store::load_session_window_state(
+        &store,
+        lash_core::store::WindowSelector::Current,
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .state;
+    let derived_node = read
+        .session_graph
+        .nodes
+        .iter()
+        .find(|node| node.node_id == derived_ids[0])
+        .unwrap();
+    assert_eq!(derived_node.parent_node_id.as_ref(), advanced_ids.last());
+    // Rewind a new session to the ancestor: the descendant still exists in
+    // shared history, but cannot be the new session's derivation base.
+    let branch_id = lash::SessionId::try_from("owner-only-branch".to_owned()).unwrap();
+    let revision = catalog
+        .revisions(&id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|revision| revision.leaf_node_id.as_ref() == Some(&ancestor))
+        .unwrap()
+        .head_revision;
+    let head = store.load_session_head_meta().await.unwrap().unwrap();
+    catalog
+        .fork_session(&lash_core::ForkSessionRequest {
+            pending_observer_intents: Vec::new(),
+            session_id: branch_id.clone(),
+            source_session_id: id.clone(),
+            head_revision: revision,
+            relation: lash_core::SessionRelation::Root,
+            config: head.config,
+            retention: lash_core::Retention::UntilGc,
+        })
+        .await
+        .unwrap();
+    let branch_store =
+        lash_core::store::SessionStore::new(catalog.clone(), branch_id.clone()).unwrap();
+    let branch_runtime = owner_service_runtime(&world, branch_store.clone()).await;
+    let branch_service = branch_runtime.session_graph_service().unwrap();
+    let branch = world.core.session(branch_id.clone()).open().await.unwrap();
+    let mut abandoned = request.clone();
+    abandoned.operation_id = "abandoned-base".to_owned();
+    abandoned.requires_ancestor_node_id = advanced_ids.first().cloned();
+    let before = branch_store
+        .load_session_head_meta()
+        .await
+        .unwrap()
+        .unwrap()
+        .leaf_node_id;
+    let stale = settle_service_append(
+        &branch,
+        branch_service
+            .append_session_nodes(&branch_id, abandoned)
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        stale,
+        lash_core::AppendSessionNodesOutcome::StaleBranch {
+            required_node_id: advanced_ids[0].clone()
+        }
+    );
+    assert_eq!(
+        branch_store
+            .load_session_head_meta()
+            .await
+            .unwrap()
+            .unwrap()
+            .leaf_node_id,
+        before
+    );
+    drop(branch);
+    drop(branch_runtime);
+    // Only the removed append bypass is counted here. Ordinary command,
+    // idle and terminal loads remain part of the engine's normal path.
+    release.add_permits(1);
+    let next = world.core.session(id.clone()).durable().await.unwrap();
+    let reloads = recording.load_session_head_meta_count();
+    served::assert_answered(
+        "the next owner turn",
+        &world.send(&next, "after-append").await,
+    );
+    runtime.await_background_work().await.unwrap();
+    assert_eq!(
+        recording.load_session_head_meta_count() - reloads,
+        0,
+        "the next turn owes no append-bypass head refresh"
+    );
+    eprintln!(
+        "LO-OWNER-ONLY service: one accepted command, one application, stable retry, typed identity refusal, ancestor/abandoned branch, append bypass reloads=0"
+    );
+    // Direct writes belong only to an unclaimed session, and advance its
+    // actor revision atomically (the lo-writers half of the cutover).
+    let direct = world.session("owner-only-direct", served::spec(8)).await;
+    let direct_id = direct.session_id();
+    let direct_store =
+        lash_core::store::SessionStore::new(catalog.clone(), direct_id.clone()).unwrap();
+    let direct_actor = lash_durable::ActorKey::session(direct_id.as_str()).unwrap();
+    let previous = world.backend.durable().actor(&direct_actor).await.unwrap();
+    assert!(
+        previous
+            .as_ref()
+            .is_none_or(|actor| actor.state != lash_durable::ActorState::Owned)
+    );
+    let revision = previous.map_or(0, |actor| actor.revision.0);
+    let mut state = lash_core::store::load_session_window_state(
+        &direct_store,
+        lash_core::store::WindowSelector::Current,
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .state;
+    let commit = lash_core::store::append_request_commit_for_testing(
+        &mut state,
+        "unclaimed-direct",
+        &request.nodes,
+        None,
+    )
+    .unwrap();
+    let receipt = direct_store.commit_runtime_state(commit).await.unwrap();
+    assert_eq!(
+        receipt.realized_node_timestamps.last().unwrap().node_id,
+        receipt.committed_leaf_node_id.unwrap()
+    );
+    let after = world.backend.durable().actor(&direct_actor).await.unwrap();
+    assert_eq!(
+        after.map_or(0, |actor| actor.revision.0),
+        revision + 1,
+        "unclaimed direct append must advance actor revision atomically"
+    );
+
+    drop(live);
+    drop(runtime);
+    world.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn lo_owner_only_service_append_on_sqlite_memory() {
+    Box::pin(lo_owner_only_service_append(Tier::SqliteMemory)).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn lo_owner_only_service_append_on_sqlite_file() {
+    Box::pin(lo_owner_only_service_append(Tier::SqliteFile)).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires PostgreSQL"]
+async fn lo_owner_only_service_append_on_postgres_when_configured() {
+    let _ = lash_postgres_store::testing::required_database_url();
+    Box::pin(lo_owner_only_service_append(Tier::Postgres)).await;
+}

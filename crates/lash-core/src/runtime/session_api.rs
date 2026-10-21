@@ -213,7 +213,6 @@ impl LashRuntime {
 
     pub async fn refresh_session_graph_from_store(&mut self) -> Result<(), SessionError> {
         let Some(store) = self.services.store.clone() else {
-            self.resident_session.mark_graph_head_current();
             return Ok(());
         };
         let requires_hydration = match store.load_session_head_meta().await {
@@ -238,7 +237,6 @@ impl LashRuntime {
                     });
                 }
                 self.resident_session.mark_graph_loaded();
-                self.resident_session.mark_graph_head_current();
                 return Ok(());
             }
             // The bounded read is an optimization. If it cannot determine the
@@ -256,7 +254,6 @@ impl LashRuntime {
         };
         if !requires_hydration {
             self.resident_session.mark_graph_loaded();
-            self.resident_session.mark_graph_head_current();
             return Ok(());
         }
         let read = store
@@ -267,7 +264,6 @@ impl LashRuntime {
             })?;
         self.resident_session.mark_graph_loaded();
         let Some(read) = read else {
-            self.resident_session.mark_graph_head_current();
             return Ok(());
         };
         self.adopt_session_read(read).await
@@ -316,7 +312,6 @@ impl LashRuntime {
             empty.last_prompt_usage = None;
             Box::pin(self.adopt_resident_state(empty)).await?;
             self.resident_session.mark_graph_loaded();
-            self.resident_session.mark_graph_head_current();
             return Ok(());
         }
         let read = store
@@ -353,7 +348,6 @@ impl LashRuntime {
                 source,
             })?;
         Box::pin(self.adopt_resident_state(adopted)).await?;
-        self.resident_session.mark_graph_head_current();
         Ok(())
     }
 
@@ -445,9 +439,8 @@ impl LashRuntime {
 
     /// Returns a lane-less session graph service. Host head writes are
     /// boundary session commands, applied by the session at a turn boundary.
-    /// A direct append while the bound turn owns the head returns the
-    /// recoverable [`PluginError::SessionHeadOwned`] busy refusal, naming
-    /// the session and its head owner, without writing anything.
+    /// Acceptance returns a durable pending receipt or its recorded result;
+    /// it never waits for the applying owner.
     pub fn session_graph_service(
         &self,
     ) -> Result<Arc<dyn crate::plugin::SessionGraphService>, PluginOperationInvokeError> {
@@ -703,36 +696,11 @@ impl LashRuntime {
                 .await?;
             return Ok(AcceptedSessionCommand::Inline(receipt));
         };
-        let draft = crate::QueuedWorkBatchDraft::new(
-            session_id.clone(),
-            crate::DeliveryPolicy::AfterCurrentTurnCommit,
-            command,
-        )
-        .with_source_key(source_key.clone())
-        .with_trace_parent(parent);
-        let enqueued = match store.enqueue_queued_work_with_outcome(draft).await {
-            Ok(
-                crate::QueuedWorkEnqueueOutcome::Inserted(batch)
-                | crate::QueuedWorkEnqueueOutcome::Existing(batch),
-            ) => batch,
-            Err(error @ crate::StoreError::QueuedWorkSourceKeyConflict { .. }) => {
-                return Err(SessionCommandEnqueueError::ChangedContent(
-                    super::runtime_error_from_store_commit(error),
-                ));
-            }
-            Err(error) => return Err(super::runtime_error_from_store_commit(error).into()),
-        };
-        // The batch's insert woke the session actor in its transaction (ADR
-        // 0132 §12); the actor applies the command at its next boundary,
-        // before any turn input (ADR 0101 §4).
+        let receipt =
+            enqueue_stored_session_command(&store, &session_id, command, &idempotency_key, parent)
+                .await?;
         Ok(AcceptedSessionCommand::Queued(
-            crate::runtime::SessionCommandSettlementHandle {
-                receipt: crate::SessionCommandReceipt {
-                    session_id,
-                    batch_id: enqueued.batch_id,
-                    source_key,
-                },
-            },
+            crate::runtime::SessionCommandSettlementHandle { receipt },
         ))
     }
 
@@ -740,56 +708,13 @@ impl LashRuntime {
         &mut self,
         handle: crate::runtime::SessionCommandSettlementHandle,
     ) -> Result<crate::runtime::SessionCommandSettlement, RuntimeError> {
-        let store = self.services.store.clone().ok_or_else(|| {
+        let store = self.services.store.as_ref().ok_or_else(|| {
             RuntimeError::new(
                 RuntimeErrorCode::StoreCommitFailed,
                 "accepted session command lost its persistent store",
             )
         })?;
-        // A recorded answer needs neither the open queue nor session state.
-        // Probe it first so unrelated queued documents are never loaded for
-        // an already settled command.
-        let mut completion = store
-            .queued_work_batch_completion(&handle.receipt.batch_id)
-            .await
-            .map_err(super::runtime_error_from_store_commit)?;
-        if completion.is_none() {
-            let still_pending = store
-                .list_queued_work()
-                .await
-                .map_err(super::runtime_error_from_store_commit)?
-                .iter()
-                .any(|batch| batch.batch_id == handle.receipt.batch_id);
-            if still_pending {
-                return Ok(crate::runtime::SessionCommandSettlement::Pending(
-                    handle.receipt,
-                ));
-            }
-            // A settlement can commit between the first probe and the queue
-            // read. Read its evidence again before calling it cancelled.
-            completion = store
-                .queued_work_batch_completion(&handle.receipt.batch_id)
-                .await
-                .map_err(super::runtime_error_from_store_commit)?;
-        }
-        let Some(completion) = completion else {
-            return Ok(crate::runtime::SessionCommandSettlement::Cancelled(
-                handle.receipt,
-            ));
-        };
-        Ok(
-            match completion
-                .command_outcomes
-                .get(&handle.receipt.batch_id)
-                .cloned()
-            {
-                Some(outcome) => crate::runtime::SessionCommandSettlement::Applied {
-                    receipt: handle.receipt,
-                    outcome,
-                },
-                None => crate::runtime::SessionCommandSettlement::Durable(handle.receipt),
-            },
-        )
+        stored_session_command_status(store, handle.receipt).await
     }
 
     /// Submit `command` to the session's command lane and return as soon as
@@ -1406,4 +1331,105 @@ impl crate::runtime::effect::executor::RuntimeEffectLocalRunner for ReadSessionC
             .retryable_uncommitted_derivation()),
         }
     }
+}
+
+/// Accept a command through the durable queue without borrowing a runtime.
+pub(in crate::runtime) async fn enqueue_stored_session_command(
+    store: &crate::store::SessionStore,
+    session_id: &SessionId,
+    command: crate::SessionCommand,
+    idempotency_key: &str,
+    parent: Option<lash_trace::TraceParent>,
+) -> Result<crate::SessionCommandReceipt, SessionCommandEnqueueError> {
+    if store.session_id() != session_id {
+        return Err(super::runtime_error_from_store_commit(
+            crate::StoreError::ForeignSessionRequest {
+                view_session_id: store.session_id().clone(),
+                request_session_id: session_id.clone(),
+            },
+        )
+        .into());
+    }
+    if idempotency_key.trim().is_empty() {
+        return Err(RuntimeError::new(
+            RuntimeErrorCode::SessionCommandIdempotencyKey,
+            "session command idempotency key cannot be empty",
+        )
+        .into());
+    }
+    let source_key = command.source_key(idempotency_key);
+    let draft = crate::QueuedWorkBatchDraft::new(
+        session_id.clone(),
+        crate::DeliveryPolicy::AfterCurrentTurnCommit,
+        command,
+    )
+    .with_source_key(source_key.clone())
+    .with_trace_parent(parent);
+    let enqueued = match store.enqueue_queued_work_with_outcome(draft).await {
+        Ok(
+            crate::QueuedWorkEnqueueOutcome::Inserted(batch)
+            | crate::QueuedWorkEnqueueOutcome::Existing(batch),
+        ) => batch,
+        Err(error @ crate::StoreError::QueuedWorkSourceKeyConflict { .. }) => {
+            return Err(SessionCommandEnqueueError::ChangedContent(
+                super::runtime_error_from_store_commit(error),
+            ));
+        }
+        Err(error) => return Err(super::runtime_error_from_store_commit(error).into()),
+    };
+
+    // Acceptance and the actor wake share the producer transaction.
+    Ok(crate::SessionCommandReceipt {
+        session_id: session_id.clone(),
+        batch_id: enqueued.batch_id,
+        source_key,
+    })
+}
+
+/// Probe completion once, closing the completion/queue race with a recheck.
+pub(in crate::runtime) async fn stored_session_command_status(
+    store: &crate::store::SessionStore,
+    receipt: crate::SessionCommandReceipt,
+) -> Result<crate::runtime::SessionCommandSettlement, RuntimeError> {
+    if store.session_id() != receipt.session_id {
+        return Err(super::runtime_error_from_store_commit(
+            crate::StoreError::ForeignSessionRequest {
+                view_session_id: store.session_id().clone(),
+                request_session_id: receipt.session_id,
+            },
+        ));
+    }
+    // A recorded answer needs neither the open queue nor session state.
+    // Probe it first so unrelated queued documents are never loaded for
+    // an already settled command.
+    let mut completion = store
+        .queued_work_batch_completion(&receipt.batch_id)
+        .await
+        .map_err(super::runtime_error_from_store_commit)?;
+    if completion.is_none() {
+        let still_pending = store
+            .list_queued_work()
+            .await
+            .map_err(super::runtime_error_from_store_commit)?
+            .iter()
+            .any(|batch| batch.batch_id == receipt.batch_id);
+        if still_pending {
+            return Ok(crate::runtime::SessionCommandSettlement::Pending(receipt));
+        }
+        // A settlement can commit between the first probe and the queue
+        // read. Read its evidence again before calling it cancelled.
+        completion = store
+            .queued_work_batch_completion(&receipt.batch_id)
+            .await
+            .map_err(super::runtime_error_from_store_commit)?;
+    }
+    let Some(completion) = completion else {
+        return Ok(crate::runtime::SessionCommandSettlement::Cancelled(receipt));
+    };
+    Ok(
+        match completion.command_outcomes.get(&receipt.batch_id).cloned() {
+            Some(outcome) => crate::runtime::SessionCommandSettlement::Applied { receipt, outcome },
+            None => crate::runtime::SessionCommandSettlement::Durable(receipt),
+        },
+    )
 }
