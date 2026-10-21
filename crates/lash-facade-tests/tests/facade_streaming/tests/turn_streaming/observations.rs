@@ -1129,19 +1129,19 @@ async fn snapshot_subscribe_has_only_two_histories_across_a_frame_switch() -> Re
             .build()
             .into_handle();
         let replay_store = Arc::new(PausedCommitReplayStore::at(boundary));
-        let core = explicit_ephemeral_facets(LashCore::standard_builder(
-            sqlite_memory_store_backend().await,
-        ))
-        .serve_test_llm_profile(provider, mock_llm_profile_spec())
-        .tools(
-            lash::tool_provider_key!("tools"),
-            Arc::new(lash::tools::StaticToolProvider::new(
-                vec![definition],
-                SwitchFrame,
-            )),
-        )
-        .live_replay_store(replay_store.clone())
-        .build(lash_facade_tests::runtime_lease_owner())?;
+        let backend = sqlite_memory_store_backend().await;
+        let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+            .serve_test_llm_profile(provider, mock_llm_profile_spec())
+            .tools(
+                lash::tool_provider_key!("tools"),
+                Arc::new(lash::tools::StaticToolProvider::new(
+                    vec![definition],
+                    SwitchFrame,
+                )),
+            )
+            .live_replay_store(replay_store.clone())
+            .build(lash_facade_tests::runtime_lease_owner())?;
+        streaming_registered(&backend).await;
         let session_id = SessionId::fixture(format!("two-histories-switch-{boundary:?}"));
         let session = created_session(&core, session_id.clone())
             .await
@@ -1160,7 +1160,13 @@ async fn snapshot_subscribe_has_only_two_histories_across_a_frame_switch() -> Re
                 .await
         });
 
-        replay_store.wait_for_commit_append().await;
+        streaming_boundary(
+            &backend,
+            &session_id,
+            &format!("{boundary:?}"),
+            replay_store.wait_for_commit_append(),
+        )
+        .await;
         let snapshot = session
             .observe()
             .snapshot()

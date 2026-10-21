@@ -223,6 +223,8 @@ fn stage(staging: &mut GraphStaging, record: &Record) -> Result<(NodeId, bool), 
 ///
 /// Why the record does not decode.
 pub(super) fn read(facts: &RunFacts, row: &RunFactRow) -> Result<Record, String> {
+    #[cfg(any(test, feature = "testing"))]
+    crate::testing::fact_decodes::entered();
     let mut decoder = GraphDecoder::new(facts, facts.read_limits);
     let (fact, output) =
         RoundFact::load_settled(&mut decoder, row.record).map_err(|refusal| refusal.to_string())?;

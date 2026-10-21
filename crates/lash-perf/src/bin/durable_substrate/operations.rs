@@ -243,6 +243,20 @@ mod tests {
             cell_parks: 2,
             value_bytes: 16,
         };
+        // FIG-7044: startup completes on an idle database, where a claim
+        // write is neither needed nor permitted by the readiness boundary.
+        let mut idle = run.deployment();
+        idle.boot_many(1)
+            .await
+            .expect("idle registration completes");
+        let startup = idle.recorder.transactions_since(0);
+        assert!(
+            startup
+                .iter()
+                .any(|tx| tx.label == "node.register" && tx.ok)
+        );
+        assert!(startup.iter().all(|tx| tx.label != "node.claim"));
+        idle.shutdown().await.unwrap();
         let answer =
             tokio::time::timeout(std::time::Duration::from_secs(90), super::run(&run)).await;
         if !matches!(&answer, Ok(Ok(()))) {

@@ -1478,7 +1478,7 @@ mod sweep {
             .stamp_session_state_version_for_testing(&SessionId::from(SESSION), 0)
             .await
             .expect("unsupported generation");
-        let before = script.calls(StoreOp::read_session_state_version);
+        let before = script.calls(StoreOp::load_session_window);
         let serving = core_over(&engine_stores, true);
         let error = tokio::time::timeout(ANSWERS_WITHIN, sent.output())
             .await
@@ -1497,7 +1497,7 @@ mod sweep {
             }),
         );
         assert_eq!(
-            script.calls(StoreOp::read_session_state_version) - before,
+            script.calls(StoreOp::load_session_window) - before,
             1,
             "a permanent refusal is not read again"
         );
@@ -1523,7 +1523,6 @@ mod sweep {
             .stamp_session_state_version_and_corrupt_payload_for_testing(&id, generation)
             .await
             .expect("corrupt the stored head");
-        let version_reads = script.calls(StoreOp::read_session_state_version);
         let window_reads = script.calls(StoreOp::load_session_window);
         let serving = core_over(&engine_stores, true);
         let answer = tokio::time::timeout(ANSWERS_WITHIN, sent.output())
@@ -1545,14 +1544,11 @@ mod sweep {
             "the refusal names the corrupt record: {error:?}"
         );
         assert!(error.is_terminal() && !error.is_retryable(), "{error:?}");
-        // The version reads clean; the window read is the one that meets
-        // the corrupt head, and nothing reads either again.
+        // The compound window read admits the marker and meets the corrupt
+        // head. A permanent refusal must not repeat that read.
         assert_eq!(
-            (
-                script.calls(StoreOp::read_session_state_version) - version_reads,
-                script.calls(StoreOp::load_session_window) - window_reads,
-            ),
-            (1, 1),
+            script.calls(StoreOp::load_session_window) - window_reads,
+            1,
             "corrupt stored data is not read again"
         );
         let _ = serving.shutdown().await;
@@ -1575,7 +1571,7 @@ mod sweep {
             .stamp_session_state_version_for_testing(&SessionId::from(CHILD), newer)
             .await
             .expect("stamp a generation this worker cannot read");
-        let version_reads = script.calls(StoreOp::read_session_state_version);
+        let window_reads = script.calls(StoreOp::load_session_window);
         let started = core
             .processes()
             .start(
@@ -1617,7 +1613,7 @@ mod sweep {
         );
         assert_nothing_parked(&core, CHILD).await;
         assert_eq!(
-            script.calls(StoreOp::read_session_state_version) - version_reads,
+            script.calls(StoreOp::load_session_window) - window_reads,
             1,
             "a permanent refusal is not retried"
         );

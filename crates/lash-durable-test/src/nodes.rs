@@ -871,6 +871,7 @@ mod tests {
             Fault::DelayedAck(Duration::from_secs(60)),
         );
         let clock = SimClock::new();
+        let hold = Arc::new(Hold::default());
         let nodes = SimNodes::new(
             sqlite(Arc::clone(&clock)).await,
             clock,
@@ -881,8 +882,17 @@ mod tests {
                 serves: Vec::new(),
                 max_active: 4,
             },
-            Arc::new(Hold::default()) as Arc<dyn Activation>,
+            Arc::clone(&hold) as Arc<dyn Activation>,
         );
+        let mut create = MailTx::new();
+        create
+            .create_actor(actor("hung-claim"), FormatSet::new(FORMATS))
+            .append(actor("hung-claim"), MailKind::new("t"), "claim me");
+        nodes
+            .database()
+            .commit_mail(create, CommitLabel::new("t.create"))
+            .await
+            .unwrap();
         nodes.start("a");
         let self_stop_after = u64::try_from(
             LeaseConfig::default()
@@ -891,7 +901,7 @@ mod tests {
                 .as_millis(),
         )
         .unwrap();
-        while nodes.clock().logical_ms() <= 3 * self_stop_after {
+        while nodes.clock().logical_ms() <= 60_000 + 3 * self_stop_after {
             assert!(
                 nodes.serving("a"),
                 "stopped at {} ms while its claim hung: {:?}\n{}",
@@ -901,15 +911,31 @@ mod tests {
             );
             nodes.step().await;
         }
-        let renewals = nodes
-            .script()
-            .trace()
+        let trace = nodes.script().trace();
+        let claim = trace
             .iter()
-            .filter(|write| write.point.label == CommitLabel::HEARTBEAT && write.committed())
+            .find(|write| write.point.label == CommitLabel::CLAIM)
+            .expect("claimable work must reach the claim cut");
+        assert_eq!(claim.cut, Some(Fault::DelayedAck(Duration::from_secs(60))));
+        assert!(claim.committed(), "the delayed claim committed");
+        assert_eq!(
+            hold.live.load(Ordering::SeqCst),
+            1,
+            "the delayed claim is delivered"
+        );
+        eprintln!("hung claim cut fired: {claim:?}");
+        let renewals = trace
+            .iter()
+            .filter(|write| {
+                write.point.label == CommitLabel::HEARTBEAT
+                    && write.committed()
+                    && write.at_ms >= claim.at_ms
+                    && write.at_ms < claim.at_ms + 60_000
+            })
             .count();
         assert!(
             renewals >= 9,
-            "{renewals} renewals in three self-stop windows\n{}",
+            "{renewals} renewals while the claim acknowledgement hung\n{}",
             nodes.script().rendered_trace()
         );
     }

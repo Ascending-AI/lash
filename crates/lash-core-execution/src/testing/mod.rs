@@ -35,6 +35,7 @@ pub mod trace_capture;
 mod component_fixtures;
 mod durable_hooks;
 pub mod execution_context_builder;
+pub mod fact_decodes;
 #[cfg(feature = "testing")]
 pub mod kernel_internals;
 #[cfg(any(test, feature = "testing"))]

@@ -757,12 +757,13 @@ async fn checkpoint_admitted_steer_cancel_reaches_its_run() -> Result<()> {
         })
         .build()
         .into_handle();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        sqlite_memory_store_backend().await,
-    ))
-    .serve_test_llm_profile(provider, mock_llm_profile_spec())
-    .tools(lash::tool_provider_key!("tools"), Arc::new(AppTools))
-    .build(lash_facade_tests::runtime_lease_owner())?;
+    let backend = sqlite_memory_store_backend().await;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
+        .tools(lash::tool_provider_key!("tools"), Arc::new(AppTools))
+        .build(lash_facade_tests::runtime_lease_owner())?;
+    streaming_registered(&backend).await;
+    let session_id = SessionId::from("checkpoint-admitted-steer-cancel");
     let session = created_session(
         &core,
         lash::SessionId::parse("checkpoint-admitted-steer-cancel").expect("nonblank host identity"),
@@ -777,10 +778,13 @@ async fn checkpoint_admitted_steer_cancel_reaches_its_run() -> Result<()> {
         .await?;
     let turn = tokio::spawn(async move { primary.outcome().await });
 
-    tokio::time::timeout(std::time::Duration::from_secs(1), first_started_rx)
-        .await
-        .expect("first provider call should start")
-        .expect("first provider signal");
+    streaming_boundary(&backend, &session_id, "first provider", async {
+        tokio::time::timeout(std::time::Duration::from_secs(1), first_started_rx)
+            .await
+            .expect("first provider call should start")
+            .expect("first provider signal");
+    })
+    .await;
     let active = session
         .send(TurnInput::text("cancelled active steer"))
         .id(lash::TurnId::parse("checkpoint-admitted-steer").expect("nonblank host identity"))
@@ -792,10 +796,13 @@ async fn checkpoint_admitted_steer_cancel_reaches_its_run() -> Result<()> {
     release_first_tx
         .send(())
         .expect("release first provider response");
-    tokio::time::timeout(std::time::Duration::from_secs(2), second_started_rx)
-        .await
-        .expect("admitted active steer should start the follow-up provider call")
-        .expect("second provider signal");
+    streaming_boundary(&backend, &session_id, "steer provider", async {
+        tokio::time::timeout(std::time::Duration::from_secs(2), second_started_rx)
+            .await
+            .expect("admitted active steer should start the follow-up provider call")
+            .expect("second provider signal");
+    })
+    .await;
 
     // The steer is checkpoint-admitted and its turn is in flight: the input's
     // cancel resolves the consuming run from the admission's record.

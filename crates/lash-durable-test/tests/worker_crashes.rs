@@ -354,7 +354,7 @@ const HEAVY: &str = "let n = 0; while (n >= 0) { n = n + 1; } await control.fini
 
 /// Each failed match backtracks over fourteen units, below the matcher's
 /// work guard, with little charge and no growing allocation. Repeating it
-/// spends the worker's CPU or compute bound before the pool's 50M charge
+/// spends the worker's CPU, compute or wall bound before the pool's 50M charge
 /// ceiling; an arithmetic loop can spend that charge in under a second.
 const BACKTRACK_COMPUTE: &str = "let n = 0; while (n >= 0) { /(a+)+b/.test(\"aaaaaaaaaaaaaa\"); n = n + 1; } await control.finish(n);";
 
@@ -400,8 +400,7 @@ impl Limit {
     fn cell(self) -> &'static str {
         match self {
             Self::Died => BACKTRACK,
-            Self::Cpu | Self::Deadline => BACKTRACK_COMPUTE,
-            Self::Wall => HEAVY,
+            Self::Cpu | Self::Deadline | Self::Wall => BACKTRACK_COMPUTE,
         }
     }
 

@@ -719,17 +719,20 @@ async fn a_configured_200_cut_records_all_100_effect_occurrences(tier: Tier) {
 
 on_every_tier!(a_configured_200_cut_records_all_100_effect_occurrences);
 
-/// Counts the physical store work of the actual process activation, including
-/// the run-fact rows it hydrates and decodes before incorporating each effect.
+/// Counts physical store work and actual fact decodes in the process
+/// activation, whether facts arrive from a read or its acknowledged commit.
 struct MeasuredActivation {
     inner: Arc<dyn lash_durable::runner::Activation>,
     window: lash_core_execution::facade_support::sql::Window,
+    decodes: lash_core_execution::testing::fact_decodes::FactDecodes,
 }
 
 #[async_trait::async_trait]
 impl lash_durable::runner::Activation for MeasuredActivation {
     async fn activate(&self, owned: lash_durable::runner::Owned) -> lash_durable::runner::Exit {
-        self.window.within(self.inner.activate(owned)).await
+        self.decodes
+            .within(self.window.within(self.inner.activate(owned)))
+            .await
     }
 
     async fn hold(&self) -> Result<lash_durable::NodeHolding, lash_durable::DurableError> {
@@ -738,8 +741,8 @@ impl lash_durable::runner::Activation for MeasuredActivation {
 }
 
 /// FIG-6260: incorporating a sequential effect must not hydrate and decode
-/// the already-consumed history. Count real SQL rows, rather than timing an
-/// assertion: each run-fact row is one RoundFact decode in the production fold.
+/// the already-consumed history. Count actual RoundFact decoder entries:
+/// acknowledged facts bypass SQL, but still pass through the production fold.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sequential_effect_occurrences_decode_constant_facts_per_occurrence() {
     let _guard = EFFECT_LAW_GUARD.lock().await;
@@ -777,6 +780,7 @@ async fn sequential_effect_occurrences_decode_constant_facts_per_occurrence() {
             format!("effect-occurrences-{count}"),
             "sqlite",
         );
+        let fact_decodes = lash_core_execution::testing::fact_decodes::FactDecodes::default();
         let runner = lash_durable::runner::Runner::new(
             database,
             stores.clock(),
@@ -792,6 +796,7 @@ async fn sequential_effect_occurrences_decode_constant_facts_per_occurrence() {
             Arc::new(MeasuredActivation {
                 inner,
                 window: window.clone(),
+                decodes: fact_decodes.clone(),
             }),
         );
         let process = start(&core).await;
@@ -809,16 +814,7 @@ async fn sequential_effect_occurrences_decode_constant_facts_per_occurrence() {
         stop.send(()).unwrap();
         task.await.unwrap().unwrap();
         let receipt = window.snapshot();
-        let decodes: u64 = receipt
-            .shapes
-            .iter()
-            .filter(|(sql, _)| {
-                sql.starts_with(
-                    "select run_seq, ordinal, kind, call_id, record_ref, written_epoch from",
-                )
-            })
-            .map(|(_, shape)| shape.rows_returned)
-            .sum();
+        let decodes = fact_decodes.count();
         let events = log(&backend, &process).await;
         assert_eq!(
             of_type(

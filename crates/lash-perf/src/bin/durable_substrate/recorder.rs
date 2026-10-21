@@ -194,6 +194,8 @@ impl Recorder {
     pub fn discoveries(&self) -> Vec<crate::process_counters::Discovery> {
         self.process_counters.discoveries()
     }
+    // Idle nodes register but make no claim writes (FIG-7044). The wrapper
+    // records registration only after the store has completed it.
     pub async fn ready(&self, nodes: std::ops::Range<usize>) -> anyhow::Result<()> {
         tokio::time::timeout(std::time::Duration::from_secs(30), async {
             loop {
@@ -201,10 +203,9 @@ impl Recorder {
                 tokio::pin!(changed);
                 changed.as_mut().enable();
                 if nodes.clone().all(|n| {
-                    self.transactions
-                        .lock_recover()
-                        .iter()
-                        .any(|t| t.actor == format!("node-{n}") && t.label == "node.claim" && t.ok)
+                    self.transactions.lock_recover().iter().any(|t| {
+                        t.actor == format!("node-{n}") && t.label == "node.register" && t.ok
+                    })
                 }) {
                     break;
                 }
@@ -212,7 +213,7 @@ impl Recorder {
             }
         })
         .await
-        .map_err(|_| anyhow::anyhow!("nodes did not complete initial claim"))
+        .map_err(|_| anyhow::anyhow!("nodes did not complete registration"))
     }
 
     /// Microseconds since the recorder started, now.
