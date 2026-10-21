@@ -261,11 +261,14 @@ payload, and whether the tool was advertised, resolved through a deferred
 match or reached dynamically. It carries no contract: contract identity
 stays in the code's requirement. A replacement for already-linked work must
 remain resolvable under the recorded tool and provider keys and must read
-any retained codec payload. One judge decides every pinned call. When the
-live definition's contract id equals the pinned one, the call runs under
-the link's policy. When it differs, the call raises
+any retained codec payload. One judge decides every pinned call. Advertised
+links use the live provider's definition; resolved and dispatch links use
+their retained definitions. When that definition's contract id equals the pinned one,
+the call runs under the link's policy. When it differs, the call raises
 `operation_contract_changed`, which the program may catch, and no runner
-body runs. A missing tool parks. A description, transport, server-version
+body runs. An unregistered provider or unreadable binding parks work;
+a registered provider that no longer serves an advertised linked tool yields
+`linked_tool_missing`. A description, transport, server-version
 or retry-bound change is not a contract change. A committed outcome is
 consumed without executing the runner again. An MCP tool derives its
 contract from its durable tool id and a digest of its schemas, so a
@@ -386,12 +389,13 @@ strand report, `lash::durable::strand_report`) names each unfinished actor
 no live node can run, with what the closest live node lacks. A deploy that
 offers it lets the work run.
 
-Prefer body-backed functions for portable packages: any node can run them
-from the stored definitions. A native-only function runs only on a node
+Prefer body-backed functions for portable packages: nodes read their code
+from stored definitions, while still needing the code's kernel versions and
+any reached native-only callees. A native-only function runs only on a node
 whose build supplies its implementation. For deploys it behaves like a
-tool runner: a set that adds one becomes writable only once every live
-node has the native, and rolling back to a build without it can strand
-runs that need it.
+tool runner: a set that adds one becomes writable only once the writer and
+every live serving node have the native, and rolling back to a build without
+it can strand runs that need it.
 
 Lash's `kernel`, `typescript`, `python`, `regex.ecma`, `date.ecma` and
 `url.whatwg` libraries use this same install path. They export no operations.
@@ -424,10 +428,12 @@ the gate installs and answers the caller's own set as described above.
 With a nonempty fleet, it promotes by capability: of the own sets of live serving nodes, it selects the newest by store install order whose
 requirements the writer and every live serving node meet. A serving node
 is one that decodes this build's session set or one it carries forward. A
-body-only release is selected as soon as one of its nodes is live, and
-selected away again once its nodes stop. A release that adds a native-only
-function waits until no live serving node lacks the native. With a nonempty
-serving fleet, when no candidate is one every serving node can run, as in a mixed fleet of two
+body-only release with no new native or kernel requirements becomes a
+compatible candidate as soon as one of its serving nodes is live; it wins
+if no newer compatible live candidate exists, and ceases to be a candidate
+once none of its serving nodes remains. A release that adds a native-only
+function waits until the writer and every live serving node offer the native.
+With a nonempty serving fleet, when no candidate is one every serving node can run, as in a mixed fleet of two
 releases that each add a native the other lacks, a new cell fails with the
 typed `no_compatible_snapshot` refusal (`RuntimeErrorCause::NoCompatibleSnapshot`),
 which names each candidate and what it lacks; the gate never answers a
