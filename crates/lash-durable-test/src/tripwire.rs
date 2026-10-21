@@ -8,8 +8,8 @@
 //! checkpoint. A law reads the counts after resume and fails on any above
 //! its bound.
 
-use lash_durable::DurableProbe;
 use lash_durable::domain::{AdmittedId, ExecKey, Ordinal, OwnerKey, RunSeq};
+use lash_durable::{ActorKey, CommitLabel, DurableError, DurableProbe, Epoch, OwnerCut, OwnerRead};
 use lash_protocol_types::sync::MutexExt as _;
 use lash_protocol_types::{SessionId, TurnId};
 use std::collections::BTreeMap;
@@ -18,6 +18,10 @@ use std::sync::Mutex;
 /// The counts one [`Tripwire`] holds.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TripwireCounts {
+    /// Underlying reads/decodes, attributed by actor and claim epoch.
+    pub owner_reads: BTreeMap<(ActorKey, Epoch, OwnerRead), u64>,
+    /// Occurrences of acknowledged/adopted transition cuts.
+    pub owner_cuts: BTreeMap<(ActorKey, Epoch, CommitLabel, OwnerCut), usize>,
     /// Body entries per admitted execution.
     pub bodies: BTreeMap<AdmittedId, usize>,
     /// Fresh VM program entries per execution.
@@ -107,6 +111,29 @@ impl Tripwire {
 }
 
 impl DurableProbe for Tripwire {
+    fn owner_read(&self, actor: &ActorKey, epoch: Epoch, event: OwnerRead, amount: u64) {
+        *self
+            .counts
+            .lock_recover()
+            .owner_reads
+            .entry((actor.clone(), epoch, event))
+            .or_default() += amount;
+    }
+
+    fn owner_cut(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+        label: CommitLabel,
+        cut: OwnerCut,
+    ) -> Result<(), DurableError> {
+        bump(
+            &mut self.counts.lock_recover().owner_cuts,
+            (actor.clone(), epoch, label, cut),
+        );
+        Ok(())
+    }
+
     fn body_entered(&self, id: &AdmittedId) {
         bump(&mut self.counts.lock_recover().bodies, id.clone());
     }

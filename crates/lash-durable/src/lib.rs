@@ -81,5 +81,5 @@ pub use port::{
     ClaimNodeFacts, ClaimPurpose, Claimed, DurableStore, HeartbeatOutcome, MailCommit, NodeLease,
     NodeSpec, Owner, Readiness, Reaped, Woken, encode_requires, parse_requires,
 };
-pub use probe::{DurableProbe, NoProbe};
+pub use probe::{DurableProbe, NoProbe, OwnerCut, OwnerRead};
 pub use tx::{ActorTx, Mail, MailTx, MailWrite, OpenedActor, Release};
