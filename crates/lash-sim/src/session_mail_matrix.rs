@@ -72,6 +72,10 @@ fn session() -> SessionId {
     SessionId::from(SESSION)
 }
 
+fn second_id() -> InputId {
+    PendingTurnInputDraft::keyed_input_id(&session(), "second")
+}
+
 fn actor() -> ActorKey {
     ActorKey::session(SESSION).expect("the session names its actor")
 }
@@ -151,9 +155,10 @@ impl Activation for SessionDrain {
 impl SessionDrain {
     /// Note when an owner first sees the second input in the mailbox.
     async fn observe(&self, shared: &Shared) {
-        let Some((second, _)) = self.ledger.sent.lock_recover().clone() else {
-            return;
-        };
+        // Identity is fixed before admission: an owner may read the committed
+        // input before enqueue returns to its producer.
+        let second = second_id();
+        let _hold = shared.clock.hold();
         let Ok(mailbox) = shared.backend.durable().session_mailbox(&session()).await else {
             return;
         };
@@ -174,14 +179,10 @@ struct SessionMail {
     tripwire: Arc<Tripwire>,
 }
 
-async fn send(stores: &Arc<dyn StoreSet>, text: &str) -> Result<InputId, String> {
+async fn send(stores: &Arc<dyn StoreSet>, draft: PendingTurnInputDraft) -> Result<InputId, String> {
     stores
         .session_store_factory()
-        .enqueue_pending_turn_input(PendingTurnInputDraft::new(
-            session(),
-            TurnInputIngress::NextTurn,
-            TurnInput::text(text),
-        ))
+        .enqueue_pending_turn_input(draft)
         .await
         .map(|input| input.input_id)
         .map_err(|error| error.to_string())
@@ -228,7 +229,15 @@ impl Scenario for SessionMail {
             ))
             .await
             .map_err(|error| error.to_string())?;
-        send(&stores, "first").await?;
+        send(
+            &stores,
+            PendingTurnInputDraft::new(
+                session(),
+                TurnInputIngress::NextTurn,
+                TurnInput::text("first"),
+            ),
+        )
+        .await?;
         for node in NODES {
             nodes.start(node);
         }
@@ -236,7 +245,16 @@ impl Scenario for SessionMail {
         let ledger = Arc::clone(&self.ledger);
         tokio::spawn(async move {
             lash_core::Clock::sleep(&*clock, std::time::Duration::from_millis(SECOND_AT_MS)).await;
-            if let Ok(second) = send(&stores, "second").await {
+            // The external SQLite work and its producer receipt belong to
+            // one virtual instant, even if the owner reads before the reply.
+            let _hold = clock.hold();
+            let draft = PendingTurnInputDraft::new(
+                session(),
+                TurnInputIngress::NextTurn,
+                TurnInput::text("second"),
+            )
+            .with_input_id(second_id());
+            if let Ok(second) = send(&stores, draft).await {
                 *ledger.sent.lock_recover() = Some((second, clock.logical_ms()));
             }
             *ledger.producer_done.lock_recover() = true;
@@ -272,23 +290,38 @@ impl Scenario for SessionMail {
         self.one_unfinished_run(shared, &committed, &mut violations)
             .await;
         no_stale_write(&committed, &mut violations);
-        let undisturbed = cut.is_none_or(|cut| !cut.fault.pauses() && !cut.fault.kills());
-        if undisturbed {
-            let delay = match cut.map(|cut| cut.fault) {
-                Some(Fault::DelayedAck(delay)) => delay,
-                _ => std::time::Duration::ZERO,
+        let settings = self.config().lease.settings();
+        let delay = match cut.map(|cut| cut.fault) {
+            Some(Fault::DelayedAck(delay)) => delay,
+            _ => std::time::Duration::ZERO,
+        };
+        let renewal_loss = cut.is_some_and(|cut| {
+            cut.point.label == CommitLabel::HEARTBEAT
+                && settings.heartbeat_every + delay >= settings.self_stop_after
+        });
+        let failover =
+            renewal_loss || cut.is_some_and(|cut| cut.fault.pauses() || cut.fault.kills());
+        // A lost renewal stops serving before expiry. The next owner must
+        // wait for that lease, its reap and its takeover; healthy owners
+        // retain the O1 mail-poll bound.
+        let bound = 3 * settings.claim_poll
+            + delay
+            + if failover {
+                settings.ttl + settings.reap_every
+            } else {
+                std::time::Duration::ZERO
             };
-            let poll = self.config().lease.settings().claim_poll;
-            let bound = (3 * poll + delay).as_millis() as u64;
-            let sent = self.ledger.sent.lock_recover().clone();
-            let seen = *self.ledger.seen_ms.lock_recover();
-            match (sent, seen) {
-                (Some((_, sent_ms)), Some(seen_ms)) if seen_ms - sent_ms <= bound => {}
-                (sent, seen) => violations.push(format!(
-                    "O1: the second input (sent {sent:?}) was seen at {seen:?}, not within \
-                     {bound} ms"
-                )),
-            }
+        let bound_ms = bound.as_millis() as u64;
+        let sent = self.ledger.sent.lock_recover().clone();
+        let seen = *self.ledger.seen_ms.lock_recover();
+        match (sent, seen) {
+            (Some((_, sent_ms)), Some(seen_ms))
+                if seen_ms >= sent_ms && seen_ms - sent_ms <= bound_ms => {}
+            (sent, seen) => violations.push(format!(
+                "{}: the second input (sent {sent:?}) was seen at {seen:?}, not within \
+                 {bound_ms} ms",
+                if failover { "failover recovery" } else { "O1" },
+            )),
         }
         let replayed = self.tripwire.counts();
         if replayed != lash_durable_test::TripwireCounts::default() {
@@ -388,6 +421,51 @@ fn no_stale_write(committed: &[Committed], violations: &mut Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// FIG-7132: the owner may observe committed mail before enqueue
+    /// returns to the producer. Its sole woken pass must still record it.
+    #[tokio::test]
+    async fn committed_mail_is_observed_before_the_producer_records_its_receipt() {
+        let scenario = SessionMail::default();
+        let clock = SimClock::new();
+        scenario.database(Arc::clone(&clock)).await;
+        let shared = scenario.shared.get().unwrap();
+        let stores = shared.backend.stores();
+        stores
+            .session_store_factory()
+            .admit_session(&lash_core::testing::store_fixtures::root_session_request(
+                &session(),
+            ))
+            .await
+            .unwrap();
+        let second = second_id();
+        let input = stores
+            .session_store_factory()
+            .enqueue_pending_turn_input(
+                PendingTurnInputDraft::new(
+                    session(),
+                    TurnInputIngress::NextTurn,
+                    TurnInput::text("second"),
+                )
+                .with_input_id(second.clone()),
+            )
+            .await
+            .unwrap();
+        eprintln!("mail-order: second committed; producer receipt not recorded");
+        let drain = SessionDrain {
+            shared: Arc::clone(&scenario.shared),
+            ledger: Arc::clone(&scenario.ledger),
+            tripwire: Arc::clone(&scenario.tripwire),
+        };
+        drain.observe(shared).await;
+        eprintln!(
+            "mail-order: owner observed on its woken pass; seen={:?}",
+            *scenario.ledger.seen_ms.lock_recover()
+        );
+        *scenario.ledger.sent.lock_recover() = Some((input.input_id, clock.logical_ms()));
+        eprintln!("mail-order: producer receipt recorded");
+        assert_eq!(*scenario.ledger.seen_ms.lock_recover(), Some(0));
+    }
 
     /// One unfinished run, O1 and the Tripwire hold on SQLite in memory with
     /// every labelled write of the scenario cut under every fault that

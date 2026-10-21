@@ -392,3 +392,88 @@ impl DurableStore for TestDatabase {
         self.inner.actors_in(formats, after, limit).await
     }
 }
+
+/// FIG-7132: a waiting release's acknowledgement can arrive after the
+/// reconciliation already claimed its timer. That late hint owes no empty
+/// claim. Time and the commit/claim/hint order are explicit.
+#[tokio::test]
+async fn a_late_due_hint_after_a_completed_claim_opens_no_empty_claim() {
+    use lash_durable::laws::node_wakes::{Claims, CountingStore};
+    use lash_durable::runner::CommitEffects;
+    use lash_durable::runner::{Activation, Exit, Owned, Runner, RunnerConfig};
+    use lash_durable::{DurableSettings, FormatSet, NodeCapabilities, Release};
+
+    let clock = SimClock::new();
+    let store = sqlite(Arc::clone(&clock)).await;
+    let formats = FormatSet::new("law-formats");
+    let actor = actor("late-timer-ack");
+    let mut mail = MailTx::new();
+    mail.create_actor(actor.clone(), formats.clone());
+    store
+        .commit_mail(mail, CommitLabel::new("law.create"))
+        .await
+        .unwrap();
+    let owner = store
+        .register_node(&NodeSpec {
+            node: NodeId::new("releasing"),
+            decodes: vec![formats],
+            serves: Vec::new(),
+            capabilities: NodeCapabilities::default(),
+            ttl_millis: 15_000,
+        })
+        .await
+        .unwrap();
+    let claimed = store.claim(&owner, 1).await.unwrap();
+    let mut tx = store.begin(&actor, claimed[0].epoch).await.unwrap();
+    let due = store.now().await.unwrap().after_millis(40);
+    tx.ack_seen().give_up(Release::Waiting {
+        next_due: Some(due),
+    });
+    let effects = CommitEffects::of(&tx);
+    let receipt = store
+        .commit(tx, CommitLabel::new("law.timer"))
+        .await
+        .unwrap();
+    eprintln!("timer-order: release committed; acknowledgement delivery held");
+
+    clock.advance_to(40).await;
+    let claims = Claims::default();
+    struct Hold(tokio::sync::Notify);
+    #[async_trait::async_trait]
+    impl Activation for Hold {
+        async fn activate(&self, _owned: Owned) -> Exit {
+            self.0.notify_one();
+            std::future::pending().await
+        }
+    }
+    let activation = Arc::new(Hold(tokio::sync::Notify::new()));
+    let config = DurableSettings::default().validate().unwrap();
+    let runner = Runner::new(
+        Arc::new(CountingStore {
+            inner: store,
+            node: "claiming".to_owned(),
+            claims: claims.clone(),
+        }),
+        clock.clone(),
+        RunnerConfig::new(
+            NodeId::new("claiming"),
+            vec![FormatSet::new("law-formats")],
+            &config,
+        ),
+        activation.clone(),
+    );
+    let hints = runner.hints();
+    let task = tokio::spawn(runner.run(std::future::pending()));
+    activation.0.notified().await;
+    eprintln!("timer-order: due timer claimed and activation waiting");
+    hints.owner_committed(&effects, &receipt);
+    eprintln!("timer-order: old acknowledgement delivered with due hint");
+    clock.wait_for_sleepers(41, 1).await;
+    clock.advance_to(41).await;
+    // Both implementations return to reconciliation at 290. Waiting for
+    // that live sleep joins the stale deadline's complete scheduling turn.
+    clock.wait_for_sleepers(290, 1).await;
+    task.abort();
+    let _ = task.await;
+    assert_eq!(claims.take(), vec![("claiming".to_owned(), 1)]);
+}

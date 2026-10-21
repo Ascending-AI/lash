@@ -1341,6 +1341,12 @@ pub(super) async fn run_worker(stores_dir: &Path, provider: LatencyProviderKind)
         std::io::stdin().read_line(&mut line)
     })
     .await??;
+    // Remote completion can observe the terminal rows while the serving
+    // transaction is still publishing its clocks. Let activations finish
+    // their acknowledged commits before stopping them or exporting evidence.
+    core.drain().await?;
+    core.shutdown().await?;
+    drop(core);
     std::fs::write(
         stores_dir.join("latency-witness.json"),
         serde_json::to_vec(&collector.snapshot())?,
@@ -1349,7 +1355,6 @@ pub(super) async fn run_worker(stores_dir: &Path, provider: LatencyProviderKind)
         stores_dir.join(LOOP_STAMPS_FILE),
         serde_json::to_vec(&timing.stamps.export())?,
     )?;
-    core.shutdown().await?;
     Ok(())
 }
 

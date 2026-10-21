@@ -1055,15 +1055,28 @@ impl Runner {
             }
             // Why this turn claims, if it does: evidence first, then a due
             // time, then a reconciliation that found work.
+            let deadline_due = deadline.is_some_and(|at| now >= at);
             let cause = if next_claim.is_some_and(|at| now >= at) {
                 Some(woke)
-            } else if deadline.is_some_and(|at| now >= at) {
-                Some(Wake::Deadline)
-            } else if now >= next_reconcile {
-                next_reconcile = now + settings.claim_poll;
+            } else if deadline_due || now >= next_reconcile {
+                if !deadline_due {
+                    next_reconcile = now + settings.claim_poll;
+                }
+                if deadline_due {
+                    // A release acknowledgement may arrive after a claim
+                    // already took its timer. Forget the due hints being
+                    // checked before the read: a newer hint delivered during
+                    // that await must survive for the next turn.
+                    self.hints.claimed_through(self.store_time(skew));
+                }
                 if adopt {
                     Some(Wake::Poll)
                 } else {
+                    let reason = if deadline_due {
+                        Wake::Deadline
+                    } else {
+                        Wake::Poll
+                    };
                     match self
                         .bounded(&mut stop, &ended, self.store.readiness())
                         .await
@@ -1077,10 +1090,10 @@ impl Runner {
                                 let at = self.on_clock(due, skew) + settings.claim_backoff;
                                 next_reconcile = next_reconcile.min(at);
                             }
-                            readiness.due.then_some(Wake::Poll)
+                            readiness.due.then_some(reason)
                         }
                         // An unanswered read claims, as the poll did.
-                        Ok(Err(_)) => Some(Wake::Poll),
+                        Ok(Err(_)) => Some(reason),
                         Err(stopped) => break stopped,
                     }
                 }
