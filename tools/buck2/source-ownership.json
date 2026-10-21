@@ -431,6 +431,7 @@
       ],
       "kernel_step_crash_laws": [
         "tests/kernel_step_crash_laws.rs",
+        "tests/kernel_step_crash_laws/paged_carry.rs",
         "tests/support/matrix.rs",
         "tests/support/served.rs",
         "tests/support/sim.rs"

@@ -42,6 +42,9 @@ pub struct EngineStateFormat {
 /// A process's committed engine state: opaque bytes in a declared format.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EngineState {
+    /// Private nodes a carry transfers to the owner transaction with this state.
+    #[serde(skip)]
+    pub staged: Vec<lash_core_store::checkpoint_graph::EncodedNode>,
     /// The encoding of `bytes`.
     pub format: EngineStateFormat,
     /// The engine's own encoding of its state.
@@ -74,6 +77,7 @@ impl EngineState {
     #[must_use]
     pub fn of(format: EngineStateFormat, bytes: Vec<u8>) -> Self {
         Self {
+            staged: Vec::new(),
             format,
             bytes,
             pages: None,

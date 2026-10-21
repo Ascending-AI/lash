@@ -17,7 +17,9 @@ mod documents;
 mod helpers;
 mod inline;
 mod migrate;
+mod page_carry;
 mod pages;
+pub use page_carry::{carry_parked_checkpoint, carry_snapshot};
 mod replay;
 mod run;
 mod state;
@@ -25,6 +27,8 @@ mod succession;
 mod trace;
 mod workflow;
 
+#[cfg(test)]
+mod page_carry_tests;
 #[cfg(test)]
 mod tests;
 
@@ -380,6 +384,7 @@ pub struct KernelProcessEngine {
     /// snapshots answer it: what a run's stored code is admitted under
     /// (R5, FIG-6985).
     pub(crate) authority: Arc<dyn crate::InternalAuthority>,
+    pub(crate) carry_stores: Option<Arc<dyn lash_execution_contracts::backend::StoreSet>>,
 }
 
 /// Host-selected policy for one `kernel_run`, separate from a process's
@@ -570,6 +575,7 @@ impl KernelProcessEngine {
             random: Arc::new(process_random),
             trace_runtime: None,
             authority: Arc::new(crate::NoInternalOperations),
+            carry_stores: None,
         })
     }
 

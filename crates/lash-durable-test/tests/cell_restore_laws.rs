@@ -725,6 +725,7 @@ impl ProcessEngine for SleepEngine {
         };
         Ok((
             EngineState {
+                staged: Vec::new(),
                 format: self.state_format(),
                 bytes: serde_json::to_vec(&script).map_err(infra)?,
                 pages: None,

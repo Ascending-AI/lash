@@ -140,6 +140,15 @@ pub(crate) fn unmoved(base: &Document) -> Vec<Survivor> {
 pub(crate) fn same_sites(from: Unit, to: Unit, body: &Block, entries: &mut Vec<Survivor>) {
     let mut pending = vec![(Vec::new(), Node::Block(body))];
     while let Some((path, node)) = pending.pop() {
+        if let Node::Block(block) = node {
+            let mut end = path.clone();
+            end.push(block.len() as u32);
+            entries.push(Survivor::new(
+                Site::new(from.clone(), end.clone()),
+                Site::new(to.clone(), end),
+                false,
+            ));
+        }
         for (index, child) in (0u32..).zip(node.children()) {
             let mut child_path = path.clone();
             child_path.push(index);
@@ -151,6 +160,97 @@ pub(crate) fn same_sites(from: Unit, to: Unit, body: &Block, entries: &mut Vec<S
             edited: false,
         });
     }
+}
+
+/// Extends a rewrite with body nodes whose semantic identity survives after
+/// relinking callees. Duplicate statements are ambiguous and are not carried:
+/// a vector position is never evidence of a node's identity.
+pub(crate) fn library_sites(
+    correspondence: Correspondence,
+    functions: &BTreeMap<FunctionId, FunctionId>,
+    catalog: &dyn FunctionCatalog,
+) -> Result<Correspondence, DocumentRefusal> {
+    let mut entries = correspondence.entries().to_vec();
+    for (&from, &to) in functions {
+        let Some(old) = catalog.definition(&from).and_then(FunctionDefinition::body) else {
+            continue;
+        };
+        let Some(new) = catalog.definition(&to).and_then(FunctionDefinition::body) else {
+            continue;
+        };
+        let mut normalized = old.clone();
+        replace_in_body(from, &mut normalized, functions);
+        if normalized.block == new.block {
+            same_sites(
+                Unit::Library(from),
+                Unit::Library(to),
+                &normalized.block,
+                &mut entries,
+            );
+            continue;
+        }
+        let mut pending = vec![(
+            Vec::new(),
+            Vec::new(),
+            Node::Block(&normalized.block),
+            Node::Block(&new.block),
+        )];
+        while let Some((old_path, new_path, a, b)) = pending.pop() {
+            entries.push(Survivor::new(
+                Site::new(Unit::Library(from), old_path.clone()),
+                Site::new(Unit::Library(to), new_path.clone()),
+                false,
+            ));
+            if let (Node::Block(a), Node::Block(b)) = (a, b) {
+                let mut old_end = old_path.clone();
+                old_end.push(a.len() as u32);
+                let mut new_end = new_path.clone();
+                new_end.push(b.len() as u32);
+                entries.push(Survivor::new(
+                    Site::new(Unit::Library(from), old_end),
+                    Site::new(Unit::Library(to), new_end),
+                    false,
+                ));
+                for (i, statement) in a.iter().enumerate() {
+                    if a.iter().filter(|other| *other == statement).count() != 1 {
+                        continue;
+                    }
+                    let mut matches = b
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, other)| *other == statement);
+                    let Some((j, successor)) = matches.next() else {
+                        continue;
+                    };
+                    if matches.next().is_some() {
+                        continue;
+                    }
+                    let mut old_child = old_path.clone();
+                    old_child.push(i as u32);
+                    let mut new_child = new_path.clone();
+                    new_child.push(j as u32);
+                    pending.push((
+                        old_child,
+                        new_child,
+                        Node::Stmt(statement),
+                        Node::Stmt(successor),
+                    ));
+                }
+            } else {
+                // The parent statement is equal after identity substitution,
+                // so its grammar, children and evaluation order are identical.
+                for (i, (a, b)) in (0u32..).zip(a.children().into_iter().zip(b.children())) {
+                    let mut old_child = old_path.clone();
+                    old_child.push(i);
+                    let mut new_child = new_path.clone();
+                    new_child.push(i);
+                    pending.push((old_child, new_child, a, b));
+                }
+            }
+        }
+    }
+    Correspondence::of(correspondence.base, correspondence.result, entries)
+        .ok_or(DocumentRefusal::Correspondence)
 }
 
 #[cfg(test)]

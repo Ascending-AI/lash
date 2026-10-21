@@ -175,6 +175,7 @@ impl EngineSuccession for ProofSuccession {
         _from: &Value,
         to: &Value,
         state: Option<&EngineState>,
+        _environment: &lash_execution_contracts::process::ProcessEnv,
     ) -> Result<SuccessorCarry, SuccessionError> {
         let Some(state) = state else {
             return Ok(SuccessorCarry::Carried {
@@ -186,12 +187,13 @@ impl EngineSuccession for ProofSuccession {
         let mut script: Value = serde_json::from_slice(&state.bytes).map_err(unreadable)?;
         script["doc"] = to["doc"].clone();
         Ok(SuccessorCarry::Carried {
-            state: Some(EngineState {
+            state: Some(Box::new(EngineState {
+                staged: Vec::new(),
                 format: state.format.clone(),
                 bytes: serde_json::to_vec(&script).map_err(unreadable)?,
                 pages: None,
                 requirements: Default::default(),
-            }),
+            })),
             own_formats: false,
         })
     }
@@ -357,6 +359,7 @@ impl ProcessEngine for ProofEngine {
         let bytes = serde_json::to_vec(&script).map_err(infra)?;
         Ok((
             EngineState {
+                staged: Vec::new(),
                 format: self.state_format(),
                 bytes,
                 pages: None,

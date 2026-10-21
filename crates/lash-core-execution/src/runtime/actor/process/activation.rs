@@ -629,22 +629,6 @@ impl ProcessActivation {
             }
         }
         let written = state.format.clone();
-        let tx = match self
-            .carry_forward(
-                owned,
-                tx,
-                process,
-                &row,
-                &driver,
-                engine.as_ref(),
-                &state,
-                root.as_ref(),
-            )
-            .await?
-        {
-            super::carry::Carry::Ended(pass) => return Ok(pass),
-            super::carry::Carry::AsWritten(tx) => *tx,
-        };
         let current = Current {
             process,
             row: &row,
@@ -716,11 +700,29 @@ impl ProcessActivation {
             .unwrap_or_default();
         let work = super::step_admission::outstanding_work(
             process,
-            environment,
+            environment.clone(),
             &live.record,
             &driver,
             Some(&fold),
         );
+        tx = match self
+            .carry_forward(
+                owned,
+                tx,
+                process,
+                &row,
+                &driver,
+                engine.as_ref(),
+                &state,
+                root.as_ref(),
+                environment.clone(),
+                &fold,
+            )
+            .await?
+        {
+            super::carry::Carry::Ended(pass) => return Ok(pass),
+            super::carry::Carry::AsWritten(tx) => *tx,
+        };
         live.bodies.saw(&record, &driver, work);
         // A previously admitted call can drift on takeover or before a retry.
         // Settle at its existing ordinal; do not turn the drift into a policy

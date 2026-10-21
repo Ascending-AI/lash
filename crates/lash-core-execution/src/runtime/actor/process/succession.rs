@@ -177,6 +177,12 @@ impl ProcessActivation {
         else {
             return Err(corrupt("a successor request", "the process runs no engine"));
         };
+        let successor_env = lash_execution_contracts::process::load_process_env(
+            self.backend.process_env_store().as_ref(),
+            &request.env,
+        )
+        .await
+        .map_err(unavailable)?;
         let refusal = if current.record.cancel_request.is_some() {
             Some(ProcessSuccessorRefusal::Cancelling)
         } else {
@@ -190,15 +196,20 @@ impl ProcessActivation {
                 }
             };
             let old = load(launch.env.clone()).await?;
-            let new = load(request.env.clone()).await?;
-            relinked_step(driver.in_flight_effects(), &old, &new)
+            relinked_step(driver.in_flight_effects(), &old, &successor_env)
         };
         let carried = match refusal {
             Some(refusal) => Err(refusal),
             None => match self.steps.succession(current.record) {
                 None => Err(ProcessSuccessorRefusal::Unsupported { kind: kind.clone() }),
                 Some(succession) => match succession
-                    .carry(current.process, payload, &request.payload, state)
+                    .carry(
+                        current.process,
+                        payload,
+                        &request.payload,
+                        state,
+                        &successor_env,
+                    )
                     .await
                 {
                     Ok(SuccessorCarry::Carried { state, own_formats }) => Ok((state, own_formats)),

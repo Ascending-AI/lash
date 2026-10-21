@@ -74,7 +74,7 @@ impl<'a> Access<'a> {
             sizing: Default::default(),
         }
     }
-    fn borrowed(source: &'a mut dyn PageSource) -> Self {
+    pub fn borrowed(source: &'a mut dyn PageSource) -> Self {
         Self {
             source: Rc::new(RefCell::new(SourcePort::Borrowed(source))),
             cache: Rc::new(RefCell::new(BTreeMap::new())),

@@ -11,12 +11,9 @@
 //! result as the engine state in this build's format, before any
 //! transition.
 //!
-//! A parked run is never carried: its heap pages are carried by no
-//! migrator this build ships (FIG-6193). A build that interprets the
-//! version it parked under and holds every function its document reaches
-//! resumes it in that version, to its end. Any other build refuses it,
-//! typed ([`lash_kernel_migrate::ParkedRefusal::StateNotCarried`]), and parks it with its rows
-//! intact, to be resumed by a build that retains what it pins.
+//! Parked records carry copy-on-write under their exact pinned snapshot.
+//! The owner commits their new pages, requirements and closure roots together;
+//! an unavailable definition or unmapped coordinate leaves the old run intact.
 //!
 //! [`plan_migration`] is that carrying without a store, which `lashctl`
 //! runs over a deployment before an upgrade to list what would be
@@ -260,6 +257,7 @@ impl lash_execution_contracts::process::EngineStateMigration for KernelStateMigr
             mut input,
             document,
             correspondence,
+            functions,
             at_park: true,
         }) = carried
         else {
@@ -275,13 +273,31 @@ impl lash_execution_contracts::process::EngineStateMigration for KernelStateMigr
         .map_err(retried)?;
         let document = lash_kernel_doc::IdentifiedDocument::new(document);
         let declarations =
-            lash_kernel_doc::CheckedDeclarations::required(&document, engine.functions.as_ref())
-                .map_err(|refusal| {
+            lash_kernel_doc::CheckedDeclarations::required(&document, functions.as_ref()).map_err(
+                |refusal| {
                     fatal(&KernelMigrationRefusal::NotAdmitted {
                         document: correspondence.base,
                         reason: refusal.to_string(),
                     })
-                })?;
+                },
+            )?;
+        let rewritten = Rewritten {
+            document: document.document().clone(),
+            correspondence: correspondence.clone(),
+            functions: Default::default(),
+        };
+        let staged = engine
+            .carry_pages(process, &mut state, &rewritten, None, Some(&functions))
+            .await
+            .map_err(|error| match error {
+                lash_kernel_migrate::CarryFault::Refused(refusal) => {
+                    fatal(&KernelMigrationRefusal::Parked {
+                        document: correspondence.base,
+                        refusal,
+                    })
+                }
+                lash_kernel_migrate::CarryFault::Heap(error) => retried(error),
+            })?;
         input.document = engine
             .documents
             .publish(&claim, &document, &declarations)
@@ -295,7 +311,10 @@ impl lash_execution_contracts::process::EngineStateMigration for KernelStateMigr
             .map_err(retried)?;
         state.payload = serde_json::to_value(&input).map_err(retried)?;
         advance::encode(&state, engine.writes)
-            .map(Some)
+            .map(|mut state| {
+                state.staged = staged;
+                Some(state)
+            })
             .map_err(|error| {
                 fatal(&KernelMigrationRefusal::State {
                     message: error.to_string(),
@@ -317,6 +336,7 @@ struct Carried {
     /// Whether the process stands at a park; one in flight is carried
     /// from its next.
     at_park: bool,
+    functions: Arc<FunctionRegistry>,
 }
 
 enum CarryError {
@@ -333,8 +353,7 @@ impl From<KernelMigrationRefusal> for CarryError {
 /// `state` carried to the kernel version that replaced the one it is
 /// written in; `None` when it is written in `writes` already, its
 /// document is in the newest version, or it stands on a run this build
-/// resumes in place. A process that stands on a run this build does not
-/// resume is refused: no migrator carries the run's pages.
+/// resumes in place. A process with an uncarryable coordinate or unavailable pinned code is refused.
 async fn carry(
     documents: &KernelDocuments,
     functions: &FunctionRegistry,
@@ -356,28 +375,42 @@ async fn carry(
         .ok_or(KernelMigrationRefusal::DocumentMissing {
             document: input.document,
         })?;
-    let Some(plan) = plan_migration(&base, functions)? else {
+    let stored = documents
+        .stored_definitions(&base, functions)
+        .await
+        .map_err(CarryError::Store)?
+        .map_err(|error| KernelMigrationRefusal::Parked {
+            document: base.identity(),
+            refusal: lash_kernel_migrate::ParkedRefusal::StateNotCarried {
+                detail: format!("pinned definitions: {error:?}"),
+            },
+        })?;
+    let mut declared = lash_vm_broker::kernel::loader::declare(
+        base.manifest.functions.keys().copied(),
+        base.manifest.kernel,
+        functions,
+        &stored,
+    )
+    .map_err(|error| KernelMigrationRefusal::NotAdmitted {
+        document: base.identity(),
+        reason: error.to_string(),
+    })?;
+    if let Some(migration) = KernelVersion::of(base.manifest.kernel).and_then(migration_from) {
+        lash_kernel_migrate::migrate_registry(&mut declared, migration).map_err(|error| {
+            KernelMigrationRefusal::NotAdmitted {
+                document: base.identity(),
+                reason: error.to_string(),
+            }
+        })?;
+    }
+    let Some(plan) = plan_migration(&base, &declared)? else {
         return Ok(None);
     };
     let at_park = matches!(state.phase, Phase::Parked);
-    // A run is never carried: no migrator carries its pages. It runs on in
-    // the version it parked under on a build that interprets that version
-    // and holds every function its document reaches; on any other it is
-    // refused. A run in flight is checked too, so that a survey names one
-    // this build will refuse once it parks.
-    if state.parked.is_some() {
-        if validate_document(&base, functions).is_ok() {
-            return Ok(None);
-        }
-        return Err(KernelMigrationRefusal::Parked {
-            document: plan.from,
-            refusal: super::helpers::parked_not_carried(),
-        }
-        .into());
-    }
     // A state that stands on no run holds no wait: every wait is a park's.
     Ok(Some(Carried {
         at_park,
+        functions: Arc::new(declared),
         state,
         input,
         document: plan.rewritten.document,

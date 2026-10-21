@@ -6,11 +6,8 @@
 //! successor, every node of `main` and of a declared function keeps its
 //! site, and a parked run is carried coordinate for coordinate.
 //!
-//! What it declares it cannot carry: a run that stands in a library
-//! function's kernel body, or holds a coordinate there (a loop under way, a
-//! variable, a closure, the spawn of a live task, an action it has run). A
-//! redeclared body is its package's to write, and this migration vouches for
-//! no correspondence into one. Such a run is refused, naming the site.
+//! The redeclaration preserves library bodies, so their coordinates carry
+//! with the document's coordinates through the same correspondence.
 
 use std::collections::BTreeMap;
 
@@ -52,6 +49,7 @@ fn document(
             from: FROM.number(),
         });
     }
+    let catalog = functions;
     let functions: BTreeMap<_, _> = redeclare(
         definition,
         written.manifest.functions.keys().copied(),
@@ -63,7 +61,8 @@ fn document(
     let mut next = written.clone();
     next.manifest.kernel = TO.number();
     replace_functions(&mut next, &functions);
-    let correspondence = unchanged(written, &next)?;
+    let correspondence =
+        crate::rewrite::library_sites(unchanged(written, &next)?, &functions, catalog)?;
     Ok(Rewritten {
         document: next,
         correspondence,

@@ -51,6 +51,8 @@ impl ProcessActivation {
         engine: &dyn ProcessEngine,
         state: &EngineState,
         root: Option<&ExecRootRow>,
+        environment: std::collections::BTreeSet<crate::ObligationToken>,
+        fold: &crate::runtime::actor::round::RunFold,
     ) -> Result<Carry, DurableError> {
         let written = state.format.clone();
         let declared = engine.state_format();
@@ -79,6 +81,18 @@ impl ProcessActivation {
                     driver_json: driver.encode(),
                 }));
                 tx.stamp_formats(newer);
+                let mut requires = super::step_admission::outstanding_work(
+                    process,
+                    environment,
+                    &carried.requirements,
+                    driver,
+                    Some(fold),
+                )
+                .requires();
+                // Existing component obligations remain owned by the driver.
+                requires.sort();
+                requires.dedup();
+                tx.set_requires(requires);
                 super::state_graph::write_engine_state(&mut tx, process, kind, &carried, root)?;
                 owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
                 return Ok(Carry::Ended(Pass::Again));

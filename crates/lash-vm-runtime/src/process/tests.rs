@@ -953,41 +953,16 @@ fn releases() -> (
 #[test]
 fn a_definition_or_unparked_process_is_adopted_onto_the_successor_release() {
     let (registry, relink, [over_r1, over_r2]) = releases();
-    let adopted = super::plan_adoption(&over_r1, false, &registry, &relink)
+    let adopted = super::plan_adoption(&over_r1, &registry, &relink)
         .expect("the workflow adopts")
         .expect("it reaches R1");
     assert_eq!(adopted.from, over_r1.identity());
     assert_eq!(adopted.rewritten.document, over_r2);
     assert!(
-        super::plan_adoption(&over_r2, false, &registry, &relink)
+        super::plan_adoption(&over_r2, &registry, &relink)
             .expect("an R2 workflow plans")
             .is_none(),
         "a workflow already over R2 is not adopted"
-    );
-}
-
-/// An adoption request for a parked run refuses with the typed
-/// `StateNotCarried` (FIG-6233): no migrator carries its heap pages, so it
-/// stays parked on R1, which its document still pins.
-#[test]
-fn a_parked_run_is_not_adopted_and_stays_on_the_release_it_pins() {
-    let (registry, relink, [over_r1, _]) = releases();
-    let refusal = super::plan_adoption(&over_r1, true, &registry, &relink)
-        .expect_err("a parked run is not adopted");
-    let super::HelperAdoptionRefusal::Parked {
-        document,
-        refusal: lash_kernel_migrate::ParkedRefusal::StateNotCarried { detail },
-    } = &refusal
-    else {
-        panic!("{refusal:?}")
-    };
-    assert_eq!(*document, over_r1.identity());
-    assert!(detail.contains("FIG-6233"), "{detail}");
-    assert!(
-        relink
-            .keys()
-            .all(|function| over_r1.manifest.functions.contains_key(function)),
-        "it still pins every R1 function"
     );
 }
 
@@ -1094,7 +1069,7 @@ fn a_changed_contract_under_one_signature_is_rebased_and_never_adopted() {
     )
     .expect("both releases are declared");
     let relink = lash_kernel_migrate::relink(&r1, &r2);
-    let refusal = super::plan_adoption(&over_r1, false, &declared, &relink)
+    let refusal = super::plan_adoption(&over_r1, &declared, &relink)
         .expect_err("adoption refuses a changed contract");
     assert_eq!(
         refusal,

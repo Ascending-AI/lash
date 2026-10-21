@@ -409,14 +409,11 @@ pub fn node_capabilities(packages: &crate::HeldPackages) -> NodeCapabilities {
         surface: Some(packages.digest()),
         ..NodeCapabilities::default()
     };
-    for package in packages.artifacts().values() {
-        for function in package.code().ids() {
-            if let Some(registered) = packages.functions().get(function)
-                && registered.states_native()
-                && !registered.has_body()
-            {
-                capabilities.natives.insert(*function);
-            }
+    // The pool registers each interpreted kernel's redeclarations. Advertise
+    // those same identities so a freshly claimed migrated run can use them.
+    for (function, registered) in packages.functions().iter() {
+        if registered.states_native() && !registered.has_body() {
+            capabilities.natives.insert(*function);
         }
     }
     capabilities

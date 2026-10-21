@@ -599,6 +599,7 @@ impl ProcessEngine for LawEngine {
         let bytes = serde_json::to_vec(&script).map_err(infra)?;
         Ok((
             EngineState {
+                staged: Vec::new(),
                 format: if act == "wrong_format" {
                     EngineStateFormat {
                         kind: "another-engine".into(),

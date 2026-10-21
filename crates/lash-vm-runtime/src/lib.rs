@@ -66,9 +66,10 @@ pub use process::{
     StoredSourceMap, StoredWorkflow, TOOL_FAILED, TaskPath, UnmigratedKernelSession, Unreplayable,
     Unretained, WorkflowAdmissionOutcome, WorkflowAdmissionRefusal, WorkflowAdmissionRequest,
     WorkflowDocument, WorkflowDocumentError, WorkflowEnvironment, WorkflowEnvironmentRequest,
-    admit_kernel_process, definition_draft, definition_of_entry, entry_signature,
-    kernel_process_engine_registration, migrate_function_value, migrate_saved_function,
-    migration_refusal, plan_adoption, plan_migration, survey_kernel_processes,
+    admit_kernel_process, carry_parked_checkpoint, carry_snapshot, definition_draft,
+    definition_of_entry, entry_signature, kernel_process_engine_registration,
+    migrate_function_value, migrate_saved_function, migration_refusal, plan_adoption,
+    plan_migration, survey_kernel_processes,
 };
 pub use process_plugin::KernelProcessPluginFactory;
 

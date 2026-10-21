@@ -41,6 +41,8 @@ lash-core-execution = { workspace = true, features = ["testing"] }
 lash-core-store = { workspace = true, features = ["testing"] }
 lash-vm-runtime = { workspace = true }
 lash-kernel-doc = { workspace = true }
+lash-kernel-migrate = { workspace = true }
+lash-vm-broker = { workspace = true }
 lash-kernel-state = { workspace = true }
 lash-kernel-vm = { workspace = true }
 lash-llm-tools = { workspace = true }

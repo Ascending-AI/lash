@@ -79,12 +79,13 @@ impl KernelProcessPluginFactory {
         &self,
         ctx: &lash_core::plugin::ProcessEngineContributionContext<'_>,
     ) -> Result<lash_core::ProcessEngineRegistration, PluginError> {
-        let engine = self
+        let mut engine = self
             .engine(ctx.backend().module_artifacts())?
             .with_internal_authority(Arc::new(crate::StoredAuthority::new(
                 ctx.backend().stores(),
             )))
             .with_trace_runtime(ctx.trace_runtime().clone());
+        engine.carry_stores = Some(ctx.backend().stores());
         #[cfg(feature = "synthetic-next")]
         let engine = match self.writes {
             Some(writes) => engine.writing(writes),

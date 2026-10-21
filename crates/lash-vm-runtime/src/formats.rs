@@ -7,9 +7,7 @@
 //! by migration (ADR 0106): a breaking kernel version ships the migration
 //! from the version before it (`lash-kernel-migrate`), and a node of the
 //! new build carries a document forward when it takes over a process the
-//! previous build parked. A parked run is not carried (ADR 0145 §11): a
-//! build that does not interpret it refuses it, and it drains on a build
-//! that does. The `synthetic-next` build
+//! previous build parked, including its paged continuation. The `synthetic-next` build
 //! interprets the successor only it knows.
 
 use lash_kernel_doc::KernelVersion;
@@ -59,10 +57,8 @@ const _: () = assert!(KERNEL_DOCUMENT_SCHEMA_VERSION == KernelVersion::NEWEST.nu
 /// are the semantic page format's (`paged::source::PAGE_FORMAT`), which this
 /// guard names, so a page-format change moves this version too.
 ///
-/// A parked run is never carried across a kernel version or a helper-release
-/// retirement (ADR 0145 §11): a build that does not interpret it refuses it
-/// (`ParkedRefusal::StateNotCarried`), and it resumes on a build that does.
-/// The surface drains.
+/// A parked run carries through a checked correspondence. Its pages,
+/// execution requirements and closure roots move in one owner transaction.
 ///
 /// version_guard(
 ///     items(
@@ -74,12 +70,14 @@ const _: () = assert!(KERNEL_DOCUMENT_SCHEMA_VERSION == KernelVersion::NEWEST.nu
 /// )
 #[cfg(not(feature = "synthetic-next"))]
 /// format_manifest = "KernelParkedState"
-/// version_surface = "drain"
+/// version_surface = "migrate"
+/// version_unguarded = "paged kernel state: authenticated coordinate carry under the execution owner fence, never a record upcaster"
 pub const KERNEL_PARKED_STATE_VERSION: u32 = 1;
 /// The synthetic successor's parked-run format.
 #[cfg(feature = "synthetic-next")]
 /// format_manifest = "KernelParkedState"
-/// version_surface = "drain"
+/// version_surface = "migrate"
+/// version_unguarded = "paged kernel state: authenticated coordinate carry under the execution owner fence, never a record upcaster"
 pub const KERNEL_PARKED_STATE_VERSION: u32 = 2;
 
 const _: () = assert!(KERNEL_PARKED_STATE_VERSION == KernelVersion::NEWEST.number());

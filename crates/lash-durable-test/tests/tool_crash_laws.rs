@@ -1858,6 +1858,7 @@ impl lash_execution_contracts::process::ProcessEngine for StateEngine {
             _ => EngineAction::Idle,
         };
         let state = EngineState {
+            staged: Vec::new(),
             format: self.state_format(),
             bytes: serde_json::to_vec(&settled).map_err(engine_failure)?,
             pages: None,

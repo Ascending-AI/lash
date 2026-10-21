@@ -65,6 +65,7 @@ pub(crate) fn encode(
         None => written,
     };
     Ok(EngineState {
+        staged: Vec::new(),
         format: state_format(kernel),
         bytes: serde_json::to_vec(state).map_err(|error| infra(error.to_string()))?,
         pages: state.parked.map(|parked| parked.page.root),

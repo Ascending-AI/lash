@@ -1249,6 +1249,7 @@ impl lash_execution_contracts::process::ProcessEngine for ScriptEngine {
         let action = (self.advance)(&mut script, event);
         Ok((
             lash_execution_contracts::process::EngineState {
+                staged: Vec::new(),
                 format: self.state_format(),
                 bytes: serde_json::to_vec(&script).map_err(infra)?,
                 pages: None,

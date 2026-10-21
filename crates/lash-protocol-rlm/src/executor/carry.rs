@@ -6,9 +6,8 @@
 //! in, whose execution root holds the cell's document and the run parked
 //! under it. A saved function is carried by the kernel migration the
 //! process engine carries a document with, when a cell is lowered against
-//! it. A parked cell's run is not: its heap pages are carried by no
-//! migrator this build ships, so the cell is refused, typed, and stays
-//! parked (FIG-6193).
+//! it. A parked cell carries its page coordinates, Written table and
+//! admission metadata in one fenced execution-root transaction.
 
 use std::sync::Arc;
 
@@ -18,9 +17,7 @@ use lash_core_store::checkpoint_graph::{GraphDecoder, NodeKind};
 use lash_kernel_dialect::SavedFunction;
 use lash_kernel_doc::{FunctionRegistry, KERNEL_VERSION, KernelVersion};
 use lash_kernel_package::HeldPackages;
-use lash_vm_runtime::{
-    KernelMigrationRefusal, ParkedRefusal, migrate_saved_function, plan_migration,
-};
+use lash_vm_runtime::{KernelMigrationRefusal, migrate_saved_function};
 
 use super::envelope::CellEnvelope;
 
@@ -51,6 +48,10 @@ impl Default for KernelCarry {
 }
 
 impl KernelCarry {
+    pub(super) fn writes(&self) -> KernelVersion {
+        self.writes
+    }
+
     /// A carry to `writes`, the newest version when `None`, against the
     /// host's `packages`, lash's own when `None`.
     pub(crate) fn holding(
@@ -115,10 +116,8 @@ impl KernelCarry {
 
     /// Whether `cell`, a cell's stored root, runs on under the kernel
     /// version this plugin writes: an ended cell, or one whose document is
-    /// in that version already, does. A parked cell an earlier version
-    /// wrote does not: no migrator this build ships carries its heap pages
-    /// (FIG-6193). It stays parked, its rows intact, and resumes on a build
-    /// that runs its kernel.
+    /// in that version already, does. An earlier parked cell requires a known migration; its stored code
+    /// and page continuations are admitted at resume.
     ///
     /// # Errors
     ///
@@ -142,18 +141,10 @@ impl KernelCarry {
         if base.manifest.kernel >= self.writes.number() {
             return Ok(());
         }
-        match plan_migration(&base, self.library()?.as_ref())? {
-            None => Ok(()),
-            Some(plan) => Err(KernelMigrationRefusal::Parked {
-                document: plan.from,
-                refusal: ParkedRefusal::StateNotCarried {
-                    detail: "a parked cell's heap pages are carried by no migrator this \
-                             build ships; it stays parked and resumes on a build that runs \
-                             its kernel"
-                        .to_owned(),
-                },
-            }),
-        }
+        KernelVersion::of(base.manifest.kernel)
+            .and_then(lash_kernel_migrate::migration_from)
+            .map(|_| ())
+            .ok_or_else(|| state(format!("no migration from kernel {}", base.manifest.kernel)))
     }
 }
 

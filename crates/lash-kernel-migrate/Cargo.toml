@@ -31,6 +31,7 @@ schemars = { workspace = true, features = ["derive"] }
 lash-kernel-check = { workspace = true }
 lash-kernel-dialect = { workspace = true }
 lash-kernel-doc = { workspace = true }
+lash-kernel-state = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 

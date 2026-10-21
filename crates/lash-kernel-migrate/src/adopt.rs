@@ -13,11 +13,9 @@
 //! the adopted document performs under differs from what the document did,
 //! for any operation both perform, it is refused naming the operation.
 //!
-//! A run moves only where it stands in the document's own code, which a
-//! relink does not move: the correspondence is every node of `main` and of
-//! a declared function, at its own site. A parked run stands in its heap
-//! pages too, and no migrator carries those, so a parked run is never
-//! adopted (FIG-6233).
+//! Document coordinates retain their paths. Library-body coordinates map
+//! through equal statements after identity substitution; ambiguous or changed
+//! held coordinates refuse. The paged carry consumes this correspondence.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -108,7 +106,7 @@ pub fn adopt(
     document.manifest.functions = required.functions;
     document.manifest.effects = requirements(base, required.effects, required.performs)?;
     let correspondence = unchanged(base, &document)?;
-    let carried = base
+    let carried: BTreeMap<_, _> = base
         .manifest
         .functions
         .keys()
@@ -117,6 +115,7 @@ pub fn adopt(
             (*function, successor.unwrap_or(*function))
         })
         .collect();
+    let correspondence = crate::rewrite::library_sites(correspondence, &carried, functions)?;
     Ok(Rewritten {
         document,
         correspondence,

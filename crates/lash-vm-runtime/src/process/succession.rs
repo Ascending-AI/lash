@@ -6,8 +6,7 @@
 //! successor's does not is relinked to the successor's function of the same
 //! name; [`plan_carry`] rewrites the document over that relink, and the
 //! rewrite must be the successor's document, or no correspondence carries
-//! the process. A parked run is refused, typed: no migrator carries its
-//! pages (FIG-6233). The waits the state holds move to the identities
+//! the process. Parked frames and heap closure sites carry through that correspondence. The waits the state holds move to the identities
 //! the rewrite gives their effects. Their admissions
 //! keep the requests they recorded, so a step already admitted keeps its
 //! call and the match its admission recorded, and nothing is re-matched. A
@@ -53,6 +52,7 @@ impl lash_execution_contracts::process::EngineSuccession for KernelSuccession {
         from: &serde_json::Value,
         to: &serde_json::Value,
         state: Option<&EngineState>,
+        environment: &lash_execution_contracts::process::ProcessEnv,
     ) -> Result<SuccessorCarry, SuccessionError> {
         let engine = &self.engine;
         let decoded = state
@@ -85,10 +85,17 @@ impl lash_execution_contracts::process::EngineSuccession for KernelSuccession {
             });
         };
         state.payload = to.clone();
+        if state.parked.is_some() {
+            state.requirements.providers.clear();
+            state.requirements.codecs.clear();
+            for link in environment.effects().values() {
+                link.require(&mut state.requirements);
+            }
+        }
         if successor.document == input.document {
             return advance::encode(&state, engine.writes)
                 .map(|state| SuccessorCarry::Carried {
-                    state: Some(state),
+                    state: Some(Box::new(state)),
                     own_formats: false,
                 })
                 .map_err(undecodable);
@@ -130,14 +137,36 @@ impl lash_execution_contracts::process::EngineSuccession for KernelSuccession {
         )
         .map_err(|refusal| unread(refusal.to_string()))?;
         let relink = relink(&base, &next, &functions).map_err(|refusal| refused(&refusal))?;
-        let carried = plan_carry(&base, state.parked.is_some(), &functions, &relink)
-            .map_err(|refusal| refused(&refusal))?;
+        let carried =
+            plan_carry(&base, &functions, &relink).map_err(|refusal| refused(&refusal))?;
         if carried.rewritten.identity() != successor.document {
             return Err(refused(&HelperAdoptionRefusal::NoCorrespondence {
                 document: input.document,
                 successor: successor.document,
             }));
         }
+        // State, admission metadata and closure roots travel in one answer;
+        // only the process owner publishes them, under its current fence.
+        let staged = engine
+            .carry_pages(
+                process,
+                &mut state,
+                &carried.rewritten,
+                Some(environment),
+                None,
+            )
+            .await
+            .map_err(|error| match error {
+                lash_kernel_migrate::CarryFault::Refused(refusal) => {
+                    refused(&HelperAdoptionRefusal::Parked {
+                        document: input.document,
+                        refusal,
+                    })
+                }
+                lash_kernel_migrate::CarryFault::Heap(error) => {
+                    SuccessionError::Unavailable(error.to_string())
+                }
+            })?;
         // The process holds the record of the rewrite beside the successor's
         // document, so a host rekeys a map it holds of the earlier one.
         let claim = lash_core::ReferrerClaim::unguarded(
@@ -148,12 +177,14 @@ impl lash_execution_contracts::process::EngineSuccession for KernelSuccession {
             .record_rewrite(&claim, &carried.rewritten.correspondence)
             .await
             .map_err(|error| SuccessionError::Unavailable(error.to_string()))?;
-        // A state that stands on no run holds no wait: every wait is a
-        // park's, and a parked run was refused above.
+        // The owner stages the prepared pages beside the encoded state.
         advance::encode(&state, engine.writes)
-            .map(|state| SuccessorCarry::Carried {
-                state: Some(state),
-                own_formats: true,
+            .map(|mut state| {
+                state.staged = staged;
+                SuccessorCarry::Carried {
+                    state: Some(Box::new(state)),
+                    own_formats: true,
+                }
             })
             .map_err(undecodable)
     }

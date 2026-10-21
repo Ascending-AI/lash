@@ -55,7 +55,7 @@ pub struct PagedHeap {
 }
 /// The heap root a heap-header page holds: a keyed leaf of one current
 /// header record.
-fn header_root(page: PageRef, answer: &PageAnswer) -> Result<HeapRoot, HeapFault> {
+pub fn header_root(page: PageRef, answer: &PageAnswer) -> Result<HeapRoot, HeapFault> {
     let corrupt = |reason: String| HeapFault::Corrupt {
         page: page.id,
         reason,

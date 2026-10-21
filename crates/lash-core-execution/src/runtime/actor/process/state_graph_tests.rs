@@ -45,6 +45,7 @@ fn collected(
 
 fn state(version: u32, bytes: Vec<u8>) -> EngineState {
     EngineState {
+        staged: Vec::new(),
         format: EngineStateFormat {
             kind: "wasm-engine".to_owned(),
             version,

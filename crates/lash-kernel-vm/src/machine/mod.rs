@@ -13,6 +13,7 @@ mod actions;
 mod catches;
 mod checkpoint;
 mod exec;
+mod foreign;
 mod frames;
 pub(crate) mod islands;
 mod issued;

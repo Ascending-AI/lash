@@ -819,6 +819,12 @@ impl KernelMachine {
             return Ok(Answer::Done);
         }
         let result = match &function.run {
+            LibRun::Declaration => {
+                return Err(super::fault(
+                    "a native-only declaration has no executable implementation",
+                )
+                .into());
+            }
             LibRun::Body(code) => return Ok(Answer::Body((*code).into())),
             LibRun::Plan { plan, .. } => {
                 match self.run_plan(task, exe, lib, plan, args, admission)? {

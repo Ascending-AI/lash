@@ -80,6 +80,9 @@ impl Lib {
 type LazyPlan = Box<std::sync::OnceLock<Option<Arc<PreparedPlan>>>>;
 
 pub(crate) enum LibRun {
+    /// A native-only declaration admitted for foreign-image validation.
+    /// Its signature participates in compilation; it has no executable entry.
+    Declaration,
     /// The native implementation, and the kernel body that runs a call it
     /// declines (`NativeError::Decline`).
     Native {

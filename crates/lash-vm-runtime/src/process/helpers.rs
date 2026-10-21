@@ -11,12 +11,9 @@
 //! (ADOPT-CONTRACT), which refuses naming the operation.
 //!
 //! [`plan_adoption`] plans that relink for a published definition's
-//! document or a process that is not parked, and [`plan_carry`] carries a
-//! process onto a successor pair its host names (`Processes::succeed`,
-//! FIG-6121). A parked run is never adopted: its heap pages are carried by
-//! no migrator this build ships (FIG-6233), so it is refused, typed
-//! ([`ParkedRefusal::StateNotCarried`]), and stays parked on the release it
-//! pins, with its rows intact.
+//! document or a process, and [`plan_carry`] plans a successor pair its host
+//! names. Parked page rewriting and validation follow this document plan;
+//! only the fenced owner transaction publishes the carried run.
 
 use lash_kernel_doc::{Document, DocumentId, FunctionRegistry, validate_document};
 use lash_kernel_migrate::{DocumentRefusal, ParkedRefusal, Relink, Rewritten};
@@ -76,17 +73,13 @@ pub struct AdoptedRun {
 }
 
 /// `document`, a published definition's or a process's, adopted by
-/// `relink`; `None` when it lists no function `relink` names. With a run
-/// `parked` under it, the adoption is refused: no migrator carries a
-/// parked run's pages, so it stays on the release it pins. `functions`
-/// holds both releases.
+/// `relink`; `None` when it lists no function `relink` names. `functions` holds both releases.
 ///
 /// # Errors
 ///
 /// The typed refusal of a document or run that is not adopted.
 pub fn plan_adoption(
     document: &Document,
-    parked: bool,
     functions: &FunctionRegistry,
     relink: &Relink,
 ) -> Result<Option<AdoptedRun>, HelperAdoptionRefusal> {
@@ -99,31 +92,22 @@ pub fn plan_adoption(
     {
         return Ok(None);
     }
-    plan_carry(document, parked, functions, relink).map(Some)
+    plan_carry(document, functions, relink).map(Some)
 }
 
 /// `document` carried onto `relink`: each library function it calls
 /// replaced by its successor. `functions` holds every function the
-/// document reaches and every successor. A run `parked` under the document
-/// is refused, typed: its pages stay as they are, and it resumes only on a
-/// node that holds what it pins.
+/// document reaches and every successor. The paged carry applies this plan to a parked run.
 ///
 /// # Errors
 ///
 /// The typed refusal of a document or run that is not carried.
 pub fn plan_carry(
     document: &Document,
-    parked: bool,
     functions: &FunctionRegistry,
     relink: &Relink,
 ) -> Result<AdoptedRun, HelperAdoptionRefusal> {
     let from = document.identity();
-    if parked {
-        return Err(HelperAdoptionRefusal::Parked {
-            document: from,
-            refusal: parked_not_carried(),
-        });
-    }
     let rewritten = lash_kernel_migrate::adopt(document, relink, functions).map_err(|refusal| {
         HelperAdoptionRefusal::Document {
             document: from,
@@ -137,14 +121,4 @@ pub fn plan_carry(
         }
     })?;
     Ok(AdoptedRun { from, rewritten })
-}
-
-/// Why a parked run is not carried onto another document: no migrator
-/// this build ships carries its heap pages (FIG-6233).
-pub(crate) fn parked_not_carried() -> ParkedRefusal {
-    ParkedRefusal::StateNotCarried {
-        detail: "a parked run's heap pages are carried by no migrator this build ships \
-                 (FIG-6233); it stays parked and resumes on a node that holds what it pins"
-            .to_owned(),
-    }
 }

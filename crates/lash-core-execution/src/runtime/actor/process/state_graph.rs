@@ -42,6 +42,9 @@ pub fn stage_engine_state(
     expected: (Option<SnapshotRev>, Option<NodeId>),
     commit_id: CommitId,
 ) -> Result<(NodeId, DomainWrite), GraphRefusal> {
+    for node in &state.staged {
+        staging.adopt(node.clone())?;
+    }
     let owner = staging.encode_value(
         NodeKind::OWNER_BINDING,
         &OwnerBinding::Process {
@@ -197,6 +200,7 @@ pub fn load_engine_state(
     Ok((
         state.engine,
         EngineState {
+            staged: Vec::new(),
             format: EngineStateFormat {
                 kind: state.executable_identity,
                 version: state.state_format,

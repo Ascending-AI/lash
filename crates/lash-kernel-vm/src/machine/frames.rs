@@ -1062,7 +1062,6 @@ impl Frames {
     /// Restores the row of the frame at `index` afresh, as a cold open
     /// does when execution reaches it, the top by how the task comes to it
     /// and a lower frame by a return: the refusal its coordinate meets.
-    #[cfg(test)]
     pub(super) fn refusal(&self, index: u64) -> Result<Option<RestoreRefusal>, HeapFault> {
         let record = row(&self.rows, index, &self.access)?;
         let arrival = if index + 1 == self.len {

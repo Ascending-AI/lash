@@ -13,6 +13,7 @@
 //! statement again.
 
 mod carry;
+mod cell_carry;
 mod cell_outputs;
 use cell_outputs::record_cell_outputs;
 mod cell_run;
@@ -112,6 +113,22 @@ pub(crate) async fn execute_cell(
         ctx.actor_context(),
         exec.clone(),
     ));
+    let opened = match opened {
+        Ok(value) => {
+            match cell_carry::carry(&snapshots, &services.kernel, cell_bounds(services)).await {
+                Ok(()) => Ok(value),
+                Err(error) => {
+                    let message = error.to_string();
+                    ctx.record_nested_effect_error(error.into_runtime());
+                    return exec_setup_failure(lash_core::CellFailure::new(
+                        lash_core::CellFailureKind::Host,
+                        message,
+                    ));
+                }
+            }
+        }
+        Err(error) => Err(error),
+    };
     let resumed = match &opened {
         Ok(_) => match envelope::resumed_cell(&snapshots, &clean_code).await {
             Ok(resumed) => resumed,

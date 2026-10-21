@@ -410,6 +410,7 @@ impl contracts::EngineSuccession for Capabilities {
         _from: &serde_json::Value,
         _to: &serde_json::Value,
         _state: Option<&contracts::EngineState>,
+        _environment: &lash_execution_contracts::process::ProcessEnv,
     ) -> Result<contracts::SuccessorCarry, contracts::SuccessionError> {
         unreachable!("the registry never carries")
     }

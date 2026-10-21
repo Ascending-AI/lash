@@ -162,6 +162,24 @@ impl DurableSnapshotStore {
             .map_err(refused)
     }
 
+    /// Drops activation read caches after an owner commit replaces the root.
+    /// The next read resolves admissions and metadata from that new root.
+    pub fn invalidate_root(&self) {
+        *self.held() = None;
+        *self
+            .latest
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        self.stored
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
+        *self
+            .book
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = AdmissionBook::default();
+    }
+
     /// The nodes the execution's latest root reaches, as this activation
     /// knows them. They remain protected by that root until its consumer
     /// publishes the state it carries and retires the root in one commit.

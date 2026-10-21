@@ -20,11 +20,11 @@
 //! ([`relink`], `K-LIB-009`), refused when that would move it onto a
 //! changed operation contract.
 //!
-//! A parked run is not carried. Its state is pages of the persistent heap
-//! (ADR 0145), and this crate holds no migrator for them: an embedder
-//! refuses such a run with [`ParkedRefusal::StateNotCarried`], keeps it,
-//! and resumes it on a build that interprets what it pins. The paged
-//! parked-run migrator is FIG-6233.
+//! [`carry_checkpoint`] rewrites parked page records copy-on-write over a
+//! correspondence. The embedding validates the foreign continuation and
+//! commits its pages, requirements and roots in one fenced transaction.
+//! A genuinely unmapped coordinate or unavailable pinned code refuses;
+//! the original root remains readable.
 //!
 //! The crate depends on `lash-kernel-doc`, `lash-kernel-check` (an
 //! adopted document's requirements are derived, not copied),
@@ -33,6 +33,8 @@
 
 mod adopt;
 mod migration;
+mod parked;
+pub use parked::{CarryFault, carry_checkpoint, carry_effect};
 mod rewrite;
 mod saved;
 #[cfg(feature = "synthetic-next")]

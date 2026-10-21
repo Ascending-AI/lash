@@ -100,7 +100,7 @@ pub enum SuccessorCarry {
     /// The state carried onto the successor payload; `None` for a process
     /// whose engine has not started.
     Carried {
-        state: Option<EngineState>,
+        state: Option<Box<EngineState>>,
         /// The carried state pins what this build's engine writes, such as
         /// its own helper release: the process's actor is stamped with the
         /// engine's own format set, so only a node that holds them claims
@@ -136,6 +136,7 @@ pub trait EngineSuccession: Send + Sync {
         from: &serde_json::Value,
         to: &serde_json::Value,
         state: Option<&EngineState>,
+        environment: &ProcessEnv,
     ) -> Result<SuccessorCarry, SuccessionError>;
 }
 

@@ -53,7 +53,7 @@ pub use functions::{MachineFunctions, implement_machine_functions, register_mach
 pub use lash_kernel_doc::ExecutionPath;
 pub use machine::KernelMachine;
 pub use observe::{ChargeTape, ObservationMode, SiteCounts};
-pub use paged::SealedRoot;
+pub use paged::{SealedRoot, validate_foreign_checkpoint};
 pub use save::CellSaveContext;
 pub use session_editor::{SessionEditor, SessionValue};
 

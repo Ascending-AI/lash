@@ -487,7 +487,7 @@ impl Prepared {
                 Some(plan) => LibRun::Plan { plan, body },
                 None => LibRun::Body(body),
             },
-            (None, None, None) => unreachable!("registered functions have an implementation"),
+            (None, None, None) => LibRun::Declaration,
         };
         let params = &header.signature.params;
         let charge = Plan::new(&header.charge, params);

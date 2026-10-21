@@ -196,7 +196,7 @@ pub async fn request_process_successor(
     .await
     .map_err(|error| PluginError::Session(format!("reading the process's state: {error}")))?;
     if let Err(error) = succession
-        .carry(process, payload, &request.payload, state.as_ref())
+        .carry(process, payload, &request.payload, state.as_ref(), &new_env)
         .await
     {
         return Err(refused(carry_refusal(error)?));

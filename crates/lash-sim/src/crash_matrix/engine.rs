@@ -248,6 +248,7 @@ impl ProcessEngine for SimProcessEngine {
         let bytes = serde_json::to_vec(&script).map_err(infra)?;
         Ok((
             EngineState {
+                staged: Vec::new(),
                 format: self.state_format(),
                 bytes,
                 pages: None,

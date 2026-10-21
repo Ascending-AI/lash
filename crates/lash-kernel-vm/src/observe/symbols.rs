@@ -131,7 +131,7 @@ impl GuestSymbols {
                 LibSymbol {
                     token,
                     kind: match lib.run {
-                        LibRun::Native { .. } => LibKind::Native,
+                        LibRun::Native { .. } | LibRun::Declaration => LibKind::Native,
                         LibRun::Plan { .. } => LibKind::Plan,
                         LibRun::DeferredPlan { .. } => {
                             if exe.fallback(LibId(token)).is_some() {

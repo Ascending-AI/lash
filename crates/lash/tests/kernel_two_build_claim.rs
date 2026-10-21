@@ -9,10 +9,9 @@
 //! version as its first commit, and the process resumes under that
 //! version to the answer it would have reached.
 //!
-//! The refusal laws beside it: a process and a session cell pin helper
-//! release 1.0, whose manifest cannot supply the next kernel encoding.
-//! The survey names that release with a typed refusal, and build N+1 parks
-//! the run without publishing a rewritten document or cell snapshot.
+//! The heap-cell law also stops the node that committed its migration:
+//! a fresh successor node claims the carried requirements and resumes its
+//! saved declaration and Written metadata to the recorded result.
 //!
 #![cfg(all(feature = "synthetic-next", feature = "rlm", feature = "sqlite"))]
 #![allow(clippy::disallowed_methods, clippy::expect_used, clippy::unwrap_used)]
@@ -389,90 +388,43 @@ async fn survey(backend: &lash::Backend) -> serde_json::Value {
     serde_json::to_value(&survey).expect("the survey encodes")
 }
 
-/// A run parked by build N is never carried: no migrator carries its
-/// heap pages. Build N+1 interprets the version it parked under and holds
-/// every function its document reaches, so it claims the process and
-/// resumes the run in that version, to its end (FIG-6193).
+/// K-VER-005 through the durable process owner: a run parked under N is
+/// carried by N+1 once N has drained, then finishes with the recorded launch.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_process_parked_by_build_n_is_resumed_by_build_n_plus_1_in_the_version_it_parked_under() {
-    let stores: Arc<dyn StoreSet> = Arc::new(
-        lash_sqlite_store::SqliteStoreSet::memory()
-            .await
-            .expect("an in-memory store set opens"),
-    );
-    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let counted = |build, boot| {
-        serving_under(
-            &stores,
-            build,
-            boot,
-            &[],
-            lash::durable::DurableSettings::standard(),
-            Vec::new(),
-            Some(Arc::clone(&calls)),
-        )
-    };
-    let (old_backend, old) = counted(Build::N, "build-n");
-    let payload = payload(&old_backend, WORKER).await;
-    let process = start(&old, payload).await;
-    let actor = ActorKey::process(process.as_str()).expect("a process actor key");
-    let launched = launch_of(&old_backend, &process).await;
-
-    // Build N parks the process in its first sleep and lets go of it.
-    let parked = waiting(&old_backend, &actor).await;
-    let written = parked.formats.clone();
-    assert!(
-        written
-            .as_str()
-            .contains(&engine_format(KernelVersion::One)),
-        "the parked process is in build N's format set: {written:?}"
-    );
-    old.drain().await.expect("build N's node drains");
-    let survey = survey(&old_backend).await;
-    assert_eq!(survey["checked"], 1, "{survey}");
-    assert_eq!(survey["unmigrated"], 1, "{survey}");
-    assert_eq!(survey["refused"], serde_json::json!([]), "{survey}");
-
-    let (new_backend, new) = counted(Build::NPlus1, "build-n-plus-1");
+async fn a_parked_process_is_migrated_and_finishes_on_the_next_kernel() {
+    let stores: Arc<dyn StoreSet> =
+        Arc::new(lash_sqlite_store::SqliteStoreSet::memory().await.unwrap());
+    let (old_backend, old) = serving(&stores, Build::N, "migration-old", &[]);
+    let input = payload(&old_backend, WORKER).await;
+    let process = start(&old, input).await;
+    let actor = ActorKey::process(process.as_str()).unwrap();
+    waiting(&old_backend, &actor).await;
+    let launch = launch_of(&old_backend, &process).await;
+    old.drain().await.unwrap();
+    let (new_backend, new) = serving(&stores, Build::NPlus1, "migration-new", &[]);
     let output = tokio::time::timeout(
         Duration::from_secs(60),
         new.processes().await_output(&process),
     )
     .await
-    .expect("the process ends within a minute")
-    .expect("the process's end is read");
+    .unwrap()
+    .unwrap();
     let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = output else {
-        panic!("the process ended without an answer: {output:?}");
+        panic!("{output:?}");
     };
-    assert!(output.is_success(), "the process failed: {output:?}");
+    assert!(output.is_success(), "{output:?}");
     assert_eq!(output.value_for_projection(), serde_json::json!("second"));
-    // Adoption carries the process's launch as it was declared: its
-    // environment, settings and components, and no policy chooses again.
-    assert_eq!(launch_of(&new_backend, &process).await, launched);
-    assert_eq!(
-        calls.load(std::sync::atomic::Ordering::SeqCst),
-        0,
-        "no start policy ran"
-    );
-
-    let ended = new_backend
-        .durable()
-        .actor(&actor)
-        .await
-        .expect("the actor row is read")
-        .expect("the process has its actor");
+    assert_eq!(launch_of(&new_backend, &process).await, launch);
+    let ended = new_backend.durable().actor(&actor).await.unwrap().unwrap();
     assert!(
         ended
             .formats
             .as_str()
-            .contains(&engine_format(KernelVersion::One))
-            && !ended
-                .formats
-                .as_str()
-                .contains(&engine_format(KernelVersion::SyntheticNext)),
-        "the process ended in the version it parked under, never carried: {:?}",
+            .contains(&engine_format(KernelVersion::SyntheticNext)),
+        "{:?}",
         ended.formats
     );
+    new.shutdown().await.unwrap();
 }
 
 /// What `process` was launched under: its environment's reference, its
@@ -559,96 +511,89 @@ fn cell_finishes(view: &lash::persistence::SessionReadView) -> Vec<serde_json::V
         .collect()
 }
 
-/// The two-build claim law of a session (kernel spec §6), its refusal: a
-/// turn's cell of build N parks in a `sleep` and build N dies. Build N+1
-/// claims the session, which is in build N's format set: no migrator
-/// carries the parked cell's heap pages to its kernel version (FIG-6193),
-/// so the session parks typed, in build N's format set, its cell's roots
-/// as build N left them.
+/// WR-PARK/K-VER-005: the recorded cell, including its typed Written table,
+/// moves from N to N+1 and uses its saved declaration after its wait.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_session_cell_parked_by_build_n_is_carried_onto_no_kernel_version_and_parks_typed() {
-    const SESSION: &str = "kernel-two-build-session";
+async fn a_parked_heap_cell_and_its_written_table_resume_on_the_next_kernel() {
+    const SESSION: &str = "paged-cell-upgrade";
+    let clock = Arc::new(lash_core::testing::TestClock::new(1_700_000_000_000));
     let stores: Arc<dyn StoreSet> = Arc::new(
-        lash_sqlite_store::SqliteStoreSet::memory()
+        lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock.clone())
             .await
-            .expect("a SQLite memory store set opens"),
+            .unwrap(),
     );
-    let actor = ActorKey::session(SESSION).expect("a session actor key");
     let build_n = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
         .build()
-        .expect("build N's runtime");
-    let (backend, written) = build_n
+        .unwrap();
+    build_n.spawn({
+        let stores = stores.clone();
+        async move {
+            let (backend, old) = idling(&stores, Build::N, "cell-old", &["function twice(x) { return x * 2; }\nawait sleep(60000);\nawait control.finish(twice(21));"]);
+            let opened = session(&old, SESSION).await;
+            tokio::spawn(async move { let _ = opened.send(lash::TurnInput::text("finish the saved cell")).output().await; });
+            parked_cell(&backend, SESSION).await;
+            waiting(&backend, &ActorKey::session(SESSION).unwrap()).await;
+            old.drain().await.unwrap();
+            std::mem::forget(old);
+        }
+    }).await.unwrap();
+    build_n.shutdown_background();
+    let actor = ActorKey::session(SESSION).unwrap();
+    let written = stores
+        .durable_store()
+        .actor(&actor)
+        .await
+        .unwrap()
+        .unwrap()
+        .formats;
+    let migration_runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    migration_runtime
         .spawn({
-            let stores = Arc::clone(&stores);
+            let stores = stores.clone();
+            let actor = actor.clone();
             async move {
-                let (old_backend, old) = serving(
-                    &stores,
-                    Build::N,
-                    "build-n",
-                    &["await sleep(60000);\nawait control.finish(21 * 2);"],
-                );
-                let opened = session(&old, SESSION).await;
-                tokio::spawn(async move {
-                    let _ = opened
-                        .send(lash::TurnInput::text("sleep, then multiply"))
-                        .output()
-                        .await;
-                });
-                let parked = parked_cell(&old_backend, SESSION).await;
-                std::mem::forget(old);
-                (old_backend, parked.formats)
+                let (backend, migrating) = idling(&stores, Build::NPlus1, "cell-migrating", &[]);
+                let mut wake = lash_durable::MailTx::new();
+                wake.wake(actor.clone());
+                backend
+                    .durable()
+                    .commit_mail(wake, lash_durable::CommitLabel::new("law.sweep"))
+                    .await
+                    .unwrap();
+                carried_from(&backend, &actor, &written).await;
+                // Retire the migration activation too: the carried record must be
+                // claimable by another node, including its redeclared natives.
+                std::mem::forget(migrating);
             }
         })
         .await
-        .expect("build N parks the cell");
+        .unwrap();
+    migration_runtime.shutdown_background();
+    clock.advance(60_001);
+    let (backend, new) = idling(&stores, Build::NPlus1, "cell-new", &[]);
+    let idle = in_state(&backend, &actor, ActorState::Idle).await;
     assert!(
-        written.as_str().contains("kernel-parked-state@1"),
-        "{written:?}"
+        idle.formats.as_str().contains("kernel-parked-state@2"),
+        "{:?}",
+        idle.formats
     );
-    build_n.shutdown_background();
-
-    let listed = survey(&backend).await;
-    let refusal = &listed["sessions"][0]["refused"][0]["refusal"];
-    assert_eq!(refusal["refused"], "parked", "{listed}");
-    assert_eq!(
-        refusal["refusal"]["reason"], "state_not_carried",
-        "{listed}"
-    );
-    let session = lash::SessionId::fixture(SESSION);
-    let turn = backend
+    let read = new
+        .session(lash::SessionId::fixture(SESSION))
         .durable()
-        .turn(&session)
         .await
-        .expect("turn read")
-        .expect("an open turn");
-    let roots = backend
-        .durable()
-        .cell_roots(&session, &turn.run)
+        .unwrap()
+        .read()
         .await
-        .expect("the original roots");
-
-    let (new_backend, _new) = serving(&stores, Build::NPlus1, "build-n-plus-1", &[]);
-    let parked = in_state(&new_backend, &actor, ActorState::Parked).await;
-    let reason: serde_json::Value =
-        serde_json::from_str(parked.park.as_deref().expect("the actor names its refusal"))
-            .expect("a JSON park reason");
-    assert_eq!(reason["reason"], "undecodable_state", "{reason}");
-    assert!(
-        reason.to_string().contains("carried by no migrator"),
-        "{reason}"
-    );
-    assert_eq!(parked.formats, written);
-    assert_eq!(
-        new_backend
-            .durable()
-            .cell_roots(&session, &turn.run)
-            .await
-            .expect("the parked roots"),
-        roots,
-        "a refused carry publishes no rewritten cell",
-    );
+        .unwrap()
+        .unwrap();
+    assert_eq!(cell_finishes(&read), vec![serde_json::json!(42)]);
+    new.shutdown().await.unwrap();
 }
 
 /// The row of `actor` once its format set is no longer `written`.

@@ -261,3 +261,16 @@ pub trait Machine: Sized {
 
     fn meters(&self) -> Meters;
 }
+
+/// Validates every continuation in a foreign image before its owner publishes it.
+/// No guest step or host effect runs during this admission.
+pub fn validate_foreign_checkpoint(
+    program: Program,
+    bounds: crate::Bounds,
+    checkpoint: &lash_kernel_state::paged::Checkpoint,
+    source: Box<dyn PageSource>,
+) -> Result<(), OpenError> {
+    use crate::Machine as _;
+    let mut machine = crate::KernelMachine::open(program, bounds, checkpoint, source)?;
+    machine.validate_foreign_frames().map_err(OpenError::Heap)
+}
