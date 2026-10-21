@@ -1258,9 +1258,16 @@ mod tests {
             lash_vm_releases::TYPESCRIPT,
             config.run_bounds,
         )
-        .with_packages(held);
-        let payload =
-            serde_json::json!({ "document": identity, "functions": [helper], "entry": "work" });
+        .with_packages(held.clone());
+        let payload = serde_json::to_value(crate::KernelProcessInput {
+            packages: held.digest(),
+            declared_packages: held.surface().selection(),
+            document: identity,
+            functions: [helper].into_iter().collect(),
+            entry: lash_kernel_doc::Name::new("work"),
+            args: serde_json::Map::new(),
+        })
+        .expect("process payload");
         let mut bindings = Vec::new();
         let mut counts = std::collections::BTreeMap::new();
         let mut expected = None;

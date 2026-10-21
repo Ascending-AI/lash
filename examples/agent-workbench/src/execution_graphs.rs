@@ -992,7 +992,7 @@ mod tests {
 
     #[tokio::test]
     async fn visibility_keeps_later_child_session_paths() {
-        let (observer, registry, _workbench) = test_process_observer().await;
+        let (observer, registry, workbench) = test_process_observer().await;
         let process_id = registry
             .register_process(lash::process::ProcessRegistration::new(
                 RuntimeInput::SessionTurn {
@@ -1013,6 +1013,15 @@ mod tests {
             .await
             .expect("register process")
             .id;
+        // Registration starts real work. Let its terminal settle before the
+        // reference and optimized projections read the same process facts.
+        workbench
+            .state
+            .core
+            .processes()
+            .await_output(&process_id)
+            .await
+            .expect("child process settles");
         let mut root = effect_graph("root", "root");
         root.children = vec![
             child_link("root", Some("bridge"), "absent", None),

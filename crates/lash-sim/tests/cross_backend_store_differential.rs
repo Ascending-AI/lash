@@ -946,6 +946,7 @@ impl BackendRunner {
         reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
     )]
     async fn build_lifecycle_core(&self) -> lash::LashCore {
+        let node_id = format!("cross-backend-differential-test-{}", self.session_id);
         let transport = Arc::new(
             lash_provider_fixtures::provider::ScriptedLlmHttpTransport::from_scripts([])
                 .expect("empty provider script queue"),
@@ -964,7 +965,7 @@ impl BackendRunner {
             .delta_coalescing(lash::DeltaCoalescing::recommended())
             .serve_test_llm_profile(provider, model)
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
-                lash::persistence::LeaseOwnerId::new("cross-backend-differential-test"),
+                lash::persistence::LeaseOwnerId::new(node_id.clone()),
                 lash::persistence::LeaseIncarnationId::new("cross-backend-differential-test-boot"),
             ))
             .expect("build differential lifecycle core");
@@ -977,6 +978,41 @@ impl BackendRunner {
             .install(&self.lifecycle_backend)
             .await
             .expect("install the lifecycle core's package definitions");
+        // Package installation precedes the serving node's registration.
+        // Wait for this core's row too, so startup cannot move `nodes` between
+        // a refused operation's before/after digests. Other cases' nodes in
+        // the shared PostgreSQL store do not establish this core's readiness.
+        let node_wakes = self.lifecycle_backend.stores().node_wakes();
+        tokio::time::timeout(Duration::from_secs(15), async {
+            loop {
+                let registered = match &node_wakes {
+                    Some(wakes) => wakes
+                        .liveness()
+                        .await
+                        .expect("read registered lifecycle nodes")
+                        .iter()
+                        .any(|live| live.boot.node.as_str() == node_id),
+                    None => {
+                        // A fresh SQLite memory store has no cross-node wakes
+                        // and this core is its only node.
+                        assert_eq!(self.name, "sqlite-memory");
+                        !self
+                            .lifecycle_backend
+                            .durable()
+                            .live_nodes()
+                            .await
+                            .expect("read the SQLite memory lifecycle node")
+                            .is_empty()
+                    }
+                };
+                if registered {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the lifecycle core's node registers");
         core
     }
     /// Deliver every due artifact cleanup until none is due. A delete arms
