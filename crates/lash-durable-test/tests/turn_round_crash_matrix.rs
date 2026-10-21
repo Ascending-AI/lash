@@ -808,10 +808,15 @@ impl TurnDrive for L4Drive {
     fn stop_cell(&mut self) {}
 
     /// The turn publishes what it held for its commit.
-    async fn committed(&mut self) {
+    async fn committed(
+        &mut self,
+        _cx: &ActorContext,
+        _receipt: &lash_durable::ActorCommit,
+    ) -> Result<(), TurnError> {
         let mut seen = self.services.seen.lock_recover();
         seen.published += 1;
         seen.publication.push(PublicationEvent::Published);
+        Ok(())
     }
 }
 

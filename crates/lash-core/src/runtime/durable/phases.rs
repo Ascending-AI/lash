@@ -52,7 +52,7 @@ use lash_durable::domain::{
 };
 use output_boundary::OutputBoundary;
 
-use super::head::HeadCache;
+use super::head::SessionOwner;
 use super::phase_root::StagedPhase;
 use super::session::{
     CellExit, CodeCell, ComposedCall, OpenTurn, ParkedTurnState, PhaseCheckpoint, PhaseExit,
@@ -275,7 +275,7 @@ pub async fn run_phases(
     cx: &ActorContext,
     services: &dyn TurnServices,
     turn: OpenTurn,
-    heads: &mut HeadCache,
+    heads: &mut SessionOwner,
 ) -> Result<PhaseExit, TurnError> {
     let OpenTurn {
         mut drive,
@@ -371,7 +371,7 @@ async fn phase_loop(
     drive: &mut Box<dyn TurnDrive>,
     mut pending: Option<Effect>,
     row: &TurnRow,
-    heads: &mut HeadCache,
+    heads: &mut SessionOwner,
     held: &mut Option<StagedReceipt>,
 ) -> Result<Left, TurnError> {
     let session = row.session.clone();
@@ -1085,6 +1085,7 @@ async fn phase_loop(
                     let commit = drive
                         .finish(cx, done, heads.head(cx, &session).await?)
                         .await?;
+                    tx.session_postimage(commit.postimage);
                     drive.stage_model_calls(&mut tx)?;
                     if let Some(present) = carry.take() {
                         present.write(&mut tx);
@@ -1153,7 +1154,7 @@ async fn phase_loop(
                         });
                         if more { Release::Ready } else { Release::Idle }
                     });
-                    super::session_publication::commit(
+                    let receipt = super::session_publication::commit(
                         cx,
                         drive.code_executor().as_ref(),
                         &session,
@@ -1169,6 +1170,8 @@ async fn phase_loop(
                         };
                         refusal.map_or(TurnError::Durable(error), TurnError::Runtime)
                     })?;
+                    heads.acknowledged(cx, &session).await?;
+                    drive.committed(cx, &receipt).await?;
                     // The turn's commit carried a held receipt: the call's
                     // sealed record is in it, and nothing reads the receipt
                     // once the turn has ended. A commit that failed leaves it
@@ -1202,9 +1205,7 @@ async fn phase_loop(
                             ),
                         ),
                     );
-                    drive.committed().await;
-                    // The commit moved the head: the next turn loads it again.
-                    heads.evict();
+
                     Ok::<_, TurnError>(if released {
                         PhaseExit::Released
                     } else {
@@ -1272,7 +1273,7 @@ async fn stop(
     row: &TurnRow,
     request: Option<TurnCancelRequest>,
     stopped: turn_cancel::StoppedTurn,
-    heads: &mut HeadCache,
+    heads: &mut SessionOwner,
 ) -> Result<PhaseExit, TurnError> {
     let Some(request) = request else {
         return Ok(PhaseExit::CancelRequested);
@@ -1324,12 +1325,23 @@ pub(super) async fn refuse(
             "the turn was refused; the turn ends with the refusal"
         );
     }
+    let current = match cx.session_projection().await {
+        Ok(Some(projection)) => projection.turn,
+        Ok(None) | Err(_) => {
+            // A refused head commit has already poisoned its whole basis.
+            // Reload coherently before deriving the refusal's terminal.
+            cx.invalidate_session_projection().await;
+            let mut heads = super::head::SessionOwner::default();
+            heads.head(cx, &row.session).await?;
+            cx.session_projection()
+                .await?
+                .and_then(|projection| projection.turn)
+        }
+    };
+    let Some(row) = current.as_ref().filter(|current| current.run == row.run) else {
+        return Ok(());
+    };
     let mut tx = cx.begin().await?;
-    let current = cx.durable_reads()?.turn(&row.session).await?;
-    let row = current
-        .as_ref()
-        .filter(|current| current.run == row.run)
-        .unwrap_or(row);
     let cancelled = tool_round::cancel_open_round(cx, &mut tx, row).await?;
     let cause = crate::store::RunTerminalCause::Refused {
         refusal: refusal.into(),

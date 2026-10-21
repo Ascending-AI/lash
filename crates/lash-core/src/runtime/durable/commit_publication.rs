@@ -84,7 +84,6 @@ impl PublishedHeads {
 /// graph whose active path is its transcript.
 pub(in crate::runtime) struct CommitBase {
     session: SessionId,
-    store: crate::store::SessionStore,
     revision: SessionRevision,
     frame: FrameNodeId,
     graph: crate::SessionGraph,
@@ -95,10 +94,9 @@ impl CommitBase {
     /// The base `runtime`, opened at the session's committed head, stands
     /// on; `None` for a runtime with no store, which commits nothing.
     pub(in crate::runtime) fn of(runtime: &LashRuntime) -> Option<Self> {
-        let store = runtime.services.store.clone()?;
+        runtime.services.store.as_ref()?;
         Some(Self {
             session: runtime.session_id().clone(),
-            store,
             revision: crate::runtime::observation::observation_revision(&runtime.state),
             frame: runtime
                 .state
@@ -110,42 +108,34 @@ impl CommitBase {
         })
     }
 
-    /// Publish the commit past this base to `live`, once the owner's commit
-    /// is acknowledged: the durable head's revision with the entries it added,
-    /// addressed to `turn` when a turn made it. A head still at the base
-    /// committed nothing, and publishes nothing.
-    pub(in crate::runtime) async fn publish(
+    pub(in crate::runtime) async fn publish_retained(
         &self,
         live: &dyn LiveReplayStore,
         published: &PublishedHeads,
         turn: Option<&TurnId>,
+        head: &super::head::SessionHead,
     ) {
-        let loaded = match crate::store::load_session_window_state(
-            &self.store,
-            crate::store::WindowSelector::Current,
-        )
-        .await
-        {
-            Ok(Some(loaded)) => loaded,
-            Ok(None) => return,
-            Err(error) => {
-                tracing::warn!(session_id = %self.session, %error, "a commit's head was not read for its publication");
-                return;
-            }
-        };
-        let revision = crate::runtime::observation::observation_revision(&loaded.state);
+        self.publish_state(live, published, turn, head.state())
+            .await;
+    }
+
+    pub(in crate::runtime) async fn publish_state(
+        &self,
+        live: &dyn LiveReplayStore,
+        published: &PublishedHeads,
+        turn: Option<&TurnId>,
+        state: &crate::RuntimeSessionState,
+    ) {
+        let revision = crate::runtime::observation::observation_revision(state);
         if revision <= self.revision {
             return;
         }
-        let entries = SessionTranscript::added_since(
-            &self.graph,
-            &loaded.state.session_graph,
-            &self.decoders,
-        )
-        .map(SessionTranscript::into_entries)
-        .unwrap_or_default();
+        let entries =
+            SessionTranscript::added_since(&self.graph, &state.session_graph, &self.decoders)
+                .map(SessionTranscript::into_entries)
+                .unwrap_or_default();
         let mut drafts = Vec::with_capacity(2);
-        if let Some(frame_id) = loaded.state.current_frame_node_id.clone()
+        if let Some(frame_id) = state.current_frame_node_id.clone()
             && frame_id != self.frame
         {
             drafts.push(LiveReplayEventDraft::new(
@@ -170,24 +160,13 @@ impl CommitBase {
 /// Announce `session`'s durable head when this node has not published it:
 /// what an owner does before each pass, so a commit whose publication was
 /// lost still reaches the session's subscribers.
-pub(in crate::runtime) async fn announce_head(
-    backend: &lash_execution_contracts::backend::Backend,
+pub(in crate::runtime) async fn announce_retained(
     live: &dyn LiveReplayStore,
     published: &PublishedHeads,
-    session: &SessionId,
+    head: &super::head::SessionHead,
 ) {
-    let factory = backend.session_store_factory();
-    let head = match crate::SessionCommitStore::load_session_head_meta(factory.as_ref(), session)
-        .await
-    {
-        Ok(Some(head)) => head,
-        Ok(None) => return,
-        Err(error) => {
-            tracing::warn!(session_id = %session, %error, "a session's head was not read for its announcement");
-            return;
-        }
-    };
-    let revision = SessionRevision::of_durable_head(&head);
+    let session = &head.state().session_id;
+    let revision = crate::runtime::observation::observation_revision(head.state());
     if published.holds(session, revision) {
         return;
     }

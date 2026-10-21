@@ -203,7 +203,6 @@ pub(super) fn cut_laws(mode: Mode, cut: &Cut, seen: &Seen) -> Vec<String> {
         }
         Mode::CancelWhileStreaming
         | Mode::AfterStepWhileStreaming
-        | Mode::HeadMovesUnderTheTurn
         | Mode::QueuedCancel
         | Mode::CancelAtAdmission
         | Mode::MaterialLost

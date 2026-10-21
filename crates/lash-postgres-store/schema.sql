@@ -1369,7 +1369,7 @@ CREATE OR REPLACE FUNCTION lash_owner_commit(
     p_formats TEXT, p_ack BIGINT, p_release TEXT, p_due BIGINT, p_now BIGINT, p_requires TEXT)
 RETURNS TABLE (o_revision BIGINT, o_now BIGINT, o_fleet INTEGER, o_state TEXT,
     o_installed BIGINT, o_cancel_turn TEXT, o_cancel_request TEXT, o_cancel_origin TEXT,
-    o_cancel_reason TEXT, o_cancel_disposition TEXT, o_cancel_mode TEXT)
+    o_cancel_reason TEXT, o_cancel_disposition TEXT, o_cancel_mode TEXT, o_session_heads JSONB)
 LANGUAGE plpgsql
 AS $lash_owner_commit$
 #variable_conflict use_column
@@ -1400,6 +1400,7 @@ DECLARE
     v_row RECORD;
     v_first JSONB;
     v_slots JSONB := '{}';
+    v_session_heads JSONB := '[]';
     v_when JSONB;
     v_leaves TEXT[] := '{}';
     v_node TEXT;
@@ -1417,9 +1418,9 @@ DECLARE
     v_answer JSONB;
     v_frame TEXT;
 BEGIN
-    -- Generated from this build's statements (registry e9fc4b157d9178ca); a call
+    -- Generated from this build's statements (registry 2d9555648682e2a6); a call
     -- built from others is refused, as is any isolation but read committed.
-    IF p_registry IS DISTINCT FROM 'e9fc4b157d9178ca'
+    IF p_registry IS DISTINCT FROM '2d9555648682e2a6'
         OR current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'lash_owner_commit: registry or isolation refused' USING ERRCODE = 'LX000';
     END IF;
@@ -2680,6 +2681,14 @@ BEGIN
         ELSE
             RAISE EXCEPTION 'lash_owner_commit: no step %', v_step->>'s' USING ERRCODE = 'LX000';
         END CASE;
+        -- The result is assembled from the exact successful receipt write,
+        -- including the transaction's clock, without a post-commit read.
+        IF v_step->>'s' = 'turn_commit.insert_staged' THEN
+            v_session_heads := v_session_heads || jsonb_build_array(jsonb_build_object(
+                'session', v_p->>0,
+                'receipt', (v_p->>3)::JSONB || jsonb_build_object(
+                    'committed_at_ms', v_now, 'head_revision', (v_p->>10)::BIGINT)));
+        END IF;
         IF v_step ? 'c' THEN
             v_slots := v_slots || jsonb_build_object(v_step->>'c', COALESCE(v_first, 'null'::JSONB));
         END IF;
@@ -2813,7 +2822,7 @@ BEGIN
         NULL;
     END CASE;
     INSERT INTO lash_owner_commit_latches (token, created_ms, answer)
-             VALUES ((p_token), (v_clock), (jsonb_build_object('revision', v_rev, 'state', v_state, 'cancel', jsonb_build_array(v_cancel_turn, v_cancel_request, v_cancel_origin, v_cancel_reason, v_cancel_disposition, v_cancel_mode))));
+             VALUES ((p_token), (v_clock), (jsonb_build_object('revision', v_rev, 'state', v_state, 'cancel', jsonb_build_array(v_cancel_turn, v_cancel_request, v_cancel_origin, v_cancel_reason, v_cancel_disposition, v_cancel_mode), 'session_heads', v_session_heads)));
     DELETE FROM lash_owner_commit_latches WHERE token IN (
                  SELECT token FROM lash_owner_commit_latches WHERE created_ms < (v_clock - 900000)
                  ORDER BY created_ms
@@ -2821,7 +2830,8 @@ BEGIN
                  FOR UPDATE SKIP LOCKED
              );
     RETURN QUERY SELECT v_rev, v_now, v_fleet, v_state, v_installed, v_cancel_turn,
-        v_cancel_request, v_cancel_origin, v_cancel_reason, v_cancel_disposition, v_cancel_mode;
+        v_cancel_request, v_cancel_origin, v_cancel_reason, v_cancel_disposition, v_cancel_mode,
+        v_session_heads;
 END
 $lash_owner_commit$;
 CREATE OR REPLACE FUNCTION lash_artifact_end_local(

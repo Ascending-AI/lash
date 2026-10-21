@@ -56,7 +56,7 @@ impl TurnBoundary {
     /// and `outcome`: the session's next revision over the state the turn
     /// started from, with the plugin states and the code executor's state
     /// `session` holds now, and `after_turn`'s records and staged state. It
-    /// writes nothing; the committed head is adopted by reloading it.
+    /// writes nothing; its complete prepared state is adopted with the exact receipt.
     ///
     /// # Errors
     ///

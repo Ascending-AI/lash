@@ -403,5 +403,9 @@ pub trait TurnDrive: Send {
     /// (ADR 0122, FIG-5800). A drive whose commit was refused, or whose
     /// acknowledgement was lost, is dropped without it and publishes none of
     /// what it held.
-    async fn committed(&mut self);
+    async fn committed(
+        &mut self,
+        cx: &ActorContext,
+        receipt: &lash_durable::ActorCommit,
+    ) -> Result<(), TurnError>;
 }

@@ -633,6 +633,9 @@ impl SessionHistoryStore for PostgresStore {
         session_id: &SessionId,
         selector: WindowSelector,
     ) -> Result<Option<SessionWindowRead>, StoreError> {
+        lash_core_ids::operational_metrics::sql::owner_state_read(
+            lash_core_ids::operational_metrics::sql::OwnerStateRead::Head,
+        );
         let windows = self.windows.read();
         let mut tx = read_tx(self).await?;
         let read = window_conn(

@@ -641,17 +641,42 @@ async fn named_members(
     if !members.iter().any(|member| member.trace().is_some()) {
         return Vec::new();
     }
-    let surface = match cx.durable_reads() {
-        Ok(reads) => {
-            match super::phase_root::read_plugin_phase(reads, &row.session, &row.run).await {
-                Ok(phase) => phase.and_then(|phase| phase.surface),
-                Err(error) => {
-                    tracing::warn!(%error, "terminal tool trace names could not be read");
-                    None
+    let projection = cx.session_projection().await.ok().flatten();
+    let current = projection.as_ref().is_some_and(|projection| {
+        projection.turn.as_ref().is_some_and(|turn| {
+            turn.run == row.run && turn.phase.checkpoint() == row.phase.checkpoint()
+        })
+    });
+    let retained = projection
+        .as_ref()
+        .filter(|_| current)
+        .and_then(|projection| projection.phase_surface.clone())
+        .filter(|(root, _)| Some(*root) == row.phase.checkpoint());
+    let read_class = match (&projection, current) {
+        (Some(_), true) => lash_core_ids::operational_metrics::sql::OwnerReadClass::Warm,
+        (Some(_), false) => lash_core_ids::operational_metrics::sql::OwnerReadClass::Historical,
+        (None, _) => lash_core_ids::operational_metrics::sql::OwnerReadClass::Recovery,
+    };
+    let surface = match retained {
+        Some((_, surface)) => surface,
+        None => lash_core_ids::operational_metrics::sql::classify_owner_reads(read_class, async {
+            match cx.durable_reads() {
+                Ok(reads) => {
+                    match super::phase_root::read_plugin_phase(reads, &row.session, &row.run).await
+                    {
+                        Ok(phase) => phase
+                            .and_then(|phase| phase.surface)
+                            .map(std::sync::Arc::new),
+                        Err(error) => {
+                            tracing::warn!(%error, "terminal tool trace names could not be read");
+                            None
+                        }
+                    }
                 }
+                Err(_) => None,
             }
-        }
-        Err(_) => None,
+        })
+        .await,
     };
     members
         .into_iter()

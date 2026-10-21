@@ -352,7 +352,8 @@ pub(crate) fn function_ddl() -> String {
             "v_clock",
             "jsonb_build_object('revision', v_rev, 'state', v_state, 'cancel', \
              jsonb_build_array(v_cancel_turn, v_cancel_request, v_cancel_origin, \
-             v_cancel_reason, v_cancel_disposition, v_cancel_mode))",
+             v_cancel_reason, v_cancel_disposition, v_cancel_mode), \
+             'session_heads', v_session_heads)",
         ],
     );
     let latch_sweep = inline(
@@ -361,6 +362,7 @@ pub(crate) fn function_ddl() -> String {
     );
     let branches: String = entries().iter().map(|entry| branch(entry)).collect();
     let registry = &*REGISTRY;
+    let receipt_statement = super::head_commit::RECORD_RECEIPT.name();
     let fleet_fence = perform(connection_sql().lock_xact_fleet_fence_shared.sql());
     format!(
         "CREATE OR REPLACE FUNCTION {FUNCTION}(
@@ -373,7 +375,7 @@ pub(crate) fn function_ddl() -> String {
     p_formats TEXT, p_ack BIGINT, p_release TEXT, p_due BIGINT, p_now BIGINT, p_requires TEXT)
 RETURNS TABLE (o_revision BIGINT, o_now BIGINT, o_fleet INTEGER, o_state TEXT,
     o_installed BIGINT, o_cancel_turn TEXT, o_cancel_request TEXT, o_cancel_origin TEXT,
-    o_cancel_reason TEXT, o_cancel_disposition TEXT, o_cancel_mode TEXT)
+    o_cancel_reason TEXT, o_cancel_disposition TEXT, o_cancel_mode TEXT, o_session_heads JSONB)
 LANGUAGE plpgsql
 AS $lash_owner_commit$
 #variable_conflict use_column
@@ -404,6 +406,7 @@ DECLARE
     v_row RECORD;
     v_first JSONB;
     v_slots JSONB := '{{}}';
+    v_session_heads JSONB := '[]';
     v_when JSONB;
     v_leaves TEXT[] := '{{}}';
     v_node TEXT;
@@ -505,6 +508,14 @@ BEGIN
 {branches}        ELSE
             RAISE EXCEPTION 'lash_owner_commit: no step %', v_step->>'s' USING ERRCODE = 'LX000';
         END CASE;
+        -- The result is assembled from the exact successful receipt write,
+        -- including the transaction's clock, without a post-commit read.
+        IF v_step->>'s' = '{receipt_statement}' THEN
+            v_session_heads := v_session_heads || jsonb_build_array(jsonb_build_object(
+                'session', v_p->>0,
+                'receipt', (v_p->>3)::JSONB || jsonb_build_object(
+                    'committed_at_ms', v_now, 'head_revision', (v_p->>10)::BIGINT)));
+        END IF;
         IF v_step ? 'c' THEN
             v_slots := v_slots || jsonb_build_object(v_step->>'c', COALESCE(v_first, 'null'::JSONB));
         END IF;
@@ -587,7 +598,8 @@ BEGIN
     {latch_record};
     {latch_sweep};
     RETURN QUERY SELECT v_rev, v_now, v_fleet, v_state, v_installed, v_cancel_turn,
-        v_cancel_request, v_cancel_origin, v_cancel_reason, v_cancel_disposition, v_cancel_mode;
+        v_cancel_request, v_cancel_origin, v_cancel_reason, v_cancel_disposition, v_cancel_mode,
+        v_session_heads;
 END
 $lash_owner_commit$;
 "

@@ -55,6 +55,7 @@ pub(super) enum SurfaceMethod {
     ActorRequirements,
     /// Test authority refuses an absent actor without changing durable state.
     AcquireIdleForTesting,
+    BeginRetained,
     ListPendingTurnInputs,
     /// [`IngressStore::pending_turn_input`]: the keyed point read of the
     /// case's next-turn input (`known`), or of an id no case enqueues
@@ -206,6 +207,7 @@ impl SurfaceMethod {
             Self::PrepareModelCalls => "surface:prepare_model_calls",
             Self::ModelCalls => "surface:model_calls",
             Self::ModelCallPins => "surface:model_call_pins",
+            Self::BeginRetained => "surface:begin_retained",
             Self::ClaimFacts => "surface:claim_facts",
             Self::Readiness => "surface:readiness",
             Self::ActorRequirements => "surface:actor_requirements",
@@ -457,6 +459,7 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             )),
             surface(SurfaceMethod::ModelCalls),
             surface(SurfaceMethod::ModelCallPins),
+            surface(SurfaceMethod::BeginRetained),
             surface(SurfaceMethod::ClaimFacts),
             surface(SurfaceMethod::Readiness),
             surface(SurfaceMethod::ActorRequirements),
@@ -720,6 +723,25 @@ impl BackendRunner {
                     ))
                 ));
                 "unknown_actor".to_owned()
+            }
+            SurfaceMethod::BeginRetained => {
+                let actor = lash_core::durable_port::ActorKey::session("surface-test-absent")
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                let result = self
+                    .lifecycle_backend
+                    .durable()
+                    .begin_retained(
+                        &actor,
+                        lash_core::durable_port::Epoch(0),
+                        lash_core::durable_port::StateRevision(0),
+                        0,
+                    )
+                    .await;
+                assert!(matches!(
+                    result,
+                    Err(lash_core::durable_port::DurableError::OwnershipLost(_))
+                ));
+                "ownership_lost".to_owned()
             }
             SurfaceMethod::ClaimFacts => {
                 let actor = lash_core::durable_port::ActorKey::session(session_id.as_str())

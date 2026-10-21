@@ -37,9 +37,10 @@ pub struct TripwireCounts {
 }
 
 /// A counting [`DurableProbe`].
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct Tripwire {
     counts: Mutex<TripwireCounts>,
+    owner_script: Mutex<Option<std::sync::Arc<crate::script::Shared>>>,
 }
 
 fn bump<K: Ord>(map: &mut BTreeMap<K, usize>, key: K) {
@@ -47,6 +48,11 @@ fn bump<K: Ord>(map: &mut BTreeMap<K, usize>, key: K) {
 }
 
 impl Tripwire {
+    /// Route owner cuts to the same script as the database faults.
+    pub fn observe_owner_cuts(&self, script: &crate::Script) {
+        *self.owner_script.lock_recover() = Some(std::sync::Arc::clone(&script.shared));
+    }
+
     /// A tripwire with nothing counted.
     #[must_use]
     pub fn new() -> Self {
@@ -131,6 +137,10 @@ impl DurableProbe for Tripwire {
             &mut self.counts.lock_recover().owner_cuts,
             (actor.clone(), epoch, label, cut),
         );
+        let script = self.owner_script.lock_recover().clone();
+        if let Some(script) = script {
+            script.owner_cut(actor, epoch, label, cut)?;
+        }
         Ok(())
     }
 
@@ -158,5 +168,13 @@ impl DurableProbe for Tripwire {
             &mut self.counts.lock_recover().restores,
             (session.clone(), run.clone()),
         );
+    }
+}
+
+impl std::fmt::Debug for Tripwire {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Tripwire")
+            .field("counts", &self.counts())
+            .finish_non_exhaustive()
     }
 }

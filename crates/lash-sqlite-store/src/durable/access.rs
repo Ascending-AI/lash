@@ -159,6 +159,17 @@ lash_store_sql::statements! {
              WHERE r.session_id = ?1 AND r.admission_json IS NOT NULL
                AND r.terminal_kind IS NULL";
 
+        /// Only the unfinished turn's root identities and fresh cancellation.
+        /// The owner commit never decodes its own admission or phase JSON.
+        turn_frontier = "SELECT r.run, p.checkpoint_ref, p.answer_ref,
+                    c.request_id, c.origin, c.reason, c.disposition, c.mode
+             FROM session_runs AS r
+             JOIN turn_phases AS p ON p.session_id = r.session_id AND p.run = r.run
+             LEFT JOIN turn_cancel_requests AS c
+                 ON c.session_id = r.session_id AND c.turn_id = r.run
+             WHERE r.session_id = ?1 AND r.admission_json IS NOT NULL
+               AND r.terminal_kind IS NULL";
+
         /// Actor `?1`'s epoch, state, revision and mail marks with each mail
         /// past its acknowledgement, in order (one row with NULL mail columns
         /// when none); and, when `?2` names its session, on every row that
@@ -166,6 +177,24 @@ lash_store_sql::statements! {
         /// column order, and the cancel request the turn accepted, in the
         /// cancel read's (FIG-6399). One statement, so one snapshot answers
         /// the open; the turn is looked up once.
+        /// External-frontier-only refresh, with body bytes bounded before transfer.
+        open_retained = "WITH page AS MATERIALIZED (
+                SELECT m.seq, length(CAST(m.body AS BLOB)) AS bytes,
+                    sum(length(CAST(m.body AS BLOB))) OVER (ORDER BY m.seq) AS total
+                FROM actor_mail m JOIN actors a ON a.actor_key = m.actor_key
+                WHERE a.actor_key = ?1 AND m.seq > a.acked_seq)
+             SELECT a.epoch, a.state, a.state_revision, a.acked_seq, a.mail_seq,
+                    p.seq, p.bytes, p.total, m.kind, m.body, m.appended_at_ms,
+                    c.turn_id, c.request_id, c.origin, c.reason, c.disposition, c.mode
+             FROM actors a
+             LEFT JOIN page p ON p.total - p.bytes <= ?3
+             LEFT JOIN actor_mail m ON m.actor_key = a.actor_key AND m.seq = p.seq
+                 AND p.total <= ?3 AND ?3 > 0
+             LEFT JOIN session_runs r ON r.session_id = ?2
+                 AND r.admission_json IS NOT NULL AND r.terminal_kind IS NULL
+             LEFT JOIN turn_cancel_requests c ON c.session_id = r.session_id AND c.turn_id = r.run
+             WHERE a.actor_key = ?1 ORDER BY p.seq";
+
         open = "WITH t AS MATERIALIZED (
                  SELECT r.run, r.admission_json, p.phase, p.phase_arg, p.iteration,
                         p.checkpoint_ref, p.model_request_ref, p.model_deadline_ms,

@@ -248,9 +248,38 @@ pub struct Reaped {
     pub epoch: Epoch,
 }
 
+/// A session head actually committed by an owner transaction.
+#[derive(Clone, Debug)]
+pub struct CommittedSessionHead {
+    /// The target session, in domain-write order.
+    pub session: lash_protocol_types::SessionId,
+    /// The complete result constructed inside the transaction.
+    pub receipt: lash_core_store::store::RuntimeCommitReceipt,
+}
+
+impl PartialEq for CommittedSessionHead {
+    fn eq(&self, other: &Self) -> bool {
+        // Receipt equality includes every encoded fact and the transient
+        // replay decision, which deliberately is not part of persistence.
+        self.session == other.session
+            && self.receipt.receipt_replayed == other.receipt.receipt_replayed
+            && match (
+                serde_json::to_value(&self.receipt),
+                serde_json::to_value(&other.receipt),
+            ) {
+                (Ok(left), Ok(right)) => left == right,
+                _ => false,
+            }
+    }
+}
+impl Eq for CommittedSessionHead {}
+
 /// An owner commit's receipt.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActorCommit {
+    /// One exact result per successful session-head write, in write order.
+    /// No result is published before the enclosing transaction commits.
+    pub session_heads: Vec<CommittedSessionHead>,
     /// Root leases acquired atomically with this commit, in request order.
     /// Their expiry remains owned by retirement if acknowledgement is lost.
     pub root_leases: Vec<crate::domain::pages::RootLease>,
@@ -524,6 +553,17 @@ pub trait DurableStore: DurableReads {
     /// Refused with [`DurableError::OwnershipLost`] when `epoch` is not
     /// current.
     async fn begin(&self, actor: &ActorKey, epoch: Epoch) -> Result<ActorTx, DurableError>;
+
+    /// Refresh only external control and a byte-bounded mailbox page for a
+    /// retained owner. An unchanged basis never reloads a head or phase.
+    /// Every adapter must implement this boundary explicitly.
+    async fn begin_retained(
+        &self,
+        actor: &ActorKey,
+        epoch: Epoch,
+        expected: StateRevision,
+        max_mail_bytes: u64,
+    ) -> Result<ActorTx, DurableError>;
 
     /// [`begin`](Self::begin) over process actor `actor`, with the
     /// [`ProcessView`] its owner decides a pass from, read in the same

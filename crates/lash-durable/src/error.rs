@@ -70,6 +70,13 @@ pub enum DurableError {
         /// The store's configured served-node count.
         served_nodes: u32,
     },
+    /// One necessary owner allocation cannot fit the host's explicit cap.
+    #[error("owner {actor} needs {requested} bytes, exceeding its {capacity}-byte capacity")]
+    OwnerCapacityExceeded {
+        actor: ActorKey,
+        requested: u64,
+        capacity: u64,
+    },
     /// A mailbox transaction broke a mailbox rule.
     #[error(transparent)]
     MailRefused(MailRefusal),

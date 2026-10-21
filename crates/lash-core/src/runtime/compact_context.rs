@@ -341,16 +341,19 @@ impl LashRuntime {
                 tx,
                 self.code_executor().as_ref(),
                 commit,
+                self.state.clone(),
                 lash_durable::CommitLabel::SESSION_COMMAND,
                 self.host.core.tracing.metrics(),
             )
             .await;
             // Resident state gives way to the durable head, which a landed
             // commit moved; nothing of a commit that did not land is durable.
-            self.invalidate_resident_session_state();
+            if committed.is_err() {
+                self.invalidate_resident_session_state();
+            }
             let error = match committed {
-                Ok(()) => {
-                    self.reload_invalidated_resident_session_state().await?;
+                Ok(_) => {
+                    self.adopt_owner_state(owner).await?;
                     if switch.is_some() {
                         // Every accepted open restarts the live interpreter
                         // from the new frame's seed, on the shift's own

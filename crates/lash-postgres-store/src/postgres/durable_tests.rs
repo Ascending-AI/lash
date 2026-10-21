@@ -848,3 +848,43 @@ async fn lo_idle_writer_close_and_redrive_when_configured() {
         revision
     );
 }
+
+async fn lo_postimage_receipt_path(explicit: bool) {
+    let url = crate::testing::required_database_url();
+    let database = IsolatedDatabase::create(&url).await;
+    let storage = crate::testing::connect(database.url()).await.unwrap();
+    let durable = storage.durable_store();
+    let (answer, evidence) = Box::pin(lash_core_ids::operational_metrics::sql::collect(
+        "lo-postimage",
+        "postgres",
+        laws::lo_postimage_receipt_matches_reopen(
+            &durable,
+            &storage.session_store_factory(),
+            explicit,
+        ),
+    ))
+    .await;
+    answer.unwrap();
+    let calls: u64 = evidence
+        .shapes
+        .iter()
+        .filter(|(shape, _)| shape.contains("lash_owner_commit("))
+        .map(|(_, shape)| shape.statements)
+        .sum();
+    assert!(
+        explicit || calls > 0,
+        "function twin never called the generated function: {evidence:?}"
+    );
+    eprintln!("LO-POSTIMAGE explicit={explicit} function_calls={calls} {evidence:?}");
+}
+
+#[tokio::test]
+#[ignore = "requires a private PostgreSQL service"]
+async fn lo_postimage_explicit_when_configured() {
+    Box::pin(lo_postimage_receipt_path(true)).await;
+}
+#[tokio::test]
+#[ignore = "requires a private PostgreSQL service"]
+async fn lo_postimage_function_when_configured() {
+    Box::pin(lo_postimage_receipt_path(false)).await;
+}

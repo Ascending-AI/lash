@@ -497,6 +497,18 @@ impl DurableStore for CountingStore {
         self.inner.begin(actor, epoch).await
     }
 
+    async fn begin_retained(
+        &self,
+        actor: &ActorKey,
+        epoch: crate::Epoch,
+        expected: crate::StateRevision,
+        max_mail_bytes: u64,
+    ) -> Result<ActorTx, DurableError> {
+        self.inner
+            .begin_retained(actor, epoch, expected, max_mail_bytes)
+            .await
+    }
+
     async fn open_process(
         &self,
         actor: &ActorKey,

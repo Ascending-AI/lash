@@ -78,8 +78,9 @@ pub use packages::{
 };
 pub use port::{
     ActorCommit, ActorSnapshot, ActorState, ClaimActorFacts, ClaimCause, ClaimFacts,
-    ClaimNodeFacts, ClaimPurpose, Claimed, DurableStore, HeartbeatOutcome, MailCommit, NodeLease,
-    NodeSpec, Owner, Readiness, Reaped, Woken, encode_requires, parse_requires,
+    ClaimNodeFacts, ClaimPurpose, Claimed, CommittedSessionHead, DurableStore, HeartbeatOutcome,
+    MailCommit, NodeLease, NodeSpec, Owner, Readiness, Reaped, Woken, encode_requires,
+    parse_requires,
 };
 pub use probe::{DurableProbe, NoProbe, OwnerCut, OwnerRead};
 pub use tx::{ActorTx, Mail, MailTx, MailWrite, OpenedActor, Release};

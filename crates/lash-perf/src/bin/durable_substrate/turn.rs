@@ -677,7 +677,13 @@ impl TurnDrive for BenchDrive {
     fn stop_cell(&mut self) {}
 
     /// Nothing is held for the commit.
-    async fn committed(&mut self) {}
+    async fn committed(
+        &mut self,
+        _cx: &ActorContext,
+        _receipt: &lash_durable::ActorCommit,
+    ) -> Result<(), TurnError> {
+        Ok(())
+    }
 }
 
 fn output_material(session: &SessionId, run: &TurnId, text: String) -> Material {

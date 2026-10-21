@@ -232,6 +232,22 @@ impl SessionRuntimes for CoreRuntimes {
         }
     }
 
+    async fn open_retained(
+        &self,
+        cx: &lash_core::ActorContext,
+        head: &lash_core::runtime::durable::head::SessionHead,
+    ) -> Result<LashRuntime, TurnError> {
+        self.0
+            .session(head.state().session_id.clone())
+            .open_retained_runtime(head.state().clone(), cx)
+            .await
+            .map_err(|error| match error {
+                crate::EmbedError::Runtime(error) => TurnError::Runtime(error),
+                crate::EmbedError::Store(error) => TurnError::Runtime(error.runtime_error()),
+                error => TurnError::Exec(error.to_string()),
+            })
+    }
+
     fn live_replay(&self) -> Arc<dyn LiveReplayStore> {
         Arc::clone(&self.0.live_replay_store)
     }

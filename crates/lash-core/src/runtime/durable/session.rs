@@ -44,7 +44,7 @@ use lash_sansio::SavedTurn;
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument as _;
 
-use super::head::{HeadCache, SessionHead};
+use super::head::{SessionHead, SessionOwner};
 use super::{phases, turn_cancel, turn_trace};
 use crate::ActorContext;
 use crate::AdmittedScope;
@@ -314,8 +314,10 @@ pub fn cancelled_cause(
 
 /// What `turn.commit` writes for a finished turn: the session head's next
 /// revision. Its terminal is the finished machine's ([`TurnDone`]).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct TurnCommit {
+    /// Complete prepared postimage, adopted only with its store receipt.
+    pub postimage: crate::RuntimeSessionState,
     /// The head revision the commit replaces.
     pub expected_head: u64,
     /// The session head's commit, encoded by
@@ -330,6 +332,8 @@ pub struct SessionActivation {
     backend: Backend,
     services: Arc<dyn TurnServices>,
     probe: Arc<dyn DurableProbe>,
+    #[cfg(any(test, feature = "testing"))]
+    cold_after_ack: bool,
 }
 
 impl std::fmt::Debug for SessionActivation {
@@ -351,7 +355,18 @@ impl SessionActivation {
             backend,
             services,
             probe,
+            #[cfg(any(test, feature = "testing"))]
+            cold_after_ack: false,
         }
+    }
+
+    /// Run the production reducer against a cold reference after every
+    /// acknowledgement, without changing its durable transition trace.
+    #[cfg(any(test, feature = "testing"))]
+    #[must_use]
+    pub fn cold_after_acknowledgement(mut self) -> Self {
+        self.cold_after_ack = true;
+        self
     }
 
     /// The backend it runs over.
@@ -370,7 +385,7 @@ impl SessionActivation {
         cx: &ActorContext,
         session: &SessionId,
         release: bool,
-        heads: &mut HeadCache,
+        heads: &mut SessionOwner,
         carry_checked: &mut bool,
     ) -> Result<Pass, TurnError> {
         // A turn's scope whose cascade a crash cut short is marked to its end
@@ -380,7 +395,14 @@ impl SessionActivation {
             Closing::Ran(pass) => return Ok(pass),
             Closing::Not(tx) => *tx,
         };
-        let open = cx.durable_reads()?.turn(session).await?;
+        heads.head(cx, session).await?;
+        let mut open = cx
+            .session_projection()
+            .await?
+            .and_then(|projection| projection.turn);
+        if let Some(row) = &mut open {
+            row.cancel = tx.turn_cancel().cloned();
+        }
         let Some(row) = open else {
             // No unfinished turn: the mailbox says what runs next (L3s).
             let drain = drain_session_mail(cx, &mut tx, self.services.input_batching()).await?;
@@ -394,7 +416,7 @@ impl SessionActivation {
                     let carried = self.services.carry_session(cx, session).await;
                     *carry_checked = carried.is_ok();
                     carried?;
-                    heads.evict();
+                    heads.acknowledged(cx, session).await?;
                     return Ok(Pass::Again);
                 }
             }
@@ -435,9 +457,7 @@ impl SessionActivation {
                 Some(admitted) => {
                     drop(tx);
                     self.services.apply_commands(cx, &admitted).await?;
-                    // A command's commit may move the head outside
-                    // `turn.commit`: the next turn loads it again.
-                    heads.evict();
+                    heads.acknowledged(cx, session).await?;
                     Ok(Pass::Again)
                 }
                 None if release => {
@@ -601,126 +621,164 @@ impl Activation for SessionActivation {
             CancellationToken::new(),
             Arc::clone(&self.probe),
         );
-        // A session whose claims ended the activation-loop budget's claims
-        // in a row with nothing committed (a panic, a read given up, a stop
-        // that failed) parks, or ends a pending stop first (FIG-6096,
-        // FIG-6099). A session whose claim requirements this node does not
-        // serve was claimed for its close or an `Immediate` cancel alone
-        // (FIG-6072).
-        let cancel_only = owned.purpose() == lash_durable::ClaimPurpose::CancelOnly;
-        match park::at_claim(&owned, &cx, &session, self.services.tracing()).await {
-            Ok(park::Budget::Within) if !cancel_only => {}
-            Ok(_) => {
-                return turn_cancel::end_unserved(&owned, &cx, self.services.as_ref(), &session)
-                    .await;
-            }
-            Err(exit) => return exit,
+        let _claim = cx.session_claim_guard();
+        #[cfg(any(test, feature = "testing"))]
+        if self.cold_after_ack {
+            cx.cold_after_acknowledgement();
         }
-        witness_claim(owned.claimed_on());
-        // An owner with nothing to do keeps the actor hot for `idle_evict`,
-        // reading its mailbox at every hint or idle poll, then releases it;
-        // it releases at once when a claim takes its slot (FIG-6890).
-        let idle_evict = self.backend.config().settings().idle_evict;
-        // What ended the owner's last wait, until the pass after it.
-        let mut woke = None;
-        let mut idle_since = None;
-        // The owner cache of the session's head, for this claim's epoch.
-        let mut heads = HeadCache::default();
-        // Whether this claim asked if its idle session is to be carried to
-        // this build's formats (FIG-5787).
-        let mut carry_checked = false;
-        // The passes in a row that failed with an error that does not pass
-        // by itself: at the activation-loop budget the session parks
-        // (FIG-5230), so a poison session holds no slot.
-        let budget = self.backend.config().settings().activation_loop_budget;
-        let mut failed_passes = 0_u32;
-        let mut retried_conflict = false;
-        let mut acknowledged = cx.acknowledged_commits();
-        loop {
-            let release = woke == Some(lash_durable::runner::Wake::Yield)
-                || idle_since.is_some_and(|since: std::time::Instant| {
-                    owned.clock().now().saturating_duration_since(since) >= idle_evict
-                });
-            // A draining node starts no pass: every commit before this one
-            // is a committed phase the next build resumes from.
-            let pass = if owned.draining() {
-                drain_release(&cx).await
-            } else {
-                self.services.announce_head(&cx, &session).await;
-                Box::pin(self.pass(&cx, &session, release, &mut heads, &mut carry_checked)).await
-            };
-            witness_pass(woke.take(), &pass);
-            if pass.is_ok() && !retried_conflict {
-                failed_passes = 0;
-            }
-            let progress = cx.acknowledged_commits();
-            if progress != acknowledged {
-                acknowledged = progress;
-                retried_conflict = false;
-                failed_passes = 0;
-            }
-            match pass {
-                Ok(Pass::Again) => idle_since = None,
-                Ok(Pass::Idle) => {
-                    // Keep the actor hot, but not its decoded head: idle
-                    // sessions with no readers reload on their next mail.
-                    heads.evict();
-                    let since = *idle_since.get_or_insert_with(|| owned.clock().now());
-                    woke = Some(owned.wait_idle(since).await);
+        let observed_cx = cx.clone();
+        Box::pin(lash_core_ids::operational_metrics::sql::observe_owner_reads(
+            Arc::new(move |source, class| {
+                use lash_core_ids::operational_metrics::sql::{OwnerReadClass, OwnerStateRead};
+                let event = match class {
+                    OwnerReadClass::Recovery => lash_durable::OwnerRead::RecoveryLoads,
+                    OwnerReadClass::Historical => lash_durable::OwnerRead::HistoricalPinReads,
+                    OwnerReadClass::Warm => match source {
+                        OwnerStateRead::Head => lash_durable::OwnerRead::OwnHeadReload,
+                        OwnerStateRead::Phase => lash_durable::OwnerRead::OwnCommittedPhaseReload,
+                    },
+                };
+                observed_cx
+                    .probe()
+                    .owner_read(observed_cx.actor(), observed_cx.epoch(), event, 1);
+            }),
+            async {
+                // A session whose claims ended the activation-loop budget's claims
+                // in a row with nothing committed (a panic, a read given up, a stop
+                // that failed) parks, or ends a pending stop first (FIG-6096,
+                // FIG-6099). A session whose claim requirements this node does not
+                // serve was claimed for its close or an `Immediate` cancel alone
+                // (FIG-6072).
+                let cancel_only = owned.purpose() == lash_durable::ClaimPurpose::CancelOnly;
+                match park::at_claim(&owned, &cx, &session, self.services.tracing()).await {
+                    Ok(park::Budget::Within) if !cancel_only => {}
+                    Ok(_) => {
+                        return turn_cancel::end_unserved(
+                            &owned,
+                            &cx,
+                            self.services.as_ref(),
+                            &session,
+                        )
+                        .await;
+                    }
+                    Err(exit) => return exit,
                 }
-                Ok(Pass::Released | Pass::Lost) => return Exit::Released,
-                Err(error) if matches!(owner_refusal(&error), Some(OwnerRefusal::Lost)) => {
-                    return Exit::Released;
-                }
-                // Anything else did not commit, or committed with its answer
-                // lost: the next pass reloads the rows, the head among them,
-                // and carries on from them. A lost epoch shows at its fenced
-                // read.
-                Err(error) => {
-                    heads.evict();
-                    if matches!(owner_refusal(&error), Some(OwnerRefusal::Revision)) {
-                        cx.discard_conflicted_attempt().await;
-                        if !retried_conflict {
-                            retried_conflict = true;
-                            idle_since = None;
-                            continue;
+                witness_claim(owned.claimed_on());
+                // An owner with nothing to do keeps the actor hot for `idle_evict`,
+                // reading its mailbox at every hint or idle poll, then releases it;
+                // it releases at once when a claim takes its slot (FIG-6890).
+                let idle_evict = self.backend.config().settings().idle_evict;
+                // What ended the owner's last wait, until the pass after it.
+                let mut woke = None;
+                let mut idle_since = None;
+                // The owner cache of the session's head, for this claim's epoch.
+                let mut heads = SessionOwner::default();
+                // Whether this claim asked if its idle session is to be carried to
+                // this build's formats (FIG-5787).
+                let mut carry_checked = false;
+                // The passes in a row that failed with an error that does not pass
+                // by itself: at the activation-loop budget the session parks
+                // (FIG-5230), so a poison session holds no slot.
+                let budget = self.backend.config().settings().activation_loop_budget;
+                let mut failed_passes = 0_u32;
+                let mut retried_conflict = false;
+                let mut acknowledged = cx.acknowledged_commits();
+                loop {
+                    let release = woke == Some(lash_durable::runner::Wake::Yield)
+                        || idle_since.is_some_and(|since: std::time::Instant| {
+                            owned.clock().now().saturating_duration_since(since) >= idle_evict
+                        });
+                    // A draining node starts no pass: every commit before this one
+                    // is a committed phase the next build resumes from.
+                    let pass = if owned.draining() {
+                        drain_release(&cx).await
+                    } else {
+                        self.services.announce_head(&cx, &session).await;
+                        {
+                            Box::pin(self.pass(
+                                &cx,
+                                &session,
+                                release,
+                                &mut heads,
+                                &mut carry_checked,
+                            ))
+                            .await
                         }
-                    }
-                    if !passes_by_itself(&error) {
-                        failed_passes = failed_passes.saturating_add(1);
-                    }
-                    // A parked state this build does not decode fails every
-                    // pass of this build the same way: the session parks at
-                    // once with the typed refusal, its turn open (FIG-5592).
-                    let reason = match resume_refusal(&error) {
-                        Some(reason) => Some(reason),
-                        None => (failed_passes >= budget).then(|| SessionParkReason::PassLoop {
-                            failed_passes,
-                            error: SessionPassFailure::of(&error),
-                        }),
                     };
-                    if let Some(reason) = reason {
-                        match park(&cx, &session, &reason, self.services.tracing()).await {
-                            Ok(park::Parking::Committed) | Err(DurableError::OwnershipLost(_)) => {
-                                return Exit::Released;
+                    witness_pass(woke.take(), &pass);
+                    if pass.is_ok() && !retried_conflict {
+                        failed_passes = 0;
+                    }
+                    let progress = cx.acknowledged_commits();
+                    if progress != acknowledged {
+                        acknowledged = progress;
+                        retried_conflict = false;
+                        failed_passes = 0;
+                    }
+                    match pass {
+                        Ok(Pass::Again) => idle_since = None,
+                        Ok(Pass::Idle) => {
+                            let since = *idle_since.get_or_insert_with(|| owned.clock().now());
+                            woke = Some(owned.wait_idle(since).await);
+                        }
+                        Ok(Pass::Released | Pass::Lost) => return Exit::Released,
+                        Err(error) if matches!(owner_refusal(&error), Some(OwnerRefusal::Lost)) => return Exit::Released,
+                        // Anything else did not commit, or committed with its answer
+                        // lost: the next pass reloads the rows, the head among them,
+                        // and carries on from them. A lost epoch shows at its fenced
+                        // read.
+                        Err(error) => {
+                            cx.invalidate_session_projection().await;
+                            heads.evict();
+                            if matches!(owner_refusal(&error), Some(OwnerRefusal::Revision)) {
+                                cx.discard_conflicted_attempt().await;
+                                if !retried_conflict {
+                                    retried_conflict = true;
+                                    idle_since = None;
+                                    continue;
+                                }
                             }
-                            // A stop is pending, and may be what failed: it
-                            // is never parked over. The next claim runs it
-                            // first and counts this one (FIG-6099).
-                            Ok(park::Parking::Stopping) => return Exit::Abandoned,
-                            Err(park_error) => tracing::warn!(
-                                session_id = %session,
-                                %error,
-                                %park_error,
-                                "the session's park failed; retrying"
-                            ),
+                            if !passes_by_itself(&error) {
+                                failed_passes = failed_passes.saturating_add(1);
+                            }
+                            // A parked state this build does not decode fails every
+                            // pass of this build the same way: the session parks at
+                            // once with the typed refusal, its turn open (FIG-5592).
+                            let reason = match resume_refusal(&error) {
+                                Some(reason) => Some(reason),
+                                None => {
+                                    (failed_passes >= budget).then(|| SessionParkReason::PassLoop {
+                                        failed_passes,
+                                        error: SessionPassFailure::of(&error),
+                                    })
+                                }
+                            };
+                            if let Some(reason) = reason {
+                                match park(&cx, &session, &reason, self.services.tracing()).await {
+                                    Ok(park::Parking::Committed)
+                                    | Err(DurableError::OwnershipLost(_)) => {
+                                        return Exit::Released;
+                                    }
+                                    // A stop is pending, and may be what failed: it
+                                    // is never parked over. The next claim runs it
+                                    // first and counts this one (FIG-6099).
+                                    Ok(park::Parking::Stopping) => return Exit::Abandoned,
+                                    Err(park_error) => tracing::warn!(
+                                        session_id = %session,
+                                        %error,
+                                        %park_error,
+                                        "the session's park failed; retrying"
+                                    ),
+                                }
+                            }
+                            tracing::debug!(%error, "session activation pass failed; reloading");
+                            woke = Some(owned.wait_for_mail().await);
                         }
                     }
-                    tracing::debug!(%error, "session activation pass failed; reloading");
-                    woke = Some(owned.wait_for_mail().await);
                 }
-            }
-        }
+            },
+        ))
+        .await
     }
     /// What the backend's node's package code offers running code
     /// (FIG-6993), once installed.
@@ -759,6 +817,11 @@ fn witness_pass(woke: Option<lash_durable::runner::Wake>, pass: &Result<Pass, Tu
     let _ = (woke, pass);
 }
 
+/// Whether `error` may pass by itself, so the next pass can succeed with
+/// nothing changed: contention, an unreachable store, a lost
+/// acknowledgement, or an admission whose mail a producer withdrew since the
+/// drain read it (FIG-5262), which the next drain no longer finds. Such a
+/// failure does not count toward the session's park.
 /// The owner fence cause stays typed through phase-specific wrappers.
 fn owner_refusal(error: &TurnError) -> Option<OwnerRefusal> {
     fn durable(error: &DurableError) -> Option<OwnerRefusal> {
@@ -1211,7 +1274,7 @@ fn session_of(cx: &ActorContext) -> SessionId {
 pub struct TurnRestore<'a> {
     cx: &'a ActorContext,
     row: &'a TurnRow,
-    heads: &'a mut HeadCache,
+    heads: &'a mut SessionOwner,
     /// The phase checkpoint, once read, with the nodes its content is
     /// stored as.
     phase: Option<(PhaseCheckpoint, super::phase_root::PhaseStored)>,
@@ -1222,7 +1285,7 @@ impl<'a> TurnRestore<'a> {
     /// what the activation hands [`TurnServices::resume`] when it takes the
     /// turn over.
     #[must_use]
-    pub fn new(cx: &'a ActorContext, row: &'a TurnRow, heads: &'a mut HeadCache) -> Self {
+    pub fn new(cx: &'a ActorContext, row: &'a TurnRow, heads: &'a mut SessionOwner) -> Self {
         Self {
             cx,
             row,
@@ -1432,7 +1495,11 @@ pub async fn cancel_open_turn(
     tx: &mut ActorTx,
     cause: &crate::runtime::TurnCancellationEvidence,
 ) -> Result<Option<TurnRow>, TurnError> {
-    let Some(row) = cx.durable_reads()?.turn(&session_of(cx)).await? else {
+    let row = match cx.session_projection().await? {
+        Some(projection) => projection.turn,
+        None => cx.durable_reads()?.turn(&session_of(cx)).await?,
+    };
+    let Some(row) = row else {
         return Ok(None);
     };
     super::turn_terminal::write_terminal(

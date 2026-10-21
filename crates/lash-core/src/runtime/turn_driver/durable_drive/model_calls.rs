@@ -9,7 +9,10 @@ impl RuntimeDrive {
         error: crate::LlmCallError,
     ) -> Result<(), TurnError> {
         use lash_core_store::model_calls::{ModelCallEnd, ModelCallEndReason};
-        let row = cx.durable_reads()?.turn(&self.driver.session_id).await?;
+        let row = cx
+            .session_projection()
+            .await?
+            .and_then(|projection| projection.turn);
         let call = row
             .as_ref()
             .and_then(|row| row.phase.model())

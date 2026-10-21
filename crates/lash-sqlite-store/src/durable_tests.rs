@@ -1686,3 +1686,25 @@ law!(
     lo_fence_preserves_a_composed_drafts_basis,
     |store, _advance| { laws::lo_fence_preserves_a_composed_drafts_basis(store) }
 );
+
+mod lo_postimage_receipt_matches_reopen {
+    use super::*;
+    async fn run(file: bool) {
+        let (_root, set, _clock) = world(file).await;
+        laws::lo_postimage_receipt_matches_reopen(
+            &set.durable_store(),
+            set.session_store_factory().as_ref(),
+            false,
+        )
+        .await
+        .unwrap();
+    }
+    #[tokio::test]
+    async fn memory() {
+        run(false).await;
+    }
+    #[tokio::test]
+    async fn file() {
+        run(true).await;
+    }
+}

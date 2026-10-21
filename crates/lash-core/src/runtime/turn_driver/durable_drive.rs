@@ -747,7 +747,11 @@ impl TurnDrive for RuntimeDrive {
             cancel,
             stop_error,
         } = attempt;
-        if let Some(row) = cx.durable_reads()?.turn(&self.driver.session_id).await? {
+        if let Some(row) = cx
+            .session_projection()
+            .await?
+            .and_then(|projection| projection.turn)
+        {
             self.driver.model_call_ordinal =
                 row.phase.model().map_or(row.model_calls, |pin| pin.call);
         }
@@ -1361,6 +1365,7 @@ impl TurnDrive for RuntimeDrive {
             .as_ref()
             .map(|commit| self.published.committing(commit));
         Ok(TurnCommit {
+            postimage: self.driver.turn_pipeline.state().clone(),
             expected_head: commit.expected_head_revision,
             commit: crate::store::encode_session_commit(&commit)
                 .map_err(|error| TurnError::Exec(error.to_string()))?,
@@ -1372,7 +1377,35 @@ impl TurnDrive for RuntimeDrive {
     /// and the publisher ends once that reached the live stream; then the
     /// commit itself, which settles the turn's provisional activity; then
     /// the lifecycle observers see the finalized turn.
-    async fn committed(&mut self) {
+    async fn committed(
+        &mut self,
+        cx: &ActorContext,
+        receipt: &lash_durable::ActorCommit,
+    ) -> Result<(), TurnError> {
+        let plugins = Arc::clone(self.driver.session.plugins());
+        if let Some(state) = self.after_commit.state.take()
+            && let Err(error) = plugins.publish_committed_state(state.resolutions())
+        {
+            cx.invalidate_session_projection().await;
+            return Err(TurnError::Exec(error.to_string()));
+        }
+        let head = match cx.session_projection().await? {
+            Some(projection) => projection.head,
+            None => {
+                // Release drops the projection immediately. Publication still
+                // owns this acknowledged postimage for the terminal handoff.
+                let mut state = self.driver.turn_pipeline.state().clone();
+                let [head] = receipt.session_heads.as_slice() else {
+                    return Err(TurnError::Exec(
+                        "terminal acknowledgement has no unique head".into(),
+                    ));
+                };
+                state
+                    .adopt_retained_commit_result(&head.receipt)
+                    .map_err(|error| TurnError::Exec(error.to_string()))?;
+                Arc::new(state)
+            }
+        };
         if let Some(follow) = self.after_commit.follow.take() {
             follow.publish();
         }
@@ -1387,19 +1420,10 @@ impl TurnDrive for RuntimeDrive {
         );
         let AfterCommit {
             follow: _,
-            state,
+            state: _,
             finalized,
             panic,
         } = std::mem::take(&mut self.after_commit);
-        let plugins = Arc::clone(self.driver.session.plugins());
-        if let Some(state) = state
-            && let Err(error) = plugins.publish_committed_state(state.resolutions())
-        {
-            tracing::warn!(
-                %error,
-                "a committed turn's after-turn state did not publish; its namespaces are fenced"
-            );
-        }
         self.observer.release_terminal();
         self.observer.close();
         if let Err(error) = (&mut self.publisher).await {
@@ -1407,10 +1431,11 @@ impl TurnDrive for RuntimeDrive {
         }
         if let Some(commit) = &self.commit {
             commit
-                .publish(
+                .publish_state(
                     self.live.as_ref(),
                     &self.published,
                     Some(&self.driver.turn_id),
+                    &head,
                 )
                 .await;
         }
@@ -1432,6 +1457,7 @@ impl TurnDrive for RuntimeDrive {
         {
             panic!("{code}: {message}");
         }
+        Ok(())
     }
 }
 

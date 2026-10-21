@@ -221,14 +221,14 @@ impl RuntimeTurnDriver<'_> {
                 format!("the turn's cancel request does not read: {error}"),
             )
         };
-        let row = self
+        let tx = self
             .scoped_effect_controller
-            .durable_reads()
-            .map_err(durable)?
-            .turn(&self.session_id)
+            .begin()
             .await
             .map_err(durable)?;
-        Ok(row.is_some_and(|row| row.run == self.turn_id && row.cancel.is_some()))
+        Ok(tx
+            .turn_cancel()
+            .is_some_and(|cancel| cancel.run == self.turn_id))
     }
 
     pub(super) async fn invoke_turn_checkpoint_effect(

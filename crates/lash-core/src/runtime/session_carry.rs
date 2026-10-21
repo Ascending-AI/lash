@@ -81,7 +81,10 @@ impl LashRuntime {
             owner,
             tx,
             self.code_executor().as_ref(),
-            commit,
+            super::durable::head_commit::PreparedHeadCommit {
+                commit,
+                state: self.state.clone(),
+            },
             lash_durable::CommitLabel::SESSION_COMMAND,
             self.host.core.tracing.metrics(),
             Some(formats),
@@ -90,8 +93,10 @@ impl LashRuntime {
         .await;
         // The resident session gives way to the durable head, which a landed
         // commit moved.
-        self.invalidate_resident_session_state();
+        if committed.is_err() {
+            self.invalidate_resident_session_state();
+        }
         committed.map_err(super::durable::head_commit::HeadCommitError::into_runtime_error)?;
-        self.reload_invalidated_resident_session_state().await
+        self.adopt_owner_state(owner).await
     }
 }

@@ -774,7 +774,13 @@ impl TurnDrive for SimDrive {
     fn stop_cell(&mut self) {}
 
     /// Nothing is held for the commit.
-    async fn committed(&mut self) {}
+    async fn committed(
+        &mut self,
+        _cx: &ActorContext,
+        _receipt: &lash_durable::ActorCommit,
+    ) -> Result<(), TurnError> {
+        Ok(())
+    }
 }
 
 /// A body's journal-local output, owned by its turn.
