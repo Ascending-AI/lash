@@ -105,6 +105,22 @@ pub struct ToolProviderHandle {
     key: std::borrow::Cow<'static, str>,
 }
 impl ToolProviderHandle {
+    pub fn from_name(
+        registry: crate::claims::RegistryKind,
+        name: &crate::package::ProviderName,
+    ) -> Result<Self, ToolProviderKeyError> {
+        if !ToolProviderKey::is_valid(&name.key) {
+            return Err(ToolProviderKeyError::InvalidGrammar {
+                key: name.key.clone(),
+            });
+        }
+        Ok(Self {
+            registry,
+            owner: std::borrow::Cow::Owned(name.owner.clone()),
+            key: std::borrow::Cow::Owned(name.key.clone()),
+        })
+    }
+
     pub fn new(
         registry: crate::claims::RegistryKind,
         owner: impl Into<String>,

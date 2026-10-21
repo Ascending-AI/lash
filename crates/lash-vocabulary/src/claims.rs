@@ -37,28 +37,6 @@ const KERNEL: &str = "kernel:";
 const PROVIDER: &str = "provider:";
 const CODEC: &str = "codec:";
 
-/// The hard tokens of four sets of natives, kernels, providers and codecs.
-fn hard<'a>(
-    natives: &'a std::collections::BTreeSet<crate::FunctionId>,
-    kernels: &'a std::collections::BTreeSet<u32>,
-    providers: &'a std::collections::BTreeSet<String>,
-    codecs: &'a std::collections::BTreeSet<(String, u32)>,
-) -> impl Iterator<Item = ObligationToken> + 'a {
-    let natives = natives
-        .iter()
-        .map(|function| ObligationToken(format!("{NATIVE}{function}")));
-    let kernels = kernels
-        .iter()
-        .map(|version| ObligationToken(format!("{KERNEL}{version}")));
-    let providers = providers
-        .iter()
-        .map(|provider| ObligationToken(format!("{PROVIDER}{provider}")));
-    let codecs = codecs
-        .iter()
-        .map(|(provider, version)| ObligationToken(format!("{CODEC}{provider}@{version}")));
-    natives.chain(kernels).chain(providers).chain(codecs)
-}
-
 /// One claim token: what an actor's `requires` holds and a node's `serves`
 /// offers. Only this codec spells them, including the owner token a
 /// deployment serves to refuse a retired owner's outstanding callbacks.
@@ -105,61 +83,74 @@ impl ObligationToken {
         Self(format!("component:{component}@fmt{format}"))
     }
 
-    /// The tokens of a hard requirements record (FIG-6993): `native:<id>`
-    /// for each native-only function the code reached, `kernel:<n>` for
-    /// each kernel version, `provider:<key>` for each linked provider and
-    /// `codec:<key>@<n>` for each codec version that reads a link's
-    /// payload. Work carrying them runs only on a node whose capabilities
-    /// serve each ([`Self::for_capabilities`]).
-    pub fn for_requirements(
-        requirements: &crate::legacy_capabilities::ExecutionRequirements,
-    ) -> impl Iterator<Item = Self> + '_ {
-        hard(
-            &requirements.natives,
-            &requirements.kernels,
-            &requirements.providers,
-            &requirements.codecs,
-        )
+    /// Canonical claim tokens, including exact registry-qualified callbacks.
+    pub fn for_requirements(requirements: &ClaimRequirements) -> impl Iterator<Item = Self> {
+        claim_tokens(requirements).into_iter()
     }
 
-    /// The tokens a node offering `capabilities` serves: the same spelling
-    /// as [`Self::for_requirements`], so a record is met exactly when each
-    /// of its tokens is served.
-    pub fn for_capabilities(
-        capabilities: &crate::legacy_capabilities::NodeCapabilities,
-    ) -> impl Iterator<Item = Self> + '_ {
-        hard(
-            &capabilities.natives,
-            &capabilities.kernels,
-            &capabilities.providers,
-            &capabilities.codecs,
-        )
+    /// Canonical tokens served by one node. There is no fleet surface gate.
+    pub fn for_capabilities(capabilities: &NodeCapabilities) -> impl Iterator<Item = Self> {
+        claim_tokens(&ClaimRequirements {
+            machine: capabilities.machine.clone(),
+            providers: capabilities.providers.clone(),
+            codecs: capabilities.codecs.clone(),
+            callbacks: capabilities.callbacks.clone(),
+            components: capabilities.components.clone(),
+        })
+        .into_iter()
     }
 
-    /// The hard requirements `tokens` name, read back: every other token is
-    /// left out, and so is one that does not read.
+    /// Read all recognized requirement families, ignoring unrelated actor tokens.
     #[must_use]
-    pub fn requirements_of<'a>(
-        tokens: impl IntoIterator<Item = &'a str>,
-    ) -> crate::legacy_capabilities::ExecutionRequirements {
-        let mut requirements = crate::legacy_capabilities::ExecutionRequirements::default();
+    pub fn requirements_of<'a>(tokens: impl IntoIterator<Item = &'a str>) -> ClaimRequirements {
+        let mut requirements = ClaimRequirements::default();
         for token in tokens {
             if let Some(function) = token.strip_prefix(NATIVE) {
                 if let Ok(function) = crate::FunctionId::parse(function) {
-                    requirements.natives.insert(function);
+                    requirements.machine.natives.insert(function);
                 }
             } else if let Some(version) = token.strip_prefix(KERNEL) {
                 if let Ok(version) = version.parse() {
-                    requirements.kernels.insert(version);
+                    requirements.machine.kernels.insert(version);
                 }
-            } else if let Some(provider) = token.strip_prefix(PROVIDER) {
-                requirements.providers.insert(provider.to_owned());
-            } else if let Some((provider, version)) = token
-                .strip_prefix(CODEC)
-                .and_then(|codec| codec.rsplit_once('@'))
-                && let Ok(version) = version.parse()
+            } else if let Some(provider) = token.strip_prefix(PROVIDER).and_then(parse_provider) {
+                requirements.providers.insert(provider);
+            } else if let Some((provider, version)) =
+                token.strip_prefix(CODEC).and_then(|s| s.rsplit_once('@'))
             {
-                requirements.codecs.insert((provider.to_owned(), version));
+                if let (Some(provider), Ok(version)) =
+                    (parse_provider(provider), version.parse::<u32>())
+                    && let Some(version) = FormatVersion::new(version)
+                {
+                    requirements.codecs.insert((provider, version));
+                }
+            } else if let Some(callback) = token.strip_prefix("callback:") {
+                if let Some((registry, callback)) = callback.split_once(':')
+                    && let Some(registry) = match registry {
+                        "session" => Some(RegistryKind::Session),
+                        "process" => Some(RegistryKind::Process),
+                        _ => None,
+                    }
+                    && let Some((owner, key)) = callback.split_once('/')
+                    && !owner.is_empty()
+                    && !key.is_empty()
+                {
+                    requirements.callbacks.insert(CallbackRequirement {
+                        registry,
+                        callback: PluginCallbackIdentity {
+                            owner: owner.into(),
+                            key: key.into(),
+                        },
+                    });
+                }
+            } else if let Some((component, version)) = token
+                .strip_prefix("component:")
+                .and_then(|s| s.rsplit_once("@fmt"))
+                && let (Ok(component), Ok(version)) =
+                    (ProcessComponentId::new(component), version.parse::<u32>())
+                && let Some(version) = FormatVersion::new(version)
+            {
+                requirements.components.insert((component, version));
             }
         }
         requirements
@@ -232,4 +223,242 @@ pub struct NodeCapabilities {
     pub codecs: BTreeSet<(ProviderName, FormatVersion)>,
     pub callbacks: BTreeSet<CallbackRequirement>,
     pub components: BTreeSet<(ProcessComponentId, FormatVersion)>,
+}
+
+fn parse_provider(value: &str) -> Option<ProviderName> {
+    let (owner, key) = value.split_once('/')?;
+    (!owner.is_empty() && crate::providers::is_declared_tool_provider_key(key)).then(|| {
+        ProviderName {
+            owner: owner.into(),
+            key: key.into(),
+        }
+    })
+}
+
+fn claim_tokens(requirements: &ClaimRequirements) -> BTreeSet<ObligationToken> {
+    requirements
+        .machine
+        .natives
+        .iter()
+        .map(|id| ObligationToken(format!("{NATIVE}{id}")))
+        .chain(
+            requirements
+                .machine
+                .kernels
+                .iter()
+                .map(|version| ObligationToken(format!("{KERNEL}{version}"))),
+        )
+        .chain(requirements.providers.iter().map(|provider| {
+            ObligationToken(format!("{PROVIDER}{}/{}", provider.owner, provider.key))
+        }))
+        .chain(requirements.codecs.iter().map(|(provider, version)| {
+            ObligationToken(format!(
+                "{CODEC}{}/{}@{version}",
+                provider.owner, provider.key
+            ))
+        }))
+        .chain(
+            requirements.callbacks.iter().map(|required| {
+                ObligationToken::for_callback(required.registry, &required.callback)
+            }),
+        )
+        .chain(
+            requirements
+                .components
+                .iter()
+                .map(|(component, format)| ObligationToken::for_component(component, *format)),
+        )
+        .collect()
+}
+
+impl NodeRequirements {
+    /// Union of selected linked reach. Extra unused Exports add no debt.
+    pub fn extend(&mut self, other: &Self) {
+        self.natives.extend(other.natives.iter().copied());
+        self.kernels.extend(other.kernels.iter().copied());
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.natives.is_empty() && self.kernels.is_empty()
+    }
+}
+
+impl ClaimRequirements {
+    /// Add debt without retiring another recorded use's requirements.
+    pub fn extend(&mut self, other: &Self) {
+        self.machine.extend(&other.machine);
+        self.providers.extend(other.providers.iter().cloned());
+        self.codecs.extend(other.codecs.iter().cloned());
+        self.callbacks.extend(other.callbacks.iter().cloned());
+        self.components.extend(other.components.iter().cloned());
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.machine.is_empty()
+            && self.providers.is_empty()
+            && self.codecs.is_empty()
+            && self.callbacks.is_empty()
+            && self.components.is_empty()
+    }
+
+    /// Work parks while any known requirement is absent on the claiming node.
+    #[must_use]
+    pub fn met_by(&self, node: &NodeCapabilities) -> bool {
+        self.unmet_by(node).is_empty()
+    }
+
+    #[must_use]
+    pub fn unmet_by(&self, node: &NodeCapabilities) -> Self {
+        fn missing<T: Ord + Clone>(required: &BTreeSet<T>, offered: &BTreeSet<T>) -> BTreeSet<T> {
+            required.difference(offered).cloned().collect()
+        }
+        Self {
+            machine: NodeRequirements {
+                natives: missing(&self.machine.natives, &node.machine.natives),
+                kernels: missing(&self.machine.kernels, &node.machine.kernels),
+            },
+            providers: missing(&self.providers, &node.providers),
+            codecs: missing(&self.codecs, &node.codecs),
+            callbacks: missing(&self.callbacks, &node.callbacks),
+            components: missing(&self.components, &node.components),
+        }
+    }
+}
+
+impl NodeCapabilities {
+    pub fn extend(&mut self, other: &Self) {
+        self.machine.extend(&other.machine);
+        self.providers.extend(other.providers.iter().cloned());
+        self.codecs.extend(other.codecs.iter().cloned());
+        self.callbacks.extend(other.callbacks.iter().cloned());
+        self.components.extend(other.components.iter().cloned());
+    }
+}
+
+impl std::fmt::Display for ClaimRequirements {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let tokens: Vec<_> = self.tokens().collect();
+        if tokens.is_empty() {
+            f.write_str("nothing")
+        } else {
+            f.write_str(&tokens.join(", "))
+        }
+    }
+}
+
+impl ClaimRequirements {
+    pub fn tokens(&self) -> impl Iterator<Item = String> {
+        ObligationToken::for_requirements(self).map(ObligationToken::into_string)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// L-CLAIM-STAGED: adding a target keeps known resolver debt and exact callbacks.
+    #[test]
+    fn staged_target_debt_keeps_resolver_debt_and_registry_identity() {
+        let provider = |key: &str| ProviderName {
+            owner: "owner".into(),
+            key: key.into(),
+        };
+        let mut base = ClaimRequirements::default();
+        base.providers.insert(provider("resolver"));
+        base.callbacks.insert(CallbackRequirement {
+            registry: RegistryKind::Process,
+            callback: PluginCallbackIdentity {
+                owner: "owner".into(),
+                key: "resolver:lookup".into(),
+            },
+        });
+        base.components.insert((
+            ProcessComponentId::new("owner").unwrap(),
+            FormatVersion::ONE,
+        ));
+        let mut target = ClaimRequirements::default();
+        target.providers.insert(provider("target"));
+        target
+            .codecs
+            .insert((provider("codec"), FormatVersion::ONE));
+        target.callbacks.insert(CallbackRequirement {
+            registry: RegistryKind::Session,
+            callback: PluginCallbackIdentity::tool_reads("owner", "target"),
+        });
+        let resolver_tokens: BTreeSet<_> = base.tokens().collect();
+        base.extend(&target);
+        let tokens: Vec<_> = base.tokens().collect();
+        assert!(resolver_tokens.is_subset(&base.tokens().collect()));
+        assert_eq!(
+            ObligationToken::requirements_of(tokens.iter().map(String::as_str)),
+            base
+        );
+        assert!(!base.met_by(&NodeCapabilities::default()));
+        let node = NodeCapabilities {
+            machine: base.machine.clone(),
+            providers: base.providers.clone(),
+            codecs: base.codecs.clone(),
+            callbacks: base.callbacks.clone(),
+            components: base.components.clone(),
+        };
+        assert!(base.met_by(&node));
+        assert_eq!(
+            tokens,
+            ObligationToken::for_capabilities(&node)
+                .map(ObligationToken::into_string)
+                .collect::<Vec<_>>()
+        );
+        assert!(ObligationToken::is_served(
+            "callback:process:owner/resolver:lookup",
+            &["callback:process:owner/".into()]
+        ));
+        assert!(!ObligationToken::is_served(
+            "callback:process:owner/resolver:lookup",
+            &["callback:session:owner/".into()]
+        ));
+    }
+}
+
+impl crate::tokens::TokenCodec for NodeRequirements {
+    fn encode(&self, out: &mut crate::tokens::TokenWriter) {
+        out.seq(2);
+        self.natives.iter().copied().collect::<Vec<_>>().encode(out);
+        self.kernels.iter().copied().collect::<Vec<_>>().encode(out);
+    }
+
+    fn decode(
+        input: &mut crate::tokens::TokenReader<'_>,
+    ) -> Result<Self, crate::tokens::TokenError> {
+        input.expect_struct(2)?;
+        let natives = Vec::<FunctionId>::decode(input)?;
+        crate::tokens::check_ascending(&natives)?;
+        let kernels = Vec::<u32>::decode(input)?;
+        crate::tokens::check_ascending(&kernels)?;
+        Ok(Self {
+            natives: natives.into_iter().collect(),
+            kernels: kernels.into_iter().collect(),
+        })
+    }
+}
+
+impl crate::tokens::TokenCodec for ClaimRequirements {
+    fn encode(&self, out: &mut crate::tokens::TokenWriter) {
+        self.tokens().collect::<Vec<_>>().encode(out);
+    }
+
+    fn decode(
+        input: &mut crate::tokens::TokenReader<'_>,
+    ) -> Result<Self, crate::tokens::TokenError> {
+        let tokens = Vec::<String>::decode(input)?;
+        crate::tokens::check_ascending(&tokens)?;
+        let requirements = ObligationToken::requirements_of(tokens.iter().map(String::as_str));
+        if requirements.tokens().collect::<Vec<_>>() != tokens {
+            return Err(crate::tokens::TokenError::Invalid(
+                "unrecognized or noncanonical claim requirement".into(),
+            ));
+        }
+        Ok(requirements)
+    }
 }
