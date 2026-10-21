@@ -345,6 +345,10 @@ pub async fn a_producer_commits_its_row_and_its_wake_together(
     for producer in Producer::ALL {
         let session = SessionId::fixture(format!("{prefix}-atomic-{producer:?}"));
         admit_root(&stores, &session).await;
+        let before = durable
+            .actor(&actor_of(&session))
+            .await
+            .expect("read the idle actor");
         cut.arm().await;
         let produced = producer.produce(&stores, &session).await;
         cut.disarm().await;
@@ -353,13 +357,13 @@ pub async fn a_producer_commits_its_row_and_its_wake_together(
             !producer.row_stored(&stores, &session).await,
             "{producer:?}: a cut before the commit leaves no row"
         );
-        assert!(
+        assert_eq!(
             durable
                 .actor(&actor_of(&session))
                 .await
-                .expect("read the session actor")
-                .is_none(),
-            "{producer:?}: a cut before the commit leaves no wake"
+                .expect("read the session actor"),
+            before,
+            "{producer:?}: a cut before the commit leaves the idle actor unchanged"
         );
         assert!(
             producer.produce(&stores, &session).await,
@@ -377,8 +381,8 @@ pub async fn a_producer_commits_its_row_and_its_wake_together(
 }
 
 /// WAKE1: a send against an absent or deleted session wakes no session
-/// actor and creates nothing: the session stays absent or deleted, and no
-/// actor exists for it. One send to a live session wakes it.
+/// actor: the session stays absent or deleted, and any retained actor is
+/// unchanged. One send to a live session wakes its idle actor.
 pub async fn a_producer_wakes_no_absent_or_deleted_session(
     stores: Arc<dyn StoreSet>,
     prefix: &str,
@@ -393,18 +397,22 @@ pub async fn a_producer_wakes_no_absent_or_deleted_session(
         .await
         .expect("delete the session");
     for session in [&absent, &deleted] {
+        let before = durable
+            .actor(&actor_of(session))
+            .await
+            .expect("read the actor");
         for producer in [Producer::Input, Producer::Batch] {
             // The store may keep or refuse the row; either way it wakes
             // nobody.
             let _ = producer.produce(&stores, session).await;
         }
-        assert!(
+        assert_eq!(
             durable
                 .actor(&actor_of(session))
                 .await
-                .expect("read the session actor")
-                .is_none(),
-            "{session} gains no actor"
+                .expect("read the session actor"),
+            before,
+            "{session} gains no wake or actor mutation"
         );
         assert!(
             matches!(
@@ -420,11 +428,7 @@ pub async fn a_producer_wakes_no_absent_or_deleted_session(
     let live = SessionId::fixture(format!("{prefix}-wake1-live"));
     admit_root(&stores, &live).await;
     assert!(
-        durable
-            .actor(&actor_of(&live))
-            .await
-            .expect("read the session actor")
-            .is_none(),
+        !woken(&durable, &live).await,
         "creating a session wakes nothing"
     );
     assert!(Producer::Input.produce(&stores, &live).await);

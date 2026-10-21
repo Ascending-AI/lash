@@ -86,6 +86,8 @@ pub(super) struct Inner {
     durable: Option<Arc<dyn DurableStore>>,
     actor: ActorKey,
     epoch: Epoch,
+    /// Independent append operations plan and commit under one owner.
+    fresh_updates: tokio::sync::Mutex<()>,
     /// What the claim's activation waits on for mail; a context that owns
     /// no claim polls on the backend's claim interval.
     mail: Option<lash_durable::runner::MailWaker>,
@@ -147,6 +149,7 @@ impl ActorContext {
             inner: Arc::new(Inner {
                 backend: Some(backend),
                 durable: None,
+                fresh_updates: tokio::sync::Mutex::new(()),
                 actor,
                 epoch,
                 mail: None,
@@ -185,6 +188,7 @@ impl ActorContext {
             inner: Arc::new(Inner {
                 backend: Some(backend),
                 durable: Some(Arc::clone(owned.store())),
+                fresh_updates: tokio::sync::Mutex::new(()),
                 actor: owned.actor().clone(),
                 epoch: owned.epoch(),
                 mail: Some(owned.mail_waker()),
@@ -229,6 +233,7 @@ impl ActorContext {
             inner: Arc::new(Inner {
                 backend: None,
                 durable: None,
+                fresh_updates: tokio::sync::Mutex::new(()),
                 actor: ActorKey::session("unavailable").expect("a constant actor id"),
                 epoch: Epoch(0),
                 mail: None,
@@ -626,6 +631,28 @@ impl ActorContext {
         self.durable()?
             .begin(&self.inner.actor, self.inner.epoch)
             .await
+    }
+
+    /// Plan and commit an independent append under one synchronization owner.
+    /// The closure adds facts that do not depend on an earlier mutable view;
+    /// it must not copy a prepared actor draft. No external callback or effect
+    /// body runs while this guard is held. Dropping the future releases its
+    /// place in the queue.
+    ///
+    /// # Errors
+    ///
+    /// The open or commit refusal, including a typed revision conflict from
+    /// any writer outside this queue. A draft is never re-fenced or retried.
+    #[doc(hidden)]
+    pub async fn commit_fresh(
+        &self,
+        label: CommitLabel,
+        write: impl FnOnce(&mut ActorTx),
+    ) -> Result<ActorCommit, DurableError> {
+        let _guard = self.inner.fresh_updates.lock().await;
+        let mut tx = self.begin().await?;
+        write(&mut tx);
+        self.commit(tx, label).await
     }
 
     /// Commit `tx` under `label`.

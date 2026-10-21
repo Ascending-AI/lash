@@ -17,9 +17,6 @@ use lash_core_store::checkpoint_graph::{CommitId, EncodedNode};
 use super::{CellServices, CodeModeExecutionState, KernelCarry, execute_cell};
 use crate::projection::CodeModeProjectedBindings;
 
-/// The format set the publisher's node decodes and its actor is created in.
-const FORMATS: &str = "rlm-checkpoint-perf/1";
-
 /// How many manifest entries a publication reads at once.
 const MANIFEST_BATCH: usize = 256;
 
@@ -271,7 +268,7 @@ pub struct CodeModeCheckpointPerfPublisher {
 }
 
 impl CodeModeCheckpointPerfPublisher {
-    /// Creates `session`'s actor on `backend` and claims it.
+    /// Claims the idle actor created with `session` on `backend`.
     ///
     /// # Errors
     ///
@@ -286,22 +283,22 @@ impl CodeModeCheckpointPerfPublisher {
         let actor = ActorKey::session(session.as_str()).map_err(|error| {
             lash_core::SessionError::Protocol(format!("checkpoint perf publisher: {error}"))
         })?;
-        let mut created = MailTx::new();
-        created.create_actor(actor.clone(), FormatSet::new(FORMATS));
-        backend
-            .durable()
-            .commit_mail(created, CommitLabel::new("perf.create"))
-            .await
-            .map_err(failed)?;
         let lease = backend
             .durable()
             .register_node(&NodeSpec {
                 node: NodeId::new(format!("rlm-checkpoint-perf-{session}")),
-                decodes: vec![FormatSet::new(FORMATS)],
+                decodes: vec![FormatSet::unstarted_session()],
                 serves: Vec::new(),
                 capabilities: Default::default(),
                 ttl_millis: 600_000,
             })
+            .await
+            .map_err(failed)?;
+        let mut wake = MailTx::new();
+        wake.wake(actor.clone());
+        backend
+            .durable()
+            .commit_mail(wake, CommitLabel::new("perf.wake"))
             .await
             .map_err(failed)?;
         let epoch = backend

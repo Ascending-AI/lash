@@ -200,17 +200,17 @@ impl OwnedCall<'_> {
             .find(|pin| pin.key == self.key)
             .map_or(0, |pin| pin.attempt);
         let attempt = previous.saturating_add(1);
-        let mut tx = self.cx.begin().await.map_err(live)?;
-        tx.write(lash_durable::DomainWrite::ModelCallPin(
-            lash_durable::domain::ModelCallPinWrite::Reserve {
-                key: self.key.clone(),
-                call_id: crate::provider::call_id_for_scope(scope),
-                attempt,
-                enclosing: self.enclosing.clone(),
-            },
-        ));
         self.cx
-            .commit(tx, CommitLabel::COMPLETION_START)
+            .commit_fresh(CommitLabel::COMPLETION_START, |tx| {
+                tx.write(lash_durable::DomainWrite::ModelCallPin(
+                    lash_durable::domain::ModelCallPinWrite::Reserve {
+                        key: self.key.clone(),
+                        call_id: crate::provider::call_id_for_scope(scope),
+                        attempt,
+                        enclosing: self.enclosing.clone(),
+                    },
+                ));
+            })
             .await
             .map_err(live)?;
         Ok(attempt)
@@ -293,19 +293,19 @@ impl OwnedCall<'_> {
         .map_err(|error| {
             PluginError::Session(format!("the call's admission does not encode: {error}"))
         })?;
-        let mut tx = cx.begin().await.map_err(live)?;
-        tx.write(record);
-        tx.write(lash_durable::DomainWrite::ModelCallPin(
-            lash_durable::domain::ModelCallPinWrite::Reserve {
-                key,
-                call_id: crate::provider::call_id_for_scope(&response.scope),
-                attempt: 1,
-                enclosing,
-            },
-        ));
-        cx.commit(tx, CommitLabel::COMPLETION_START)
-            .await
-            .map_err(live)?;
+        cx.commit_fresh(CommitLabel::COMPLETION_START, |tx| {
+            tx.write(record);
+            tx.write(lash_durable::DomainWrite::ModelCallPin(
+                lash_durable::domain::ModelCallPinWrite::Reserve {
+                    key,
+                    call_id: crate::provider::call_id_for_scope(&response.scope),
+                    attempt: 1,
+                    enclosing,
+                },
+            ));
+        })
+        .await
+        .map_err(live)?;
         Ok(OwnedAdmission::Send {
             request: Box::new(request),
             admitted: AdmittedDirectSend {
@@ -454,10 +454,19 @@ async fn compose(
 }
 
 fn live(error: lash_durable::DurableError) -> PluginError {
-    PluginError::RuntimeEffectController(crate::RuntimeEffectControllerError::new(
-        crate::RuntimeErrorCode::StoreCommitFailed,
-        error.to_string(),
-    ))
+    let refusal = match error {
+        error @ (lash_durable::DurableError::RevisionConflict { .. }
+        | lash_durable::DurableError::OwnershipLost(_)) => {
+            super::durable::head_commit::HeadCommitError::Owner(error)
+                .into_runtime_error()
+                .into()
+        }
+        error => crate::RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::StoreCommitFailed,
+            error.to_string(),
+        ),
+    };
+    PluginError::RuntimeEffectController(refusal)
 }
 
 fn refused(code: TurnFailureCode, message: String) -> LlmCallError {

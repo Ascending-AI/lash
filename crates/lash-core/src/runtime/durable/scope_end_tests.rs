@@ -1647,72 +1647,36 @@ async fn end_process(backend: &Backend, process: &ProcessId) {
         .expect("release the terminal's node");
 }
 
-/// ADR 0049: a session's actor is created by its first work, so a session
-/// created but never sent anything has metadata and no actor. Its metadata
-/// makes the id one session lifetime, so its close request is its first
-/// work: the request creates the actor with the close as its mail. An id the
-/// catalog never held stays a no-op.
+/// FIG-7133: dropping an independent update at a store await and dropping a
+/// caller waiting behind it both release their queue positions. The remaining
+/// caller can commit under the same actor without a revision conflict.
 #[tokio::test]
-async fn a_created_session_with_no_work_is_closed_by_its_close_request() {
-    let world = World::new("with-work", DurableSettings::default(), Vec::new()).await;
-    let idle = SessionId::parse("created-idle").expect("a session id");
-    world
-        .backend
-        .session_store_factory()
-        .admit_session(&lash_core_store::testing::store_fixtures::root_session_request(&idle))
+async fn a_dropped_fresh_update_and_its_waiter_release_the_actor_queue() {
+    let world = World::new("fresh-update-drop", DurableSettings::default(), Vec::new()).await;
+    let cx = world.claim().await;
+    let entered = Arc::new(tokio::sync::Notify::new());
+    world.cut.before(
+        CommitLabel::COMPLETION_START,
+        Box::new({
+            let entered = Arc::clone(&entered);
+            move || {
+                Box::pin(async move {
+                    entered.notify_one();
+                    std::future::pending::<()>().await;
+                })
+            }
+        }),
+    );
+    let mut first = Box::pin(cx.commit_fresh(CommitLabel::COMPLETION_START, |_| ()));
+    tokio::select! {
+        result = &mut first => panic!("the store holds the first update: {result:?}"),
+        () = entered.notified() => {}
+    }
+    let mut waiting = Box::pin(cx.commit_fresh(CommitLabel::COMPLETION_START, |_| ()));
+    assert!(futures_util::poll!(&mut waiting).is_pending());
+    drop(waiting);
+    drop(first);
+    cx.commit_fresh(CommitLabel::COMPLETION_START, |_| ())
         .await
-        .expect("materialize the session");
-    let idle_actor = ActorKey::session(idle.as_str()).expect("a session actor key");
-    assert!(
-        world
-            .backend
-            .durable()
-            .actor(&idle_actor)
-            .await
-            .expect("read the actor")
-            .is_none(),
-        "a created session has no actor before its first work"
-    );
-
-    assert_eq!(
-        request_session_close(&world.backend, &idle)
-            .await
-            .expect("request the close"),
-        SessionCloseRequested::Requested
-    );
-    assert!(
-        world
-            .backend
-            .durable()
-            .actor(&idle_actor)
-            .await
-            .expect("read the actor")
-            .is_some(),
-        "the close request created the session's actor"
-    );
-    assert_eq!(
-        request_session_close(&world.backend, &idle)
-            .await
-            .expect("repeat the close"),
-        SessionCloseRequested::Requested,
-        "a repeated request appends to the actor the first one created"
-    );
-
-    let never = SessionId::parse("never-created").expect("a session id");
-    assert_eq!(
-        request_session_close(&world.backend, &never)
-            .await
-            .expect("request the close"),
-        SessionCloseRequested::Absent
-    );
-    assert!(
-        world
-            .backend
-            .durable()
-            .actor(&ActorKey::session(never.as_str()).expect("a session actor key"))
-            .await
-            .expect("read the actor")
-            .is_none(),
-        "closing an id the catalog never held creates nothing"
-    );
+        .expect("the next update commits");
 }

@@ -64,11 +64,10 @@ async fn owned(name: &'static str) -> Option<Owned> {
     .await
     .expect("the catalog admits the session");
     let store = storage.durable_store();
-    let formats = FormatSet::new("round-trips");
     let node = store
         .register_node(&NodeSpec {
             node: NodeId::new("round-trips"),
-            decodes: vec![formats.clone()],
+            decodes: vec![FormatSet::unstarted_session()],
             serves: Vec::new(),
             capabilities: Default::default(),
             ttl_millis: 15_000,
@@ -76,12 +75,12 @@ async fn owned(name: &'static str) -> Option<Owned> {
         .await
         .expect("register");
     let actor = ActorKey::session(session.as_str()).expect("actor key");
-    let mut create = MailTx::new();
-    create.create_actor(actor.clone(), formats);
+    let mut wake = MailTx::new();
+    wake.wake(actor.clone());
     store
-        .commit_mail(create, CommitLabel::new("law.create"))
+        .commit_mail(wake, CommitLabel::new("law.wake"))
         .await
-        .expect("create");
+        .expect("wake the idle actor");
     let epoch = store.claim(&node, 1).await.expect("claim")[0].epoch;
     Some(Owned {
         _database: database,

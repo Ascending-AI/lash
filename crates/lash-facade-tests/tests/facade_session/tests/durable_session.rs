@@ -450,12 +450,21 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
         "the checkpointed id reads its committed turn"
     );
 
-    lash_core::SessionCatalogStore::delete_session(
-        backend.session_store_factory().as_ref(),
-        &SessionId::from("sqlite-metadata-only"),
+    let administration = serving.session_administration().await;
+    LashCore::delete_session(
+        administration
+            .delete_context("sqlite-metadata-only")
+            .expect("delete context"),
     )
     .await
-    .expect("delete the sqlite session");
+    .expect("request the sqlite session's close");
+    assert_eq!(
+        serving
+            .await_session_deletion(&SessionId::from("sqlite-metadata-only"))
+            .await
+            .expect("await deletion"),
+        lash::SessionDeleteCompletion::Deleted,
+    );
     let deleted = client
         .session(id("sqlite-metadata-only"))
         .durable()

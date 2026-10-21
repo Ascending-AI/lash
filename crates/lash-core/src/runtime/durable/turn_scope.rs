@@ -40,7 +40,6 @@ use lash_core_execution::runtime::actor::process::{self, CascadeProgress};
 use lash_core_execution::runtime::actor::waits;
 use lash_durable::domain::{ScopeKey, SessionCloseWrite};
 use lash_durable::{ActorTx, CommitLabel, DomainWrite, DurableError};
-use lash_execution_contracts::waits::ProcessWaitOutcome;
 use lash_execution_contracts::waits::WaitDeadline;
 
 use crate::ActorContext;
@@ -203,17 +202,44 @@ pub async fn await_turn_children(
     let scope = ScopeKey::Turn(session.clone(), run.clone());
     let live = durable.live_until_descendants(&scope, limit).await?;
     let deadline = WaitDeadline::after(stop_grace, durable.now().await?);
-    let outcomes = futures_util::future::join_all(
-        live.iter()
-            .map(|child| waits::await_process(cx, child, deadline)),
-    )
-    .await;
+    if live.is_empty() {
+        return Ok(TurnChildrenStop::default());
+    }
+    // These waits belong to one actor. Mint them in one transition and poll
+    // one race at a time, so siblings cannot stale each other's drafts.
+    let mut tx = cx.begin().await?;
+    let wait_scope = waits::wait_scope(cx)?;
+    let pending = live
+        .into_iter()
+        .map(|child| {
+            let (wait, _) = waits::pin(
+                &mut tx,
+                lash_execution_contracts::waits::WaitSpec {
+                    scope: wait_scope.clone(),
+                    purpose: lash_durable::domain::WaitPurpose::ProcessTerminal {
+                        process: child.clone(),
+                        deadline: Some(deadline.at()),
+                    },
+                },
+            );
+            (child, wait)
+        })
+        .collect::<Vec<_>>();
+    cx.commit(tx, CommitLabel::WAIT_MINT).await?;
+    for (_, wait) in &pending {
+        waits::resolve_ended_terminal(cx.backend(), wait).await?;
+    }
     let mut stop = TurnChildrenStop::default();
-    for (child, outcome) in live.iter().zip(outcomes) {
-        match outcome? {
-            ProcessWaitOutcome::Resolved(outcome) => stop.ended.push((child.clone(), outcome)),
-            ProcessWaitOutcome::TimedOut | ProcessWaitOutcome::Cancelled => {
-                stop.may_still_be_running.push(child.clone());
+    // Every wait keeps the same deadline. Poll them serially to preserve the
+    // producer's descendant order and give timeout writes one owner as well.
+    for (child, wait) in pending {
+        match waits::race(cx, &[wait]).await? {
+            lash_execution_contracts::waits::RaceWinner::Resolved { resolution, .. } => stop
+                .ended
+                .push((child, waits::process_outcome(resolution)?)),
+            lash_execution_contracts::waits::RaceWinner::TimedOut(_)
+            | lash_execution_contracts::waits::RaceWinner::Cancelled => {
+                stop.may_still_be_running.push(child)
             }
         }
     }

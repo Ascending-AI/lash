@@ -29,6 +29,14 @@ use crate::runtime::turn_boundary::SeedCarries;
 /// compaction's commit has landed, before its command run goes on.
 pub const COMPACT_CONTEXT_COMMITTED_PHASE: &str = "compact_context.committed";
 
+/// A summary is a fact about one committed head. Its provider work may advance
+/// the actor's phase state; opening its frame is a later owner transition.
+struct CompactionPlan {
+    base: crate::runtime::effect::CompactionBase,
+    summary: Result<Option<crate::plugin::ContextCompaction>, RuntimeError>,
+    committing: crate::ExecutionScope,
+}
+
 /// What one administrative compaction did in resident state, before anything
 /// of it commits.
 enum CompactionRun {
@@ -98,7 +106,8 @@ impl LashRuntime {
                  `SessionCommand::CompactContext`, which applies at the next turn boundary",
             ));
         }
-        match Box::pin(self.run_compaction(instructions, &scoped_effect_controller)).await? {
+        let plan = Box::pin(self.plan_compaction(instructions, &scoped_effect_controller)).await?;
+        match self.stage_compaction(plan).await? {
             CompactionRun::Opened(_) => {
                 self.restore_protocol_session_after_frame_open().await?;
                 Ok(super::CompactContextOutcome::Opened {
@@ -146,8 +155,13 @@ impl LashRuntime {
                 batch_id.as_str(),
             ),
         )?;
+        self.open_head_attempt(run_controller).await?;
+        let plan = Box::pin(self.plan_compaction(instructions, &controller)).await?;
+        // The summary's recorded calls have their own commits. Start the frame
+        // transition only after they finish, reload its basis, and validate the
+        // summary's head before staging any mutation. Never re-fence a draft.
         let tx = self.open_head_attempt(run_controller).await?;
-        let run = Box::pin(self.run_compaction(instructions, &controller)).await?;
+        let run = self.stage_compaction(plan).await?;
         Box::pin(self.commit_compact_context_command(run, completion, run_controller, tx)).await
     }
 
@@ -161,14 +175,15 @@ impl LashRuntime {
     /// its compactor, its frame open) is [`CompactionRun::Failed`]. Invocation
     /// faults, including replay divergences, remain typed run errors and
     /// leave the command unsettled.
-    async fn run_compaction(
+    async fn plan_compaction(
         &mut self,
         instructions: Option<String>,
         controller: &crate::ActorContext,
-    ) -> Result<CompactionRun, RuntimeError> {
+    ) -> Result<CompactionPlan, RuntimeError> {
         self.reload_invalidated_resident_session_state().await?;
         let ordinal = controller.next_compaction_ordinal();
-        self.adopt_recorded_compaction_base(controller, ordinal)
+        let base = self
+            .adopt_recorded_compaction_base(controller, ordinal)
             .await?;
         let services = self.runtime_session_services().map_err(|error| {
             RuntimeError::new(
@@ -176,7 +191,6 @@ impl LashRuntime {
                 error.to_string(),
             )
         })?;
-        let ended = self.state.current_frame_node_id.clone();
         let committing = controller.execution_scope().clone();
         let Some(session) = self.session.as_ref() else {
             return Err(RuntimeError::new(
@@ -196,15 +210,48 @@ impl LashRuntime {
             direct_completions: services.direct_completion_client(controller.clone(), None),
             trace: self.hook_trace(controller),
         };
-        let compaction = match plugin_session.compact_context(&ctx).await {
+        let summary = match plugin_session.compact_context(&ctx).await {
+            Ok(summary) => Ok(summary),
+            Err(error) if error.aborts_invocation() => {
+                return Err(error.into_turn_failure(RuntimeErrorCode::ContextCompaction));
+            }
+            Err(error) => Err(error.into_turn_failure(RuntimeErrorCode::ContextCompaction)),
+        };
+        Ok(CompactionPlan {
+            base,
+            summary,
+            committing,
+        })
+    }
+
+    /// Apply a summary only to the head it describes, under the transaction
+    /// opened before this stage. A moved head settles a refusal without a frame.
+    async fn stage_compaction(
+        &mut self,
+        plan: CompactionPlan,
+    ) -> Result<CompactionRun, RuntimeError> {
+        let CompactionPlan {
+            base,
+            summary,
+            committing,
+        } = plan;
+        let compaction = match summary {
             Ok(Some(compaction)) => compaction,
             Ok(None) => return Ok(CompactionRun::NothingToCompact),
-            Err(error) => return CompactionRun::failure(error),
+            Err(error) => return Ok(CompactionRun::Failed(error)),
         };
-        drop(ctx);
+        if self.state.head_revision != base.head.revision
+            || self.state.current_frame_node_id != base.frame
+        {
+            return Ok(CompactionRun::Failed(RuntimeError::new(
+                RuntimeErrorCode::StoreCommitSuperseded,
+                "the session head moved from the base the compaction summarized",
+            )));
+        }
+        let ended = base.frame;
         let frame_key = compaction_frame_key(
             &self.state.session_id,
-            controller.scope_id(),
+            committing.id(),
             ended.as_deref().unwrap_or_default(),
         );
         let opened = match self

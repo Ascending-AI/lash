@@ -120,15 +120,6 @@ pub async fn receipts(stores: &dyn StoreSet, backend: &'static str) -> Vec<Recei
         .await;
         answer.expect("register");
         receipts.push(receipt);
-        let mut create = lash_durable::MailTx::new();
-        create.create_actor(
-            lash_durable::ActorKey::session(session.as_str()).expect("actor"),
-            lash_durable::FormatSet::new("sql-work"),
-        );
-        durable
-            .commit_mail(create, lash_durable::CommitLabel::new("sql-work.setup"))
-            .await
-            .expect("create wake actor");
         let mut mail = lash_durable::MailTx::new();
         mail.wake(lash_durable::ActorKey::session(session.as_str()).expect("actor"));
         let (answer, receipt) = sql::collect(

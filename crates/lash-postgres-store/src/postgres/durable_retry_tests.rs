@@ -26,7 +26,7 @@ use crate::testing::{CommitFault, IsolatedDatabase, LostCommit};
 
 const LABEL: CommitLabel = CommitLabel::new("law.write");
 
-/// Admit session `session` to the catalog, with no durable actor yet.
+/// Admit session `session` and its idle actor to the catalog.
 async fn admit(storage: &PostgresStorage, session: &lash_protocol_types::SessionId) {
     use lash_core_store::session_identity::SessionRelation;
     use lash_core_store::session_store_factory_types::SessionCreationHead;
@@ -121,8 +121,6 @@ async fn a_waiting_admission_holds_no_history_or_referrer_lock(
         .expect("hermetic PostgreSQL is available");
     let session = lash_protocol_types::SessionId::from(name);
     admit(&storage, &session).await;
-    let store = storage.durable_store();
-    create(&store, &actor(session.as_str())).await;
     let mut owner = crate::begin_guarded(storage.pool(), &storage.fence)
         .await
         .expect("the owner's transaction opens");
@@ -242,96 +240,6 @@ async fn a_session_close_waiting_for_the_owner_holds_no_history_or_referrer_lock
         }),
     )
     .await;
-}
-
-/// FIG-5429: a producer that waited for history while the session's actor
-/// was created takes the new actor row before history after all. Holding
-/// history while it waits for the row, it deadlocks with a writer that
-/// locked the row once it appeared and then waits for history: the racing
-/// producers of the turn-input batch law met exactly that and were refused
-/// `Contended`. Here the owner holds the new row as the producer leaves
-/// its history wait; once the producer waits for the row, the owner takes
-/// history without waiting.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_producer_queued_behind_the_actors_creation_takes_the_actor_row_before_history() {
-    use lash_core_store::store::TurnInputStore as _;
-    use lash_core_store::turn_input_vocabulary::PendingTurnInputBatch;
-
-    let name = "actor-creation-lock-order";
-    let (_database, storage) = storage(name, &PostgresHostConfig::default())
-        .await
-        .expect("hermetic PostgreSQL is available");
-    let session = lash_protocol_types::SessionId::from(name);
-    admit(&storage, &session).await;
-    let mut history = crate::begin_guarded(storage.pool(), &storage.fence)
-        .await
-        .expect("the history holder opens");
-    crate::runtime_persistence::lock_session_history_mutation_tx(&mut history, &session)
-        .await
-        .expect("the holder takes history while the session has no actor");
-    let history_pid = backend_pid(&mut history).await;
-
-    let produced = tokio::spawn({
-        let store = storage.store();
-        let session = session.clone();
-        async move {
-            let draft = lash_core_store::turn_input_vocabulary::PendingTurnInputDraft::new(
-                &session,
-                lash_core_store::turn_input_vocabulary::TurnInputIngress::NextTurn,
-                lash_core_store::turn_input_vocabulary::TurnInput::text("queued"),
-            )
-            .with_source_key("queued-input");
-            store
-                .enqueue_pending_turn_inputs(PendingTurnInputBatch::one(draft))
-                .await
-                .expect("the producer is admitted without contention");
-        }
-    });
-    lock_wait_beside(&storage, &[history_pid]).await;
-    create(&storage.durable_store(), &actor(session.as_str())).await;
-    let mut owner = crate::begin_guarded(storage.pool(), &storage.fence)
-        .await
-        .expect("the owner's transaction opens");
-    crate::PostgresDurableStore::lock_session_actor(&mut owner, &session)
-        .await
-        .expect("the owner holds the new actor row");
-    let owner_pid = backend_pid(&mut owner).await;
-    history.commit().await.expect("the holder releases history");
-    tokio::time::timeout(Duration::from_secs(10), async {
-        loop {
-            let waiting: bool = sqlx::query_scalar(
-                "SELECT EXISTS (SELECT 1 FROM pg_locks
-                 WHERE NOT granted AND locktype IN ('transactionid', 'tuple')
-                   AND pid <> $1)",
-            )
-            .bind(owner_pid)
-            .fetch_one(storage.pool())
-            .await
-            .expect("read the actor row's waiters");
-            if waiting {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("the producer waits for the actor row");
-    let history_free: bool =
-        sqlx::query_scalar("SELECT pg_try_advisory_xact_lock(hashtextextended($1, 1::bigint))")
-            .bind(session.as_str())
-            .fetch_one(&mut **owner)
-            .await
-            .expect("the owner probes its history lock");
-    // Release the producer and join even on the red side.
-    owner
-        .rollback()
-        .await
-        .expect("the owner releases its locks");
-    produced.await.expect("the producer is admitted");
-    assert!(
-        history_free,
-        "the producer holds history while it waits for the actor row"
-    );
 }
 
 fn formats() -> FormatSet {

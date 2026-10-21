@@ -169,17 +169,20 @@ impl LocalDirectEffectRunner {
                     let enclosing = enclosing.clone();
                     Box::pin(async move {
                         let result = async {
-                            let mut tx = cx.begin().await?;
-                            tx.write(lash_durable::DomainWrite::ModelCallPin(
-                                lash_durable::domain::ModelCallPinWrite::Reserve {
-                                    key,
-                                    call_id,
-                                    attempt,
-                                    enclosing,
+                            cx.commit_fresh(
+                                lash_durable::CommitLabel::new("completion.attempt"),
+                                |tx| {
+                                    tx.write(lash_durable::DomainWrite::ModelCallPin(
+                                        lash_durable::domain::ModelCallPinWrite::Reserve {
+                                            key,
+                                            call_id,
+                                            attempt,
+                                            enclosing,
+                                        },
+                                    ));
                                 },
-                            ));
-                            cx.commit(tx, lash_durable::CommitLabel::new("completion.attempt"))
-                                .await?;
+                            )
+                            .await?;
                             Ok::<_, lash_durable::DurableError>(())
                         }
                         .await;
@@ -296,11 +299,7 @@ impl LocalDirectEffectRunner {
             }
         };
         if let Some(error) = reservation_fault.lock_recover().take() {
-            return Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::StoreCommitFailed,
-                error.to_string(),
-            )
-            .retryable_uncommitted_derivation());
+            return Err(reservation_refusal(error).retryable_uncommitted_derivation());
         }
         cancellation.disarm();
         Ok(match completed {
@@ -310,5 +309,37 @@ impl LocalDirectEffectRunner {
                 Some(*failure.call_record),
             ),
         })
+    }
+}
+
+/// Keep owner refusals typed across the transport's reservation callback.
+fn reservation_refusal(error: lash_durable::DurableError) -> RuntimeEffectControllerError {
+    let message = error.to_string();
+    match error {
+        lash_durable::DurableError::RevisionConflict {
+            actor,
+            epoch,
+            expected,
+            actual,
+        } => {
+            let mut refusal = RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::OwnerRevisionConflict,
+                message,
+            );
+            refusal.cause = Some(crate::RuntimeErrorCause::OwnerRevisionConflict(Box::new(
+                crate::OwnerRevisionConflict {
+                    actor: actor.as_str().to_owned(),
+                    epoch: epoch.0,
+                    expected: expected.0,
+                    actual: actual.0,
+                },
+            )));
+            refusal
+        }
+        lash_durable::DurableError::OwnershipLost(_) => RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::SessionExecutionLeaseLost,
+            message,
+        ),
+        _ => RuntimeEffectControllerError::new(crate::RuntimeErrorCode::StoreCommitFailed, message),
     }
 }

@@ -37,10 +37,6 @@
 //!   record's range, before `lashctl finalize`) fails every pass alike; the
 //!   session parks at the activation-loop budget with the turn still open,
 //!   and the run does not end refused.
-//! - **Owner-cached head (FIG-5207):** when another writer moves the session
-//!   head while the turn runs, the head commit over the head the owner
-//!   cached is refused once, the cache is evicted, and the turn commits over
-//!   the moved head.
 //! - **Queued withdraw (FIG-5262):** a host's cancel of a second input,
 //!   queued behind the running turn, answers `Withdrawn`, and that input
 //!   never runs.
@@ -134,8 +130,7 @@ use lash_durable::domain::{
 };
 use lash_durable::runner::Activation;
 use lash_durable::{
-    ActorKey, ActorState, CommitLabel, DomainRefusal, DomainWrite, DurableError, DurableStore,
-    MailTx,
+    ActorKey, ActorState, CommitLabel, DomainWrite, DurableError, DurableStore, MailTx,
 };
 use lash_durable_test::{
     Cut, Fault, Matrix, Scenario, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire, WriteKind,
@@ -186,9 +181,6 @@ enum Mode {
     /// The first model call requests an `AfterStep` cancel of the turn, then
     /// answers "again", which would call the model a second time.
     AfterStepWhileStreaming,
-    /// Another writer moves the session head while the second model call
-    /// streams its first attempt.
-    HeadMovesUnderTheTurn,
     /// A second input waits behind the turn; the turn's first model call
     /// has the host cancel it, then the turn runs as [`Mode::Plain`].
     QueuedCancel,
@@ -397,8 +389,6 @@ struct Seen {
     /// Calls that requested the cancel, and how many of them answered.
     cancel_requests: usize,
     answered_after_request: usize,
-    /// The head revisions another writer moved the head from and to.
-    moved: Option<(u64, u64)>,
     /// The input the host cancels, as the store accepted it.
     queued: Option<lash_core::InputId>,
     /// What the host's cancel of the queued input answered.
@@ -487,7 +477,6 @@ impl TurnServices for L3Services {
             Mode::Plain
             | Mode::CancelWhileStreaming
             | Mode::AfterStepWhileStreaming
-            | Mode::HeadMovesUnderTheTurn
             | Mode::QueuedCancel
             | Mode::CancelAtAdmission
             | Mode::MaterialLost
@@ -757,24 +746,6 @@ impl TurnDrive for L3Drive {
             }
             None => None,
         };
-        if self.services.mode == Mode::HeadMovesUnderTheTurn && second && attempt == 1 {
-            let backend = self.services.backend();
-            let from = SessionHead::load(&backend, &session())
-                .await
-                .expect("the head loads")
-                .revision();
-            let to = move_head(
-                &backend,
-                "l3-other-writer",
-                vec![session_message(
-                    "l3-other-note",
-                    MessageRole::User,
-                    "a note another writer committed while the turn ran",
-                )],
-            )
-            .await;
-            self.services.seen.lock_recover().moved = Some((from, to));
-        }
         // The attempt goes through the runtime's own attempt loop, which
         // fills the template's slots and hands the provider the wire.
         let sent = slots::send_attempt(&self.services, &request, send).await?;
@@ -1220,7 +1191,6 @@ impl Scenario for L3 {
         match self.mode {
             Mode::Plain
             | Mode::ShortDeadline
-            | Mode::HeadMovesUnderTheTurn
             | Mode::Slots
             | Mode::AdapterSlots
             | Mode::SlotHold => {
@@ -1286,10 +1256,6 @@ impl Scenario for L3 {
             }
         }
 
-        if self.mode == Mode::HeadMovesUnderTheTurn {
-            let backend = self.backend.lock_recover().clone().expect("the backend");
-            violations.extend(head_moved_laws(&backend, &trace, &seen).await);
-        }
         let image = self.image.lock_recover().clone();
         if let Some(image) = image {
             violations.extend(slots::delivery_laws(&seen, &image));
@@ -1508,52 +1474,6 @@ async fn withdraw_or_cancel_laws(
         None if withdrawn => violations
             .push("a cancel sent after the admission left the store withdrew its input".to_owned()),
         _ => {}
-    }
-    violations
-}
-
-/// FIG-5207: the turn's head commit over the head its owner cached is
-/// refused once the head moved; the owner evicts the head, reloads it, and
-/// the turn commits over the moved head. No commit over the stale head
-/// lands.
-async fn head_moved_laws(
-    backend: &Backend,
-    trace: &[lash_durable_test::Write],
-    seen: &Seen,
-) -> Vec<String> {
-    let Some((from, to)) = seen.moved else {
-        return vec!["owner cache: the head never moved under the turn".to_owned()];
-    };
-    let mut violations = Vec::new();
-    let refused: Vec<&lash_durable_test::Write> = trace
-        .iter()
-        .filter(|write| write.point.label == CommitLabel::TURN_COMMIT && !write.committed())
-        .collect();
-    let stale = refused
-        .iter()
-        .filter(|write| {
-            matches!(
-                &write.stored,
-                Stored::Refused(DurableError::Domain(DomainRefusal::HeadMoved { expected, .. }))
-                    if *expected == from
-            )
-        })
-        .count();
-    if stale != 1 || refused.len() != 1 {
-        violations.push(format!(
-            "owner cache: the head commit over the cached head {from} was refused {stale} times \
-             among {} refused head commits: {refused:?}",
-            refused.len()
-        ));
-    }
-    let head = SessionHead::load(backend, &session())
-        .await
-        .expect("the head loads")
-        .revision();
-    if head != to + 1 {
-        violations.push(format!(
-            "owner cache: the head is at {head}, not one past the moved head {to}"
-        ));
     }
     violations
 }
@@ -2095,45 +2015,6 @@ async fn a_restore_after_the_head_moved_rebuilds_the_window_the_turn_started_fro
         return;
     };
     restore_after_the_head_moved(Dialect::Postgres, Some(url)).await;
-}
-
-/// FIG-5207: a head commit refused because another writer moved the head
-/// under the turn evicts the owner's cached head, and the turn reloads it
-/// and commits over the moved head, never over the stale one.
-#[tokio::test]
-async fn a_head_commit_refused_on_a_moved_head_evicts_the_cached_head_and_the_turn_commits_over_the_moved_one()
- {
-    prove_on(
-        Matrix::new().faults(&[]),
-        Mode::HeadMovesUnderTheTurn,
-        &[],
-        Dialect::SqliteMemory,
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn a_head_commit_refused_on_a_moved_head_evicts_the_cached_head_and_the_turn_commits_over_the_moved_one_on_sqlite_file()
- {
-    prove_on(
-        Matrix::new().faults(&[]),
-        Mode::HeadMovesUnderTheTurn,
-        &[],
-        Dialect::SqliteFile,
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn a_head_commit_refused_on_a_moved_head_evicts_the_cached_head_and_the_turn_commits_over_the_moved_one_on_postgres()
- {
-    prove_on(
-        Matrix::new().faults(&[]),
-        Mode::HeadMovesUnderTheTurn,
-        &[],
-        Dialect::Postgres,
-    )
-    .await;
 }
 
 /// Send `session` its turn's first input, under source key `run`, claim its
