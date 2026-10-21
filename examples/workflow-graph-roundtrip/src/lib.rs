@@ -66,7 +66,7 @@ pub struct AppState {
 /// draft's document; lash holds its definition.
 #[derive(Clone)]
 struct SavedWorkflow {
-    package_set: Option<lash::package::CellPackages>,
+    package_set: Option<lash::package::WorkflowPackages>,
     version: u64,
     /// The workflow as the host edits it.
     draft: Draft,
@@ -95,7 +95,7 @@ pub(crate) enum Origin {
     Document,
     /// Imported from this source, with the captions it spells.
     Imported {
-        packages: lash::package::CellPackages,
+        packages: lash::package::WorkflowPackages,
         dialect: Dialect,
         text: String,
         map: Option<lash::workflow::document::SourceMap>,
@@ -399,7 +399,12 @@ impl AppState {
         };
         let selected = match existing_packages {
             Some(packages) => Ok(packages),
-            None => self.core.host_artifacts().cell_packages().await,
+            None => self
+                .core
+                .host_artifacts()
+                .cell_packages()
+                .await
+                .map(|packages| packages.declare_all()),
         };
         let packages = selected.as_ref().ok().cloned();
         let publication = match selected {

@@ -270,6 +270,10 @@ async fn payload(backend: &lash::Backend, text: &str) -> serde_json::Value {
             lash::package::lash_packages()
                 .expect("the shipped library assembles")
                 .digest(),
+            lash::package::lash_packages()
+                .expect("fixture packages")
+                .surface()
+                .selection(),
         )
         .start(serde_json::Map::new()),
     )
@@ -1018,6 +1022,10 @@ async fn payload_under(
         .expect("the gate answers the environment's set")
         .digest();
     serde_json::to_value(lash_vm_runtime::KernelProcessInput {
+        declared_packages: lash_vm_runtime::lash_packages()
+            .expect("fixture packages")
+            .surface()
+            .selection(),
         packages,
         document: identity,
         functions: document.manifest.functions.keys().copied().collect(),

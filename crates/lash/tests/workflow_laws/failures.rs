@@ -25,7 +25,7 @@ pub(super) struct Module {
     map: lash::workflow::document::SourceMap,
     pin: lash::process::HostArtifactPin,
     document: lash::workflow::document::DocumentBytes,
-    packages: lash::package::CellPackages,
+    packages: lash::package::WorkflowPackages,
     environment: lash::process::ProcessEnv,
 }
 
@@ -45,7 +45,8 @@ impl Module {
                 artifacts
                     .cell_packages()
                     .await
-                    .expect("the package gate answers"),
+                    .expect("the package gate answers")
+                    .declare_all(),
                 None,
             )
             .await

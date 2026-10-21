@@ -583,7 +583,7 @@ async fn sleeping_cell(deployment: &Holding) -> lash_core::llm::types::LlmRespon
             lash::workflow::document::SourceLanguage::TypeScript,
             &body,
             &environment,
-            selected,
+            selected.declare_all(),
             None,
         )
         .await
@@ -1255,6 +1255,10 @@ impl DynamicCalls {
             .await
             .map_err(|error| format!("publish the document: {error}"))?;
         let payload = serde_json::to_value(lash_vm_runtime::KernelProcessInput {
+            declared_packages: lash_vm_runtime::lash_packages()
+                .expect("fixture packages")
+                .surface()
+                .selection(),
             packages: lash_vm_runtime::lash_packages()
                 .expect("lash's packages")
                 .digest(),

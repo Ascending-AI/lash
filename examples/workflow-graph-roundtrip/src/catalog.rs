@@ -60,7 +60,7 @@ pub(crate) struct CatalogWorkflow {
     python: Option<ImportedTwin>,
 }
 pub(crate) struct ImportedTwin {
-    packages: lash::package::CellPackages,
+    packages: lash::package::WorkflowPackages,
     pub(crate) document: Document,
     pub(crate) entry: Name,
     dialect: Dialect,

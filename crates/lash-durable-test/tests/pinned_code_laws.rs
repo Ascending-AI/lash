@@ -127,6 +127,7 @@ async fn start(
         .await
         .expect("the document publishes");
     let payload = serde_json::to_value(lash_vm_runtime::KernelProcessInput {
+        declared_packages: packages.surface().selection(),
         document: identity,
         functions: document.manifest.functions.keys().copied().collect(),
         entry: lash::workflow::document::Name::new("worker"),

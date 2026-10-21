@@ -28,6 +28,7 @@ fn definition(
         value.document.identity(),
         value.entry.clone(),
         packages.digest(),
+        packages.surface().selection(),
     );
     let draft = lash::process::ProcessDefinitionDraft::new(
         lash::process::LASH_VM_ENGINE_KIND,
@@ -179,7 +180,7 @@ impl HostTriggers {
                 &lash::workflow::document::DocumentBytes::from(value.document),
                 &value.entry,
                 &environment,
-                packages,
+                packages.declare_all(),
                 None,
             )
             .await

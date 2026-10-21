@@ -3,7 +3,7 @@
 pub mod process;
 pub use process::*;
 pub mod package_gate;
-pub use package_gate::{CellPackages, PackageGate};
+pub use package_gate::{CellPackages, PackageGate, WorkflowPackages};
 pub mod backend;
 pub use backend::*;
 pub mod module_artifacts;

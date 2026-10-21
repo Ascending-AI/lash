@@ -241,7 +241,7 @@ pub mod package {
     /// The rows a node installs before it serves (FIG-6918): for a host
     /// that runs its own node runner.
     pub use crate::packages::install_rows;
-    pub use lash_execution_contracts::{CellPackages, PackageGate};
+    pub use lash_execution_contracts::{CellPackages, PackageGate, WorkflowPackages};
     pub use lash_kernel_package::*;
     /// lash's own packages as this build holds them, and why they did not
     /// assemble: a defect of the build.

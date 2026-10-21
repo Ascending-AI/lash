@@ -21,7 +21,7 @@ pub enum WorkflowImport {
     /// the document to keep them. `captions` are those the source spelled:
     /// they replace whatever the host held for this workflow.
     Imported {
-        packages: lash_execution_contracts::CellPackages,
+        packages: lash_execution_contracts::WorkflowPackages,
         document: DocumentBytes,
         source_map: SourceMap,
         source: String,
@@ -58,7 +58,7 @@ pub(crate) async fn import(
     workers: &lash_vm_client::service::Service,
     language: SourceLanguage,
     source: &str,
-    packages: lash_execution_contracts::CellPackages,
+    packages: lash_execution_contracts::WorkflowPackages,
     operations: &lash_kernel_dialect::Operations,
     checker: &lash_kernel_check::Environment<'_>,
     limits: Option<WorkflowSourceLimits>,
@@ -68,7 +68,11 @@ pub(crate) async fn import(
             language,
             source,
             operations,
-            lash_vm_client::service::SurfaceRef::of(packages.digest(), packages.stored_wire()),
+            lash_vm_client::service::SurfaceRef::of(
+                packages.packages().digest(),
+                packages.packages().stored_wire(),
+            ),
+            packages.declared().clone(),
             limits,
         )
         .await
@@ -76,11 +80,43 @@ pub(crate) async fn import(
         Ok(imported) => imported,
         Err(error) => return source_refusal(error),
     };
-    let bytes = DocumentBytes::from(document.clone());
-    let _admitted = match WorkflowDocument::admit(document, WorkflowDocumentEntry::Main, checker) {
-        Ok(document) => document,
-        Err(refusal) => return Ok(WorkflowImport::Admission(refusal)),
-    };
+    let reach = lash_kernel_check::requirements(&document, checker.functions);
+    {
+        let view = packages.view();
+        let members = view.undeclared(
+            &reach.functions,
+            reach.effects.iter().chain(reach.performs.keys()),
+        );
+        if !members.is_empty() {
+            return Ok(WorkflowImport::Admission(
+                WorkflowAdmissionRefusal::UndeclaredMembers { members },
+            ));
+        }
+        let catalog = lash_kernel_package::SelectedCatalog {
+            catalog: checker.functions,
+            packages: &view,
+        };
+        let mut restricted = lash_kernel_check::Environment::new(&catalog);
+        restricted.effects = checker
+            .effects
+            .iter()
+            .filter(|(effect, _)| {
+                lash_kernel_dialect::QualifiedOperation::from_effect(effect)
+                    .is_ok_and(|operation| view.permits_operation(&operation))
+            })
+            .map(|(effect, requirement)| (effect.clone(), requirement.clone()))
+            .collect();
+        restricted.internal = Box::new(|effect| (checker.internal)(effect));
+        let _admitted = match WorkflowDocument::admit(
+            document.clone(),
+            WorkflowDocumentEntry::Main,
+            &restricted,
+        ) {
+            Ok(document) => document,
+            Err(refusal) => return Ok(WorkflowImport::Admission(refusal)),
+        };
+    }
+    let bytes = DocumentBytes::from(document);
     Ok(WorkflowImport::Imported {
         packages,
         document: bytes,
@@ -94,6 +130,9 @@ pub(crate) fn source_refusal(
     error: lash_vm_client::service::SourceServiceError,
 ) -> crate::Result<WorkflowImport> {
     match error {
+        lash_vm_client::service::SourceServiceError::UndeclaredMembers { members } => Ok(
+            WorkflowImport::Admission(WorkflowAdmissionRefusal::UndeclaredMembers { members }),
+        ),
         lash_vm_client::service::SourceServiceError::Dialect(refusal) => {
             Ok(WorkflowImport::Refused(vec![WorkflowSourceDiagnostic {
                 code: refusal.code,
@@ -121,7 +160,16 @@ pub(crate) fn admit_read(
     document: lash_kernel_doc::Document,
     captions: Captions,
     checker: &lash_kernel_check::Environment<'_>,
+    packages: &lash_execution_contracts::WorkflowPackages,
 ) -> WorkflowImport {
+    let reach = lash_kernel_check::requirements(&document, checker.functions);
+    let members = packages.view().undeclared(
+        &reach.functions,
+        reach.effects.iter().chain(reach.performs.keys()),
+    );
+    if !members.is_empty() {
+        return WorkflowImport::Admission(WorkflowAdmissionRefusal::UndeclaredMembers { members });
+    }
     let bytes = DocumentBytes::from(document.clone());
     let _admitted = match WorkflowDocument::admit(document, WorkflowDocumentEntry::Main, checker) {
         Ok(document) => document,

@@ -288,7 +288,8 @@ impl KernelSteps {
                         core.host_artifacts()
                             .cell_packages()
                             .await
-                            .expect("the package gate answers"),
+                            .expect("the package gate answers")
+                            .declare_all(),
                         None,
                     )
                     .await
@@ -323,6 +324,10 @@ impl KernelSteps {
             .await
             .map_err(|error| format!("publish the document: {error}"))?;
         let payload = serde_json::to_value(lash_vm_runtime::KernelProcessInput {
+            declared_packages: lash_vm_runtime::lash_packages()
+                .expect("fixture packages")
+                .surface()
+                .selection(),
             packages: lash_vm_runtime::lash_packages()
                 .expect("lash's packages")
                 .digest(),

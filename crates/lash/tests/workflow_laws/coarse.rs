@@ -491,7 +491,8 @@ async fn launch(
                 artifacts
                     .cell_packages()
                     .await
-                    .expect("the package gate answers"),
+                    .expect("the package gate answers")
+                    .declare_all(),
                 None,
             )
             .await

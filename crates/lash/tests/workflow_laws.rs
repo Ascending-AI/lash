@@ -394,7 +394,8 @@ main { finish null }
                 artifacts
                     .cell_packages()
                     .await
-                    .expect("the package gate answers"),
+                    .expect("the package gate answers")
+                    .declare_all(),
                 None,
             )
             .await
@@ -492,7 +493,8 @@ async fn a_host_captures_exactly_the_published_entrys_environment() {
                 artifacts
                     .cell_packages()
                     .await
-                    .expect("the package gate answers"),
+                    .expect("the package gate answers")
+                    .declare_all(),
                 None,
             )
             .await
@@ -699,7 +701,8 @@ async fn a_document_is_published_read_edited_in_a_try_region_republished_and_run
                 artifacts
                     .cell_packages()
                     .await
-                    .expect("the package gate answers"),
+                    .expect("the package gate answers")
+                    .declare_all(),
                 None,
             )
             .await
@@ -766,7 +769,8 @@ async fn a_document_is_published_read_edited_in_a_try_region_republished_and_run
                 artifacts
                     .cell_packages()
                     .await
-                    .expect("the package gate answers"),
+                    .expect("the package gate answers")
+                    .declare_all(),
                 None,
             )
             .await
@@ -841,7 +845,8 @@ async fn stored_sleep_waits_name_the_sleep_site_and_each_loop_occurrence() {
                 artifacts
                     .cell_packages()
                     .await
-                    .expect("the package gate answers"),
+                    .expect("the package gate answers")
+                    .declare_all(),
                 None,
             )
             .await
@@ -1040,7 +1045,8 @@ main { finish null }
                 artifacts
                     .cell_packages()
                     .await
-                    .expect("the package gate answers"),
+                    .expect("the package gate answers")
+                    .declare_all(),
                 None,
             )
             .await
@@ -1160,7 +1166,8 @@ async fn a_fan_out_overlay_holds_one_row_for_each_elements_effect() {
                 artifacts
                     .cell_packages()
                     .await
-                    .expect("the package gate answers"),
+                    .expect("the package gate answers")
+                    .declare_all(),
                 None,
             )
             .await
@@ -1329,6 +1336,12 @@ async fn a_process_starts_another_entry_of_its_document_by_function_reference_an
         document.identity(),
         &Name::new("worker"),
         packages,
+        artifacts
+            .cell_packages()
+            .await
+            .unwrap()
+            .surface()
+            .selection(),
     )
     .expect("pure workflow id");
     let worker_id =
@@ -1343,7 +1356,8 @@ async fn a_process_starts_another_entry_of_its_document_by_function_reference_an
                 artifacts
                     .cell_packages()
                     .await
-                    .expect("the package gate answers"),
+                    .expect("the package gate answers")
+                    .declare_all(),
                 None,
             )
             .await
@@ -1522,7 +1536,8 @@ async fn a_process_parked_in_its_inner_loop_resumes_on_another_node_and_finishes
                 artifacts
                     .cell_packages()
                     .await
-                    .expect("the package gate answers"),
+                    .expect("the package gate answers")
+                    .declare_all(),
                 None,
             )
             .await
@@ -1622,7 +1637,8 @@ async fn a_sealed_env_naming_a_retired_component_builds_without_it_and_resumes()
                 artifacts
                     .cell_packages()
                     .await
-                    .expect("the package gate answers"),
+                    .expect("the package gate answers")
+                    .declare_all(),
                 None,
             )
             .await
@@ -1712,19 +1728,22 @@ fn workflow_import_future_is_send() {
 
     let _: fn(&lash::process::HostArtifacts, &lash::process::ProcessEnv) =
         |artifacts, environment| {
-            assert_send(artifacts.import_workflow(
-                lash::workflow::document::SourceLanguage::Python,
-                "async def main():\n    return None\n",
-                environment,
-                {
-                    let held = lash::package::lash_packages().unwrap();
-                    lash::package::CellPackages::held(&held)
-                },
-                Some(lash::dialect::workflow::WorkflowSourceLimits {
-                    max_bytes: 1024,
-                    max_nesting: 16,
-                }),
-            ));
+            assert_send(
+                artifacts.import_workflow(
+                    lash::workflow::document::SourceLanguage::Python,
+                    "async def main():\n    return None\n",
+                    environment,
+                    {
+                        let held = lash::package::lash_packages().unwrap();
+                        lash::package::CellPackages::held(&held)
+                    }
+                    .declare_all(),
+                    Some(lash::dialect::workflow::WorkflowSourceLimits {
+                        max_bytes: 1024,
+                        max_nesting: 16,
+                    }),
+                ),
+            );
         };
 }
 
@@ -1760,7 +1779,8 @@ async fn typescript_and_python_modules_share_one_entry_contract() {
                     artifacts
                         .cell_packages()
                         .await
-                        .expect("the package gate answers"),
+                        .expect("the package gate answers")
+                        .declare_all(),
                     None,
                 )
                 .await
@@ -1906,6 +1926,11 @@ async fn typescript_import_reports_missing_tools_as_admission_refusals() {
             lash::dialect::SourceFormat::TypeScriptV1,
             &document,
             &environment(true),
+            core.host_artifacts()
+                .cell_packages()
+                .await
+                .unwrap()
+                .declare_all(),
         )
         .await
         .expect("import answers")

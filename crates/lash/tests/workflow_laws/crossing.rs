@@ -102,7 +102,8 @@ async fn a_function_a_process_ships_runs_from_its_own_document_as_it_was() {
             artifacts
                 .cell_packages()
                 .await
-                .expect("the package gate answers"),
+                .expect("the package gate answers")
+                .declare_all(),
             None,
         )
         .await

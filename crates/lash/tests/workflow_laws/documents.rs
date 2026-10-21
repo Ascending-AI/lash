@@ -110,7 +110,8 @@ async fn a_running_process_draws_its_view_after_its_pin_and_helper_release_are_g
                 artifacts
                     .cell_packages()
                     .await
-                    .expect("the package gate answers"),
+                    .expect("the package gate answers")
+                    .declare_all(),
                 None,
             )
             .await
@@ -149,7 +150,8 @@ async fn a_running_process_draws_its_view_after_its_pin_and_helper_release_are_g
                 artifacts
                     .cell_packages()
                     .await
-                    .expect("the package gate answers"),
+                    .expect("the package gate answers")
+                    .declare_all(),
                 None,
             )
             .await
@@ -250,7 +252,7 @@ async fn an_unpublished_import_draws_from_shipped_declarations_and_refuses_a_cor
         .import_workflow(
             lash::workflow::document::SourceLanguage::TypeScript,
             "export async function digest(items: string[]) { const out = items.map((item) => item); return out; }",
-            &environment, artifacts.cell_packages().await.expect("the package gate answers"),
+            &environment, artifacts.cell_packages().await.expect("the package gate answers").declare_all(),
             None,
         )
         .await
@@ -344,7 +346,8 @@ async fn a_publication_holds_its_checked_source_map_and_refuses_one_that_does_no
                     artifacts
                         .cell_packages()
                         .await
-                        .expect("the package gate answers"),
+                        .expect("the package gate answers")
+                        .declare_all(),
                     None,
                 )
                 .await
@@ -391,7 +394,8 @@ async fn a_publication_holds_its_checked_source_map_and_refuses_one_that_does_no
                     artifacts
                         .cell_packages()
                         .await
-                        .expect("the package gate answers"),
+                        .expect("the package gate answers")
+                        .declare_all(),
                     Some((&map, "other source"))
                 )
                 .await
@@ -410,7 +414,8 @@ async fn a_publication_holds_its_checked_source_map_and_refuses_one_that_does_no
                     artifacts
                         .cell_packages()
                         .await
-                        .expect("the package gate answers"),
+                        .expect("the package gate answers")
+                        .declare_all(),
                     Some((&map, &printed.source))
                 )
                 .await
@@ -436,7 +441,8 @@ async fn a_publication_holds_its_checked_source_map_and_refuses_one_that_does_no
                     artifacts
                         .cell_packages()
                         .await
-                        .expect("the package gate answers"),
+                        .expect("the package gate answers")
+                        .declare_all(),
                     Some((&stray, &printed.source))
                 )
                 .await
@@ -473,7 +479,8 @@ async fn a_publication_holds_its_checked_source_map_and_refuses_one_that_does_no
                 artifacts
                     .cell_packages()
                     .await
-                    .expect("the package gate answers"),
+                    .expect("the package gate answers")
+                    .declare_all(),
                 Some((&map, &printed.source)),
             )
             .await
@@ -522,7 +529,8 @@ async fn a_host_runs_opaque_document_bytes_without_json() {
                 artifacts
                     .cell_packages()
                     .await
-                    .expect("the package gate answers"),
+                    .expect("the package gate answers")
+                    .declare_all(),
                 None,
             )
             .await
@@ -575,7 +583,8 @@ async fn a_publication_acknowledges_admission_and_reads_its_pinned_document() {
                 artifacts
                     .cell_packages()
                     .await
-                    .expect("the package gate answers"),
+                    .expect("the package gate answers")
+                    .declare_all(),
                 None,
             )
             .await
@@ -677,7 +686,8 @@ async fn host_document_bytes_refuse_tampering_and_wrong_grammar_typed() {
                 artifacts
                     .cell_packages()
                     .await
-                    .expect("the package gate answers"),
+                    .expect("the package gate answers")
+                    .declare_all(),
                 None,
             )
             .await

@@ -136,3 +136,42 @@ pub trait PackageGate: Send + Sync {
     /// live survey or the stored surface is unavailable.
     async fn writable(&self) -> Result<CellPackages, crate::RuntimeEffectControllerError>;
 }
+
+/// A workflow's source surface and the packages/operations its host attaches.
+/// Unlike a cell, a workflow has no implicit whole-set attachment.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkflowPackages {
+    packages: CellPackages,
+    declared: lash_kernel_package::PackageSelection,
+}
+
+impl WorkflowPackages {
+    pub fn packages(&self) -> &CellPackages {
+        &self.packages
+    }
+    pub fn declared(&self) -> &lash_kernel_package::PackageSelection {
+        &self.declared
+    }
+    pub fn view(&self) -> lash_kernel_package::SelectedPackages<'_> {
+        lash_kernel_package::SelectedPackages::new(self.packages.surface(), &self.declared)
+    }
+}
+
+impl CellPackages {
+    /// Attach exactly `declared` to a workflow written under this surface.
+    /// The declaration is neither expanded nor reduced.
+    pub fn declare(&self, declared: lash_kernel_package::PackageSelection) -> WorkflowPackages {
+        WorkflowPackages {
+            packages: self.clone(),
+            declared,
+        }
+    }
+}
+
+impl CellPackages {
+    /// Explicitly attach every package and operation of this surface.
+    /// Hosts wanting a narrower workflow use `declare` instead.
+    pub fn declare_all(&self) -> WorkflowPackages {
+        self.declare(self.surface.selection())
+    }
+}

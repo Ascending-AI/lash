@@ -11,7 +11,8 @@ parse a source language to do any of this.
 The [host-package guide](host-packages.md) explains the operations and code
 a document can call, their installation, and the identities a published or
 parked workflow retains. New cells select one dependency-closed package
-set; published workflows retain their admitted function identities.
+set; workflow definitions record an explicit package/operation declaration
+and retain their admitted function identities.
 
 [`examples/workflow-graph-roundtrip`](../examples/workflow-graph-roundtrip/README.md)
 is a host built this way, and the code below is the shape of its backend.
@@ -387,7 +388,7 @@ who may create or run a workflow from an id.
 | --- | --- | --- |
 | `Site` | Where a node sits in one document | One document. An insertion moves the statements after it. |
 | `DocumentId` | The content identity of a document | Forever; equal content is the same id. |
-| The definition id | The published definition | Forever; equal content and entry is the same id. |
+| The definition id | The published definition | Forever; equal document, entry, source set and declaration is the same id. |
 
 Never match nodes across two documents by site. Each applied transaction
 answers a `Correspondence` from its base to the result: one `Survivor` per
@@ -416,7 +417,8 @@ editor; a host that edited one converts `draft.document().clone()` to
 
 ```rust,ignore
 let pin = HostArtifactPin::mint();
-let packages = core.host_artifacts().cell_packages().await?;
+let offered = core.host_artifacts().cell_packages().await?;
+let packages = offered.declare(declared); // the host's explicit package/operation map
 match core
     .host_artifacts()
     .publish_workflow(
@@ -891,17 +893,72 @@ diagnostic, and the document stays readable, editable, publishable and
 runnable.
 
 `HostArtifacts::import_workflow(language, source, &environment, packages, limits).await`
-takes the gate's `CellPackages` and a whole workflow module in TypeScript or Python
+takes `WorkflowPackages`, made by the host with
+`cell_packages.declare(selection)`, and a whole workflow module in TypeScript or Python
 (`SourceLanguage::TypeScript` or `SourceLanguage::Python`) and the
 `ProcessEnv` you pass to `workflow_environment` and `publish_workflow`. Lash
 builds the dialect environment from the operations that environment admits from
 the process components it names and the selected package view; the
 worker lowers the source, and lash admits the document. Obtain `packages` once
-from `HostArtifacts::cell_packages`; keep the `packages` returned by an imported
+from `HostArtifacts::cell_packages`, then explicitly attach packages and their
+operations with `declare`; `declare_all()` explicitly chooses the whole surface.
+Keep the `WorkflowPackages` returned by an imported
 workflow and pass it to `publish_workflow` after editing. It runs no effect,
 publishes nothing and links no parser into your process. `limits`
 (`lash::dialect::workflow::WorkflowSourceLimits`) narrows the dialect's source
 policy; `None` keeps its standard one.
+
+A host's `workflows.create` tool can accept only `{code}`. Its handler lowers
+for inspection over the offered surface, derives typed
+`graph::requirements(&document, offered.catalog().as_ref())`, then attaches exactly
+the packages whose `SnapshotPackage::ids()` intersect `requirements.functions`
+and the operations named by `requirements.effects` and
+`requirements.performs.keys()`. It publishes with
+`cell_packages.declare(declared)`. This is host policy: **derive from the
+document's requirements, declare that set**. Core accepts the declaration as
+written, preserves unused attachments and refuses all undeclared members with
+`WorkflowAdmissionRefusal::UndeclaredMembers { members }`.
+The model never sees or chooses packages. See the
+[compiled certification handler](../crates/lash/src/testing/plugin_harness/certification/workflows_create.rs)
+and the [TypeScript and Python dataframe workflows](host-packages.md#a-dataframe-pipeline-in-two-dialects)
+for both dialects using this pattern. The host selects the source language;
+the model-facing schema and description contain only code.
+
+For example, the same code-only tool can receive this TypeScript workflow:
+
+```ts
+export async function rows(text: string) {
+  return await dataframe.DataQuanta.readText(text).limit(5).collectRows();
+}
+```
+
+Or this Python workflow, with the host configured for Python:
+
+```python
+async def rows(text: str):
+    return await dataframe.DataQuanta.read_text(text).limit(5).collect_rows()
+```
+
+Both use the [dataframe fixture](../crates/lash-kernel-package/src/testing/dataframe.surface).
+The handler derives their language/kernel function requirements and attaches
+`dataframe.run`; it does not attach `dataframe.explain`, which neither program
+performs. The host's publication call is the same in both cases:
+
+```rust,ignore
+let required = lash::workflow::graph::requirements(&document, offered.catalog().as_ref());
+// Project required.functions through surface package ids; add canonical
+// operations from required.effects and required.performs.keys().
+let packages = offered.declare(declared);
+artifacts.publish_workflow(&pin, &DocumentBytes::from(document), &entry,
+    &process_environment, packages, Some((&map, &code))).await?;
+```
+
+Stored definitions and their start inputs require `declared_packages`.
+The source set's digest identifies the installed snapshot; the declaration
+restricts its code and operations for this definition. A later install that
+changes only undeclared packages leaves linking and resume unchanged. A
+successor is checked against its explicit declaration, and adopting code
+still refuses changed operation contracts with `operation_contract_changed`.
 
 Both dialects implement one workflow contract (`lash::dialect::workflow`):
 
@@ -927,10 +984,11 @@ Import returns opaque `DocumentBytes`; select an entry when publishing them.
 Decode explicitly with `to_document()` when you need to inspect the entries.
 
 Printed source reads back through
-`HostArtifacts::import_exported_workflow(source, format, &base, &environment)`,
+`HostArtifacts::import_exported_workflow(source, format, &base, &environment, packages)`,
 where `base` is the stored Document it was printed from. The source carries
 only code; the manifest, entries, helper identities and renames come from
-`base`, and the result is admitted against `environment`. An edit the reader
+`base`, and the result is admitted against `environment` and the required
+package declaration. An edit the reader
 has no exact inverse for is a typed refusal naming the construct.
 
 `WorkflowImport::Imported { document, source_map, source, captions }` carries the

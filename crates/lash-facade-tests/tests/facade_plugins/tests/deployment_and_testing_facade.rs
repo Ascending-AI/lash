@@ -115,7 +115,8 @@ async fn definition_args_checks_partial_and_complete_inputs_without_starting() {
             core.host_artifacts()
                 .cell_packages()
                 .await
-                .expect("the package gate answers"),
+                .expect("the package gate answers")
+                .declare_all(),
             None,
         )
         .await
@@ -309,7 +310,8 @@ async fn a_saved_definition_start_read_fault_is_an_outer_store_error() {
             core.host_artifacts()
                 .cell_packages()
                 .await
-                .expect("the package gate answers"),
+                .expect("the package gate answers")
+                .declare_all(),
             None,
         )
         .await

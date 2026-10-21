@@ -247,6 +247,7 @@ async fn a_start_is_judged_by_the_declarations_of_the_set_it_was_linked_under() 
         lash_kernel_doc::parse_document("kernel 1\nnumbers float\nmain { }").expect("a document");
     let start = |packages| {
         serde_json::to_value(crate::KernelProcessInput {
+            declared_packages: sets.writer.surface().selection(),
             document: document.identity(),
             functions: BTreeSet::new(),
             entry: lash_kernel_doc::Name::new("work"),

@@ -17,6 +17,7 @@ mod install;
 mod lash;
 mod package;
 mod refusal;
+mod selection;
 mod set;
 mod shape;
 pub mod shipped_display;
@@ -42,6 +43,7 @@ pub use lash_kernel_doc::{
 };
 pub use package::{ArtifactKey, Code, Origin, Package, PackageDisplay, PackageHeader, Root};
 pub use refusal::{Declared, NameRole, PackageRefusal, SetHolds};
+pub use selection::{PackageSelection, SelectedCatalog, SelectedPackages};
 pub use set::PackageSet;
 pub use shape::STALE_VALUE;
 pub use snapshot::{

@@ -47,7 +47,7 @@ impl KernelInlineStarts {
         lash_execution_contracts::plugin_error::PluginError,
     > {
         let engine = &self.engine;
-        let (_, functions) = engine.linked_packages(packages).await.map_err(|message| {
+        let (surface, functions) = engine.linked_packages(packages).await.map_err(|message| {
             lash_execution_contracts::plugin_error::PluginError::Session(format!(
                 "the package surface a start is linked under is not read: {message}"
             ))
@@ -89,6 +89,7 @@ impl KernelInlineStarts {
             identity,
             value.entry,
             packages,
+            surface.selection(),
         ))
         .map_err(refused)?;
         Ok((

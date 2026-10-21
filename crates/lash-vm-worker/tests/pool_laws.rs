@@ -2025,6 +2025,10 @@ fn authored_workflow_import_is_worker_owned_and_preserves_source_policy() {
                 source,
                 &environment,
                 service::SurfaceRef::held(lash_vm_releases::lash_packages().unwrap().digest()),
+                lash_vm_releases::lash_packages()
+                    .unwrap()
+                    .surface()
+                    .selection(),
                 limits(1024),
             )
             .await
@@ -2036,6 +2040,10 @@ fn authored_workflow_import_is_worker_owned_and_preserves_source_policy() {
                 source,
                 &environment,
                 service::SurfaceRef::held(lash_vm_releases::lash_packages().unwrap().digest()),
+                lash_vm_releases::lash_packages()
+                    .unwrap()
+                    .surface()
+                    .selection(),
                 limits(1),
             )
             .await;
@@ -2049,6 +2057,10 @@ fn authored_workflow_import_is_worker_owned_and_preserves_source_policy() {
                 "export const broken = ;",
                 &environment,
                 service::SurfaceRef::held(lash_vm_releases::lash_packages().unwrap().digest()),
+                lash_vm_releases::lash_packages()
+                    .unwrap()
+                    .surface()
+                    .selection(),
                 limits(1024),
             )
             .await;

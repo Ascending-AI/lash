@@ -33,6 +33,16 @@ pub(crate) async fn import_source(
     let current = state.current();
     check_version(request.version, current.version)?;
     let (document, map, captions, packages) = if let Some(format) = request.format {
+        let packages = match current.package_set.clone() {
+            Some(packages) => packages,
+            None => state
+                .core
+                .host_artifacts()
+                .cell_packages()
+                .await
+                .map_err(|error| ErrorResponse::invalid("packages", error))?
+                .declare_all(),
+        };
         let read = state
             .core
             .host_artifacts()
@@ -42,6 +52,7 @@ pub(crate) async fn import_source(
                 current.draft.document(),
                 &runtime::environment()
                     .map_err(|error| ErrorResponse::invalid("environment", error))?,
+                packages.clone(),
             )
             .await
             .map_err(|error| ErrorResponse::invalid("source_read", error))?;
@@ -52,15 +63,7 @@ pub(crate) async fn import_source(
                     .map_err(|error| ErrorResponse::invalid("document_bytes", error))?,
                 None,
                 captions,
-                match current.package_set {
-                    Some(packages) => packages,
-                    None => state
-                        .core
-                        .host_artifacts()
-                        .cell_packages()
-                        .await
-                        .map_err(|error| ErrorResponse::invalid("packages", error))?,
-                },
+                packages,
             ),
             other => {
                 return Err(ErrorResponse::invalid(
@@ -125,7 +128,7 @@ pub(crate) async fn import(
         Document,
         Option<SourceMap>,
         Captions,
-        lash::package::CellPackages,
+        lash::package::WorkflowPackages,
     ),
     ErrorResponse,
 > {
@@ -140,7 +143,8 @@ pub(crate) async fn import(
             core.host_artifacts()
                 .cell_packages()
                 .await
-                .map_err(|error| ErrorResponse::invalid("packages", error))?,
+                .map_err(|error| ErrorResponse::invalid("packages", error))?
+                .declare_all(),
             None,
         )
         .await

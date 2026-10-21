@@ -103,7 +103,7 @@ pub struct WorkflowEnvironmentRequest {
 /// opaque bytes once; admission shares that decoded value with publication.
 #[derive(Clone, Debug)]
 pub struct WorkflowAdmissionRequest {
-    pub packages: lash_execution_contracts::CellPackages,
+    pub packages: lash_execution_contracts::WorkflowPackages,
     pub document: IdentifiedDocument,
     /// The entry the definition starts.
     pub entry: Name,
@@ -290,6 +290,23 @@ impl lash_execution_contracts::process::ProcessDocumentProvider for KernelDocume
             }
         };
         let document = read.document;
+        let (surface, functions) = self
+            .engine
+            .linked_packages(definition.packages)
+            .await
+            .map_err(unresolvable)?;
+        let selected =
+            lash_kernel_package::SelectedPackages::new(&surface, &definition.declared_packages);
+        let reach = lash_kernel_check::requirements(document.document(), functions.as_ref());
+        let members = selected.undeclared(
+            &reach.functions,
+            reach.effects.iter().chain(reach.performs.keys()),
+        );
+        if !members.is_empty() {
+            return Err(unresolvable(
+                WorkflowAdmissionRefusal::UndeclaredMembers { members }.to_string(),
+            ));
+        }
         if !document
             .document()
             .manifest
@@ -453,10 +470,29 @@ impl lash_execution_contracts::process::ProcessDocumentProvider for KernelDocume
         let identified = request.document;
         // A document written under a stored set is checked, and held, against
         // that set's definitions.
-        let functions = Arc::clone(request.packages.catalog());
+        let functions = Arc::clone(request.packages.packages().catalog());
+        let selected = request.packages.view();
+        let reach = lash_kernel_check::requirements(identified.document(), functions.as_ref());
+        let members = selected.undeclared(
+            &reach.functions,
+            reach.effects.iter().chain(reach.performs.keys()),
+        );
+        if !members.is_empty() {
+            return refused(WorkflowAdmissionRefusal::UndeclaredMembers { members });
+        }
+        let catalog = lash_kernel_package::SelectedCatalog {
+            catalog: functions.as_ref(),
+            packages: &selected,
+        };
         let admission = {
-            let mut environment = Environment::new(functions.as_ref());
-            environment.effects = requirements(boundary.operations());
+            let mut environment = Environment::new(&catalog);
+            environment.effects = requirements(boundary.operations())
+                .into_iter()
+                .filter(|(effect, _)| {
+                    lash_kernel_dialect::QualifiedOperation::from_effect(effect)
+                        .is_ok_and(|operation| selected.permits_operation(&operation))
+                })
+                .collect();
             environment.internal = Box::new(|effect| {
                 boundary.effect(effect).is_some_and(|(_, offered)| {
                     offered.visibility == lash_kernel_dialect::Visibility::Internal
@@ -483,7 +519,8 @@ impl lash_execution_contracts::process::ProcessDocumentProvider for KernelDocume
             document.document(),
             document.identity(),
             request.entry.clone(),
-            request.packages.digest(),
+            request.packages.packages().digest(),
+            request.packages.declared().clone(),
         ))
         .map_err(|error| unresolvable(error.to_string()))?;
         // Only an admitted document is held, with the declarations it was

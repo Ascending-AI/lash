@@ -80,6 +80,48 @@ cannot be taken as function values. Ordinary lexical bindings shadow package
 roots; a dotted call that would shadow an offered operation is refused with
 the binding and operation named, so the author can rename the binding.
 
+## Attach packages to a workflow
+
+A cell keeps the complete set chosen for its round. A workflow definition
+instead records the host's explicit package and operation declaration.
+`CellPackages::declare(selection)` makes a `WorkflowPackages`; `selection` is
+`PackageSelection`, a map from canonical `PackagePath` to a set of operation
+`Segment`s. A key attaches that package's code; its operation set attaches
+exactly those operations, including internal operations reached through bodies.
+Dependencies, including the language and kernel functions the code reaches,
+are declared explicitly. `declare_all()` is an explicit host choice for the
+whole offered surface. Import and publication have no implicit all-packages
+choice and never shrink or expand what the host declared.
+
+The TypeScript and Python dataframe workflows above use the same handler
+pattern: **derive from the document's requirements, declare that set**.
+The model writes code and calls `workflows.create({code})`; its schema and
+description say nothing about packages. The host first inspects the code
+through its worker over the offered surface, then reads
+`lash::workflow::graph::requirements(&document, offered.catalog().as_ref())`.
+For every reached function, the surface's `SnapshotPackage::ids()` identifies
+its packages; `requirements.effects` and `requirements.performs.keys()` name
+the operations and their owning packages. The handler builds that map and
+passes `packages.declare(declared)` to publication. No name scraping or
+hard-coded dataframe list is needed. The compiled
+[`workflows.create` example](../crates/lash/src/testing/plugin_harness/certification/workflows_create.rs)
+implements that handler and checks both dialects.
+
+For example, a workflow that calls only `dataframe.col` attaches dataframe's
+code and no dataframe operations. A workflow that collects rows also attaches
+`dataframe.run`; one that explains a plan attaches `dataframe.explain`.
+Code reaching an omitted package, or a direct or body-performed operation
+outside its operation set, is refused with
+`WorkflowAdmissionRefusal::UndeclaredMembers { members }`. Every undeclared
+member is named. Publication stores the declaration as required configuration,
+and starts and resumes preserve it. Claims still use the code's derived hard
+requirements. Changing only an undeclared package cannot relink the retained
+definition or alter its continuation. Adoption and successor admission check
+the declared surface and retain the `operation_contract_changed` rule.
+
+Hosts that store this: stored workflow definitions gain a required declared-packages field.
+Old form: no field (linked against the cell's set). New form: an explicit declaration.
+
 ## Declare the package
 
 A `Package` has a path, a human-readable release label, exact dependency

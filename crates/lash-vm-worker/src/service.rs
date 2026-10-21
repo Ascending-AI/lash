@@ -116,29 +116,18 @@ pub(crate) fn perform(
             source,
             operations,
             packages,
+            declared_packages,
             limits,
-        } => {
-            let surface = surface_of(embedding, &packages)?;
-            let namespaces = match embedding.namespaces(operations, &surface) {
-                Ok(namespaces) => namespaces,
-                Err(refused) => return respond(&namespace_refused(refused)),
-            };
-            let environment = lash_kernel_dialect::Environment::new(surface.library(), &namespaces);
-            match import_module(embedding, language, &source, &environment, limits) {
-                None => Response::UnknownDialect {
-                    dialect: dialect_name(language).into(),
-                },
-                Some(Ok(lowered)) => Response::Lowered {
-                    document: lowered.document.body().to_vec(),
-                    source_map: lowered.source_map,
-                    written: lowered.written,
-                    captions: Some(lowered.captions),
-                    function_values: None,
-                    reads: Default::default(),
-                },
-                Some(Err(diagnostic)) => Response::DialectRefused(refusal(diagnostic)),
-            }
-        }
+        } => import_selected(
+            embedding,
+            language,
+            &source,
+            operations,
+            &packages,
+            &declared_packages,
+            limits,
+        )?,
+
         Request::Print {
             format,
             document,
@@ -527,5 +516,131 @@ mod tests {
             ));
             assert_eq!(READER_CALLS.replace(0), 1);
         }
+    }
+}
+
+/// Lower against the declaration. A failed lowering may inspect the full
+/// surface solely to report all undeclared requirements; that document is
+/// never returned or admitted.
+fn import_selected(
+    embedding: &Embedding,
+    language: SourceLanguage,
+    source: &str,
+    operations: lash_kernel_dialect::Operations,
+    packages: &lash_vm_client::service::SurfaceRef,
+    declared: &lash_kernel_package::PackageSelection,
+    limits: Option<WorkflowSourceLimits>,
+) -> Result<Response, PoolError> {
+    let surface = surface_of(embedding, packages)?;
+    let view = surface.view(embedding.packages().functions());
+    let selected = lash_kernel_package::SelectedPackages::new(view.surface(), declared);
+    let reserves = |root: &str| {
+        embedding
+            .dialects
+            .values()
+            .find_map(|package| package.front_end.reserves(root))
+    };
+    let permitted = operations
+        .iter()
+        .filter(|(operation, _)| selected.permits_operation(operation))
+        .map(|(operation, offered)| (operation.clone(), offered.clone()))
+        .collect();
+    let namespaces = lash_kernel_dialect::Namespaces::build(
+        &lash_kernel_dialect::Reserving {
+            view: &selected,
+            reserves: &reserves,
+        },
+        permitted,
+    )
+    .map_err(|error| PoolError::payload(PayloadKind::ServiceRequest, error))?;
+    let library = SelectedLibrary {
+        library: surface.library(),
+        packages: &selected,
+    };
+    let environment = lash_kernel_dialect::Environment::new(&library, &namespaces);
+    let lowered = import_module(embedding, language, source, &environment, limits);
+    match lowered {
+        None => Ok(Response::UnknownDialect {
+            dialect: dialect_name(language).into(),
+        }),
+        Some(Ok(lowered)) => {
+            let requirements =
+                lash_kernel_check::requirements(lowered.document.document(), surface.library());
+            let members = selected.undeclared(
+                &requirements.functions,
+                requirements
+                    .effects
+                    .iter()
+                    .chain(requirements.performs.keys()),
+            );
+            if !members.is_empty() {
+                return Ok(Response::UndeclaredMembers { members });
+            }
+            Ok(Response::Lowered {
+                document: lowered.document.body().to_vec(),
+                source_map: lowered.source_map,
+                written: lowered.written,
+                captions: Some(lowered.captions),
+                function_values: None,
+                reads: Default::default(),
+            })
+        }
+        Some(Err(diagnostic)) => {
+            let full_namespaces = match embedding.namespaces(operations, &surface) {
+                Ok(namespaces) => namespaces,
+                Err(refusal) => return Ok(namespace_refused(refusal)),
+            };
+            let full_environment =
+                lash_kernel_dialect::Environment::new(surface.library(), &full_namespaces);
+            if let Some(Ok(lowered)) =
+                import_module(embedding, language, source, &full_environment, limits)
+            {
+                let requirements =
+                    lash_kernel_check::requirements(lowered.document.document(), surface.library());
+                let members = selected.undeclared(
+                    &requirements.functions,
+                    requirements
+                        .effects
+                        .iter()
+                        .chain(requirements.performs.keys()),
+                );
+                if !members.is_empty() {
+                    return Ok(Response::UndeclaredMembers { members });
+                }
+            }
+            Ok(Response::DialectRefused(refusal(diagnostic)))
+        }
+    }
+}
+
+struct SelectedLibrary<'a> {
+    library: &'a dyn lash_kernel_dialect::Library,
+    packages: &'a lash_kernel_package::SelectedPackages<'a>,
+}
+impl lash_kernel_doc::FunctionCatalog for SelectedLibrary<'_> {
+    fn definition(
+        &self,
+        function: &lash_kernel_doc::FunctionId,
+    ) -> Option<&lash_kernel_doc::FunctionDefinition> {
+        self.packages
+            .permits_function(function)
+            .then(|| self.library.definition(function))
+            .flatten()
+    }
+    fn registered(
+        &self,
+        function: &lash_kernel_doc::FunctionId,
+    ) -> Option<&lash_kernel_doc::RegisteredFunction> {
+        self.packages
+            .permits_function(function)
+            .then(|| self.library.registered(function))
+            .flatten()
+    }
+}
+impl lash_kernel_dialect::Library for SelectedLibrary<'_> {
+    fn resolve(&self, name: &str) -> Option<lash_kernel_doc::FunctionId> {
+        self.library
+            .resolve(name)
+            .filter(|function| self.packages.permits_function(function))
     }
 }

@@ -61,6 +61,7 @@ pub enum Request {
         /// The gate's package surface whose names the module resolves
         /// against: the worker's own set, or a stored one sent whole.
         packages: SurfaceRef,
+        declared_packages: lash_kernel_package::PackageSelection,
         limits: Option<lash_kernel_dialect::workflow::WorkflowSourceLimits>,
     },
     /// Print `document` (its token body) in the selected generated format,
@@ -328,6 +329,9 @@ pub enum Response {
         captions: lash_kernel_doc::Captions,
     },
     DialectRefused(DialectRefusal),
+    UndeclaredMembers {
+        members: Vec<String>,
+    },
     /// The worker has no such dialect installed.
     UnknownDialect {
         dialect: String,

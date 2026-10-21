@@ -240,6 +240,10 @@ async fn payload(
         .await
         .expect("the document publishes");
     serde_json::to_value(lash_vm_runtime::KernelProcessInput {
+        declared_packages: lash_vm_runtime::lash_packages()
+            .expect("fixture packages")
+            .surface()
+            .selection(),
         packages: lash_vm_runtime::lash_packages()
             .expect("lash's packages")
             .digest(),

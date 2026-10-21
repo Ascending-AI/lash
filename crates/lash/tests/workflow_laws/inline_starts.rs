@@ -901,7 +901,8 @@ async fn a_declared_inline_start_realizes_once_across_a_crash_at_each_realizatio
                     artifacts
                         .cell_packages()
                         .await
-                        .expect("the package gate answers"),
+                        .expect("the package gate answers")
+                        .declare_all(),
                     None,
                 )
                 .await
@@ -1021,7 +1022,8 @@ async fn an_uncommitted_declared_inline_start_leaves_no_process_and_holds_nothin
                 artifacts
                     .cell_packages()
                     .await
-                    .expect("the package gate answers"),
+                    .expect("the package gate answers")
+                    .declare_all(),
                 None,
             )
             .await
@@ -1149,7 +1151,8 @@ async fn an_inline_start_past_the_value_or_batch_bound_publishes_and_starts_noth
                 artifacts
                     .cell_packages()
                     .await
-                    .expect("the package gate answers"),
+                    .expect("the package gate answers")
+                    .declare_all(),
                 None,
             )
             .await

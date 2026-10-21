@@ -207,6 +207,9 @@ pub enum WorkflowDocumentError {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum WorkflowAdmissionRefusal {
+    /// Every package function or operation reached outside the host's
+    /// explicit declaration, in canonical name order.
+    UndeclaredMembers { members: Vec<String> },
     /// The opaque host blob failed receipt validation. Nothing was admitted.
     Bytes(lash_kernel_doc::DocumentBytesRefusal),
     /// The checker refused the document, naming every fault at its site:
@@ -232,6 +235,7 @@ impl WorkflowAdmissionRefusal {
     /// For `Document`, inspect each nested `RefusalReason::code()`; multiple errors retain their detail.
     pub fn code(&self) -> &'static str {
         match self {
+            Self::UndeclaredMembers { .. } => "undeclared_members",
             Self::Bytes(_) => "bytes",
             Self::Document(_) => "document",
             Self::EntryEffects(_) => "entry_effects",
@@ -245,6 +249,9 @@ impl WorkflowAdmissionRefusal {
 impl std::fmt::Display for WorkflowAdmissionRefusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::UndeclaredMembers { members } => {
+                write!(f, "undeclared package members: {}", members.join(", "))
+            }
             Self::Bytes(refusal) => write!(f, "{refusal}"),
             Self::Document(refusal) => write!(f, "{refusal}"),
             Self::EntryEffects(refusal) => write!(f, "{refusal}"),

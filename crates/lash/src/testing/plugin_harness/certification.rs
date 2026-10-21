@@ -764,7 +764,12 @@ async fn attribution_law(
 }
 
 #[cfg(all(test, feature = "rlm"))]
+#[path = "certification/workflows_create.rs"]
+mod workflows_create;
+
+#[cfg(all(test, feature = "rlm"))]
 mod tests {
+    use super::workflows_create;
     use crate as lash;
     use lash::plugins::*;
     use lash::testing::*;
@@ -927,7 +932,7 @@ mod tests {
                     empty,
                     resolutions,
                     definition: definition("remote:send_email", "tools.send_email")?,
-                    workflow: definition("remote:workflows_create", "workflows.create")?,
+                    workflow: workflows_create::definition()?,
                 })),
             ),
         )))

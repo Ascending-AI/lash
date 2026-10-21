@@ -336,7 +336,9 @@ impl HostArtifacts {
     /// The answer carries the document, its source map, the source and the
     /// captions it spelled, for [`Self::publish_workflow`] to keep together; the opaque bytes retain
     /// every entry, available through an explicit typed read for editing.
-    /// Select an entry when publishing. Without `limits` the dialect's standard source policy
+    /// `packages` carries the host's required package/operation declaration.
+    /// Code reaching outside it is refused with `UndeclaredMembers`; no
+    /// attachment is selected implicitly. Select an entry when publishing. Without `limits` the dialect's standard source policy
     /// applies.
     ///
     /// The host supplies no dialect internals and links no parser: the
@@ -348,10 +350,13 @@ impl HostArtifacts {
         language: crate::workflow::document::SourceLanguage,
         source: &str,
         environment: &ProcessEnv,
-        packages: lash_execution_contracts::CellPackages,
+        packages: lash_execution_contracts::WorkflowPackages,
         limits: Option<crate::dialect::workflow::WorkflowSourceLimits>,
     ) -> Result<crate::workflow::WorkflowImport> {
-        let checked = match self.import_context(environment, packages.clone()).await? {
+        let checked = match self
+            .import_context(environment, packages.packages().clone())
+            .await?
+        {
             Ok(context) => context,
             Err(refused) => return Ok(refused),
         };
@@ -384,9 +389,10 @@ impl HostArtifacts {
         format: crate::dialect::SourceFormat,
         base: &crate::workflow::document::Document,
         environment: &ProcessEnv,
+        packages: lash_execution_contracts::WorkflowPackages,
     ) -> Result<crate::workflow::WorkflowImport> {
         let checked = match self
-            .import_context(environment, self.cell_packages().await?)
+            .import_context(environment, packages.packages().clone())
             .await?
         {
             Ok(context) => context,
@@ -404,6 +410,7 @@ impl HostArtifacts {
             document,
             captions,
             &checked.checker(),
+            &packages,
         ))
     }
 
@@ -454,6 +461,9 @@ impl HostArtifacts {
     /// it lists, and the descriptor of the selected entry. Other functions
     /// cross inline when passed to tools; they have no stored descriptors.
     ///
+    /// The definition records `packages.declared()` as written; its code
+    /// and operations link only against that declaration. Unused attachments
+    /// remain attached and code outside it is refused with `UndeclaredMembers`.
     /// The checker admits the document against `environment`, the
     /// environment a process of the definition would run under. No source
     /// is printed or parsed, no editor is needed, and nothing the document
@@ -478,7 +488,7 @@ impl HostArtifacts {
         document: &crate::workflow::document::DocumentBytes,
         entry: &crate::workflow::document::Name,
         environment: &ProcessEnv,
-        packages: lash_execution_contracts::CellPackages,
+        packages: lash_execution_contracts::WorkflowPackages,
         source: Option<(&crate::workflow::document::SourceMap, &str)>,
     ) -> Result<crate::workflow::WorkflowPublish> {
         use crate::workflow::{WorkflowPublication, WorkflowPublish};

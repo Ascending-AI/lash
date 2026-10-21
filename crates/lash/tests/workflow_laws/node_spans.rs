@@ -144,7 +144,8 @@ async fn publish_nodes(
                 artifacts
                     .cell_packages()
                     .await
-                    .expect("the package gate answers"),
+                    .expect("the package gate answers")
+                    .declare_all(),
                 None,
             )
             .await
@@ -337,7 +338,8 @@ async fn a_definition_start_attributes_loading_resolution_acquisition_and_claim_
             artifacts
                 .cell_packages()
                 .await
-                .expect("the package gate answers"),
+                .expect("the package gate answers")
+                .declare_all(),
             None,
         )
         .await

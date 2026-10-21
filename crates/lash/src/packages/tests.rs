@@ -268,7 +268,7 @@ async fn an_imported_definition_keeps_its_gate_set_and_runs_its_internal_body() 
             lash_kernel_doc::SourceLanguage::TypeScript,
             "export async function flow() { return await dataframe.execute(); }",
             &env,
-            chosen.clone(),
+            chosen.clone().declare_all(),
             None,
         )
         .await
@@ -279,7 +279,7 @@ async fn an_imported_definition_keeps_its_gate_set_and_runs_its_internal_body() 
     else {
         panic!("{imported:?}");
     };
-    assert_eq!(packages, chosen);
+    assert_eq!(packages.packages(), &chosen);
     let imported_document = document.to_document().unwrap();
     let old_id = old.code().ids()[old.code().position("dataframe.execute").unwrap()];
     assert!(imported_document.manifest.functions.contains_key(&old_id));

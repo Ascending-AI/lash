@@ -484,7 +484,8 @@ async fn publish_draft(State(host): State<Host>, Json(request): Json<PublishDraf
                 .host_artifacts()
                 .cell_packages()
                 .await
-                .map_err(api_error)?,
+                .map_err(api_error)?
+                .declare_all(),
             None,
         )
         .await

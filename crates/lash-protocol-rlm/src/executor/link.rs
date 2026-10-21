@@ -253,7 +253,12 @@ pub(super) async fn link_cell(
                 "this session's cells are written in `{dialect}`, and no worker has that dialect installed"
             )));
         }
-        Ok(Response::Printed(_) | Response::Read { .. } | Response::ToolCalls(_)) => {
+        Ok(
+            Response::Printed(_)
+            | Response::Read { .. }
+            | Response::ToolCalls(_)
+            | Response::UndeclaredMembers { .. },
+        ) => {
             return Err(Refused::Worker(Box::new(
                 lash_vm_client::PoolError::breach(
                     lash_vm_protocol::SequenceFault::UnexpectedServiceResponse,

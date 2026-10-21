@@ -38,6 +38,8 @@ pub struct KernelProcessInput {
     /// The package set the definition is linked under: the publishing or
     /// starting cell's, recorded at creation (FIG-6993).
     pub packages: lash_kernel_doc::PackageSetDigest,
+    /// Required host attachment, preserved as written across starts and resume.
+    pub declared_packages: lash_kernel_package::PackageSelection,
     pub document: DocumentId,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub functions: BTreeSet<FunctionId>,
@@ -61,6 +63,7 @@ impl KernelProcessInput {
     pub fn definition(&self) -> KernelProcessDefinition {
         KernelProcessDefinition {
             packages: self.packages,
+            declared_packages: self.declared_packages.clone(),
             document: self.document,
             functions: self.functions.clone(),
             entry: self.entry.clone(),
@@ -76,6 +79,8 @@ pub struct KernelProcessDefinition {
     /// The package set the definition is linked under: the publishing or
     /// starting cell's, recorded at creation (FIG-6993).
     pub packages: lash_kernel_doc::PackageSetDigest,
+    /// Required host attachment, preserved as written across starts and resume.
+    pub declared_packages: lash_kernel_package::PackageSelection,
     pub document: DocumentId,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub functions: BTreeSet<FunctionId>,
@@ -84,15 +89,18 @@ pub struct KernelProcessDefinition {
 
 impl KernelProcessDefinition {
     /// The definition of `entry` of `document`, whose identity is
-    /// `identity`, linked under `packages`: pure, from the document alone.
+    /// `identity`, with the host's explicit `declared_packages` attachment
+    /// under `packages`: pure, without selecting any configuration.
     pub fn of(
         document: &lash_kernel_doc::Document,
         identity: DocumentId,
         entry: Name,
         packages: lash_kernel_doc::PackageSetDigest,
+        declared_packages: lash_kernel_package::PackageSelection,
     ) -> Self {
         Self {
             packages,
+            declared_packages,
             document: identity,
             functions: document.manifest.functions.keys().copied().collect(),
             entry,
@@ -103,6 +111,7 @@ impl KernelProcessDefinition {
     pub fn start(&self, args: serde_json::Map<String, serde_json::Value>) -> KernelProcessInput {
         KernelProcessInput {
             packages: self.packages,
+            declared_packages: self.declared_packages.clone(),
             document: self.document,
             functions: self.functions.clone(),
             entry: self.entry.clone(),

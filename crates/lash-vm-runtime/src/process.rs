@@ -301,6 +301,7 @@ pub fn definition_draft(
 > {
     let mut value = serde_json::json!({
         "packages": definition.packages,
+        "declared_packages": definition.declared_packages,
         "document": definition.document,
         "entry": definition.entry,
     });
@@ -333,6 +334,7 @@ pub fn definition_of_entry(
     identity: DocumentId,
     function: &Name,
     packages: lash_kernel_doc::PackageSetDigest,
+    declared_packages: lash_kernel_package::PackageSelection,
 ) -> Result<serde_json::Value, String> {
     let signature = document.entries.get(function).ok_or_else(|| {
         format!("`{function}` is not an entry of the document, so no process starts from it")
@@ -342,6 +344,7 @@ pub fn definition_of_entry(
         identity,
         function.clone(),
         packages,
+        declared_packages,
     ))
     .map_err(|error| error.to_string())?;
     serde_json::to_value(lash_execution_contracts::process::ProcessDefinition::new(
@@ -645,6 +648,23 @@ impl KernelProcessEngine {
                 "the definition does not name the library functions document `{}` lists",
                 definition.document
             )));
+        }
+        let (surface, functions) = match self.linked_packages(definition.packages).await {
+            Ok(linked) => linked,
+            Err(message) => return Ok(Err(message)),
+        };
+        let selected =
+            lash_kernel_package::SelectedPackages::new(&surface, &definition.declared_packages);
+        let reach = lash_kernel_check::requirements(&document, functions.as_ref());
+        let members = selected.undeclared(
+            &reach.functions,
+            reach.effects.iter().chain(reach.performs.keys()),
+        );
+        if !members.is_empty() {
+            return Ok(Err(
+                lash_kernel_check::WorkflowAdmissionRefusal::UndeclaredMembers { members }
+                    .to_string(),
+            ));
         }
         Ok(match document.entries.get(&definition.entry).cloned() {
             Some(entry) => Ok((document, entry.signature)),
