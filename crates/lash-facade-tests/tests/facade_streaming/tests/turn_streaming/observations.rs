@@ -717,6 +717,11 @@ async fn trimmed_gap_replacement_cursor_preserves_unseen_auxiliary_event() -> Re
         .output()
         .await?;
     let head = live.published(1).await;
+    // The append notification precedes the node closing its publication
+    // window. Finish that delivery before trimming the commit: while the
+    // window is open a replacement cursor may still sit at the replay tail.
+    // Draining joins the node without refreshing the open session's resident.
+    core.drain().await.expect("the commit's publisher drained");
     lash_core::LiveReplayStore::publish(
         live.as_ref(),
         &session_id,
