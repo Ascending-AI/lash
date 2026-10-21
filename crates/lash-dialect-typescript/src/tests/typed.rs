@@ -232,11 +232,12 @@ fn a_float_in_a_template_is_spelled_as_javascript_spells_it() {
 /// what they give is a list the source can use in place.
 #[test]
 fn a_built_in_array_methods_new_array_is_a_list() {
-    let text = main_text("const xs = [1, 2]; const ys = xs.map((x) => x); ys.push(3);");
-    assert!(
-        !text.contains("ts.method.push") && !text.contains("ts.array.push"),
-        "{text}"
-    );
+    let source = "const xs = [1, 2]; const ys = xs.map((x) => x); ys.push(3);";
+    let text = main_text(source);
+    let lowered = super::lower(source).unwrap();
+    for helper in ["ts.member.push", "ts.array.push"] {
+        assert!(!calls_helper(&lowered.document, helper), "{helper}\n{text}");
+    }
     assert_eq!(
         finished(
             "const xs = [1, , 3]; const ys = xs.map((x) => x * 2); ys.push(8); \
@@ -707,12 +708,19 @@ fn plain_record_proofs_survive_text_keys_with_an_ordinary_prefix() {
        }\n\
        await control.finish(body());";
     let text = super::main_text_with_effects(source);
-    for refused in ["__lash_brand", "kind(", "ts.set", "ts.get_computed"] {
+    for refused in ["__lash_brand", "kind("] {
         assert!(!text.contains(refused), "{refused}\n{text}");
+    }
+    let lowered = super::lower_with_effects(source).unwrap();
+    for helper in ["ts.set", "ts.get_computed"] {
+        assert!(!calls_helper(&lowered.document, helper), "{helper}\n{text}");
     }
     let guarded = source.replace("const counts = {};", "const counts = opaque({});");
     let guarded = format!("function opaque(x) {{ return x; }} {guarded}");
-    assert!(super::main_text_with_effects(&guarded).contains("ts.get_computed"));
+    assert!(calls_helper(
+        &super::lower_with_effects(&guarded).unwrap().document,
+        "ts.get_computed"
+    ));
     assert_eq!(super::machine::end(source), super::machine::end(&guarded));
 }
 
@@ -788,7 +796,13 @@ fn plain_record_text_keys_that_may_name_a_member_keep_the_helper() {
          const key = 'to' + tail; const other = 'to' + 'X'; r[other] = 1; \
          return [typeof r[key], typeof r.toString, r[other]]; } await control.finish(body());";
     let text = super::main_text_with_effects(source);
-    assert!(text.contains("ts.get_computed"), "{text}");
+    assert!(
+        calls_helper(
+            &super::lower_with_effects(source).unwrap().document,
+            "ts.get_computed"
+        ),
+        "{text}"
+    );
     assert!(text.contains("\"__lash_brand\""), "{text}");
     let guarded = source.replace("const r = {", "const r = opaque({");
     let guarded = guarded.replace("a: 1 };", "a: 1 });");

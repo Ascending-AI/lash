@@ -127,11 +127,7 @@ pub(crate) fn lower(source: &str) -> Result<Lowered, lash_kernel_dialect::Diagno
 pub(crate) fn kernel_text(source: &str) -> String {
     let lowered = lower(source).unwrap_or_else(|error| panic!("{error}"));
     let printed = lash_kernel_doc::print_document(&lowered.document);
-    let mut text = printed
-        .lines()
-        .take_while(|line| !line.starts_with("definition ") && !line.starts_with("main {"))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let mut text = String::new();
     for definition in lowered.document.functions.values() {
         if matches!(
             definition.implementation,
@@ -147,6 +143,13 @@ pub(crate) fn kernel_text(source: &str) -> String {
         text.push_str(&printed[at..]);
     }
     text
+}
+
+/// Whether authored code invokes this exact imported helper.
+pub(crate) fn calls_helper(source: &str, helper: &str) -> bool {
+    let lowered = lower(source).unwrap_or_else(|error| panic!("{error}"));
+    super::linked::helper_slot(&lowered.document, helper)
+        .is_some_and(|slot| kernel_text(source).contains(&format!("invoke import {}(", slot.0)))
 }
 
 pub(super) const BOUNDS: Bounds = Bounds {
@@ -952,7 +955,7 @@ fn integer_facts_remove_loop_guards_and_preserve_bigints() {
         (vec!["9223372036854775810".into()], "ok".into())
     );
     assert!(
-        !kernel_text(source).contains("py.iadd"),
+        !calls_helper(source, "py.iadd"),
         "proven integer addition is direct"
     );
 }
@@ -975,13 +978,13 @@ def outer():
 outer()
 "#;
     assert_eq!(output(source), (vec!["abb".into()], "ok".into()));
-    assert!(kernel_text(source).contains("py.iadd"));
+    assert!(calls_helper(source, "py.iadd"));
     for read_only in [
         "x = 1\ndef read():\n    return x\nfor i in range(2):\n    x += i\nprint(read())",
         "x = 1\nread = lambda: x\nfor i in range(2):\n    x += i\nprint(read())",
     ] {
         assert_eq!(output(read_only), (vec!["2".into()], "ok".into()));
-        assert!(kernel_text(read_only).contains("py.iadd"));
+        assert!(calls_helper(read_only, "py.iadd"));
     }
 }
 
@@ -1001,7 +1004,7 @@ fn integer_facts_exclude_string_and_float_reassignments() {
         ("x = 1\nif True:\n    x = 1.5\nx += 1\nprint(x)", "2.5"),
     ] {
         assert_eq!(output(source), (vec![expected.into()], "ok".into()));
-        assert!(kernel_text(source).contains("py.iadd"));
+        assert!(calls_helper(source, "py.iadd"));
     }
 }
 
@@ -1025,7 +1028,7 @@ f(True)
         output(source),
         (vec!["unbound".into(), "2".into()], "ok".into())
     );
-    assert!(kernel_text(source).contains("py.iadd"));
+    assert!(calls_helper(source, "py.iadd"));
 }
 
 /// FIG-6115: Python implicitly deletes an except target; the next read
@@ -1052,7 +1055,7 @@ f()
         output(source),
         (vec!["deleted".into(), "2".into()], "ok".into())
     );
-    assert!(kernel_text(source).contains("py.iadd"));
+    assert!(calls_helper(source, "py.iadd"));
     assert_eq!(
         lower("x = 1\ndel x")
             .expect_err("variable del is outside the dialect")
@@ -1075,7 +1078,7 @@ x += 1
 print(x)
 "#;
     assert_eq!(output(source), (vec!["2.5".into()], "ok".into()));
-    assert!(kernel_text(source).contains("py.iadd"));
+    assert!(calls_helper(source, "py.iadd"));
 }
 
 /// FIG-6115: supported bool-to-int conversion remains guarded; integer
@@ -1132,7 +1135,7 @@ for i in range(3):
         await host.echo(s)
 print(s)
 "#;
-    assert!(!kernel_text(source).contains("py.iadd"));
+    assert!(!calls_helper(source, "py.iadd"));
     let lowered = lower(source).expect("the integer loop lowers");
     let program = crate::tests::linked::program(
         Arc::clone(lowered.document.shared()),
@@ -1167,7 +1170,7 @@ def f(range):
 f(lambda n: [1.5])
 "#;
     assert_eq!(output(source), (vec!["2.5".into()], "ok".into()));
-    assert!(kernel_text(source).contains("py.iadd"));
+    assert!(calls_helper(source, "py.iadd"));
     assert_eq!(
         session(&["x = 1.5", "for i in range(2):\n    x += 1\nprint(x)"]),
         ["3.5"]
@@ -1580,7 +1583,10 @@ fn python_awaits_add_no_turn() {
         await asyncio.gather(a, b)\n";
     let text = kernel_text(source);
     assert!(!text.contains("then yield"), "{text}");
-    assert!(text.contains("via py.await"), "{text}");
+    let lowered = lower(source).unwrap();
+    let slot =
+        super::linked::helper_slot(&lowered.document, "py.await").expect("await policy import");
+    assert!(text.contains(&format!("via import {}", slot.0)), "{text}");
     for order in [
         ["host.echo:i", "host.echo:p"],
         ["host.echo:p", "host.echo:i"],
@@ -1609,9 +1615,9 @@ xs.append(await host.echo('last'))
 print(xs)
 "#;
     let text = kernel_text(source);
-    assert!(!text.contains("py.method.append"), "{text}");
-    assert!(!text.contains("py.add"), "{text}");
-    assert!(!text.contains("invoke py.str("), "{text}");
+    assert!(!calls_helper(source, "py.method.append"), "{text}");
+    assert!(!calls_helper(source, "py.add"), "{text}");
+    assert!(!calls_helper(source, "py.str"), "{text}");
     assert!(text.contains("num.to_text"), "{text}");
     assert!(text.contains("text.concat"), "{text}");
     let direct = run(source, &[]);
@@ -1682,7 +1688,7 @@ fn sequence_facts_reject_incompatible_or_unbound_definitions() {
             "[2]",
         ),
     ] {
-        assert!(kernel_text(source).contains(helper), "{source}");
+        assert!(calls_helper(source, helper), "{source}");
         assert_eq!(
             output(source),
             (vec![expected.into()], "ok".into()),

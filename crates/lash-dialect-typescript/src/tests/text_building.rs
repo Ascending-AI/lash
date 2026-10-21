@@ -29,7 +29,19 @@ fn a_float_key_lowers_to_its_spelling_and_one_concatenation() {
             text.contains("text.concat(\"key_\", ts.number.format_value(num.rem_trunc("),
             "{key}:\n{text}"
         );
-        for general in ["ts.string.create", "ts.add(", "text.join(", "ts.to_string("] {
+        assert!(
+            super::linked::helper_slot(
+                &super::lower(&format!(
+                    "function f(n: number) {{ const key = {key}; return key; }}"
+                ))
+                .unwrap()
+                .document,
+                "ts.string.create",
+            )
+            .is_none(),
+            "{key} keeps the general string helper:\n{text}"
+        );
+        for general in ["ts.add(", "text.join(", "ts.to_string("] {
             assert!(!text.contains(general), "{key} keeps {general}:\n{text}");
         }
     }
@@ -49,7 +61,16 @@ fn an_unproven_operand_keeps_the_general_form() {
     assert!(annotated.contains("ts.add(\"k\", n)"), "{annotated}");
     let unknown = main_text("function f(x) { return String(x) + `k${x}`; }");
     assert!(unknown.contains("ts.to_string(x)"), "{unknown}");
-    assert!(!unknown.contains("ts.string.create"), "{unknown}");
+    assert!(
+        super::linked::helper_slot(
+            &super::lower("function f(x) { return String(x) + `k${x}`; }")
+                .unwrap()
+                .document,
+            "ts.string.create",
+        )
+        .is_none(),
+        "{unknown}"
+    );
     // A spread has no fixed position: it keeps the argument list.
     let spread = main_text("function f(xs) { return String(...xs); }");
     assert!(

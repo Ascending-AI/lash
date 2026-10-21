@@ -78,7 +78,10 @@ fn array_callback_slots_agree_with_packed_calls() {
             "function call(xs, f) {{ return xs.sort(f); }} console.log(call([3, 1, 2], {callback}).join(','));"
         );
         let text = super::main_text(&direct);
-        assert_eq!(text.contains("ts.pad"), packed, "{callback}\n{text}");
+        let lowered = super::lower(&direct).unwrap();
+        let padded = super::linked::helper_slot(&lowered.document, "ts.pad")
+            .is_some_and(|slot| text.contains(&format!("invoke import {}(", slot.0)));
+        assert_eq!(padded, packed, "{callback}\n{text}");
         let direct = machine::run(&direct, &[]);
         let generic = machine::run(&generic, &[]);
         assert_eq!(direct.end, "ok");
@@ -111,7 +114,10 @@ fn array_callback_slots_agree_with_packed_calls() {
                 "function call(xs, f, context) {{ return xs.{method}(f, context); }} console.log(call([1, , 3], {callback}, {{offset: 5}}).join(','));"
             );
             let text = super::main_text(&direct);
-            assert_eq!(text.contains("ts.pad"), packed, "{callback}\n{text}");
+            let lowered = super::lower(&direct).unwrap();
+            let padded = super::linked::helper_slot(&lowered.document, "ts.pad")
+                .is_some_and(|slot| text.contains(&format!("invoke import {}(", slot.0)));
+            assert_eq!(padded, packed, "{callback}\n{text}");
             let direct = machine::run(&direct, &[]);
             let generic = machine::run(&generic, &[]);
             assert_eq!(direct.end, "ok");

@@ -143,6 +143,9 @@ print(outer())
 "#;
     ran(source, &["unbound", "20"]);
     let text = kernel_text(source);
-    assert!(text.contains("py.name_check"), "{text}");
+    assert!(
+        super::machine::calls_helper(source, "py.name_check"),
+        "{text}"
+    );
     assert_eq!(checks(source, "late"), 0, "{text}");
 }

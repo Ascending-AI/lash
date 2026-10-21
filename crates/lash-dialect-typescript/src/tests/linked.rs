@@ -264,3 +264,32 @@ pub(super) fn main(
     document.functions.remove(&root.function);
     document
 }
+
+/// The document-local slot of exactly this code helper, when it is imported.
+pub(super) fn helper_slot(
+    document: &lash_kernel_doc::Document,
+    helper: &str,
+) -> Option<lash_vocabulary::ImportSlot> {
+    let name = lash_kernel_dialect::authoring::helper_name(
+        &lash_vocabulary::FunctionName::new(helper).expect("helper name"),
+    );
+    document.imports.iter().find_map(|(slot, import)| {
+        (import.name == name && matches!(import.kind, ImportKind::Code { .. })).then_some(*slot)
+    })
+}
+
+/// An operation's diagnostic name identifies its declaration, never its call syntax.
+pub(super) fn operation_slot(
+    document: &lash_kernel_doc::Document,
+    operation: &str,
+) -> Option<lash_vocabulary::ImportSlot> {
+    let name = QualifiedOperation::from_effect(&EffectName::new(operation).unwrap())
+        .expect("operation name");
+    document.imports.iter().find_map(|(slot, import)| {
+        (import.name.package == name.package
+            && import.name.member == name.name
+            && import.name.type_member.is_none()
+            && matches!(import.kind, ImportKind::Operation { .. }))
+        .then_some(*slot)
+    })
+}

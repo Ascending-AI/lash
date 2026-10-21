@@ -127,8 +127,8 @@ fn lower_against(
     Ok(lowered)
 }
 
-/// The body of `main` in kernel text, one statement per line, without the
-/// header that lists library functions.
+/// Main and authored function definitions in final kernel text, excluding
+/// native reference bodies and the document's import declarations.
 pub(crate) fn main_text(source: &str) -> String {
     main_of(lower(source))
 }
@@ -159,9 +159,7 @@ fn main_of(lowered: Result<Lowered, Diagnostic>) -> String {
             }
         ) {
             let text = lash_kernel_doc::print_definition(definition);
-            if let Some((_, body)) = text.split_once("body {") {
-                bodies.push(body.to_owned());
-            }
+            bodies.push(text);
         }
     }
     bodies.join("\n")

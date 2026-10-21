@@ -42,7 +42,15 @@ fn a_multiword_operation_is_written_in_camel_case_and_performed_canonically() {
     )
     .expect("the camelCase spelling lowers");
     let text = print_document(&lowered.document);
-    assert!(text.contains("perform inbox.send_item("), "{text}");
+    assert!(
+        text.contains(&format!(
+            "perform {}(",
+            super::linked::operation_slot(&lowered.document, "inbox.send_item")
+                .expect("operation import")
+                .0
+        )),
+        "{text}"
+    );
     assert!(text.contains("item_id"), "{text}");
 }
 
@@ -105,5 +113,13 @@ fn a_keyword_operation_is_callable_through_the_qualified_escape() {
     )
     .expect("the escape names the operation");
     let text = print_document(&lowered.document);
-    assert!(text.contains("perform records.delete("), "{text}");
+    assert!(
+        text.contains(&format!(
+            "perform {}(",
+            super::linked::operation_slot(&lowered.document, "records.delete")
+                .expect("operation import")
+                .0
+        )),
+        "{text}"
+    );
 }

@@ -68,7 +68,15 @@ fn a_dotted_call_performs_the_operation_by_its_canonical_name() {
     ] {
         let lowered = lower(source, &[], &[operation]).unwrap_or_else(|error| panic!("{error}"));
         let text = k::print_document(&lowered.document);
-        assert!(text.contains(&format!("perform {operation}(")), "{text}");
+        assert!(
+            text.contains(&format!(
+                "perform {}(",
+                super::linked::operation_slot(&lowered.document, operation)
+                    .expect("operation import")
+                    .0
+            )),
+            "{text}"
+        );
     }
     let error = lower("await web_fetch({})\n", &[], &["web.fetch"])
         .expect_err("the flattened name is no operation");
@@ -106,5 +114,13 @@ fn a_keyword_operation_is_callable_through_the_qualified_escape() {
     )
     .unwrap_or_else(|error| panic!("{error}"));
     let text = k::print_document(&lowered.document);
-    assert!(text.contains("perform processes.await("), "{text}");
+    assert!(
+        text.contains(&format!(
+            "perform {}(",
+            super::linked::operation_slot(&lowered.document, "processes.await")
+                .expect("operation import")
+                .0
+        )),
+        "{text}"
+    );
 }
