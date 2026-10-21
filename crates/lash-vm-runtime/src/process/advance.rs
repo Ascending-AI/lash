@@ -71,7 +71,7 @@ pub(crate) fn encode(
         pages: state.parked.map(|parked| parked.page.root),
         // An ended process requires nothing, whatever its last park did.
         requirements: if matches!(state.phase, Phase::Ended) {
-            lash_kernel_doc::ExecutionRequirements::default()
+            lash_vocabulary::claims::ClaimRequirements::default()
         } else {
             state.requirements.clone()
         },
@@ -142,7 +142,7 @@ pub(crate) fn advance(
             waits: Default::default(),
             settled: Vec::new(),
             phase: Phase::Ended,
-            requirements: lash_kernel_doc::ExecutionRequirements::default(),
+            requirements: lash_vocabulary::claims::ClaimRequirements::default(),
         };
         let action = run(&mut state, Vec::new())?;
         return Ok((encode(&state, writes)?, action));
@@ -166,31 +166,7 @@ fn transition(
             Ok(EngineAction::Terminal(cancelled(origin)))
         }
         EngineEvent::StepSettled { step, outcome, .. } => step_settled(state, &step, outcome),
-        EngineEvent::Woke => {
-            // The earliest timers fire together, in wait order.
-            let Some(due) = next_timer(state) else {
-                return Ok(standing(state));
-            };
-            let fired: Vec<lash_protocol_types::WaitId> = state
-                .waits
-                .iter()
-                .filter(
-                    |(_, wait)| matches!(wait, Wait::Timer { until_ms, .. } if *until_ms <= due.until.0),
-                )
-                .map(|(wait, _)| *wait)
-                .collect();
-            for wait in fired {
-                if let Some(Wait::Timer { identity, .. }) = state.waits.remove(&wait) {
-                    state.settled.push(Delivery {
-                        wait,
-                        identity,
-                        outcome: OutcomeWire::Elapsed,
-                        source: DeliverySource::Elapsed,
-                    });
-                }
-            }
-            resume(state, Vec::new())
-        }
+        EngineEvent::Woke => Ok(EngineAction::Idle),
         // A process is awaited through the await effect, which is a step.
         EngineEvent::ProcessEnded { .. } | EngineEvent::ProcessWaitTimedOut { .. } => {
             Ok(standing(state))
@@ -292,10 +268,7 @@ fn resume(
         return Ok(if steps.is_empty() {
             standing(state)
         } else {
-            EngineAction::Steps {
-                steps,
-                wake: next_timer(state),
-            }
+            EngineAction::Steps { steps, wake: None }
         });
     }
     run(state, steps)
@@ -344,7 +317,7 @@ fn run_settled(
         KernelRunOutput::Ended { outcome, .. } => {
             // An ended run stands on no page, and requires nothing.
             state.parked = None;
-            state.requirements = lash_kernel_doc::ExecutionRequirements::default();
+            state.requirements = lash_vocabulary::claims::ClaimRequirements::default();
             state.phase = Phase::Ended;
             Ok(EngineAction::Terminal(*outcome))
         }
@@ -379,8 +352,7 @@ fn run_settled(
                     Issued::Effect {
                         wait,
                         admission,
-                        effect,
-                        contract,
+                        use_,
                         input,
                     } => {
                         let step = StepName(format!("effect.{}", state.effects));
@@ -395,11 +367,9 @@ fn run_settled(
                         );
                         steps.push(StepRequest::Tool {
                             step,
-                            effect,
-                            contract,
+                            use_,
                             input,
                             site: Some(Box::new(identity)),
-                            matched: None,
                         });
                     }
                     Issued::Refused {
@@ -413,14 +383,6 @@ fn run_settled(
                         outcome: refused(&kind, message),
                         source: DeliverySource::Refused { run: settling },
                     }),
-                    Issued::Sleep {
-                        wait,
-                        admission,
-                        until_ms,
-                    } => {
-                        let identity = admission.identity().clone();
-                        state.waits.insert(wait, Wait::Timer { until_ms, identity });
-                    }
                 }
             }
             // The run consumed every outcome it was handed: a wait the
@@ -447,42 +409,14 @@ fn run_settled(
             Ok(if steps.is_empty() {
                 standing(state)
             } else {
-                EngineAction::Steps {
-                    steps,
-                    wake: next_timer(state),
-                }
+                EngineAction::Steps { steps, wake: None }
             })
         }
     }
 }
 
-/// The earliest task timer, retaining the same task's execution identity.
-fn next_timer(state: &KernelEngineState) -> Option<lash_execution_contracts::process::EngineWake> {
-    state
-        .waits
-        .values()
-        .filter_map(|wait| match wait {
-            Wait::Timer { until_ms, identity } => {
-                Some(lash_execution_contracts::process::EngineWake {
-                    until: lash_core::durable_port::DurableInstant(*until_ms),
-                    site: Some(identity.clone()),
-                })
-            }
-            Wait::Step { .. } => None,
-        })
-        .min_by_key(|wake| wake.until)
-}
-
-/// The action that stands while the process waits on what it already
-/// asked for: an event it does not wait on changes nothing.
-fn standing(state: &KernelEngineState) -> EngineAction {
-    match next_timer(state) {
-        Some(wake) => EngineAction::Sleep {
-            until: wake.until,
-            site: wake.site,
-        },
-        None => EngineAction::Idle,
-    }
+fn standing(_state: &KernelEngineState) -> EngineAction {
+    EngineAction::Idle
 }
 
 /// Asks for the next `kernel_run`, handing it every settled outcome, and
@@ -505,10 +439,7 @@ fn run(
         kind: EngineStepKind::new(KERNEL_RUN_STEP),
         input: serde_json::to_value(input).map_err(|error| infra(error.to_string()))?,
     });
-    Ok(EngineAction::Steps {
-        steps,
-        wake: next_timer(state),
-    })
+    Ok(EngineAction::Steps { steps, wake: None })
 }
 
 fn cancelled(

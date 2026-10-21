@@ -694,7 +694,7 @@ async fn a_deferred_only_granted_cell_call_executes_once_or_parks_for_missing_re
     let mut unserved = member.clone();
     let CellMember::Tool(call) = &mut unserved;
     let grant = call.execution_grant.as_mut().unwrap();
-    **grant = crate::ToolExecutionGrant::of_link(&crate::OperationLink {
+    **grant = crate::ToolExecutionGrant::of_link(&crate::OperationRoute {
         provider: crate::plugin::ToolProviderHandle::new(
             crate::plugin::RegistryKind::Session,
             "absent",

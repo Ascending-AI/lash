@@ -22,25 +22,26 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use lash_kernel_doc::{Datum, EffectName, ErrorDatum};
+use lash_kernel_doc::{Datum, ErrorDatum};
 use lash_protocol_types::sync::MutexExt;
 use lash_vm_broker::ParentFault;
 use lash_vm_broker::kernel::{EFFECT_CANCELLED, EFFECT_RESULT, EFFECT_TIMED_OUT, datum_from_json};
-use lash_vm_runtime::{EffectReads, HostBoundary};
+use lash_vm_runtime::EffectReads;
+use lash_vocabulary::names::OperationUse;
 
 use super::host::{CellArgs, CellHostLedgers, TOOL_CALL_LIMIT, TOOL_FAILED, refused, tool_failed};
 
 /// The reads one activation of a cell answers.
 pub(super) struct CellReads {
     /// Each planned effect's route on this node.
-    pub routes: BTreeMap<EffectName, lash_core::ReadRoute>,
+    pub routes: BTreeMap<OperationUse, lash_core::ReadRoute>,
     pub config: lash_core::plugin::OwnerConfigView,
+    pub clock: Arc<dyn lash_core::Clock>,
     /// Cancelled when the cell's run is stopped.
     pub cancel: lash_core::CancellationToken,
     /// How long the worker waits on its parent's answer.
     pub parent_wait: Duration,
     pub ledgers: Arc<Mutex<CellHostLedgers>>,
-    pub boundary: HostBoundary,
     pub limit: lash_core::MaxToolCalls,
     /// The cell, as its observations name it.
     pub cell: String,
@@ -51,7 +52,7 @@ impl CellReads {
     /// cell's reads, or the refusal its `perform` raises.
     fn count(&self) -> Result<u64, ErrorDatum> {
         let mut ledgers = self.ledgers.lock_recover();
-        let counted = ledgers.counted(&self.boundary);
+        let counted = ledgers.counted();
         if counted.saturating_add(1) > self.limit.get() {
             let exceeded = lash_core::ToolCallLimitExceeded {
                 scope: lash_core::ToolCallLimitScope::Cell,
@@ -69,7 +70,7 @@ impl CellReads {
     /// The read's arguments, validated against its tool's input schema.
     fn args(
         &self,
-        effect: &EffectName,
+        effect: &OperationUse,
         route: &lash_core::ReadRoute,
         args: &[Datum],
     ) -> Result<serde_json::Value, ErrorDatum> {
@@ -100,13 +101,19 @@ impl CellReads {
 
     async fn answer(
         &self,
-        effect: &EffectName,
+        effect: &OperationUse,
         route: &lash_core::ReadRoute,
         args: &serde_json::Value,
     ) -> Result<(Datum, usize), ErrorDatum> {
         let bound = route.definition.manifest.execution().min(self.parent_wait);
-        let deadline = Instant::now() + bound;
-        let read = route.read(args, &self.config, &self.cancel, deadline);
+        let deadline = self.clock.now() + bound;
+        let read = route.read(
+            args,
+            &self.config,
+            self.clock.as_ref(),
+            &self.cancel,
+            deadline,
+        );
         let value = tokio::select! {
             biased;
             () = self.cancel.cancelled() => {
@@ -115,7 +122,7 @@ impl CellReads {
                     format!("the read of `{effect}` was stopped with the cell"),
                 ));
             }
-            () = tokio::time::sleep_until(deadline.into()) => {
+            () = self.clock.sleep_until(deadline) => {
                 return Err(refused(
                     EFFECT_TIMED_OUT,
                     format!("the read of `{effect}` took longer than {bound:?}"),
@@ -129,8 +136,12 @@ impl CellReads {
             data: datum_from_json(&error.data.to_string()).unwrap_or(Datum::Null),
         })?;
         let text = value.to_string();
-        let value = datum_from_json(&text)
-            .map_err(|invalid| refused(EFFECT_RESULT, invalid.to_string()))?;
+        let signature = lash_protocol_types::tool_signature(
+            &route.definition.contract.input_schema.canonical,
+            &route.definition.contract.output_schema.canonical,
+        );
+        let value = lash_vm_broker::kernel::value::datum_from_tool_json(&value, &signature.result)
+            .map_err(|invalid| refused(EFFECT_RESULT, invalid))?;
         Ok((value, text.len()))
     }
 }
@@ -139,7 +150,7 @@ impl CellReads {
 impl EffectReads for CellReads {
     async fn perform(
         &self,
-        effect: &EffectName,
+        effect: &OperationUse,
         args: &[Datum],
         site: &lash_kernel_doc::PositionLabel,
         origin: &lash_kernel_doc::Site,

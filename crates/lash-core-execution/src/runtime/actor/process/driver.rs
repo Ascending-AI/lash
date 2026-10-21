@@ -75,6 +75,7 @@ pub(super) struct InFlight {
     pub(super) call: ToolCallId,
     /// The request, so a `Repeatable` body can run again at its ordinal.
     pub(super) request: StepRequest,
+    pub(super) target: Option<crate::runtime::process::steps::InvocationTarget>,
     /// Whether it is the resolution of a granted tool's call (P6): its
     /// committed outcome is the match lash consumes, never the engine's
     /// answer.
@@ -193,7 +194,7 @@ impl<'de> Deserialize<'de> for StoredWaitId {
 /// The decode error of a driver that does not decode.
 pub(crate) fn in_flight_effects(
     stored: Option<&str>,
-) -> Result<Vec<lash_kernel_doc::EffectName>, serde_json::Error> {
+) -> Result<Vec<lash_vocabulary::names::OperationUse>, serde_json::Error> {
     Ok(Driver::decode(stored)?.in_flight_effects())
 }
 
@@ -234,11 +235,11 @@ pub async fn engine_status(
 impl Driver {
     /// The effects of the tool steps it holds admitted and unsettled: what
     /// a successor env must link as their admissions matched them.
-    pub(super) fn in_flight_effects(&self) -> Vec<lash_kernel_doc::EffectName> {
+    pub(super) fn in_flight_effects(&self) -> Vec<lash_vocabulary::names::OperationUse> {
         self.steps
             .values()
             .filter_map(|step| match &step.request {
-                StepRequest::Tool { effect, .. } => Some(effect.clone()),
+                StepRequest::Tool { use_, .. } => Some(*use_),
                 StepRequest::Engine { .. } => None,
             })
             .collect()

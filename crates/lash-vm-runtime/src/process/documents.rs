@@ -493,7 +493,7 @@ impl KernelDocuments {
     pub async fn published_requirements(
         &self,
         document: &Document,
-    ) -> Result<Result<lash_kernel_doc::ExecutionRequirements, Unretained>, DocumentStoreError>
+    ) -> Result<Result<lash_vocabulary::claims::ClaimRequirements, Unretained>, DocumentStoreError>
     {
         let artifact = requirements_artifact(&document.identity());
         let Some(bytes) = self
@@ -525,7 +525,7 @@ impl KernelDocuments {
         };
         Ok(
             match lash_kernel_doc::graph_tokens::decode_body_with_limits::<
-                lash_kernel_doc::ExecutionRequirements,
+                lash_vocabulary::claims::ClaimRequirements,
             >(&bytes, lash_kernel_doc::KernelDataLimits::standard())
             {
                 Ok(record) if record == derived => Ok(record),
@@ -1294,7 +1294,7 @@ mod tests {
         assert_eq!(record.kernels, [1].into());
 
         let forged = lash_kernel_doc::graph_tokens::encode_body(
-            &lash_kernel_doc::ExecutionRequirements::default(),
+            &lash_vocabulary::claims::ClaimRequirements::default(),
         );
         store
             .stored

@@ -263,7 +263,7 @@ pub struct ExecRoot {
     /// natives and kernel versions its code reaches and the providers and
     /// codecs of its static operation links, written with every root. An
     /// ended root requires nothing.
-    pub requirements: lash_kernel_doc::ExecutionRequirements,
+    pub requirements: lash_vocabulary::claims::ClaimRequirements,
 }
 
 impl TokenCodec for ExecRoot {
@@ -295,7 +295,7 @@ impl TokenCodec for ExecRoot {
             host: Option::decode(input)?,
             envelope: Option::decode(input)?,
             owed: Vec::decode(input)?,
-            requirements: lash_kernel_doc::ExecutionRequirements::decode(input)?,
+            requirements: lash_vocabulary::claims::ClaimRequirements::decode(input)?,
         })
     }
 }

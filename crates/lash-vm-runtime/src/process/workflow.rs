@@ -174,7 +174,7 @@ impl lash_execution_contracts::process::ProcessDocumentProvider for KernelDocume
         &self,
         payload: &serde_json::Value,
     ) -> Result<
-        Option<lash_kernel_doc::ExecutionRequirements>,
+        Option<lash_vocabulary::claims::ClaimRequirements>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         let definition = super::payload_definition(payload)?;

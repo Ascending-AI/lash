@@ -342,7 +342,7 @@ fn a_matched_call_owes_its_provider_and_codec_until_it_settles() {
         "o",
         crate::tool_provider_key!("q"),
     );
-    let link = lash_core_store::tool_surface::OperationLink {
+    let link = lash_core_store::tool_surface::OperationRoute {
         tool: ToolId::new("matched"),
         provider,
         policy: ExecutionPolicy::Once,
@@ -352,7 +352,7 @@ fn a_matched_call_owes_its_provider_and_codec_until_it_settles() {
             format: crate::FormatVersion::new(2).unwrap(),
             payload: serde_json::json!({}),
         }),
-        source: lash_core_store::tool_surface::LinkSource::Advertised,
+        source: lash_core_store::tool_surface::RouteSource::Advertised,
     };
     let call = ToolCallId::fixture("matched");
     let binding = bound_to("o");

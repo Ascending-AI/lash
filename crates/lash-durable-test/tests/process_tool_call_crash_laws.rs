@@ -1150,11 +1150,11 @@ impl DynamicCalls {
 
     /// The link of `call_tool` the host's env records: its registration's
     /// grant, or, when withheld, a dispatch link the host built itself.
-    fn link(&self) -> lash::tools::OperationLink {
+    fn link(&self) -> lash::tools::OperationRoute {
         let deferred = DYNAMIC_COMPONENT.tool_provider(lash::tool_provider_key!("deferred"));
         match self.grant {
             Grant::Withheld => {
-                lash::tools::OperationLink::dispatch(deferred, call_tool(), self.policy())
+                lash::tools::OperationRoute::dispatch(deferred, call_tool(), self.policy())
             }
             Grant::Pure | Grant::Diverging => self
                 .registration()

@@ -4,10 +4,7 @@
 use super::{OwnerConfigView, PluginRegistrar};
 use crate::deferred_provider::DeferredResolveContext;
 use lash_core_store::artifact_referrer::ReferrerClaim;
-use lash_core_store::{
-    packages::linked::PublicationRecord, process_env::linked::ProcessEnv,
-    resolutions::ResolutionEntry, tool_surface::linked::OperationRoute,
-};
+use lash_core_store::{process_env::ProcessEnv, tool_surface::OperationRoute};
 use lash_execution_contracts::{
     PluginError,
     process::{EngineSettings, linking::*},
@@ -54,13 +51,6 @@ pub trait PackagePublisher: Send + Sync {
         request: PublishPackage,
     ) -> Result<PublicationRecord, EnginePortError>;
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-/// A trusted host policy pin validated for scope, identity, mode, codec and target debt before start.
-pub struct ResolutionSeed {
-    pub use_: OperationUse,
-    pub entry: ResolutionEntry,
-}
 #[derive(Debug)]
 /// Trusted host-selected start, arguments, complete environment/settings and explicit initial pins.
 pub struct StartLinked {
@@ -68,7 +58,7 @@ pub struct StartLinked {
     pub args: serde_json::Map<String, serde_json::Value>,
     pub env: ProcessEnv,
     pub settings: Option<EngineSettings>,
-    pub initial_resolutions: Vec<ResolutionSeed>,
+    pub initial_resolutions: Vec<lash_core_store::resolutions::ResolutionSeed>,
 }
 #[async_trait::async_trait]
 /// Host starts after linked reach, routes, hosting, arguments and initial pins validate.

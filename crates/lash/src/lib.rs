@@ -677,7 +677,9 @@ pub mod tools {
     /// surfaces, deferred matches and process envs alike, and the one judge
     /// every pinned call meets: the live tool's contract id must equal the
     /// pinned one.
-    pub use lash_core::{Judgement, LinkSource, OperationLink, judge, operation_contract_changed};
+    pub use lash_core::{
+        Judgement, OperationRoute, RouteSource, judge, operation_contract_changed,
+    };
     /// What a run's tool surface records and a provider reads: the provider
     /// keys tools are matched to, the surface entries, the run's config each
     /// provider method reads, and the refusal of a surface whose names collide.

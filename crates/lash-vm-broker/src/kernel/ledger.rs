@@ -23,8 +23,9 @@
 use std::collections::BTreeMap;
 
 use lash_durable::DurableInstant;
-use lash_kernel_doc::{EffectId, EffectName, ErrorDatum};
+use lash_kernel_doc::{EffectId, ErrorDatum};
 use lash_kernel_vm::WaitId;
+use lash_vocabulary::names::OperationUse;
 
 use crate::snapshot::OperationId;
 
@@ -42,8 +43,6 @@ pub struct AdmittedEffect {
 pub enum Standing {
     /// An admitted execution, run through the admitted-execution lifecycle.
     Admitted(AdmittedEffect),
-    /// A sleep, over at the instant its park pinned.
-    Sleeping { until_ms: i64 },
     /// The parent refused the effect: it is answered with this error and
     /// nothing was dispatched.
     Refused(ErrorDatum),
@@ -56,7 +55,7 @@ pub struct PendingEffect {
     /// to.
     pub wait: lash_protocol_types::WaitId,
     /// The effect performed; none for a sleep.
-    pub effect: Option<EffectName>,
+    pub effect: Option<OperationUse>,
     pub standing: Standing,
 }
 
@@ -205,7 +204,7 @@ impl EffectLedger {
             .values()
             .filter_map(|entry| match &entry.standing {
                 Standing::Admitted(admitted) => Some(admitted),
-                Standing::Sleeping { .. } | Standing::Refused(_) => None,
+                Standing::Refused(_) => None,
             })
             .chain(&self.released)
     }
@@ -216,17 +215,6 @@ impl EffectLedger {
         self.pending
             .values()
             .any(|entry| matches!(entry.standing, Standing::Admitted(_)))
-    }
-
-    /// The earliest instant a sleep the state stands on is over.
-    pub fn next_wake(&self) -> Option<DurableInstant> {
-        self.pending
-            .values()
-            .filter_map(|entry| match entry.standing {
-                Standing::Sleeping { until_ms } => Some(DurableInstant(until_ms)),
-                Standing::Admitted(_) | Standing::Refused(_) => None,
-            })
-            .min()
     }
 
     /// The oldest park whose run records a state saved with this ledger can
@@ -299,142 +287,5 @@ impl EffectLedger {
     /// committed, and nothing waits for it.
     pub(crate) fn drop_released(&mut self, mut settled: impl FnMut(&AdmittedEffect) -> bool) {
         self.released.retain(|admitted| !settled(admitted));
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #![allow(clippy::expect_used)]
-
-    use lash_kernel_doc::{Site, Unit};
-
-    use super::*;
-
-    fn identity(occurrence: u64) -> EffectId {
-        lash_kernel_doc::testkit::effect(
-            lash_kernel_doc::testkit::root_task(),
-            Site {
-                unit: Unit::Main,
-                path: vec![0],
-            },
-            occurrence,
-            Vec::new(),
-        )
-    }
-
-    fn admitted(run: u64, ordinal: u64) -> AdmittedEffect {
-        AdmittedEffect {
-            operation: OperationId { run, ordinal },
-            call: crate::CodeCallIdentities::cell(
-                lash_core_store::effect_opener::EffectOpener::turn("session", "turn"),
-                "cell",
-            )
-            .child_call_id(run, ordinal),
-        }
-    }
-
-    fn standing(wait: u64, standing: Standing) -> PendingEffect {
-        PendingEffect {
-            wait: lash_kernel_doc::testkit::wait_id(wait),
-            effect: None,
-            standing,
-        }
-    }
-
-    /// The records of a park stay reachable while a saved ledger names any
-    /// of its executions, awaited or released, and no longer.
-    #[test]
-    fn a_parks_records_are_reachable_until_no_entry_names_them() {
-        let mut ledger = EffectLedger::new();
-        assert_eq!(ledger.take_park(), 0);
-        assert!(ledger.stand(identity(0), standing(0, Standing::Admitted(admitted(0, 0)))));
-        assert!(ledger.stand(identity(1), standing(1, Standing::Admitted(admitted(0, 1)))));
-        assert_eq!(ledger.take_park(), 1);
-        assert!(ledger.stand(identity(2), standing(2, Standing::Admitted(admitted(1, 0)))));
-        assert!(ledger.stand(
-            identity(3),
-            standing(3, Standing::Sleeping { until_ms: 40 })
-        ));
-        assert!(
-            !ledger.stand(identity(3), standing(9, Standing::Sleeping { until_ms: 1 })),
-            "one identity is requested once"
-        );
-        assert_eq!(ledger.oldest_reachable(), 0);
-        assert_eq!(ledger.next_wake(), Some(DurableInstant(40)));
-
-        // Delivered: park 0 is still named by its other effect.
-        assert!(ledger.consume(&identity(0)).is_some());
-        assert_eq!(ledger.oldest_reachable(), 0);
-        // Withdrawn: the execution is released, live, and still reachable.
-        assert!(ledger.withdraw(lash_kernel_doc::testkit::wait_id(1)));
-        assert!(!ledger.withdraw(lash_kernel_doc::testkit::wait_id(1)));
-        assert_eq!(ledger.released(), [admitted(0, 1)]);
-        assert_eq!(ledger.oldest_reachable(), 0);
-        // Settled: nothing names park 0.
-        ledger.drop_released(|_| true);
-        assert_eq!(ledger.oldest_reachable(), 1);
-        assert!(
-            ledger.withdraw(lash_kernel_doc::testkit::wait_id(3)),
-            "a withdrawn sleep is gone"
-        );
-        assert!(ledger.consume(&identity(2)).is_some());
-        assert_eq!(ledger.oldest_reachable(), 2);
-        assert_eq!(ledger.next_wake(), None);
-    }
-
-    /// A stored ledger that names an execution no park of its run admitted,
-    /// one wait twice or one execution twice, is refused when it is read.
-    #[test]
-    fn a_stored_ledger_that_names_what_was_never_admitted_is_refused() {
-        let pending = |entries: Vec<(u64, u64, Standing)>| {
-            entries
-                .into_iter()
-                .map(|(occurrence, wait, standing)| {
-                    (identity(occurrence), self::standing(wait, standing))
-                })
-                .collect::<BTreeMap<_, _>>()
-        };
-        let read = EffectLedger::restored(
-            pending(vec![(0, 0, Standing::Admitted(admitted(0, 0)))]),
-            Vec::new(),
-            1,
-            Growth::default(),
-        )
-        .expect("an issued ledger reads back");
-        assert_eq!(read.oldest_reachable(), 0);
-        assert_eq!(
-            EffectLedger::restored(
-                pending(vec![(0, 0, Standing::Admitted(admitted(0, 0)))]),
-                Vec::new(),
-                0,
-                Growth::default(),
-            ),
-            Err(LedgerRefusal::UnissuedPark { park: 0, parks: 0 })
-        );
-        assert_eq!(
-            EffectLedger::restored(
-                pending(vec![
-                    (0, 0, Standing::Admitted(admitted(0, 0))),
-                    (1, 0, Standing::Sleeping { until_ms: 5 }),
-                ]),
-                Vec::new(),
-                1,
-                Growth::default(),
-            ),
-            Err(LedgerRefusal::SharedWait {
-                wait: lash_kernel_doc::testkit::wait_id(0)
-            })
-        );
-        assert_eq!(
-            EffectLedger::restored(
-                pending(vec![(0, 0, Standing::Admitted(admitted(0, 0)))]),
-                vec![admitted(0, 0)],
-                1,
-                Growth::default(),
-            ),
-            Err(LedgerRefusal::SharedExecution {
-                operation: OperationId { run: 0, ordinal: 0 }
-            })
-        );
     }
 }

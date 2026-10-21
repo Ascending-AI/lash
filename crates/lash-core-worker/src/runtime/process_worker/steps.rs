@@ -58,19 +58,13 @@ use super::DurableProcessWorker;
 /// effect is linked as a dispatch grant in the env `runtime`'s tools were
 /// built from, and it is not the call of a match.
 fn resolves(runtime: &StepRuntime, step: &StepRequest) -> bool {
-    let StepRequest::Tool {
-        effect,
-        matched: None,
-        ..
-    } = step
-    else {
+    let StepRequest::Tool { use_: effect, .. } = step else {
         return false;
     };
     runtime.built_tools().is_some_and(|tools| {
         tools
-            .effects
-            .get(effect)
-            .is_some_and(lash_core::OperationLink::dispatches)
+            .route(effect)
+            .is_some_and(lash_core::OperationRoute::dispatches)
     })
 }
 
@@ -95,15 +89,16 @@ impl DurableProcessWorker {
     ) -> MemberOutcome {
         let resolves = resolves(&runtime, &step);
         let StepRequest::Tool {
-            effect,
+            use_: effect,
             input,
-            matched,
             ..
         } = step
         else {
             return SettledOutput::Interrupted.into();
         };
-        if resolves {
+        let retained = runtime.target(execution.call());
+        let matched = retained.as_ref().and_then(|target| target.deferred_match());
+        if resolves && retained.is_none() {
             return self
                 .resolve_dispatch(&runtime, &process, &execution, &effect, input)
                 .await;
@@ -144,7 +139,13 @@ impl DurableProcessWorker {
                     }
                 }
             }
-            None => (step.effects.get(&effect), input),
+            None => (
+                retained
+                    .as_ref()
+                    .map(|target| &target.route)
+                    .or_else(|| step.route(&effect)),
+                input,
+            ),
         };
         if let Some(grant) = resolution.and_then(crate::ToolExecutionGrant::of_link) {
             let call = lash_core_execution::sansio::PendingToolCall {
@@ -191,7 +192,7 @@ impl DurableProcessWorker {
         runtime: &Arc<StepRuntime>,
         process: &ProcessRecord,
         execution: &AdmittedExecution,
-        effect: &lash_core::EffectName,
+        effect: &lash_vocabulary::names::OperationUse,
         input: serde_json::Value,
     ) -> MemberOutcome {
         let call = lash_core_execution::sansio::PendingToolCall {
@@ -234,7 +235,7 @@ impl DurableProcessWorker {
         else {
             return;
         };
-        if resolves(runtime, step) {
+        if resolves(runtime, step) && runtime.target(execution.call()).is_none() {
             return;
         }
         let tracing = crate::plugin::PluginExecutionTrace::new(
@@ -312,6 +313,27 @@ impl ProcessSteps for WorkerSteps {
             .runtime_host
             .process_engines
             .succession(engine_kind(process)?)
+    }
+
+    async fn succession_context(
+        &self,
+        process: &ProcessRecord,
+        request: &lash_execution_contracts::process::ProcessSuccessorRequest,
+        environment: &crate::ProcessEnv,
+    ) -> Result<lash_execution_contracts::process::SuccessionContext, crate::PluginError> {
+        let ProcessInput::Engine { kind, payload, .. } = process.input.as_ref() else {
+            return Err(crate::PluginError::Session("not an engine process".into()));
+        };
+        lash_core_execution::runtime::process::succession_context(
+            self.0.config.runtime_host.backend(),
+            &self.0.config.runtime_host.process_engines,
+            &process.id,
+            kind,
+            payload,
+            &request.payload,
+            environment,
+        )
+        .await
     }
 
     /// An engine process's composition and the activation's step tools
@@ -473,6 +495,7 @@ impl ProcessSteps for WorkerSteps {
         runtime: &Arc<StepRuntime>,
         process: &ProcessRecord,
         step: &StepRequest,
+        target: Option<&lash_core_execution::runtime::process::steps::InvocationTarget>,
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
         match step {
@@ -494,9 +517,8 @@ impl ProcessSteps for WorkerSteps {
             }
             StepRequest::Tool {
                 step,
-                effect,
-                contract,
-                matched,
+                use_: effect,
+                input,
                 ..
             } => {
                 let unavailable = |error: lash_execution_contracts::plugin_error::PluginError| {
@@ -519,19 +541,75 @@ impl ProcessSteps for WorkerSteps {
                             ),
                         )
                     })?;
-                let link = match matched {
-                    Some(matched) => {
+                // First-use resolution commits independently of this invocation's input.
+                let mut target = target.cloned();
+                if target.is_none()
+                    && matches!(
+                        tools.environment.uses.get(effect),
+                        Some(lash_core_store::tool_surface::UseBinding::Deferred(_))
+                    )
+                {
+                    let winner = tools
+                        .context
+                        .resolve_use(runtime.cx(), process, *effect)
+                        .await
+                        .map_err(|error| StepRefusal::CompositionUnavailable {
+                            reason: error.to_string(),
+                        })?;
+                    let record = match winner {
+                        lash_core_execution::runtime::actor::resolutions::CommittedUse::Ready(record) => record,
+                        lash_core_execution::runtime::actor::resolutions::CommittedUse::Parked { unmet, .. } => return Err(StepRefusal::CompositionUnavailable { reason: unmet.to_string() }),
+                    };
+                    match record.entry {
+                        lash_core_store::resolutions::ResolutionEntry::Resolved {
+                            definition: _,
+                            contract,
+                            route,
+                            ..
+                        } => {
+                            target = Some(
+                                lash_core_execution::runtime::process::steps::InvocationTarget {
+                                    route: *route,
+                                    contract,
+                                    args: input.clone(),
+                                    dispatch_requested: None,
+                                },
+                            )
+                        }
+                        lash_core_store::resolutions::ResolutionEntry::Refused { note } => {
+                            return Ok(negative_resolution(process, now_ms, "tool_refused", note));
+                        }
+                        lash_core_store::resolutions::ResolutionEntry::Unavailable { note } => {
+                            return Ok(negative_resolution(
+                                process,
+                                now_ms,
+                                "tool_unavailable",
+                                note.unwrap_or_else(|| {
+                                    format!("operation use `{effect}` is unavailable")
+                                }),
+                            ));
+                        }
+                    }
+                }
+                let link = match target.as_ref() {
+                    Some(target) => {
+                        let matched = crate::DeferredMatch {
+                            requested: target
+                                .dispatch_requested
+                                .clone()
+                                .unwrap_or_else(|| effect.to_string()),
+                            outcome: crate::DeferredOutcome::Resolved {
+                                link: target.route.clone(),
+                            },
+                        };
                         let (link, binding) =
-                            tools.context.matched_link(matched).map_err(unavailable)?;
+                            tools.context.matched_link(&matched).map_err(unavailable)?;
                         if let Err(reason) = binding {
                             return Err(StepRefusal::CompositionUnavailable { reason });
                         }
                         link
                     }
-                    None => tools
-                        .context
-                        .step_link(effect, contract)
-                        .map_err(unavailable)?,
+                    None => tools.context.step_link(effect).map_err(unavailable)?,
                 };
                 match link {
                     crate::plugin::StepLink::Unlinked => Err(StepRefusal::UnknownTool {
@@ -575,11 +653,11 @@ impl ProcessSteps for WorkerSteps {
                         admission.binding = Some(*binding);
                         // A granted tool's call is its resolution, under the
                         // policy and bound its grant recorded.
-                        admission.resolves = matched.is_none()
+                        admission.resolves = target.is_none()
                             && tools
-                                .effects
-                                .get(effect)
-                                .is_some_and(lash_core::OperationLink::dispatches);
+                                .route(effect)
+                                .is_some_and(lash_core::OperationRoute::dispatches);
+                        admission.target = target;
                         Ok(admission)
                     }
                     // The linked tool is missing here, or served under
@@ -676,7 +754,12 @@ impl ProcessSteps for WorkerSteps {
         call: &lash_core_execution::ToolCallId,
         output: SettledOutput,
     ) -> SettledOutput {
-        let StepRequest::Tool { effect, input, .. } = step else {
+        let StepRequest::Tool {
+            use_: effect,
+            input,
+            ..
+        } = step
+        else {
             return output;
         };
         let call = lash_core_execution::sansio::PendingToolCall {
@@ -784,13 +867,15 @@ impl DurableProcessWorker {
             tracing::warn!(process_id = %process.id, "an engine step ran before its activation built its tools");
             return SettledOutput::Interrupted.into();
         };
-        let effects = Arc::clone(&tools.effects);
+        let environment = Arc::clone(&tools.environment);
         let cx = runtime.cx();
         let backend = cx.backend().clone();
         let run = EngineStepRun {
             process: process.id.clone(),
             engine_settings: process.engine_settings().cloned(),
-            effects,
+            environment,
+            execution: lash_core_store::resolutions::ExecutionId::process(&process.id),
+            resolutions: Arc::clone(&tools.resolutions),
             reads: Arc::clone(&tools.reads),
             now: cx.now(),
             clock: Arc::clone(cx.clock()),
@@ -851,7 +936,7 @@ fn failure_outcome(process: &ProcessRecord, failure: crate::ToolFailure) -> Memb
 fn dispatch_missing(
     process: &ProcessRecord,
     call: &lash_core_execution::sansio::PendingToolCall,
-    effect: &lash_core::EffectName,
+    effect: &lash_vocabulary::names::OperationUse,
     execution: &AdmittedExecution,
     error: &lash_execution_contracts::plugin_error::PluginError,
 ) -> MemberOutcome {
@@ -867,4 +952,26 @@ fn dispatch_missing(
     )
     .output;
     tool_step_refused(&process.id, call, output).into()
+}
+
+fn negative_resolution(
+    process: &ProcessRecord,
+    now_ms: u64,
+    code: &str,
+    note: String,
+) -> StepAdmission {
+    let mut admission = StepAdmission::new(
+        crate::ToolId::from("deferred-resolution"),
+        crate::ExecutionPolicy::Once,
+        ExecutionLimit::starting_at(now_ms, std::time::Duration::ZERO, std::time::Duration::ZERO),
+        None,
+    );
+    admission.settled = Some(
+        failure_outcome(
+            process,
+            crate::ToolFailure::runtime(crate::ToolFailureClass::Unavailable, code, note),
+        )
+        .output,
+    );
+    admission
 }

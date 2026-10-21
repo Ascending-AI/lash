@@ -184,6 +184,7 @@ pub(crate) enum ToolExecutionRoute {
 /// Integrator class 3 sealed, controller-free environment for a recorded leaf attempt.
 #[derive(Clone)]
 pub struct AttemptContext<'run> {
+    admission_now: lash_durable::DurableInstant,
     live: crate::ToolLivePublisher,
     fleet_format: crate::FleetFormat,
     /// Who the attempt runs for: a session on its admitted frame, or a
@@ -239,13 +240,11 @@ pub struct AttemptContext<'run> {
     /// The routes of the surface the attempt was admitted under: what a
     /// start's capture links from. `None` outside a runtime dispatch.
     routes: Option<crate::SurfaceTools>,
-    /// The grants the declaring cell's committed deferred matches recorded,
-    /// by effect path: what a start's capture links an effect the surface
-    /// does not offer from. Empty outside a cell.
-    recorded_grants: crate::session::RecordedGrants,
-    /// The package set the declaring cell is linked under: what a function
-    /// it starts inline is linked under (FIG-6993). `None` outside a cell.
-    linked_packages: Option<lash_kernel_doc::PackageSetDigest>,
+    linked_execution: Option<crate::LinkedExecution>,
+    resolution_pins: std::collections::BTreeMap<
+        lash_vocabulary::names::OperationUse,
+        lash_core_store::resolutions::ResolutionEntry,
+    >,
     definition_engines: crate::ProcessEngineRegistry,
     pub(crate) resolved_run: Option<Arc<crate::ResolvedRun>>,
     /// The environments [`declare_launch`](Self::declare_launch) held under
@@ -288,6 +287,7 @@ impl ToolCompletionState {
 /// effect controller.
 #[derive(Clone)]
 pub(crate) struct ToolContext<'run> {
+    pub(crate) admission_now: Option<lash_durable::DurableInstant>,
     pub(crate) owner: crate::ExecutionOwner,
     pub(crate) sessions: Arc<dyn SessionStateService>,
     pub(crate) session_lifecycle: Arc<dyn SessionLifecycleService>,
@@ -439,6 +439,7 @@ impl<'run> ToolContextBuilder<'run> {
 
     pub(crate) fn build(self) -> ToolContext<'run> {
         ToolContext {
+            admission_now: None,
             owner: self.owner,
             sessions: self.sessions,
             session_lifecycle: self.session_lifecycle,
@@ -508,6 +509,7 @@ impl<'run> ToolContext<'run> {
 
     pub(crate) fn to_static(&self) -> Option<ToolContext<'static>> {
         Some(ToolContext {
+            admission_now: self.admission_now,
             owner: self.owner.clone(),
             sessions: Arc::clone(&self.sessions),
             session_lifecycle: Arc::clone(&self.session_lifecycle),

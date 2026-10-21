@@ -552,9 +552,7 @@ impl SurfaceTools {
             }
             .refusal(call)
         };
-        if !self.registry.serves(grant.provider())
-            || !matches!(self.deferred_provider(), Ok(Some(_)))
-        {
+        if !self.registry.serves(grant.provider()) {
             return Err(missing());
         }
         if let Some(payload) = grant.payload() {

@@ -961,7 +961,6 @@ impl KernelBroker<'_> {
         live: u64,
     ) -> Result<Vec<EffectAdmission>, KernelFailure> {
         let park = ledger.next_park();
-        let mut now = None::<DurableInstant>;
         let mut admit = Vec::with_capacity(requests.len());
         let mut executions = 0_u64;
         for request in requests {
@@ -985,30 +984,8 @@ impl KernelBroker<'_> {
                     EffectAdmission {
                         identity: request.identity,
                         wait: request.wait,
-                        effect: Some(request.effect),
+                        effect: Some(request.use_),
                         admit: how,
-                    }
-                }
-                Request::Sleep(sleep) => {
-                    let now = match now {
-                        Some(now) => now,
-                        None => *now.insert(
-                            self.store
-                                .context()
-                                .durable_now()
-                                .await
-                                .map_err(|error| QuietPointRefusal(error.to_string()))?,
-                        ),
-                    };
-                    let millis = i64::try_from(sleep.duration.as_millis()).unwrap_or(i64::MAX);
-                    EffectAdmission {
-                        identity: sleep.identity,
-                        wait: sleep.wait,
-                        effect: None,
-                        admit: AdmitAs::Sleep {
-                            duration: sleep.duration,
-                            until: DurableInstant(now.0.saturating_add(millis)),
-                        },
                     }
                 }
             });
@@ -1041,7 +1018,6 @@ impl KernelBroker<'_> {
 fn wait_of(request: &Request) -> WaitId {
     match request {
         Request::Effect(request) => request.wait,
-        Request::Sleep(sleep) => sleep.wait,
     }
 }
 

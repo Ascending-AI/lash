@@ -946,6 +946,7 @@ impl RoundTools for Catalog {
                     },
                     store_local: effects,
                     terminal: None,
+                    timer: None,
                     capacity: None,
                     candidate: None,
                 }

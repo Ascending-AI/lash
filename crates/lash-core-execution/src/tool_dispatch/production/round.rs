@@ -57,6 +57,7 @@ impl ParkedCall {
     fn awaited_process(&self) -> Option<&crate::ProcessId> {
         match self.completion.resolved_by.as_ref()? {
             crate::PendingResolver::ProcessTerminal { process_id } => Some(process_id),
+            crate::PendingResolver::Timer { .. } => None,
             crate::PendingResolver::DeclaredStart(_) => self
                 .launch
                 .as_ref()
@@ -131,6 +132,10 @@ fn parked_output(
         output: SettledOutput::Waiting(source),
         store_local: Vec::new(),
         terminal: parked.awaited_process().cloned(),
+        timer: match parked.completion.resolved_by.as_ref() {
+            Some(crate::PendingResolver::Timer { deadline, .. }) => Some(*deadline),
+            _ => None,
+        },
         capacity: None,
         candidate: None,
     }
@@ -465,6 +470,12 @@ pub(super) fn member_body(
                     context.clone().with_cancellation_token(token.clone()),
                 )
                 .with_completion_key(key.clone())
+                .with_admitted_at(lash_durable::DurableInstant(
+                    i64::try_from(execution.limit().expires_at.saturating_sub(
+                        u64::try_from(execution.limit().max_slice.as_millis()).unwrap_or(u64::MAX),
+                    ))
+                    .unwrap_or(i64::MAX),
+                ))
                 .with_admitted_declaration(execution.draft().declaration().cloned())
                 .with_stops(closing.clone(), stop.clone());
                 handlers.model_call_owner = Some(lash_durable::domain::ModelCallOwner {

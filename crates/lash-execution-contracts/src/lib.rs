@@ -33,7 +33,7 @@ use lash_core_store::execution_state::PluginOptions;
 use lash_core_store::plugin_state::FormatRefusal;
 use lash_core_store::session_identity::FrameNodeId;
 use lash_core_store::tool_surface::DeferredMatch;
-use lash_core_store::tool_surface::OperationLink;
+use lash_core_store::tool_surface::OperationRoute;
 use lash_protocol_types::AttachmentId;
 use lash_protocol_types::CancelOrigin;
 use lash_protocol_types::CancelRequest;

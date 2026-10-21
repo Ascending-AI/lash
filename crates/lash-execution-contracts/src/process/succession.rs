@@ -13,17 +13,12 @@ pub const SUCCESSOR_MAIL: &str = "process.successor";
 pub struct ProcessSuccessor {
     pub payload: serde_json::Value,
     pub env: ProcessEnvRef,
-    pub fits: BTreeMap<EffectName, FitPolicy>,
 }
 
 impl ProcessSuccessor {
     #[must_use]
     pub fn new(payload: serde_json::Value, env: ProcessEnvRef) -> Self {
-        Self {
-            payload,
-            env,
-            fits: BTreeMap::new(),
-        }
+        Self { payload, env }
     }
 }
 
@@ -156,7 +151,7 @@ pub mod linked {
     use super::SuccessionError;
     use crate::process::engine_state::linked::EngineState;
     use lash_core_store::artifact_referrer::ArtifactName;
-    use lash_core_store::{resolutions::*, tool_surface::linked::ExecutionEnvironment};
+    use lash_core_store::{resolutions::*, tool_surface::ExecutionEnvironment};
     use lash_vocabulary::{claims::*, identity::ProcessId, names::*};
     use serde::{Deserialize, Serialize};
     use std::collections::BTreeMap;

@@ -39,6 +39,11 @@ pub enum PendingResolver {
     /// records the realized id as the call's launch receipt, and arms the
     /// terminal of that id, on the park and on every redrive.
     DeclaredStart(DeclaredStart),
+    /// The existing durable timer resolves this call with the recorded result.
+    Timer {
+        deadline: lash_durable::DurableInstant,
+        result: serde_json::Value,
+    },
 }
 
 impl PendingResolver {
@@ -48,6 +53,7 @@ impl PendingResolver {
     pub fn awaits_process_terminal(&self) -> bool {
         match self {
             Self::ProcessTerminal { .. } | Self::DeclaredStart(_) => true,
+            Self::Timer { .. } => false,
         }
     }
 }
@@ -91,6 +97,14 @@ impl PendingCompletion {
     pub fn resolved_by(mut self, resolver: PendingResolver) -> Self {
         self.resolved_by = Some(resolver);
         self
+    }
+
+    pub fn resolved_by_timer(
+        self,
+        deadline: lash_durable::DurableInstant,
+        result: serde_json::Value,
+    ) -> Self {
+        self.resolved_by(PendingResolver::Timer { deadline, result })
     }
 
     pub fn resolved_by_process_terminal(self, process_id: crate::ProcessId) -> Self {
@@ -387,6 +401,11 @@ pub fn tool_output_from_completion_resolution(
     resolution: crate::Resolution,
     resolver: Option<&crate::PendingResolver>,
 ) -> crate::ToolCallOutput {
+    if let (Some(crate::PendingResolver::Timer { result, .. }), crate::Resolution::Ok(_)) =
+        (resolver, &resolution)
+    {
+        return crate::ToolCallOutput::success(result.clone());
+    }
     if let (Some(resolver), crate::Resolution::Ok(value)) = (resolver, &resolution)
         && resolver.awaits_process_terminal()
         && let Ok(terminal) = serde_json::from_value::<

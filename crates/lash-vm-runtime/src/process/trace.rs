@@ -44,13 +44,11 @@ impl ProcessTrace {
             process_id: process.clone(),
             identity: TraceLanguageExecutionIdentity {
                 scope: TraceRuntimeScope::none(),
-                document: WorkflowDocumentRef {
-                    document: input.document,
-                    entry: WorkflowDocumentEntry::Entry {
-                        function: input.entry.clone(),
-                    },
+                start: input.start.clone(),
+                entry_name: match &input.start.selector {
+                    lash_vocabulary::names::StartSelector::Main => "main".into(),
+                    lash_vocabulary::names::StartSelector::Export(name) => name.to_string(),
                 },
-                entry_name: input.entry.to_string(),
                 engine_execution_id: Some(process.to_string()),
                 // The durable actor has no execution-attempt fact. Its
                 // minted process identity names the resumed lifetime.
@@ -113,18 +111,8 @@ impl ProcessTrace {
                     message: error.message.clone(),
                 },
             },
-            OutcomeWire::Elapsed => TraceNodeFact::Resumed {
-                resolution: TraceNodeWaitResolution::Resumed,
-            },
         };
         self.node(&delivery.identity, fact);
-        // A sleep that ended is done; an effect's own terminal says so.
-        if matches!(delivery.outcome, OutcomeWire::Elapsed) {
-            self.node(
-                &delivery.identity,
-                TraceNodeFact::Completed { call_id: None },
-            );
-        }
     }
 
     /// One wait the machine asked for at a park. An effect that became a
@@ -138,22 +126,6 @@ impl ProcessTrace {
                 self.node(
                     admission.identity(),
                     TraceNodeFact::Started { call_id: None },
-                );
-            }
-            Issued::Sleep {
-                admission,
-                until_ms,
-                ..
-            } => {
-                let identity = admission.identity();
-                self.node(identity, TraceNodeFact::Started { call_id: None });
-                self.node(
-                    identity,
-                    TraceNodeFact::Waiting {
-                        awaited: TraceNodeAwaited::Sleep {
-                            deadline_ms: u64::try_from(*until_ms).ok(),
-                        },
-                    },
                 );
             }
         }

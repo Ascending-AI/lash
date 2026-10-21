@@ -23,7 +23,7 @@
 //! refused.
 
 use lash_execution_contracts::process::*;
-use lash_kernel_doc::EffectName;
+use lash_vocabulary::names::OperationUse;
 
 use super::engine::ProcessEngineRegistry;
 
@@ -40,13 +40,13 @@ use lash_protocol_types::ProcessId;
 /// The refusal of a request whose new env links an effect of an admitted,
 /// unsettled step otherwise than `old` does.
 pub(crate) fn relinked_step(
-    in_flight: impl IntoIterator<Item = EffectName>,
+    in_flight: impl IntoIterator<Item = OperationUse>,
     old: &crate::ProcessEnv,
     new: &crate::ProcessEnv,
 ) -> Option<ProcessSuccessorRefusal> {
     in_flight
         .into_iter()
-        .find(|effect| old.effects().get(effect) != new.effects().get(effect))
+        .find(|effect| old.execution().uses.get(effect) != new.execution().uses.get(effect))
         .map(|effect| ProcessSuccessorRefusal::AdmittedStepRelinked {
             effect: effect.to_string(),
         })
@@ -138,41 +138,14 @@ pub async fn request_process_successor(
         }
     };
     let new_env = load(request.env.clone()).await?;
-    let linked = engines
-        .link_package_namespaces(kind, &request.payload, new_env.clone())
-        .await?;
-    if linked != new_env {
-        let claim = ReferrerClaim::unguarded(ArtifactReferrer::ProcessRecord(process.clone()))
-            .map_err(|error| PluginError::Session(error.to_string()))?;
-        request.env = super::hold_process_env(
-            &super::ProcessEnvPorts::admitting(env_store.as_ref(), engines.components()),
-            &claim,
-            &super::ProcessEnvSelection::New(linked.clone()),
-        )
+    let start = linked_start(engines, kind, &request.payload).await?;
+    let inspection = engines
+        .inspect_link(kind, &start)
         .await
-        .map_err(|error| match error {
-            super::HoldEnvError::Fault(error) => error,
-            super::HoldEnvError::Refused(refusal) => link(refusal),
-        })?;
-    }
-    if lash_execution_contracts::process::succession::successor_is_current(&request, &record) {
-        return Ok(ProcessSuccession::AlreadyCurrent);
-    }
-    let new_env = linked;
-    let performed = engines
-        .performed_effects(kind, &request.payload)
-        .await
-        .map_err(link)?;
+        .map_err(PluginError::from)?;
     engines
-        .check_links(
-            kind,
-            &request.payload,
-            &std::sync::Arc::new(new_env.clone()),
-            &performed,
-            &successor.fits,
-        )
-        .await
-        .map_err(link)?;
+        .check_links(&std::sync::Arc::new(new_env.clone()), &inspection)
+        .map_err(PluginError::from)?;
     // An admitted step keeps the match its admission recorded.
     let row =
         backend.durable().process(process).await.map_err(|error| {
@@ -195,10 +168,17 @@ pub async fn request_process_successor(
     )
     .await
     .map_err(|error| PluginError::Session(format!("reading the process's state: {error}")))?;
-    if let Err(error) = succession
-        .carry(process, payload, &request.payload, state.as_ref(), &new_env)
-        .await
-    {
+    let context = succession_context(
+        backend,
+        engines,
+        process,
+        kind,
+        payload,
+        &request.payload,
+        &new_env,
+    )
+    .await?;
+    if let Err(error) = succession.carry(process, &context, state.as_ref()).await {
         return Err(refused(carry_refusal(error)?));
     }
     hold(backend, engines, process, kind, &request).await?;
@@ -247,6 +227,7 @@ async fn hold(
             refusal: Box::new(ProcessSuccessorRefusal::Link { refusal }),
         },
         super::HoldEnvError::Fault(error) => error,
+        super::HoldEnvError::Admission(error) => error.into(),
     })?;
     let names = engines.require(kind)?.start_artifacts(&request.payload)?;
     if names.is_empty() {
@@ -259,4 +240,60 @@ async fn hold(
     })?;
     ports.acquire(engines, &claim, &names).await?;
     Ok(())
+}
+
+pub(crate) async fn linked_start(
+    engines: &ProcessEngineRegistry,
+    kind: &str,
+    payload: &serde_json::Value,
+) -> Result<lash_vocabulary::names::LinkedStart, PluginError> {
+    let provider = engines
+        .document_provider(kind)
+        .ok_or_else(|| PluginError::Session("successor engine has no document provider".into()))?;
+    match provider.document_ref(payload).await? {
+        ProcessDocumentRefRead::Named(start) => Ok(start),
+        ProcessDocumentRefRead::ArtifactMissing { artifact } => Err(
+            lash_execution_contracts::process::linking::EnginePortError::Missing { artifact }
+                .into(),
+        ),
+    }
+}
+
+pub async fn succession_context(
+    backend: &Backend,
+    engines: &ProcessEngineRegistry,
+    process: &ProcessId,
+    kind: &str,
+    from: &serde_json::Value,
+    to: &serde_json::Value,
+    environment: &crate::ProcessEnv,
+) -> Result<lash_execution_contracts::process::SuccessionContext, PluginError> {
+    let execution = lash_core_store::resolutions::ExecutionId::process(process);
+    let from = linked_start(engines, kind, from).await?;
+    let to = linked_start(engines, kind, to).await?;
+    let previous = engines
+        .inspect_link(kind, &from)
+        .await
+        .map_err(PluginError::from)?;
+    let store = backend.stores().execution_resolutions();
+    let mut resolutions = std::collections::BTreeMap::new();
+    for use_ in previous.operations.keys() {
+        if let Some(record) = store
+            .load(&lash_core_store::resolutions::ResolutionKey {
+                execution: execution.clone(),
+                use_: *use_,
+            })
+            .await
+            .map_err(lash_execution_contracts::plugin_error::registry_error)?
+        {
+            resolutions.insert(*use_, record.entry);
+        }
+    }
+    Ok(lash_execution_contracts::process::SuccessionContext {
+        execution,
+        from,
+        to,
+        environment: environment.execution().clone(),
+        resolutions,
+    })
 }

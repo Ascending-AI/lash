@@ -129,20 +129,14 @@ pub struct ReplayFault(String);
 /// does not answer diverges the replay. A process binds no handle, so a
 /// projection read is unreachable; meeting one diverges it too.
 struct ReplayHost {
-    now_ms: Option<i64>,
-    random: std::sync::Mutex<std::collections::VecDeque<u64>>,
     effects: std::sync::Mutex<std::collections::VecDeque<super::state::EffectRead>>,
-    clock_read: AtomicBool,
     diverged: AtomicBool,
 }
 
 impl ReplayHost {
     fn of(reads: &HostReads) -> Self {
         Self {
-            now_ms: reads.now_ms,
             effects: std::sync::Mutex::new(reads.effects.iter().cloned().collect()),
-            random: std::sync::Mutex::new(reads.random.iter().copied().collect()),
-            clock_read: AtomicBool::new(false),
             diverged: AtomicBool::new(false),
         }
     }
@@ -154,16 +148,10 @@ impl ReplayHost {
 
     /// Whether the run read exactly what its tape recorded.
     fn consumed(&self) -> bool {
-        let draws = self
-            .random
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
         self.effects
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .is_empty()
-            && draws.is_empty()
-            && self.clock_read.load(Ordering::Relaxed) == self.now_ms.is_some()
             && !self.diverged.load(Ordering::Relaxed)
     }
 }
@@ -178,24 +166,6 @@ impl RunHost for ReplayHost {
         true
     }
 
-    async fn clock(&self) -> Result<Timestamp, ParentFault> {
-        let now_ms = self
-            .now_ms
-            .ok_or_else(|| self.diverge("the segment read a clock its tape lacks"))?;
-        self.clock_read.store(true, Ordering::Relaxed);
-        Ok(Timestamp {
-            nanoseconds: Integer::from(now_ms.saturating_mul(1_000_000)),
-        })
-    }
-
-    async fn random(&self) -> Result<u64, ParentFault> {
-        self.random
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .pop_front()
-            .ok_or_else(|| self.diverge("the segment drew more random bits than its tape holds"))
-    }
-
     async fn read(
         &self,
         _handle: &Handle,
@@ -206,7 +176,7 @@ impl RunHost for ReplayHost {
 
     async fn perform(
         &self,
-        effect: &lash_kernel_doc::EffectName,
+        effect: &lash_vocabulary::names::OperationUse,
         args: &[Datum],
         site: &lash_kernel_doc::PositionLabel,
         origin: &lash_kernel_doc::Site,
@@ -217,10 +187,7 @@ impl RunHost for ReplayHost {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .pop_front()
             .ok_or_else(|| self.diverge("the segment read beyond its operation tape"))?;
-        if read.effect != *effect
-            || read.args != args
-            || read.site != *site
-            || read.origin != *origin
+        if read.use_ != *effect || read.args != args || read.site != *site || read.origin != *origin
         {
             return Err(self.diverge("the segment's operation read differs from its tape"));
         }
@@ -277,7 +244,6 @@ impl Journal<'_> {
         digest: &str,
     ) -> Result<OutcomeWire, Unreplayable> {
         let candidates = match source {
-            DeliverySource::Elapsed => vec![OutcomeWire::Elapsed],
             DeliverySource::Refused { run } => match self.issued(*run, wait) {
                 Some(Issued::Refused { kind, message, .. }) => vec![refused(kind, message.clone())],
                 _ => return Err(Unreplayable::Pruned),
@@ -496,29 +462,50 @@ impl KernelProcessEngine {
         {
             return unreplayable(Unreplayable::KernelVersion);
         }
-        let document = match self.documents.get_shared(&recorded_start.document).await {
-            Ok(Some(document)) => document,
-            Ok(None) => return unreplayable(Unreplayable::Pruned),
-            Err(error) => return Err(ReplayFault(error.to_string())),
-        };
-        if document.manifest.kernel != writes {
-            return unreplayable(Unreplayable::KernelVersion);
-        }
+        let content = self
+            .documents
+            .load_linked(recorded_start.start.link)
+            .await
+            .map_err(|error| ReplayFault(error.to_string()))?;
+        let root = content
+            .links
+            .get(&recorded_start.start.link)
+            .ok_or_else(|| ReplayFault("root Link is absent".into()))?;
+        let document = content
+            .documents
+            .get(&root.document)
+            .ok_or_else(|| ReplayFault("root Document is absent".into()))?
+            .clone();
         let Ok(mut input) = KernelProcessInput::from_payload(&request.payload) else {
             return unreplayable(Unreplayable::NoTape);
         };
-        input.document = recorded_start.document;
+        input.start = recorded_start.start.clone();
         let Ok(args) = entry_args(&document, &input) else {
             return unreplayable(Unreplayable::NoTape);
         };
-        // A replay runs the code the run ran: the definitions its document
-        // was written against, the store's where the node lacks them.
-        let Ok(closure) = super::run::pinned_closure(self, &document)
-            .await
-            .map_err(|fault| ReplayFault(fault.0))?
-        else {
-            return unreplayable(Unreplayable::FunctionMissing);
-        };
+        let reach = content
+            .inspect(
+                input.start.link,
+                &lash_kernel_package::ReachSelection::Start(input.start.selector.clone()),
+            )
+            .map_err(|error| ReplayFault(error.to_string()))?;
+        let loaded = lash_vm_broker::kernel::loader::assemble_reach(
+            &document,
+            &content.documents,
+            &reach.functions,
+            &reach.machine,
+            &self.functions,
+        )
+        .map_err(|error| ReplayFault(error.to_string()))?;
+        let closure = loaded.closure;
+        let program = lash_kernel_vm::Program::prepare(
+            input.start.link,
+            content.documents.clone(),
+            &content.links,
+            lash_kernel_doc::heap::PageId(closure.reference().0),
+            lash_kernel_vm::PreparedLibrary::with_charge(loaded.registry, settings.charge),
+        )
+        .map_err(|error| ReplayFault(error.to_string()))?;
         let host = Arc::new(ReplayHost::of(reads));
         let machines = lash_vm_client::RemoteMachines::new(
             self.workers.clone(),
@@ -529,10 +516,22 @@ impl KernelProcessEngine {
             &document,
             &settings.dialect,
             lash_vm_client::RunStart {
-                target: Target::Entry(input.entry.clone()),
+                link: program.link,
+                instances: program.instances,
+                documents: program.documents,
+                target: match &input.start.selector {
+                    lash_vocabulary::names::StartSelector::Main => Target::Main,
+                    lash_vocabulary::names::StartSelector::Export(name) => {
+                        Target::Entry(name.clone())
+                    }
+                },
                 args,
                 session: None,
-                modes: lash_kernel_vm::EffectModes::reading(reads.read_effects.iter().cloned()),
+                modes: reads
+                    .read_effects
+                    .iter()
+                    .map(|use_| (*use_, lash_vocabulary::package::OperationMode::Read))
+                    .collect(),
                 host: Vec::new(),
                 save: None,
             },

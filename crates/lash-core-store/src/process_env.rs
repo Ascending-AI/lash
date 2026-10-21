@@ -20,9 +20,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::provider::AttachmentCapabilitySnapshot;
 use crate::run_spec::{CapabilityRef, SlotId};
-use crate::tool_surface::OperationLink;
+use crate::tool_surface::ExecutionEnvironment;
 use crate::{ChargeSafetyPolicy, LlmProfileConfig, MaxToolCalls, SessionId};
-use lash_kernel_doc::EffectName;
+use lash_vocabulary::claims::RegistryKind;
 
 use crate::process_identity::{ProcessEnvRef, process_env_ref_for_bytes};
 
@@ -43,18 +43,12 @@ pub struct ProcessEnv {
     )]
     attachments: Arc<AttachmentCapabilitySnapshot>,
     limits: ProcessLimits,
-    /// The link of each effect the process performs, exactly: a start is
-    /// refused unless these are the effects its entry calls or spawns.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    effects: BTreeMap<EffectName, OperationLink>,
+    /// Immutable accepted links, routes and known claim requirements.
+    execution: ExecutionEnvironment,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     components: Vec<ProcessComponentEntry>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     capabilities: BTreeMap<SlotId, CapabilityRef>,
-    /// Namespace roots of the snapshot this process was linked against.
-    /// Dynamic strings cannot enter any of these statically linked namespaces.
-    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    package_roots: BTreeSet<String>,
 }
 
 /// The model data a process's direct calls and tools read (D16): the data
@@ -376,9 +370,6 @@ pub enum ProcessEnvRefusal {
         pinned: lash_kernel_doc::ContractId,
         live: lash_kernel_doc::ContractId,
     },
-    /// Two linked effect paths collide: one is a namespace of the other.
-    #[error("linked effects `{first}` and `{second}` collide")]
-    LinkPathCollision { first: String, second: String },
     /// Capture matched an effect to a tool of the run's recorded surface,
     /// or of the declaring cell's committed deferred match, that no
     /// component the env names serves.
@@ -398,9 +389,6 @@ pub enum ProcessEnvRefusal {
         codec: String,
         reason: String,
     },
-    /// A restricted child env names an effect its parent does not link.
-    #[error("effect `{effect}` is not linked by the parent env it is restricted from")]
-    RestrictMissing { effect: String },
     /// The document's linked-effect set could not be certified.
     #[error("the process's linked effects cannot be certified: {reason}")]
     Uncertified { reason: String },
@@ -426,83 +414,16 @@ impl ProcessEnv {
                 model: None,
                 attachments: Arc::new(AttachmentCapabilitySnapshot::default()),
                 limits: ProcessLimits::new(max_tool_calls),
-                effects: BTreeMap::new(),
+                execution: ExecutionEnvironment::empty(RegistryKind::Process),
                 components: Vec::new(),
                 capabilities: BTreeMap::new(),
-                package_roots: BTreeSet::new(),
             },
             refusal: None,
         }
     }
 
-    /// An environment stated from `run`, the starting turn's recorded run:
-    /// its model data, attachment rules, tool-call limit and capability
-    /// refs, with `effects` linked and exactly `components`. Nothing is
-    /// inferred from tool owners (M2).
-    ///
-    /// # Errors
-    ///
-    /// The component list is refused.
-    pub fn from_run(
-        run: &crate::run_spec::ResolvedRun,
-        effects: BTreeMap<EffectName, OperationLink>,
-        components: Vec<ProcessComponentEntry>,
-    ) -> Result<ProcessEnv, ProcessEnvRefusal> {
-        let config = run.config();
-        let mut builder = ProcessEnv::builder(config.max_tool_calls)
-            .attachments(Arc::clone(&config.attachment_acceptance))
-            .effects(effects);
-        if let Some(profile) = &config.model {
-            builder = builder.model(ProcessModel::new(
-                profile.clone(),
-                config.generation.clone(),
-                config.charge_safety.clone(),
-            ));
-        }
-        for (slot, capability) in run.capabilities() {
-            builder = builder.capability(slot.clone(), capability.clone());
-        }
-        for entry in components {
-            builder = builder.entry(entry);
-        }
-        builder.build()
-    }
-
-    /// This env restricted to `effects`, each keeping the link this env
-    /// recorded for it: a child's derived env, never re-resolved. It is a
-    /// new content address.
-    ///
-    /// # Errors
-    ///
-    /// An effect this env does not link.
-    pub fn restrict<'a>(
-        &self,
-        effects: impl IntoIterator<Item = &'a EffectName>,
-    ) -> Result<ProcessEnv, ProcessEnvRefusal> {
-        let mut restricted = self.clone();
-        restricted.effects = effects
-            .into_iter()
-            .map(|effect| {
-                self.effects
-                    .get(effect)
-                    .map(|link| (effect.clone(), link.clone()))
-                    .ok_or_else(|| ProcessEnvRefusal::RestrictMissing {
-                        effect: effect.to_string(),
-                    })
-            })
-            .collect::<Result<_, _>>()?;
-        Ok(restricted)
-    }
-
-    pub fn package_roots(&self) -> &BTreeSet<String> {
-        &self.package_roots
-    }
-
-    /// Record the namespace decision made at linking, before the start is stored.
-    #[must_use]
-    pub fn with_package_roots(mut self, roots: BTreeSet<String>) -> Self {
-        self.package_roots = roots;
-        self
+    pub fn execution(&self) -> &ExecutionEnvironment {
+        &self.execution
     }
 
     pub fn model(&self) -> Option<&ProcessModel> {
@@ -519,11 +440,6 @@ impl ProcessEnv {
 
     pub fn max_tool_calls(&self) -> MaxToolCalls {
         self.limits.max_tool_calls
-    }
-
-    /// The link of each effect the process performs.
-    pub fn effects(&self) -> &BTreeMap<EffectName, OperationLink> {
-        &self.effects
     }
 
     /// Replace only the component representations at a recorded format cut.
@@ -582,26 +498,6 @@ impl ProcessEnv {
     ///
     /// The first structural refusal.
     pub fn check_shape(&self) -> Result<(), ProcessEnvRefusal> {
-        let paths = self
-            .effects
-            .keys()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>();
-        for (index, first) in paths.iter().enumerate() {
-            for second in &paths[index + 1..] {
-                let nested = |outer: &str, inner: &str| {
-                    inner
-                        .strip_prefix(outer)
-                        .is_some_and(|rest| rest.starts_with('.'))
-                };
-                if nested(first, second) || nested(second, first) {
-                    return Err(ProcessEnvRefusal::LinkPathCollision {
-                        first: first.clone(),
-                        second: second.clone(),
-                    });
-                }
-            }
-        }
         let mut ids = BTreeSet::new();
         for entry in &self.components {
             if !ids.insert(entry.id.as_str()) {
@@ -640,34 +536,10 @@ impl ProcessEnvBuilder {
         self
     }
 
-    /// Link `effect` to `link`, replacing an earlier link of it.
+    /// Record the selected per-use environment. Resolutions are stored separately.
     #[must_use]
-    pub fn link(mut self, effect: EffectName, link: OperationLink) -> Self {
-        self.env.effects.insert(effect, link);
-        self
-    }
-
-    /// Link the effect `definition`'s binding names (`module.operation`) to
-    /// that tool, advertised by the env component provider declared as
-    /// `provider`. A tool with no binding names no effect: [`Self::build`]
-    /// refuses it.
-    #[must_use]
-    pub fn link_tool(
-        mut self,
-        provider: crate::tool_surface::ProviderKey,
-        definition: &crate::ToolDefinition,
-    ) -> Self {
-        let link = OperationLink::advertised(provider, definition, None);
-        self.env
-            .effects
-            .insert(definition.manifest.operation.effect_name(), link);
-        self
-    }
-
-    /// Link exactly `effects`, replacing every earlier link.
-    #[must_use]
-    pub fn effects(mut self, effects: BTreeMap<EffectName, OperationLink>) -> Self {
-        self.env.effects = effects;
+    pub fn execution(mut self, execution: ExecutionEnvironment) -> Self {
+        self.env.execution = execution;
         self
     }
 
@@ -744,32 +616,3 @@ fn capture_missing(effect: &str, tool: &str) -> String {
 mod tests;
 
 pub use lash_vocabulary::providers::{ProcessComponentId, ProcessComponentIdError};
-
-/// Linked execution environment; implementation belongs to pkg-exec.
-pub mod linked {
-    use super::{
-        AttachmentCapabilitySnapshot, CapabilityRef, ProcessComponentEntry, ProcessLimits,
-        ProcessModel, SlotId,
-    };
-    use crate::tool_surface::linked::ExecutionEnvironment;
-    use serde::{Deserialize, Serialize};
-    use std::{collections::BTreeMap, sync::Arc};
-    #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-    #[serde(deny_unknown_fields)]
-    pub struct ProcessEnv {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        model: Option<ProcessModel>,
-        #[serde(
-            default,
-            skip_serializing_if = "crate::provider::AttachmentCapabilitySnapshot::is_empty_arc"
-        )]
-        attachments: Arc<AttachmentCapabilitySnapshot>,
-        limits: ProcessLimits,
-        /// Immutable accepted links, routes and known claim requirements.
-        execution: ExecutionEnvironment,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        components: Vec<ProcessComponentEntry>,
-        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-        capabilities: BTreeMap<SlotId, CapabilityRef>,
-    }
-}

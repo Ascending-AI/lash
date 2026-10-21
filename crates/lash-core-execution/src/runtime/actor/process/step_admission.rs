@@ -52,6 +52,7 @@ pub(super) struct Consumed<'a> {
 pub(super) struct Handoff {
     pub(super) resolution: InFlight,
     pub(super) target: StepRequest,
+    pub(super) pin: crate::runtime::process::steps::InvocationTarget,
 }
 
 /// How a batch of steps is held against the process's `max_tool_calls`.
@@ -102,8 +103,8 @@ impl ProcessActivation {
                     .steps
                     .values()
                     .find(|step| step.call == *execution.draft().call())
-                    .and_then(|step| step.request.matched())
-                    .and_then(crate::DeferredMatch::resolved),
+                    .and_then(|step| step.target.as_ref())
+                    .map(|target| &target.route),
             );
         }
         let requires = work.requires();
@@ -132,7 +133,11 @@ impl ProcessActivation {
         live: &mut Live,
         handoff: Handoff,
     ) -> Result<Pass, DurableError> {
-        let Handoff { resolution, target } = handoff;
+        let Handoff {
+            resolution,
+            target,
+            pin,
+        } = handoff;
         let Consumed {
             process,
             row,
@@ -158,6 +163,7 @@ impl ProcessActivation {
                 now,
                 &mut fresh,
                 Hold::Moved,
+                Some(&pin),
             )
             .await?
         {
@@ -242,6 +248,7 @@ impl ProcessActivation {
         now: DurableInstant,
         fresh: &mut Vec<AdmittedExecution>,
         hold: Hold,
+        target: Option<&crate::runtime::process::steps::InvocationTarget>,
     ) -> Result<Admission, DurableError> {
         let tools = requests
             .iter()
@@ -290,7 +297,7 @@ impl ProcessActivation {
             }
             let admitted = match self
                 .steps
-                .admit(runtime, record, &request, millis(now))
+                .admit(runtime, record, &request, target, millis(now))
                 .await
             {
                 Ok(admitted) => admitted,
@@ -301,6 +308,16 @@ impl ProcessActivation {
                 }
                 Err(refusal) => return Ok(Admission::Refused(refusal)),
             };
+            let current = runtime.cx().begin().await?.revision();
+            if current != tx.revision() {
+                // First-use pinning commits before invocation fitting. The
+                // engine transition must be replayed over that committed revision.
+                return Err(DurableError::ResolutionRevisionConflict {
+                    actor: tx.actor().clone(),
+                    expected: tx.revision(),
+                    current,
+                });
+            }
             let call = admission.call_id(&[ToolCallPosition::ProcessStep {
                 step: &request.step().0,
                 run,
@@ -314,6 +331,7 @@ impl ProcessActivation {
                 limit_max_slice_ms: u64::try_from(admitted.limit.max_slice.as_millis())
                     .unwrap_or(u64::MAX),
                 request,
+                target: admitted.target,
                 resolves: admitted.resolves,
             };
             let trace = super::node_trace::step_trace_scope(
@@ -420,7 +438,7 @@ pub(super) fn step_requests(driver: &Driver) -> Vec<StepRequest> {
 pub(super) fn outstanding_work(
     process: &ProcessId,
     environment: BTreeSet<crate::ObligationToken>,
-    record: &lash_kernel_doc::ExecutionRequirements,
+    record: &lash_vocabulary::claims::ClaimRequirements,
     driver: &Driver,
     fold: Option<&RunFold>,
 ) -> crate::runtime::actor::claim_obligations::RecordedWork {
@@ -452,9 +470,7 @@ pub(super) fn outstanding_work(
                     OwnerKey::Process(process.clone()),
                     member.call().clone(),
                     member.draft().binding(),
-                    step.request
-                        .matched()
-                        .and_then(crate::DeferredMatch::resolved),
+                    step.target.as_ref().map(|target| &target.route),
                 );
             }
         }
@@ -494,14 +510,6 @@ impl ProcessActivation {
                 steps: requests,
                 wake,
             } => {
-                // A recorded match is lash's to record, at the commit that
-                // consumes its resolution: an engine asks for the granted
-                // tool's effect, never for a match.
-                if requests.iter().any(|request| request.matched().is_some()) {
-                    return Ok(Some(refused(
-                        "a step names a recorded match, which only lash records".to_owned(),
-                    )));
-                }
                 match self
                     .admit_steps(
                         runtime,
@@ -513,6 +521,7 @@ impl ProcessActivation {
                         now,
                         fresh,
                         Hold::Counted,
+                        None,
                     )
                     .await?
                 {

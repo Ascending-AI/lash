@@ -1,27 +1,27 @@
 //! Authority carried by a recorded deferred match.
-use crate::{OperationLink, ToolContract, ToolDefinition, ToolManifest};
+use crate::{OperationRoute, ToolContract, ToolDefinition, ToolManifest};
 use serde::{Deserialize, Serialize};
 
 /// The authority to execute a tool a recorded deferred match resolved,
-/// outside the run's recorded surface: the match's [`OperationLink`], whose
+/// outside the run's recorded surface: the match's [`OperationRoute`], whose
 /// provider prepares and executes its calls under the definition it
 /// retains, and whose payload the provider reads from its prepare and
 /// execute contexts.
 // `PartialEq` but not `Eq`: the payload is a `serde_json::Value`, whose float
 // arm has no total equality.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(try_from = "OperationLink", into = "OperationLink")]
+#[serde(try_from = "OperationRoute", into = "OperationRoute")]
 pub struct ToolExecutionGrant {
-    /// A [`crate::LinkSource::Resolved`] link: the one identity its calls
+    /// A [`crate::RouteSource::Resolved`] link: the one identity its calls
     /// bind to and dispatch through.
-    link: OperationLink,
+    link: OperationRoute,
     definition: ToolDefinition,
 }
 
-impl TryFrom<OperationLink> for ToolExecutionGrant {
+impl TryFrom<OperationRoute> for ToolExecutionGrant {
     type Error = String;
 
-    fn try_from(link: OperationLink) -> Result<Self, Self::Error> {
+    fn try_from(link: OperationRoute) -> Result<Self, Self::Error> {
         let definition = link
             .resolution()
             .cloned()
@@ -30,7 +30,7 @@ impl TryFrom<OperationLink> for ToolExecutionGrant {
     }
 }
 
-impl From<ToolExecutionGrant> for OperationLink {
+impl From<ToolExecutionGrant> for OperationRoute {
     fn from(grant: ToolExecutionGrant) -> Self {
         grant.link
     }
@@ -44,19 +44,19 @@ impl ToolExecutionGrant {
         definition: ToolDefinition,
     ) -> Self {
         Self {
-            link: OperationLink::resolved(provider, definition.clone(), None),
+            link: OperationRoute::resolved(provider, definition.clone(), None),
             definition,
         }
     }
 
     /// The grant a committed deferred match's `link` makes; `None` for a
     /// link that retains no definition.
-    pub fn of_link(link: &OperationLink) -> Option<Self> {
+    pub fn of_link(link: &OperationRoute) -> Option<Self> {
         Self::try_from(link.clone()).ok()
     }
 
     /// The grant's link.
-    pub fn link(&self) -> &OperationLink {
+    pub fn link(&self) -> &OperationRoute {
         &self.link
     }
 

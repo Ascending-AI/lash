@@ -8,7 +8,7 @@ use crate::RuntimeServices;
 use crate::tool_dispatch::ToolDispatchContext;
 
 mod execution_context;
-pub(crate) use execution_context::{RecordedGrants, ToolCallStart, ToolObservationAttribution};
+pub(crate) use execution_context::{ToolCallStart, ToolObservationAttribution};
 mod opener_run;
 mod process_handles;
 mod settlement_incorporation;
@@ -17,7 +17,9 @@ pub(crate) mod tool_execution;
 
 pub use execution_context::RuntimeExecutionTracing;
 pub(crate) use execution_context::runtime_ops;
-pub use execution_context::{CellEndHandoff, EndedCell, HeldResponse, RuntimeExecutionContext};
+pub use execution_context::{
+    CellEndHandoff, EndedCell, HeldResponse, LinkedExecution, RuntimeExecutionContext,
+};
 pub(crate) use execution_context::{
     attach_process_lineage, execution_claim_of, process_lineage_of,
 };

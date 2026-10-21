@@ -5,20 +5,24 @@
 //! that match:
 //!
 //! - a session run records the [`RecordedSurface`] its model calls are
-//!   admitted under, each tool with its [`OperationLink`] and its whole
+//!   admitted under, each tool with its [`OperationRoute`] and its whole
 //!   definition as the model was shown it;
 //! - a process env links each effect its document performs to a tool by
-//!   one [`OperationLink`];
+//!   one [`OperationRoute`];
 //! - a call path no surface or link matches is resolved once by the
 //!   surface's deferred provider, and the [`DeferredMatch`] it records, an
-//!   [`OperationLink`] retaining the matched definition, is never resolved
+//!   [`OperationRoute`] retaining the matched definition, is never resolved
 //!   again.
 //!
 //! Every pinned call is judged by one [`judge`]: the live tool's contract id
 //! must equal the pinned one, and nothing else about the live tool is
 //! compared (OP-LINK-ONE).
 
-use std::collections::BTreeMap;
+use lash_vocabulary::package::PublicationRecord;
+use lash_vocabulary::{
+    claims::*, names::OperationUse, operations::OperationRequirement, package::*,
+};
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -45,7 +49,7 @@ pub enum ReconfigureError {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SurfaceEntry {
-    pub link: OperationLink,
+    pub link: OperationRoute,
     pub definition: ToolDefinition,
 }
 
@@ -58,7 +62,7 @@ impl SurfaceEntry {
         payload: Option<ExecutionBinding>,
     ) -> Self {
         Self {
-            link: OperationLink::advertised(provider, &definition, payload),
+            link: OperationRoute::advertised(provider, &definition, payload),
             definition,
         }
     }
@@ -218,8 +222,13 @@ impl RecordedSurface {
 
 /// Where a linked operation's tool comes from.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum LinkSource {
+#[serde(
+    tag = "kind",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub enum RouteSource {
     /// The link's provider advertises the tool.
     Advertised,
     /// A committed deferred match: the tool is served from this retained
@@ -241,7 +250,7 @@ pub enum LinkSource {
 /// or for a model round its recorded definition's ([`judge`]).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct OperationLink {
+pub struct OperationRoute {
     pub tool: ToolId,
     pub provider: ProviderKey,
     /// The execution policy captured from the runner's manifest at link
@@ -253,10 +262,10 @@ pub struct OperationLink {
     /// never compared.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub payload: Option<ExecutionBinding>,
-    pub source: LinkSource,
+    pub source: RouteSource,
 }
 
-impl OperationLink {
+impl OperationRoute {
     /// The link of `definition`, which `provider` advertises, with the codec
     /// `payload` the provider states for it.
     pub fn advertised(
@@ -270,7 +279,7 @@ impl OperationLink {
             policy: definition.manifest.execution_policy,
             projection: definition.manifest.argument_projection.clone(),
             payload,
-            source: LinkSource::Advertised,
+            source: RouteSource::Advertised,
         }
     }
 
@@ -287,7 +296,7 @@ impl OperationLink {
             policy: definition.manifest.execution_policy,
             projection: definition.manifest.argument_projection.clone(),
             payload,
-            source: LinkSource::Resolved {
+            source: RouteSource::Resolved {
                 definition: Box::new(definition),
             },
         }
@@ -311,25 +320,25 @@ impl OperationLink {
             policy: policy.execution_policy,
             projection: definition.manifest.argument_projection.clone(),
             payload: None,
-            source: LinkSource::Dispatch {
+            source: RouteSource::Dispatch {
                 definition: Box::new(definition),
             },
         }
     }
 
     /// The definition a committed deferred match retains, for a
-    /// [`LinkSource::Resolved`] link.
+    /// [`RouteSource::Resolved`] link.
     pub fn resolution(&self) -> Option<&ToolDefinition> {
         match &self.source {
-            LinkSource::Resolved { definition } => Some(definition),
-            LinkSource::Advertised | LinkSource::Dispatch { .. } => None,
+            RouteSource::Resolved { definition } => Some(definition),
+            RouteSource::Advertised | RouteSource::Dispatch { .. } => None,
         }
     }
 
-    /// Whether this link is a dispatch grant ([`LinkSource::Dispatch`]):
+    /// Whether this link is a dispatch grant ([`RouteSource::Dispatch`]):
     /// its call is a resolution, never a body of its own.
     pub fn dispatches(&self) -> bool {
-        matches!(self.source, LinkSource::Dispatch { .. })
+        matches!(self.source, RouteSource::Dispatch { .. })
     }
 
     /// The definition a call through this link runs as: `served`, what the
@@ -338,10 +347,10 @@ impl OperationLink {
     /// projection rather than the served manifest's (C1).
     pub fn admitted(&self, served: Option<&ToolDefinition>) -> Option<ToolDefinition> {
         let mut definition = match &self.source {
-            LinkSource::Resolved { definition } | LinkSource::Dispatch { definition } => {
+            RouteSource::Resolved { definition } | RouteSource::Dispatch { definition } => {
                 (**definition).clone()
             }
-            LinkSource::Advertised => served?.clone(),
+            RouteSource::Advertised => served?.clone(),
         };
         definition.manifest.execution_policy = self.policy;
         definition.manifest.argument_projection = self.projection.clone();
@@ -352,12 +361,26 @@ impl OperationLink {
     /// (FIG-6985): its provider, by key, in `requirements.providers`, and
     /// the codec its payload is read by, with the payload's format
     /// version, in `requirements.codecs`.
-    pub fn require(&self, requirements: &mut lash_kernel_doc::ExecutionRequirements) {
-        requirements.providers.insert(provider_key(&self.provider));
+    pub fn require(&self, requirements: &mut ClaimRequirements) {
+        requirements
+            .providers
+            .insert(logical_provider(&self.provider));
+        requirements.callbacks.insert(CallbackRequirement {
+            registry: self.provider.registry(),
+            callback: if self.policy == lash_vocabulary::ExecutionPolicy::Read {
+                self.provider.reads_identity()
+            } else {
+                self.provider.callback_identity()
+            },
+        });
         if let Some(payload) = &self.payload {
             requirements
                 .codecs
-                .insert((provider_key(&payload.codec), payload.format.get()));
+                .insert((logical_provider(&payload.codec), payload.format));
+            requirements.callbacks.insert(CallbackRequirement {
+                registry: payload.codec.registry(),
+                callback: payload.codec.callback_identity(),
+            });
         }
     }
 
@@ -400,7 +423,7 @@ pub enum Judgement {
 /// live tool is compared.
 pub fn judge(
     pinned: &lash_kernel_doc::ContractId,
-    link: &OperationLink,
+    link: &OperationRoute,
     live: Option<&ToolDefinition>,
 ) -> Judgement {
     let Some(served) = link
@@ -439,8 +462,8 @@ pub struct DeferredMatch {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DeferredOutcome {
     /// The path resolved to a tool its provider executes: a
-    /// [`LinkSource::Resolved`] link.
-    Resolved { link: OperationLink },
+    /// [`RouteSource::Resolved`] link.
+    Resolved { link: OperationRoute },
     /// The resolver refused the path.
     Refused { reason: String },
     /// No tool is available for the path, with an optional host note.
@@ -459,14 +482,14 @@ impl DeferredOutcome {
         payload: Option<ExecutionBinding>,
     ) -> Self {
         Self::Resolved {
-            link: OperationLink::resolved(provider, definition, payload),
+            link: OperationRoute::resolved(provider, definition, payload),
         }
     }
 }
 
 impl DeferredMatch {
     /// The resolved tool's link, when the path resolved.
-    pub fn resolved(&self) -> Option<&OperationLink> {
+    pub fn resolved(&self) -> Option<&OperationRoute> {
         match &self.outcome {
             DeferredOutcome::Resolved { link } => Some(link),
             DeferredOutcome::Refused { .. } | DeferredOutcome::Unavailable { .. } => None,
@@ -475,7 +498,7 @@ impl DeferredMatch {
 
     /// The resolved tool's retained definition, when the path resolved.
     pub fn definition(&self) -> Option<&ToolDefinition> {
-        self.resolved().and_then(OperationLink::resolution)
+        self.resolved().and_then(OperationRoute::resolution)
     }
 }
 
@@ -490,69 +513,93 @@ pub use lash_vocabulary::providers::{
     DeferredResolutionPolicy, ExecutionBinding, ExecutionBindingUnreadable,
 };
 
-pub mod linked {
-    use crate::packages::linked::PublicationRecord;
-    use lash_vocabulary::{
-        ExecutionPolicy, ToolArgumentProjectionPolicy, ToolDefinition, ToolId, claims::*, names::*,
-        operations::*, package::*, providers::*,
-    };
-    use serde::{Deserialize, Serialize};
-    use std::collections::{BTreeMap, BTreeSet};
-    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-    #[serde(
-        tag = "kind",
-        content = "value",
-        rename_all = "snake_case",
-        deny_unknown_fields
-    )]
-    /// Advertised routes check current contracts; resolved routes retain their definition; Dispatch resolves per invocation.
-    pub enum RouteSource {
-        Advertised,
-        Resolved { definition: Box<ToolDefinition> },
-        Dispatch { definition: Box<ToolDefinition> },
-    }
-    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-    #[serde(deny_unknown_fields)]
-    /// Recorded runner identity, policy, projection and codec payload for one operation or model call.
-    pub struct OperationRoute {
-        pub tool: ToolId,
-        pub provider: ToolProviderHandle,
-        pub policy: ExecutionPolicy,
-        pub projection: ToolArgumentProjectionPolicy,
-        pub payload: Option<ExecutionBinding>,
-        pub source: RouteSource,
-    }
-    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-    #[serde(deny_unknown_fields)]
-    /// A fixed Link requirement, accepted offer metadata and selected serving route.
-    pub struct RoutedOperation {
-        pub requirement: OperationRequirement,
-        pub offer: OperationOffer,
-        pub route: OperationRoute,
-    }
-    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-    #[serde(
-        tag = "kind",
-        content = "value",
-        rename_all = "snake_case",
-        deny_unknown_fields
-    )]
-    /// A fixed route or unresolved scoped grant. Unresolved deferred uses are Waited in this baseline.
-    pub enum UseBinding {
-        Fixed(RoutedOperation),
-        Deferred(DeferredGrant),
-    }
-    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-    #[serde(deny_unknown_fields)]
-    /// Immutable accepted publications, roots, per-use routes and base claim debt. Resolution rows stay outside its hash.
-    pub struct ExecutionEnvironment {
-        pub publications: Vec<PublicationRecord>,
-        pub roots: BTreeSet<LinkId>,
-        #[serde(with = "lash_vocabulary::ordered_pairs")]
-        pub uses: BTreeMap<OperationUse, UseBinding>,
-        pub registry: RegistryKind,
-        pub requirements: ClaimRequirements,
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+/// A fixed Link requirement, accepted offer metadata and selected serving route.
+pub struct RoutedOperation {
+    pub requirement: OperationRequirement,
+    pub offer: OperationOffer,
+    pub route: OperationRoute,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+/// A fixed route or unresolved scoped grant. Unresolved deferred uses are Waited in this baseline.
+pub enum UseBinding {
+    Fixed(RoutedOperation),
+    Deferred(DeferredGrant),
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+/// Immutable accepted publications, roots, per-use routes and base claim debt. Resolution rows stay outside its hash.
+pub struct ExecutionEnvironment {
+    pub publications: Vec<PublicationRecord>,
+    pub roots: BTreeSet<LinkId>,
+    #[serde(with = "lash_vocabulary::ordered_pairs")]
+    pub uses: BTreeMap<OperationUse, UseBinding>,
+    pub registry: RegistryKind,
+    pub requirements: ClaimRequirements,
+}
+
+/// Logical provider identity used by execution claims; callback debt also records its registry.
+pub fn logical_provider(provider: &ProviderKey) -> ProviderName {
+    ProviderName {
+        owner: provider.owner().into(),
+        key: provider.key().into(),
     }
 }
 
-pub use linked::{ExecutionEnvironment, OperationRoute, RouteSource, RoutedOperation, UseBinding};
+impl ExecutionEnvironment {
+    /// Empty reach for an engine with no operation imports.
+    pub fn empty(registry: RegistryKind) -> Self {
+        Self {
+            publications: Vec::new(),
+            roots: BTreeSet::new(),
+            uses: BTreeMap::new(),
+            registry,
+            requirements: ClaimRequirements::default(),
+        }
+    }
+
+    /// The mode is recorded per use. Deferred targets remain waited throughout execution.
+    pub fn mode(&self, use_: &OperationUse) -> Option<OperationMode> {
+        self.uses.get(use_).map(|binding| match binding {
+            UseBinding::Fixed(operation) => operation.offer.mode,
+            UseBinding::Deferred(_) => OperationMode::Waited,
+        })
+    }
+
+    pub fn fixed(&self, use_: &OperationUse) -> Option<&RoutedOperation> {
+        match self.uses.get(use_)? {
+            UseBinding::Fixed(operation) => Some(operation),
+            UseBinding::Deferred(_) => None,
+        }
+    }
+}
+
+impl RoutedOperation {
+    /// Check the fixed pin and accepted metadata without consulting a live advertisement.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.requirement.contract != self.offer.requirement.contract {
+            return Err("fixed requirement and accepted offer contracts disagree".into());
+        }
+        if (self.offer.mode == OperationMode::Read)
+            != (self.route.policy == lash_vocabulary::ExecutionPolicy::Read)
+        {
+            return Err("fixed offer mode and route policy disagree".into());
+        }
+        match lash_vocabulary::type_relations::serves(
+            &self.offer.requirement.signature,
+            &self.requirement.signature,
+        ) {
+            Some(mismatch) => Err(format!(
+                "fixed offer does not serve requirement: {mismatch:?}"
+            )),
+            None => Ok(()),
+        }
+    }
+}

@@ -16,7 +16,7 @@ use lash_core_store::checkpoint_graph::bodies::{ExecRoot, ExecStatus};
 use lash_core_store::checkpoint_graph::{GraphDecoder, NodeKind};
 use lash_kernel_dialect::SavedFunction;
 use lash_kernel_doc::{FunctionRegistry, KERNEL_VERSION, KernelVersion};
-use lash_kernel_package::HeldPackages;
+use lash_vm_runtime::HelperRelease;
 use lash_vm_runtime::{KernelMigrationRefusal, migrate_saved_function};
 
 use super::envelope::CellEnvelope;
@@ -34,7 +34,7 @@ pub(crate) struct KernelCarry {
 enum Held {
     /// The packages the host registered: what its workers were assembled
     /// with, and whose sets a cell runs on.
-    Packages(Arc<HeldPackages>),
+    Release(Arc<HelperRelease>),
     /// A registry alone: what a survey of stored cells reads.
     Registry(Arc<FunctionRegistry>),
     /// lash's own packages.
@@ -55,11 +55,11 @@ impl KernelCarry {
     /// A carry to `writes`, the newest version when `None`, against the
     /// host's `packages`, lash's own when `None`.
     pub(crate) fn holding(
-        packages: Option<Arc<HeldPackages>>,
+        release: Option<Arc<HelperRelease>>,
         writes: Option<KernelVersion>,
     ) -> Self {
         Self {
-            library: packages.map_or(Held::Lash, Held::Packages),
+            library: release.map_or(Held::Lash, Held::Release),
             writes: writes.unwrap_or(KernelVersion::NEWEST),
         }
     }
@@ -67,25 +67,10 @@ impl KernelCarry {
     pub(crate) fn library(&self) -> Result<Arc<FunctionRegistry>, KernelMigrationRefusal> {
         match &self.library {
             Held::Registry(functions) => Ok(Arc::clone(functions)),
-            Held::Packages(_) | Held::Lash => self
-                .packages()
-                .map(|packages| Arc::clone(packages.functions()))
-                .map_err(|message| KernelMigrationRefusal::State { message }),
-        }
-    }
-
-    /// The packages a cell's set is viewed in.
-    ///
-    /// # Errors
-    ///
-    /// lash's packages do not assemble, or the carry reads a registry
-    /// alone.
-    pub(crate) fn packages(&self) -> Result<Arc<HeldPackages>, String> {
-        match &self.library {
-            Held::Packages(packages) => Ok(Arc::clone(packages)),
-            Held::Lash => lash_vm_runtime::lash_packages()
-                .map_err(|error| format!("the build's library does not assemble: {error}")),
-            Held::Registry(_) => Err("a survey's carry holds no packages".to_owned()),
+            Held::Release(release) => Ok(Arc::new(release.functions.clone())),
+            Held::Lash => Ok(Arc::new(
+                lash_vm_runtime::helper_release().functions.clone(),
+            )),
         }
     }
 
@@ -102,7 +87,14 @@ impl KernelCarry {
         &self,
         function: &SavedFunction,
     ) -> Result<Option<SavedFunction>, KernelMigrationRefusal> {
-        let found = function.document.manifest.kernel;
+        let found = function
+            .document
+            .requires
+            .kernels
+            .iter()
+            .copied()
+            .max()
+            .unwrap_or(KERNEL_VERSION);
         if found == KERNEL_VERSION {
             return Ok(None);
         }
@@ -138,13 +130,38 @@ impl KernelCarry {
         };
         let carried_cell = CellEnvelope::load(&mut decoder, envelope).map_err(graph)?;
         let base = carried_cell.document;
-        if base.manifest.kernel >= self.writes.number() {
+        if base
+            .requires
+            .kernels
+            .iter()
+            .copied()
+            .max()
+            .unwrap_or(self.writes.number())
+            >= self.writes.number()
+        {
             return Ok(());
         }
-        KernelVersion::of(base.manifest.kernel)
-            .and_then(lash_kernel_migrate::migration_from)
-            .map(|_| ())
-            .ok_or_else(|| state(format!("no migration from kernel {}", base.manifest.kernel)))
+        KernelVersion::of(
+            base.requires
+                .kernels
+                .iter()
+                .copied()
+                .max()
+                .unwrap_or(self.writes.number()),
+        )
+        .and_then(lash_kernel_migrate::migration_from)
+        .map(|_| ())
+        .ok_or_else(|| {
+            state(format!(
+                "no migration from kernel {}",
+                base.requires
+                    .kernels
+                    .iter()
+                    .copied()
+                    .max()
+                    .unwrap_or(self.writes.number())
+            ))
+        })
     }
 }
 

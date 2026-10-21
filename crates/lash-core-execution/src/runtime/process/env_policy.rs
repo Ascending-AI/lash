@@ -11,16 +11,14 @@
 //! realization, redrive, takeover and adoption never call it again.
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
-use lash_core_store::process_env::{ProcessComponentEntry, ProcessEnv, ProcessEnvRefusal};
+use lash_core_store::process_env::{ProcessEnv, ProcessEnvRefusal};
 use lash_core_store::run_spec::ResolvedRun;
 
 use super::ProcessDefinitionId;
 use super::ProcessEngineRegistry;
 use super::model::ProcessEnvRef;
 use crate::{EffectName, ExecutionOwner, ProcessId, SurfaceTools, ToolExecutionGrant};
-use lash_execution_contracts::process::EngineLaunch;
 use lash_execution_contracts::process::EngineSettings;
 use lash_execution_contracts::process::ProcessSignature;
 
@@ -53,7 +51,7 @@ pub struct ResolvedStartTarget {
     pub payload: serde_json::Value,
     pub args: serde_json::Map<String, serde_json::Value>,
     /// The effects a run of `payload` performs (P3), as its engine says.
-    pub performed: super::PerformedEffects,
+    pub linked: lash_execution_contracts::process::linking::LinkInspection,
 }
 
 /// A function a start carries inline, read and checked by its engine before
@@ -63,10 +61,8 @@ pub struct ResolvedStartTarget {
 pub struct ResolvedInlineStart {
     pub target: ResolvedStartTarget,
     /// The function, as its engine's payload.
-    pub payload: serde_json::Value,
-    /// The package set the function is linked under: its starter's, which
-    /// the start records (FIG-6993).
-    pub packages: lash_kernel_doc::PackageSetDigest,
+    pub request: lash_execution_contracts::process::InlineRequest,
+    pub start: lash_vocabulary::names::LinkedStart,
 }
 
 /// The process a start is made inside: its recorded environment and
@@ -76,6 +72,11 @@ pub struct EnclosingProcess {
     pub process: ProcessId,
     pub env_ref: ProcessEnvRef,
     pub env: ProcessEnv,
+    pub execution: lash_core_store::resolutions::ExecutionId,
+    pub resolutions: BTreeMap<
+        lash_vocabulary::names::OperationUse,
+        lash_core_store::resolutions::ResolutionEntry,
+    >,
     pub engine_kind: String,
     /// The process's start payload: what its engine reads the package set
     /// it is linked under from.
@@ -98,7 +99,11 @@ pub struct ProcessEnvCx<'a> {
     /// process.
     pub surface: Option<&'a SurfaceTools>,
     pub enclosing: Option<&'a EnclosingProcess>,
-    recorded_grants: &'a BTreeMap<EffectName, ToolExecutionGrant>,
+    pub execution: Option<&'a lash_core_store::tool_surface::ExecutionEnvironment>,
+    pub resolutions: &'a BTreeMap<
+        lash_vocabulary::names::OperationUse,
+        lash_core_store::resolutions::ResolutionEntry,
+    >,
     engines: &'a ProcessEngineRegistry,
 }
 
@@ -112,7 +117,10 @@ impl<'a> ProcessEnvCx<'a> {
         enclosing: Option<&'a EnclosingProcess>,
         engines: &'a ProcessEngineRegistry,
     ) -> Self {
-        static NONE: BTreeMap<EffectName, ToolExecutionGrant> = BTreeMap::new();
+        static NO_RESOLUTIONS: BTreeMap<
+            lash_vocabulary::names::OperationUse,
+            lash_core_store::resolutions::ResolutionEntry,
+        > = BTreeMap::new();
         Self {
             starter,
             target,
@@ -120,28 +128,25 @@ impl<'a> ProcessEnvCx<'a> {
             run,
             surface,
             enclosing,
-            recorded_grants: &NONE,
+            execution: enclosing.map(|parent| parent.env.execution()),
+            resolutions: enclosing.map_or(&NO_RESOLUTIONS, |parent| &parent.resolutions),
             engines,
         }
     }
 
-    /// This context for a start the cell whose committed deferred matches
-    /// recorded `grants` declares.
-    pub(crate) fn with_recorded_grants(
+    pub(crate) fn with_execution(
         mut self,
-        grants: &'a BTreeMap<EffectName, ToolExecutionGrant>,
+        environment: Option<&'a lash_core_store::tool_surface::ExecutionEnvironment>,
+        resolutions: &'a BTreeMap<
+            lash_vocabulary::names::OperationUse,
+            lash_core_store::resolutions::ResolutionEntry,
+        >,
     ) -> Self {
-        self.recorded_grants = grants;
+        if let Some(environment) = environment {
+            self.execution = Some(environment);
+            self.resolutions = resolutions;
+        }
         self
-    }
-
-    /// The grants the declaring cell's committed deferred matches recorded,
-    /// by the effect path each matched tool's binding names: what capture
-    /// links an effect the surface does not offer from. Only the declaring
-    /// cell's own: empty for any other start, and never another cell's.
-    #[must_use]
-    pub fn recorded_grants(&self) -> &BTreeMap<EffectName, ToolExecutionGrant> {
-        self.recorded_grants
     }
 
     /// This declaring build's engine defaults for the target, sealed now:
@@ -157,177 +162,21 @@ impl<'a> ProcessEnvCx<'a> {
             .map_err(|error| ProcessEnvPolicyError::Fault(error.to_string()))
     }
 
-    /// Capture (R8): the env of the starting turn's recorded `run` with
-    /// `components`, linking each effect the target performs to the tool the
-    /// run's recorded surface matched it to or, for one the surface does not
-    /// offer, the tool the declaring cell's committed deferred match resolved
-    /// it to ([`recorded_grants`](Self::recorded_grants)). Each recorded
-    /// [`crate::OperationLink`] is copied, served by the declared process
-    /// twin of its recorded provider among `components`: the same owner and
-    /// local key in the process registry. A payload is routed to its codec's
-    /// twin there, its format and payload kept as recorded. Nothing is
-    /// re-resolved: an effect neither offers is refused, as is one no
-    /// component serves or whose payload no component reads.
-    ///
-    /// # Errors
-    ///
-    /// The target's effects cannot be certified, an effect is not linked, no
-    /// component serves its tool, or none reads its binding.
-    pub async fn capture(
-        &self,
-        run: &ResolvedRun,
-        surface: &SurfaceTools,
-        components: Vec<ProcessComponentEntry>,
-    ) -> Result<ProcessEnv, ProcessEnvRefusal> {
-        let performed = &self.target.performed;
-        let base = ProcessEnv::from_run(run, Default::default(), components.clone())?;
-        let composition = self.engines.components().compose(&base, None)?;
-        let twin = |provider: &crate::ProviderKey| {
-            composition
-                .registry
-                .keys()
-                .find(|twin| {
-                    twin.registry() == crate::RegistryKind::Process
-                        && twin.owner() == provider.owner()
-                        && twin.key() == provider.key()
-                })
-                .cloned()
-        };
-        let mut effects = BTreeMap::new();
-        for effect in performed.keys() {
-            let offered = surface
-                .entries()
-                .find(|entry| entry.definition.manifest.operation.effect_name() == *effect);
-            let recorded = match (offered, self.recorded_grants.get(effect)) {
-                (Some(entry), _) => &entry.link,
-                (None, Some(grant)) => grant.link(),
-                (None, None) => {
-                    return Err(ProcessEnvRefusal::EffectNotLinked {
-                        effect: effect.to_string(),
-                    });
-                }
-            };
-            // The link is copied: only its provider and its payload's codec
-            // move to their process twins.
-            let tool = &recorded.tool;
-            let provider =
-                twin(&recorded.provider).ok_or_else(|| ProcessEnvRefusal::CaptureMissing {
-                    effect: effect.to_string(),
-                    tool: tool.to_string(),
-                })?;
-            let payload = recorded
-                .payload
-                .clone()
-                .map(|payload| {
-                    let codec = twin(&payload.codec).ok_or_else(|| {
-                        ProcessEnvRefusal::BindingUnreadable {
-                            effect: effect.to_string(),
-                            tool: tool.to_string(),
-                            codec: payload.codec.to_string(),
-                            reason: "it has no process twin: no component the env names \
-                                     declares it"
-                                .to_owned(),
-                        }
-                    })?;
-                    Ok(crate::ExecutionBinding { codec, ..payload })
-                })
-                .transpose()?;
-            let link = crate::OperationLink {
-                provider,
-                payload,
-                ..recorded.clone()
-            };
-            effects.insert(effect.clone(), link);
-        }
-        let candidate = ProcessEnv::from_run(run, effects, components)?;
+    /// Runtime/component facts available to the host's policy implementation.
+    pub fn engines(&self) -> &ProcessEngineRegistry {
         self.engines
-            .capture_env(
-                &self.target.engine_kind,
-                &self.target.payload,
-                performed,
-                &candidate,
-            )
-            .await
     }
-
-    /// Restrict the enclosing process's environment to the effects the
-    /// target performs (P5), and keep its settings when the target runs the
-    /// same engine.
-    ///
-    /// # Errors
-    ///
-    /// Refused outside a process.
-    pub fn restrict(&self) -> Result<ProcessStartChoice, ProcessEnvPolicyError> {
-        let Some(enclosing) = self.enclosing else {
-            return Err(ProcessEnvPolicyError::Refused(ProcessEnvRefusal::Policy {
-                reason: "a start outside a process has no environment to restrict".into(),
-            }));
-        };
-        Ok(ProcessStartChoice {
-            fits: Default::default(),
-            env: ProcessEnvChoice::Restrict,
-            engine_settings: (enclosing.engine_kind == self.target.engine_kind)
-                .then(|| enclosing.settings.clone())
-                .flatten(),
-        })
-    }
-}
-
-impl ProcessEngineRegistry {
-    /// Capture exactly the certified `performed` effects from `candidate`,
-    /// preserving their recorded links and all other environment settings.
-    /// Host and model starts use this same capture judgment.
-    ///
-    /// # Errors
-    ///
-    /// A missing effect, an unfit link, or a component that cannot serve it.
-    pub async fn capture_env(
-        &self,
-        kind: &str,
-        payload: &serde_json::Value,
-        performed: &lash_execution_contracts::process::PerformedEffects,
-        candidate: &ProcessEnv,
-    ) -> Result<ProcessEnv, ProcessEnvRefusal> {
-        let env = candidate
-            .restrict(performed.keys())
-            .map_err(|refusal| match refusal {
-                ProcessEnvRefusal::RestrictMissing { effect } => {
-                    ProcessEnvRefusal::EffectNotLinked { effect }
-                }
-                refusal => refusal,
-            })?;
-        let env = self
-            .link_package_namespaces(kind, payload, env)
-            .await
-            .map_err(|error| ProcessEnvRefusal::Uncertified {
-                reason: error.to_string(),
-            })?;
-        self.components().admit(&env)?;
-        self.check_links(
-            kind,
-            payload,
-            &Arc::new(env.clone()),
-            performed,
-            &Default::default(),
-        )
-        .await
-        .map_err(|refusal| match refusal {
-            ProcessEnvRefusal::ToolNotServed { effect, tool, .. } => {
-                ProcessEnvRefusal::CaptureMissing { effect, tool }
-            }
-            refusal => refusal,
-        })?;
-        Ok(env)
+    pub fn components(&self) -> &crate::plugin::ProcessComponentRegistry {
+        self.engines.components()
     }
 }
 
 /// A policy's decision: the environment and the engine settings.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProcessStartChoice {
-    /// Per-effect fit checked before holding the launch; never stored.
-    pub fits: BTreeMap<crate::EffectName, lash_execution_contracts::process::FitPolicy>,
     pub env: ProcessEnvChoice,
     pub engine_settings: Option<EngineSettings>,
+    pub initial_resolutions: Vec<lash_core_store::resolutions::ResolutionSeed>,
 }
 
 /// Which environment a start runs under.
@@ -337,12 +186,6 @@ pub struct ProcessStartChoice {
     reason = "a choice is made once per start and moved into its launch"
 )]
 pub enum ProcessEnvChoice {
-    /// The enclosing process's own, restricted to the effects the target
-    /// performs from the links the enclosing env recorded, never re-resolved:
-    /// its reference itself when the target performs exactly what it links,
-    /// and otherwise a derived env at a new content address. Refused outside
-    /// a process, and for an effect the enclosing env does not link.
-    Restrict,
     /// One already published.
     Published(ProcessEnvRef),
     /// One stated now, admitted and published by the hold.
@@ -352,6 +195,8 @@ pub enum ProcessEnvChoice {
 /// Why a policy chose nothing.
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
 pub enum ProcessEnvPolicyError {
+    #[error(transparent)]
+    Package(Box<lash_execution_contracts::process::linking::EnginePortError>),
     /// The start's tool error, model-visible; no intent is declared.
     #[error(transparent)]
     Refused(ProcessEnvRefusal),
@@ -359,115 +204,3 @@ pub enum ProcessEnvPolicyError {
     #[error("process start policy fault: {0}")]
     Fault(String),
 }
-
-/// The explicit policy helpers. None is a default: a host composes the one
-/// it means.
-pub mod policy {
-    use super::*;
-
-    type Mapping = dyn Fn(&ProcessEnvCx<'_>) -> Result<Vec<ProcessComponentEntry>, ProcessEnvRefusal>
-        + Send
-        + Sync;
-
-    /// State the environment of the starting turn's recorded run with the
-    /// components `mapping` names, and this build's engine defaults.
-    /// Refused outside a run.
-    pub fn from_run(
-        mapping: impl Fn(&ProcessEnvCx<'_>) -> Result<Vec<ProcessComponentEntry>, ProcessEnvRefusal>
-        + Send
-        + Sync
-        + 'static,
-    ) -> Arc<dyn ProcessEnvPolicy> {
-        Arc::new(FromRun(Box::new(mapping)))
-    }
-
-    struct FromRun(Box<Mapping>);
-
-    #[async_trait::async_trait]
-    impl ProcessEnvPolicy for FromRun {
-        async fn choose(
-            &self,
-            cx: &ProcessEnvCx<'_>,
-        ) -> Result<ProcessStartChoice, ProcessEnvPolicyError> {
-            let (Some(run), Some(surface)) = (cx.run, cx.surface) else {
-                return Err(ProcessEnvPolicyError::Refused(ProcessEnvRefusal::Policy {
-                    reason: "this start has no recorded run to state an environment from".into(),
-                }));
-            };
-            let components = (self.0)(cx).map_err(ProcessEnvPolicyError::Refused)?;
-            let env = cx
-                .capture(run, surface, components)
-                .await
-                .map_err(ProcessEnvPolicyError::Refused)?;
-            Ok(ProcessStartChoice {
-                fits: Default::default(),
-                env: ProcessEnvChoice::New(env),
-                engine_settings: cx.engine_defaults()?,
-            })
-        }
-    }
-
-    /// Restrict the enclosing env inside a process; ask `inner` outside one.
-    pub fn restrict_or(inner: Arc<dyn ProcessEnvPolicy>) -> Arc<dyn ProcessEnvPolicy> {
-        Arc::new(RestrictOr(inner))
-    }
-
-    struct RestrictOr(Arc<dyn ProcessEnvPolicy>);
-
-    #[async_trait::async_trait]
-    impl ProcessEnvPolicy for RestrictOr {
-        async fn choose(
-            &self,
-            cx: &ProcessEnvCx<'_>,
-        ) -> Result<ProcessStartChoice, ProcessEnvPolicyError> {
-            if cx.enclosing.is_some() {
-                return cx.restrict();
-            }
-            self.0.choose(cx).await
-        }
-    }
-
-    /// Every start runs under `launch`, published already.
-    pub fn published(launch: EngineLaunch) -> Arc<dyn ProcessEnvPolicy> {
-        Arc::new(Published(launch))
-    }
-
-    struct Published(EngineLaunch);
-
-    #[async_trait::async_trait]
-    impl ProcessEnvPolicy for Published {
-        async fn choose(
-            &self,
-            _cx: &ProcessEnvCx<'_>,
-        ) -> Result<ProcessStartChoice, ProcessEnvPolicyError> {
-            Ok(ProcessStartChoice {
-                fits: Default::default(),
-                env: ProcessEnvChoice::Published(self.0.env.clone()),
-                engine_settings: self.0.settings.clone(),
-            })
-        }
-    }
-
-    /// Refuse every start with `reason`.
-    pub fn refuse(reason: impl Into<String>) -> Arc<dyn ProcessEnvPolicy> {
-        Arc::new(Refuse(reason.into()))
-    }
-
-    struct Refuse(String);
-
-    #[async_trait::async_trait]
-    impl ProcessEnvPolicy for Refuse {
-        async fn choose(
-            &self,
-            _cx: &ProcessEnvCx<'_>,
-        ) -> Result<ProcessStartChoice, ProcessEnvPolicyError> {
-            Err(ProcessEnvPolicyError::Refused(ProcessEnvRefusal::Policy {
-                reason: self.0.clone(),
-            }))
-        }
-    }
-}
-
-#[cfg(test)]
-#[path = "env_policy_tests.rs"]
-mod tests;

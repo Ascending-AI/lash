@@ -83,12 +83,12 @@ impl DeferredToolProviderRegistration {
         &self,
         provider: crate::ProviderKey,
         tool: &crate::ToolId,
-    ) -> Result<crate::OperationLink, DispatchGrantRefusal> {
+    ) -> Result<crate::OperationRoute, DispatchGrantRefusal> {
         let grant = self
             .grants
             .get(tool)
             .ok_or_else(|| DispatchGrantRefusal::NotGranted { tool: tool.clone() })?;
-        Ok(crate::OperationLink::dispatch(
+        Ok(crate::OperationRoute::dispatch(
             provider,
             grant.definition.clone(),
             self.resolution_policy,

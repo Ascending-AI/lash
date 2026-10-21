@@ -409,17 +409,19 @@ fn register(
 pub fn requirements<'a>(
     closure: &Closure,
     kernel: u32,
-    links: impl IntoIterator<Item = &'a lash_core_store::tool_surface::OperationLink>,
-) -> lash_kernel_doc::ExecutionRequirements {
-    let mut requirements = lash_kernel_doc::ExecutionRequirements {
-        natives: closure
-            .body()
-            .functions()
-            .iter()
-            .filter(|member| member.native_only)
-            .map(|member| member.function)
-            .collect(),
-        kernels: BTreeSet::from([kernel]),
+    links: impl IntoIterator<Item = &'a lash_core_store::tool_surface::OperationRoute>,
+) -> lash_vocabulary::claims::ClaimRequirements {
+    let mut requirements = lash_vocabulary::claims::ClaimRequirements {
+        machine: lash_vocabulary::claims::NodeRequirements {
+            natives: closure
+                .body()
+                .functions()
+                .iter()
+                .filter(|member| member.native_only)
+                .map(|member| member.function)
+                .collect(),
+            kernels: BTreeSet::from([kernel]),
+        },
         ..Default::default()
     };
     for link in links {
@@ -548,3 +550,30 @@ impl<L: Clone> Libraries<L> {
 #[cfg(test)]
 #[path = "loader_tests.rs"]
 mod tests;
+
+/// Assemble only selected reach while keeping every retained Document intact.
+/// The temporary loader input is never published or assigned a content identity.
+pub fn assemble_reach(
+    root: &Document,
+    documents: &BTreeMap<lash_vocabulary::names::DocumentId, Arc<Document>>,
+    functions: &BTreeMap<lash_vocabulary::package::LinkId, std::collections::BTreeSet<FunctionId>>,
+    machine: &lash_vocabulary::claims::NodeRequirements,
+    held: &Arc<FunctionRegistry>,
+) -> Result<Assembled, LoadRefusal> {
+    let mut selected = root.clone();
+    selected.functions.clear();
+    selected.requires = machine.clone();
+    for function in functions.values().flatten() {
+        if let Some(definition) = documents
+            .values()
+            .find_map(|document| document.functions.get(function))
+        {
+            selected.functions.insert(*function, definition.clone());
+        } else if !machine.natives.contains(function) {
+            return Err(LoadRefusal::Missing {
+                function: *function,
+            });
+        }
+    }
+    assemble(&selected, held, &BTreeMap::new())
+}

@@ -325,7 +325,7 @@ pub struct EngineStepRun {
     /// The effects the process's env links (P3): what its linked calls
     /// may perform, each by its link.
     pub effects: std::sync::Arc<
-        std::collections::BTreeMap<lash_kernel_doc::EffectName, crate::OperationLink>,
+        std::collections::BTreeMap<lash_kernel_doc::EffectName, crate::OperationRoute>,
     >,
     /// The readers registered by the process's recorded components.
     pub reads: std::sync::Arc<dyn EngineEffectReads>,
@@ -844,7 +844,7 @@ pub mod linked {
     use crate::ProjectionProviders;
     use crate::process::EngineSettings;
     use lash_core_ids::clock::Clock;
-    use lash_core_store::{resolutions::*, tool_surface::linked::ExecutionEnvironment};
+    use lash_core_store::{resolutions::*, tool_surface::ExecutionEnvironment};
     use lash_durable::DurableInstant;
     use lash_vocabulary::sites::EffectId;
     use lash_vocabulary::{ExecutionPolicy, claims::*, identity::ProcessId, names::*};

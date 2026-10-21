@@ -120,7 +120,7 @@ pub struct RequiresMismatch {
 pub struct ExecutionDebts {
     pub exec: ExecKey,
     pub owed: Vec<PluginCallbackIdentity>,
-    pub requirements: lash_kernel_doc::ExecutionRequirements,
+    pub requirements: lash_vocabulary::claims::ClaimRequirements,
 }
 
 /// An actor's outstanding recorded work, as the claim tokens each record
@@ -153,7 +153,7 @@ impl RecordedWork {
     pub fn process(
         process: &crate::ProcessId,
         environment: impl IntoIterator<Item = ObligationToken>,
-        record: &lash_kernel_doc::ExecutionRequirements,
+        record: &lash_vocabulary::claims::ClaimRequirements,
     ) -> Self {
         let mut work = Self {
             registry: RegistryKind::Process,
@@ -404,10 +404,10 @@ impl RecordedWork {
         owner: OwnerKey,
         call: ToolCallId,
         binding: Option<&AdmittedBinding>,
-        matched: Option<&lash_core_store::tool_surface::OperationLink>,
+        matched: Option<&lash_core_store::tool_surface::OperationRoute>,
     ) {
         let registry = self.registry;
-        let mut linked = lash_kernel_doc::ExecutionRequirements::default();
+        let mut linked = lash_vocabulary::claims::ClaimRequirements::default();
         if let Some(link) = matched {
             link.require(&mut linked);
         }
@@ -577,7 +577,7 @@ impl RecordedWork {
                 self.owe(
                     exec,
                     &[],
-                    &lash_kernel_doc::ExecutionRequirements::default(),
+                    &lash_vocabulary::claims::ClaimRequirements::default(),
                 );
             }
         }
@@ -649,7 +649,7 @@ impl RecordedWork {
         &mut self,
         exec: &ExecKey,
         owed: &[PluginCallbackIdentity],
-        requirements: &lash_kernel_doc::ExecutionRequirements,
+        requirements: &lash_vocabulary::claims::ClaimRequirements,
     ) {
         let registry = self.registry;
         let tokens: Vec<ObligationToken> = owed

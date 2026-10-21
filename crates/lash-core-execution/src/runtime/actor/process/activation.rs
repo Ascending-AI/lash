@@ -212,7 +212,7 @@ pub(super) struct Live {
     /// The hard requirements record of the engine state this pass read,
     /// or of the state its last commit wrote: what every rewrite of
     /// `requires` keeps (FIG-6993).
-    pub(super) record: lash_kernel_doc::ExecutionRequirements,
+    pub(super) record: lash_vocabulary::claims::ClaimRequirements,
     /// What this activation keeps of its own acknowledged commits.
     continuation: super::continuation::Continuation,
 }
@@ -302,7 +302,7 @@ impl ProcessActivation {
             history_restored: false,
             ended_refused: false,
             published: None,
-            record: lash_kernel_doc::ExecutionRequirements::default(),
+            record: lash_vocabulary::claims::ClaimRequirements::default(),
             continuation: super::continuation::Continuation::default(),
         };
         loop {
@@ -1312,12 +1312,24 @@ impl ProcessActivation {
                         outcome: decision,
                     }));
                 }
-                if let Some(target) =
-                    crate::runtime::process::steps::matched_target(&step.request, matched)
-                {
+                if let Some(route) = matched.resolved() {
+                    let request = step.request.clone();
+                    let StepRequest::Tool { input, .. } = &request else {
+                        return Err(corrupt("dispatch", "resolution is not a tool use"));
+                    };
+                    let pin = crate::runtime::process::steps::InvocationTarget {
+                        route: route.clone(),
+                        contract: matched
+                            .definition()
+                            .ok_or_else(|| corrupt("dispatch", "missing definition"))?
+                            .contract_id(),
+                        args: input.clone(),
+                        dispatch_requested: Some(matched.requested.clone()),
+                    };
                     return Ok(Next::Matched(Box::new(Handoff {
                         resolution: step,
-                        target,
+                        target: request,
+                        pin,
                     })));
                 }
                 return Err(corrupt(

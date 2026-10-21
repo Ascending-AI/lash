@@ -33,7 +33,7 @@ pub enum FitPolicy {
 /// package owns, is served only by a tool that declares the package's
 /// contract id and intents and serves its signature (PKG-RUNNER). `served`
 /// is each link's tool as an env component serves it on this node,
-/// admitted under the link ([`crate::OperationLink::admitted`]); a link it
+/// admitted under the link ([`crate::OperationRoute::admitted`]); a link it
 /// lacks is not served. A dispatch grant fits like any tool: the document
 /// is checked against the granted tool's signature, and its target is
 /// matched per call.

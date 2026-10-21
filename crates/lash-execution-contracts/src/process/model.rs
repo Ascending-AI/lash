@@ -1025,6 +1025,8 @@ pub enum ProcessRegistrationOutcome {
 /// Its fields cannot be widened between preparation and the fenced commit.
 #[derive(Clone, Debug)]
 pub struct PreparedProcessRegistration {
+    pub execution: Option<lash_durable::resolutions::ExecutionRegistration>,
+    pub initial_resolutions: Vec<lash_core_store::resolutions::ResolutionRecord>,
     registration: ProcessRegistration,
     observers: Vec<SessionId>,
     process_id: ProcessId,
@@ -1048,7 +1050,18 @@ impl PreparedProcessRegistration {
             process_id,
             retained,
             prepared_at_ms,
+            execution: None,
+            initial_resolutions: Vec::new(),
         }
+    }
+    pub fn with_execution(
+        mut self,
+        execution: lash_durable::resolutions::ExecutionRegistration,
+        initial_resolutions: Vec<lash_core_store::resolutions::ResolutionRecord>,
+    ) -> Self {
+        self.execution = Some(execution);
+        self.initial_resolutions = initial_resolutions;
+        self
     }
     pub fn process_id(&self) -> &ProcessId {
         &self.process_id

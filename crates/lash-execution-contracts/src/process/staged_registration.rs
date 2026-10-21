@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StagedRegistration {
+    pub execution: Option<lash_durable::resolutions::ExecutionRegistration>,
+    pub initial_resolutions: Vec<lash_core_store::resolutions::ResolutionRecord>,
     /// The registration, its trace span derived.
     pub registration: ProcessRegistration,
     /// The sessions that observe the process from its creation.
@@ -36,6 +38,8 @@ impl StagedRegistration {
     /// A registration that does not encode.
     pub fn rows(&self) -> Result<lash_durable::domain::ProcessStartRows, crate::PluginError> {
         Ok(lash_durable::domain::ProcessStartRows {
+            execution: self.execution.clone(),
+            initial_resolutions: self.initial_resolutions.clone(),
             process: self.process_id.clone(),
             registration_json: serde_json::to_string(self).map_err(|error| {
                 crate::PluginError::Session(format!("failed to encode a process start: {error}"))

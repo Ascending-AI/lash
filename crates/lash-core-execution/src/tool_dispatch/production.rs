@@ -46,6 +46,7 @@ pub(crate) struct ProductionToolHandlers<'run> {
     /// The declaration a round member's admission pinned: what its attempt
     /// settles under, whatever its tool declares now.
     admitted_declaration: Option<crate::ToolDeclaration>,
+    admitted_at: Option<lash_durable::DurableInstant>,
     /// The trace scope an attempt traces its call's start and terminal
     /// under: a cell member's, which its cell's admission retained and
     /// selected (FIG-5395). A round member is traced by its round's fold,
@@ -201,6 +202,7 @@ impl<'run> ProductionToolHandlers<'run> {
             isolated: Mutex::default(),
             completion_key: None,
             admitted_declaration: None,
+            admitted_at: None,
             traced_scope: None,
             run_closing: None,
             accepted_stop: None,
@@ -440,6 +442,11 @@ impl<'run> ProductionToolHandlers<'run> {
 
     /// These handlers, settling their call under `declaration`, the one
     /// its admission pinned.
+    pub(crate) fn with_admitted_at(mut self, at: lash_durable::DurableInstant) -> Self {
+        self.admitted_at = Some(at);
+        self
+    }
+
     pub(crate) fn with_admitted_declaration(
         mut self,
         declaration: Option<crate::ToolDeclaration>,
@@ -706,6 +713,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             .enclosing_process(enclosing_process.clone())
             .build()
             .with_attempt_dispatch(dispatch.clone(), invocation);
+        context.admission_now = self.admitted_at;
         context = context
             .with_prepared_payload(prepared.call.prepared_payload.clone())
             .with_executable(prepared.input.binding.executable.clone());
@@ -968,7 +976,11 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                             store_local.extend(effect);
                             Some(Box::new(receipt))
                         }
-                        Some(crate::PendingResolver::ProcessTerminal { .. }) | None => None,
+                        Some(
+                            crate::PendingResolver::ProcessTerminal { .. }
+                            | crate::PendingResolver::Timer { .. },
+                        )
+                        | None => None,
                     };
                     Ok(SingletonBodyOutcome::Pending {
                         completion: Box::new(pending),

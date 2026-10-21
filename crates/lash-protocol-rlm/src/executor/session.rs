@@ -60,8 +60,6 @@ struct Version {
     /// The library functions the session's saved functions pin, together
     /// (FIG-5799): bounded by the build's library, never by the session.
     pins: BTreeSet<FunctionId>,
-    /// The package set the saved functions are linked to (K-LIB-009).
-    linked: Option<lash_kernel_doc::PackageSetDigest>,
 }
 
 impl Default for Version {
@@ -82,7 +80,6 @@ impl Version {
             cells: 0,
             notes: SessionNotes::EMPTY,
             pins: BTreeSet::new(),
-            linked: None,
         }
     }
 }
@@ -161,11 +158,7 @@ pub struct CodeModeExecutionState {
     /// The package set the session's latest prompt showed: the fleet
     /// gate's answer for its round, which the round's cell is written
     /// under while this node holds it (P3).
-    shown: Option<crate::plugin::CellPackages>,
-    /// The surface of every set this state's cells were written under, by
-    /// digest: the releases a stale value's message names beside the
-    /// node's own (FIG-6993).
-    read: BTreeMap<lash_kernel_doc::PackageSetDigest, Arc<lash_kernel_package::SurfaceSnapshot>>,
+    shown: Option<lash_core_store::tool_surface::RecordedPackages>,
     pending: Option<Pending>,
     /// Whether the state as it stands is a turn's working state no session
     /// revision publishes yet: the turn's final capture owes it even when
@@ -213,7 +206,6 @@ impl CodeModeExecutionState {
             closures: BTreeMap::new(),
             installed_closures: BTreeSet::new(),
             shown: None,
-            read: BTreeMap::new(),
             pending: None,
             final_owed: false,
             active: None,
@@ -485,7 +477,6 @@ impl CodeModeExecutionState {
                 session,
                 notes: version.notes,
                 pins: version.pins.clone(),
-                linked: version.linked,
             },
         )?;
         let id = NodeId(page.id.0);
@@ -569,36 +560,71 @@ impl CodeModeExecutionState {
     /// A library that does not assemble, and the pages' faults.
     pub(super) async fn relink(
         &mut self,
-        cell: &crate::plugin::CellPackages,
+        documents: &lash_vm_runtime::KernelDocuments,
+        boundary: &lash_vm_runtime::HostBoundary,
+        claim: &lash_core::ReferrerClaim,
     ) -> Result<(), RelinkError> {
-        let packages = cell.digest();
-        self.read
-            .entry(packages)
-            .or_insert_with(|| Arc::clone(cell.surface()));
-        if self.current.linked == Some(packages) {
-            return Ok(());
-        }
-        let view = cell.view();
-        let library = view
-            .library(view.catalog())
-            .map_err(|error| RelinkError::Library(error.to_string()))?;
         let mut functions = self.view.functions.clone().unwrap_or_default();
         let mut rewritten = Vec::new();
         let mut dropped = Vec::new();
         for (name, function) in &mut functions {
-            match lash_kernel_dialect::relink_saved(&function.clone().into_saved(), &library, &view)
-            {
-                Ok(relinked) if relinked.document.identity() == function.document.id() => {}
+            let saved = function.clone().into_saved();
+            let bytes = lash_kernel_doc::DocumentBytes::from_parts(
+                lash_kernel_doc::DOCUMENT_GRAMMAR_VERSION,
+                function.document.id(),
+                function.document.body(),
+            );
+            documents
+                .admit_document(claim, &bytes)
+                .await
+                .map_err(|error| RelinkError::Library(error.to_string()))?;
+            let fulfilled = documents
+                .fulfil(&lash_execution_contracts::process::linking::FulfilRequest {
+                    document: function.document.id(),
+                    selector: lash_execution_contracts::process::linking::ReachSelector::AllExports,
+                    snapshot: boundary.snapshot.clone(),
+                    context: boundary.context.clone(),
+                    purpose: lash_execution_contracts::process::linking::LinkPurpose::Cell,
+                })
+                .await
+                .map_err(|error| RelinkError::Library(error.to_string()))?;
+            documents
+                .hold(
+                    claim,
+                    &lash_execution_contracts::process::linking::ContentRef::Link(
+                        fulfilled.inspection.link,
+                    ),
+                )
+                .await
+                .map_err(|error| RelinkError::Library(error.to_string()))?;
+            match lash_kernel_dialect::relink_saved(&saved, &fulfilled.content) {
+                Ok(relinked) if relinked.callable == function.callable => {}
                 Ok(relinked) => {
-                    let closure = lash_vm_broker::kernel::closure::derive(
-                        relinked.document.manifest.functions.keys().copied(),
-                        view.catalog(),
-                        &std::collections::BTreeMap::new(),
+                    function.callable = relinked.callable;
+                    function.link = relinked.callable.link;
+                    let content = documents
+                        .load_linked(function.link)
+                        .await
+                        .map_err(|error| RelinkError::Library(error.to_string()))?;
+                    let reach = content
+                        .inspect(
+                            function.link,
+                            &lash_kernel_package::ReachSelection::AllExports,
+                        )
+                        .map_err(|error| RelinkError::Library(error.to_string()))?;
+                    let held = self
+                        .kernel
+                        .library()
+                        .map_err(|error| RelinkError::Library(error.to_string()))?;
+                    let loaded = lash_vm_broker::kernel::loader::assemble_reach(
+                        &function.document,
+                        &content.documents,
+                        &reach.functions,
+                        &reach.machine,
+                        &held,
                     )
-                    .map_err(|refusal| RelinkError::Library(refusal.to_string()))?;
-                    function.against = relinked.against;
-                    function.document = lash_kernel_doc::IdentifiedDocument::new(relinked.document);
-                    rewritten.push((name.clone(), function.description(), closure));
+                    .map_err(|error| RelinkError::Library(error.to_string()))?;
+                    rewritten.push((name.clone(), function.description(), loaded.closure));
                 }
                 Err(unusable) => dropped.push((
                     name.clone(),
@@ -627,10 +653,9 @@ impl CodeModeExecutionState {
             }
         }
         let mut next = self.current.clone();
-        next.linked = Some(packages);
         next.pins = functions
             .values()
-            .flat_map(|function| function.document.manifest.functions.keys().copied())
+            .flat_map(|function| function.document.functions.keys().copied())
             .collect();
         // Each dropped function's name, and the binding dropped with it.
         let mut unbound: Vec<(Name, Name)> = Vec::new();
@@ -941,7 +966,7 @@ impl CodeModeExecutionState {
         if let Some(functions) = &self.view.functions {
             next.pins = functions
                 .values()
-                .flat_map(|function| function.document.manifest.functions.keys().copied())
+                .flat_map(|function| function.document.functions.keys().copied())
                 .collect();
         }
         self.current = self.seal_descriptor(next, spool)?;
@@ -1029,18 +1054,16 @@ impl CodeModeExecutionState {
 
     /// Notes that the round's prompt showed `packages`, the gate's answer
     /// for the round.
-    pub(crate) fn shows_packages(&mut self, packages: crate::plugin::CellPackages) {
+    pub(crate) fn shows_packages(
+        &mut self,
+        packages: lash_core_store::tool_surface::RecordedPackages,
+    ) {
         self.shown = Some(packages);
     }
 
     /// The package set the session's latest prompt showed.
-    pub(crate) fn shown_packages(&self) -> Option<crate::plugin::CellPackages> {
+    pub(crate) fn shown_packages(&self) -> Option<lash_core_store::tool_surface::RecordedPackages> {
         self.shown.clone()
-    }
-
-    /// The surfaces of the sets this state's cells were written under.
-    pub(crate) fn read_surfaces(&self) -> Vec<&lash_kernel_package::SurfaceSnapshot> {
-        self.read.values().map(AsRef::as_ref).collect()
     }
 
     /// The session's descriptor as it stands, if it holds one.
@@ -1193,7 +1216,6 @@ impl CodeModeExecutionState {
             cells: read.cells,
             notes: read.notes,
             pins: read.pins,
-            linked: read.linked,
         };
         self.installed = Some(graph.root);
         self.final_owed = purpose == ExecutionGraphPurpose::Working;

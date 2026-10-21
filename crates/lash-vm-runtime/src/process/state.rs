@@ -255,8 +255,6 @@ pub(crate) struct Delivery {
 pub(crate) enum DeliverySource {
     /// The settled output of the effect step `step`, in the run journal.
     Step { step: StepName },
-    /// A sleep's timer: the outcome is always `Elapsed`.
-    Elapsed,
     /// A `perform` the boundary refused, as `kernel_run.{run}` issued it.
     Refused { run: u64 },
 }
@@ -267,8 +265,6 @@ pub(crate) enum DeliverySource {
 pub(crate) enum Wait {
     /// A `perform`: the step that runs its effect.
     Step { step: StepName, identity: EffectId },
-    /// A `sleep`: the instant it ends.
-    Timer { until_ms: i64, identity: EffectId },
 }
 
 /// Where the process is between transitions.
@@ -315,9 +311,9 @@ pub(crate) struct KernelEngineState {
     /// the first park and once the run ended.
     #[serde(
         default,
-        skip_serializing_if = "lash_kernel_doc::ExecutionRequirements::is_empty"
+        skip_serializing_if = "lash_vocabulary::claims::ClaimRequirements::is_empty"
     )]
-    pub(crate) requirements: lash_kernel_doc::ExecutionRequirements,
+    pub(crate) requirements: lash_vocabulary::claims::ClaimRequirements,
 }
 
 /// The input of one `kernel_run`: everything the step recomputes from.
@@ -343,22 +339,18 @@ pub(crate) struct KernelRunInput {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct HostReads {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) now_ms: Option<i64>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub(crate) random: Vec<u64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) effects: Vec<EffectRead>,
     /// The complete binding, including operations this segment never called.
     #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
-    pub(crate) read_effects: std::collections::BTreeSet<lash_kernel_doc::EffectName>,
+    pub(crate) read_effects: std::collections::BTreeSet<lash_vocabulary::names::OperationUse>,
 }
 
 /// One diagnostic read: replay must ask the same use with the same input.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct EffectRead {
-    pub(crate) effect: lash_kernel_doc::EffectName,
+    pub(crate) use_: lash_vocabulary::names::OperationUse,
     pub(crate) args: Vec<lash_kernel_doc::Datum>,
     pub(crate) site: lash_kernel_doc::PositionLabel,
     pub(crate) origin: lash_kernel_doc::Site,
@@ -372,7 +364,7 @@ pub(crate) struct EffectRead {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RecordedStart {
-    pub(crate) document: DocumentId,
+    pub(crate) start: lash_vocabulary::names::LinkedStart,
     pub(crate) from: StartedFrom,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) admissions: Vec<RecordedAdmission>,
@@ -441,9 +433,7 @@ pub(crate) enum Issued {
     Effect {
         wait: lash_protocol_types::WaitId,
         admission: Admission,
-        effect: lash_kernel_doc::EffectName,
-        /// The contract the document requires of `effect`.
-        contract: lash_kernel_doc::ContractId,
+        use_: lash_vocabulary::names::OperationUse,
         input: serde_json::Value,
     },
     /// A `perform` the boundary refuses: the error is raised at the
@@ -454,28 +444,18 @@ pub(crate) enum Issued {
         kind: String,
         message: String,
     },
-    /// A `sleep`.
-    Sleep {
-        wait: lash_protocol_types::WaitId,
-        admission: Admission,
-        until_ms: i64,
-    },
 }
 
 impl Issued {
     pub(crate) fn wait(&self) -> lash_protocol_types::WaitId {
         match self {
-            Self::Effect { wait, .. } | Self::Refused { wait, .. } | Self::Sleep { wait, .. } => {
-                *wait
-            }
+            Self::Effect { wait, .. } | Self::Refused { wait, .. } => *wait,
         }
     }
 
     pub(crate) fn admission(&self) -> &Admission {
         match self {
-            Self::Effect { admission, .. }
-            | Self::Refused { admission, .. }
-            | Self::Sleep { admission, .. } => admission,
+            Self::Effect { admission, .. } | Self::Refused { admission, .. } => admission,
         }
     }
 }
@@ -511,9 +491,9 @@ pub(crate) enum KernelRunOutput {
         /// this park (FIG-6985).
         #[serde(
             default,
-            skip_serializing_if = "lash_kernel_doc::ExecutionRequirements::is_empty"
+            skip_serializing_if = "lash_vocabulary::claims::ClaimRequirements::is_empty"
         )]
-        requirements: lash_kernel_doc::ExecutionRequirements,
+        requirements: lash_vocabulary::claims::ClaimRequirements,
     },
     /// The run ended.
     Ended {

@@ -250,9 +250,10 @@ fn encode_attempt(outcome: &AttemptOutcome, out: &mut TokenWriter) {
             encode_material_ref(reference, out);
         }
         AttemptOutcome::Waiting(source) => {
-            out.sum(1, 3);
+            out.sum(1, 4);
             out.text(&source.wait);
             source.terminal.encode(out);
+            source.timer.encode(out);
             encode_material_ref(&source.metadata, out);
         }
         AttemptOutcome::Failed(failure) => {
@@ -290,10 +291,11 @@ fn decode_attempt(input: &mut TokenReader<'_>) -> Result<AttemptOutcome, TokenEr
             AttemptOutcome::Completed(decode_material_ref(input)?)
         }
         1 => {
-            expect(3)?;
+            expect(4)?;
             AttemptOutcome::Waiting(CompletionSource {
                 wait: input.text()?.to_owned(),
                 terminal: Option::decode(input)?,
+                timer: Option::decode(input)?,
                 metadata: decode_material_ref(input)?,
             })
         }

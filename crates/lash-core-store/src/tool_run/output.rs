@@ -281,6 +281,7 @@ impl Material {
             named: CompletionSource {
                 wait,
                 terminal: None,
+                timer: None,
                 metadata: self.named,
             },
             payload: self.payload,
@@ -289,6 +290,10 @@ impl Material {
 }
 
 impl Material<CompletionSource> {
+    pub fn await_timer(&mut self, timer: String) {
+        self.named.timer = Some(timer);
+    }
+
     /// The park, also racing the process terminal wait `terminal`, by its
     /// id's hex. The wait is not part of the material.
     pub fn await_terminal(&mut self, terminal: String) {

@@ -52,6 +52,12 @@ impl StepBodies {
             .filter(|step| step.resolves)
             .map(|step| step.call.clone())
             .collect();
+        for step in driver.steps.values() {
+            if let Some(target) = &step.target {
+                self.runtime
+                    .retain_target(step.call.clone(), target.clone());
+            }
+        }
         seen.record = Some(Arc::clone(record));
         seen.requests = driver
             .steps

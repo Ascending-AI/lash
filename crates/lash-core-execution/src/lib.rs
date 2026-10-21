@@ -483,8 +483,8 @@ pub use deferred_provider::{
 pub use lash_core_store::obligations::{ObligationToken, RegistryKind};
 pub use lash_core_store::tool_surface::{
     DeferredMatch, DeferredOutcome, DeferredResolutionPolicy, ExecutionBinding,
-    ExecutionBindingUnreadable, Judgement, LinkSource, OperationLink, ProviderKey, RecordedSurface,
-    SurfaceCollision, SurfaceDuplicateTool, SurfaceEntry, SurfaceRefusal, judge,
+    ExecutionBindingUnreadable, Judgement, OperationRoute, ProviderKey, RecordedSurface,
+    RouteSource, SurfaceCollision, SurfaceDuplicateTool, SurfaceEntry, SurfaceRefusal, judge,
 };
 pub use lash_kernel_doc::EffectName;
 pub use protocol_build::{FleetWriterFormats, ProtocolBuildInput};
@@ -1045,3 +1045,5 @@ pub use tool_live::{
 use lash_execution_contracts::process::Durable;
 
 use lash_execution_contracts::*;
+
+pub use session::LinkedExecution;

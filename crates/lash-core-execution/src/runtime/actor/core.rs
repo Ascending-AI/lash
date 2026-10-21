@@ -99,6 +99,7 @@ pub(super) struct Inner {
     /// effects (FIG-7044); a context that owns no claim has none.
     hints: Option<lash_durable::runner::Hints>,
     clock: Arc<dyn Clock>,
+    capabilities: lash_vocabulary::claims::NodeCapabilities,
     cancel: CancellationToken,
     probe: Arc<dyn DurableProbe>,
     dues: Dues,
@@ -153,6 +154,7 @@ impl ActorContext {
                 liveness: None,
                 hints: None,
                 clock,
+                capabilities: lash_vocabulary::claims::NodeCapabilities::default(),
                 cancel,
                 probe,
                 dues: Dues::new(),
@@ -190,6 +192,7 @@ impl ActorContext {
                 liveness: Some(owned.liveness().clone()),
                 hints: Some(owned.hints().clone()),
                 clock: Arc::clone(owned.clock()),
+                capabilities: owned.capabilities().clone(),
                 cancel,
                 probe,
                 dues: Dues::new(),
@@ -233,6 +236,7 @@ impl ActorContext {
                 liveness: None,
                 hints: None,
                 clock: Arc::new(crate::SystemClock),
+                capabilities: lash_vocabulary::claims::NodeCapabilities::default(),
                 cancel: CancellationToken::new(),
                 probe: Arc::new(lash_durable::NoProbe),
                 dues: Dues::new(),
@@ -311,6 +315,11 @@ impl ActorContext {
     /// `expires_at - now`.
     pub fn clock(&self) -> &Arc<dyn Clock> {
         &self.inner.clock
+    }
+
+    /// The claiming node's advertised capabilities, captured from its lease.
+    pub fn capabilities(&self) -> &lash_vocabulary::claims::NodeCapabilities {
+        &self.inner.capabilities
     }
 
     /// The owner's unfenced reads of its domain rows (S0): current unless

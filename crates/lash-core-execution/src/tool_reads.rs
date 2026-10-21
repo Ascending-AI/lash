@@ -28,6 +28,7 @@ use crate::{ProviderKey, ToolDefinition, ToolManifest, ToolProvider};
 /// arguments it projected from the guest's, the run's configuration, and
 /// what bounds it.
 pub struct ReadCall<'a> {
+    pub clock: &'a dyn lash_core_ids::clock::Clock,
     /// The tool's manifest as the run's surface retained it.
     pub manifest: &'a ToolManifest,
     /// The tool's arguments, projected from the guest's as a recorded
@@ -157,11 +158,13 @@ impl ReadRoute {
         &self,
         args: &serde_json::Value,
         config: &OwnerConfigView,
+        clock: &dyn lash_core_ids::clock::Clock,
         cancel: &CancellationToken,
         deadline: Instant,
     ) -> Result<serde_json::Value, ReadError> {
         self.reads
             .read(ReadCall {
+                clock,
                 manifest: &self.definition.manifest,
                 args,
                 config,

@@ -476,75 +476,35 @@ impl ProcessEngineRegistry {
         self.require(kind)?.default_settings(payload)
     }
 
-    /// The effects a run of `payload` on the `kind` engine performs (P3).
-    ///
-    /// # Errors
-    ///
-    /// The engine is not configured, or it cannot certify the payload's
-    /// effects.
-    pub async fn performed_effects(
+    /// Inspect retained linked reach without re-fulfilling it against current advertisements.
+    pub async fn inspect_link(
         &self,
         kind: &str,
-        payload: &serde_json::Value,
-    ) -> Result<PerformedEffects, crate::ProcessEnvRefusal> {
+        start: &lash_vocabulary::names::LinkedStart,
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
         self.require(kind)
-            .map_err(|error| crate::ProcessEnvRefusal::Uncertified {
-                reason: error.to_string(),
+            .map_err(|error| {
+                lash_execution_contracts::process::linking::EnginePortError::Unavailable {
+                    message: error.to_string(),
+                }
             })?
-            .performed_effects(payload)
+            .inspect_link(start)
             .await
     }
 
-    /// Freeze namespace roots from the definition's linked snapshot into its env.
-    /// The runtime needs no package view to refuse computed package paths.
-    pub async fn link_package_namespaces(
+    /// Ordinary start admission checks every reached operation use and its known debt.
+    pub fn check_links(
         &self,
-        kind: &str,
-        payload: &serde_json::Value,
-        env: crate::ProcessEnv,
-    ) -> Result<crate::ProcessEnv, lash_execution_contracts::PluginError> {
-        let Some(provider) = self.document_provider(kind) else {
-            return Ok(env);
-        };
-        let digest = provider.definition_packages(payload)?;
-        let view = provider.package_view(digest).await?;
-        let roots = view.namespace_roots();
-        Ok(env.with_package_roots(roots))
-    }
-
-    /// Check that `env` links exactly `performed`, what a start of the
-    /// `kind` engine on `payload` performs, each to a tool its components
-    /// serve under the contract the code requires and, on a path a package
-    /// owns in the package set the start is linked under, as the package
-    /// declares it (P1, PKG-RUNNER), fitting under `fits`
-    /// ([`ProcessComponentRegistry::check_links`]).
-    ///
-    /// # Errors
-    ///
-    /// The pair's typed [`crate::ProcessEnvRefusal`]; a linked set whose
-    /// declarations are not read certifies no link
-    /// ([`crate::ProcessEnvRefusal::Uncertified`]).
-    pub async fn check_links(
-        &self,
-        kind: &str,
-        payload: &serde_json::Value,
         env: &Arc<crate::ProcessEnv>,
-        performed: &PerformedEffects,
-        fits: &std::collections::BTreeMap<
-            lash_kernel_doc::EffectName,
-            lash_execution_contracts::process::FitPolicy,
-        >,
-    ) -> Result<(), crate::ProcessEnvRefusal> {
-        let owned = match self.document_provider(kind) {
-            Some(documents) => documents
-                .owned_operations(payload, performed)
-                .await
-                .map_err(|error| crate::ProcessEnvRefusal::Uncertified {
-                    reason: error.to_string(),
-                })?,
-            None => Default::default(),
-        };
-        self.components().check_links(env, performed, &owned, fits)
+        inspection: &lash_execution_contracts::process::linking::LinkInspection,
+    ) -> Result<
+        lash_vocabulary::claims::ClaimRequirements,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        self.components().check_links(env, inspection)
     }
 
     /// Resolve the engine a `ProcessInput::Engine` start names, refusing a kind

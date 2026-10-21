@@ -144,6 +144,10 @@ pub use lash_core_execution::trace;
 pub mod facade_support {
     pub use crate::runtime::effect::scope_status;
     pub use crate::runtime::{DurableSessionOps, EMPTY_HEAD_REVISION, QueueWithdrawalObservation};
+    pub use lash_core_execution::runtime::actor::resolutions::{
+        CommittedUse, FirstUse, ResolutionError, registration, start_requirements,
+    };
+    pub use lash_core_execution::runtime::actor::route_selection::select_routes;
 
     pub use lash_core_execution::runtime::process::steps::{
         RecordedProcessStep, process_step_call, read_process_steps, read_process_tool_call,
@@ -484,17 +488,17 @@ pub use lash_core_execution::EffectName;
 pub use lash_core_execution::ExecutionBinding;
 pub use lash_core_execution::ExecutionBindingUnreadable;
 pub use lash_core_execution::Judgement;
-pub use lash_core_execution::LinkSource;
 /// The run spec a frame switch's follow-on runs under (FIG-6021).
 pub use lash_core_execution::NextRun;
 pub use lash_core_execution::ObligationToken;
+pub use lash_core_execution::RouteSource;
 pub use lash_core_execution::turn_stop_from_tool_control;
 pub use lash_core_execution::{
     DispatchGrant, DispatchGrantRefusal, DispatchRefusal, DispatchTarget, DispatchTransform,
     TransformRefusal,
 };
 
-pub use lash_core_execution::OperationLink;
+pub use lash_core_execution::OperationRoute;
 pub use lash_core_execution::ProviderKey;
 pub use lash_core_execution::RecordedSurface;
 pub use lash_core_execution::RegistryKind;
@@ -1109,3 +1113,5 @@ pub use lash_core_execution::tool_live;
 pub use lash_kernel_doc::RanCounts;
 
 pub use lash_core_store::model_calls;
+
+pub use lash_core_execution::LinkedExecution;

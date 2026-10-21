@@ -21,7 +21,7 @@ mod executor;
 /// park and end commits.
 #[doc(hidden)]
 pub mod host_graph {
-    pub use crate::executor::envelope::{CellEnvelope, EffectTable, RecordedEffect};
+    pub use crate::executor::envelope::{CellEnvelope, EffectTable};
     pub use crate::executor::host_graph::*;
 }
 mod feedback;

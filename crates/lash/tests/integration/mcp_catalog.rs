@@ -194,7 +194,7 @@ async fn recorded_tool_surface_is_preserved_when_advertised_tools_change() {
             manifest: entry.manifest.clone(),
             contract: (*entry.contract).clone(),
         });
-    let link = lash_core::OperationLink::advertised(
+    let link = lash_core::OperationRoute::advertised(
         lash::plugins::ToolProviderHandle::new(
             lash::plugins::RegistryKind::Session,
             "mcp",

@@ -13,10 +13,11 @@ pub(super) fn error(kind: &str, message: String, data: serde_json::Value) -> Err
 }
 
 pub(super) fn answer(
+    expected: &lash_kernel_doc::Type,
     answer: Result<serde_json::Value, EngineReadError>,
 ) -> Result<Datum, ErrorDatum> {
     match answer {
-        Ok(value) => datum_from_json(&value.to_string())
+        Ok(value) => lash_vm_broker::kernel::value::datum_from_tool_json(&value, expected)
             .map_err(|invalid| error(EFFECT_RESULT, invalid.to_string(), serde_json::Value::Null)),
         Err(EngineReadError::Arguments(message)) => Err(error(
             super::EFFECT_ARGUMENTS,

@@ -48,6 +48,7 @@ pub use steps::{
     ProcessStepTools, ProcessSteps, StepAdmission, StepRefusal, StepRuntime, StepToolsError,
 };
 pub use succession::request_process_successor;
+pub use succession::succession_context;
 pub(crate) use succession::{carry_refusal, relinked_step};
 #[cfg(any(test, feature = "testing"))]
 pub use testing::*;
