@@ -898,6 +898,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 
 [[package]]
+name = "dataframe"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-runtime",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+]
+
+[[package]]
 name = "delegation"
 version = "0.0.0-dev"
 dependencies = [

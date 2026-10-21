@@ -1,0 +1,23 @@
+function col(name: Text) -> expr = dataframe.col
+function lit(value: Json) -> expr = dataframe.lit
+function count() -> expr = dataframe.count
+function sum(value: expr) -> expr = dataframe.sum
+type expr = Record{op: Text, args: List(Any), name: Text}
+  method neq(self: expr, other: expr) -> expr = dataframe.expr.neq
+  method alias(self: expr, name: Text) -> expr = dataframe.expr.alias
+  method sort(self: expr, options: Record{ascending: Bool}) -> expr = dataframe.expr.sort
+type data_quanta = Record{rows: List(Any), schema: List(Text), plan: List(Any)}
+  static read_text(text: Text) -> data_quanta = dataframe.data_quanta.read_text
+  method flat_map(self: data_quanta, f: Fn(value: Any) -> Any) -> data_quanta = dataframe.data_quanta.flat_map
+  method filter_by(self: data_quanta, f: Fn(value: Any) -> Bool) -> data_quanta = dataframe.data_quanta.filter_by
+  method map(self: data_quanta, f: Fn(value: Any) -> Any) -> data_quanta = dataframe.data_quanta.map
+  method reduce_by_key_fn(self: data_quanta, key: Fn(value: Any) -> Any, combine: Fn(a: Any, b: Any) -> Any) -> data_quanta = dataframe.data_quanta.reduce_by_key_fn
+  method filter(self: data_quanta, predicate: expr) -> data_quanta = dataframe.data_quanta.filter
+  method reduce_by_key(self: data_quanta, keys: List(expr), aggregates: List(expr)) -> data_quanta = dataframe.data_quanta.reduce_by_key
+  method sort(self: data_quanta, ...keys: List(expr)) -> data_quanta = dataframe.data_quanta.sort
+  method limit(self: data_quanta, n: Int) -> data_quanta = dataframe.data_quanta.limit
+  async method collect_rows(self: data_quanta) -> List(Any) = dataframe.data_quanta.collect_rows
+  async method explain(self: data_quanta) -> Json = dataframe.data_quanta.explain
+error execution_error
+internal operation run(batch: Json) -> Json contract "example.dataframe.run/1"
+internal operation explain(batch: Json) -> Json contract "example.dataframe.explain/1"

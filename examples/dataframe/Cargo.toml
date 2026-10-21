@@ -1,0 +1,22 @@
+[package]
+name = "dataframe"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+lash = { workspace = true, features = ["rlm", "dialect-typescript", "dialect-python"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+lash = { workspace = true, features = ["testing", "sqlite"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

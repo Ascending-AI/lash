@@ -75,6 +75,7 @@ members = [
     "crates/lash-ext-regex-ecma",
     "crates/lash-kernel-conformance",
     "examples/kernel-embedder",
+    "examples/dataframe",
     "crates/lash-ext-date-ecma",
     "crates/lash-ext-url-whatwg",
     "crates/lash-ext-ts-core",

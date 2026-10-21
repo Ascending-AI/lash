@@ -20,6 +20,10 @@ For an end-to-end authoring procedure, use the
 [making-packages skill](../skills/making-packages/SKILL.md) in the
 [host development skills library](../skills/README.md).
 
+A [working host-owned dataframe example](../examples/dataframe/README.md) computes
+wordcount in both dialects, keeping callbacks in the kernel and sending only data
+to its native evaluator.
+
 ## A dataframe pipeline in two dialects
 
 The [dataframe fixture](../crates/lash-kernel-package/src/testing/dataframe.surface)

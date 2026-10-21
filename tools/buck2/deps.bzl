@@ -50,6 +50,19 @@ PACKAGE_DEPS = {
             "tokio": "//third-party/rust:p0381"
         }
     },
+    "dataframe": {
+        "build": {},
+        "dev": {
+            "lash": "//crates/lash:lash",
+            "tokio": "//third-party/rust:p0381"
+        },
+        "normal": {
+            "lash": "//crates/lash:lash",
+            "serde": "//third-party/rust:p0317",
+            "serde_json": "//third-party/rust:p0322",
+            "thiserror": "//third-party/rust:p0375"
+        }
+    },
     "delegation": {
         "build": {},
         "dev": {

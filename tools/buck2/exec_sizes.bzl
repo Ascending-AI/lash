@@ -862,6 +862,7 @@ TEST_RUN_REQUESTS = {
     "//examples/agent-workbench:agent-workbench__unit_test__fv_fe3a8f10": {"cpu_count": 3, "memory_kb": 6029312},
     "//examples/codex-host-auth:codex-host-auth__bin__unit_test": {"cpu_count": 1, "memory_kb": 262144},
     "//examples/codex-host-auth:codex-host-auth__unit_test": {"cpu_count": 1, "memory_kb": 262144},
+    "//examples/dataframe:dataframe__unit_test": {"cpu_count": 2, "memory_kb": 524288},
     "//examples/delegation:delegation__unit_test": {"cpu_count": 1, "memory_kb": 262144},
     "//examples/e2e-consumer:e2e-consumer__unit_test": {"cpu_count": 1, "memory_kb": 262144},
     "//examples/e2e-consumer:otlp_export__test": {"cpu_count": 1, "memory_kb": 262144},

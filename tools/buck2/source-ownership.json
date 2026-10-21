@@ -1124,5 +1124,14 @@
       "src/testing/dataframe.labels.tsv",
       "src/testing/dataframe.surface"
     ]
+  },
+  "examples/dataframe": {
+    "compile_data": [
+      "dataframe.kernel",
+      "dataframe.surface",
+      "dataframe.labels.tsv",
+      "wordcount.ts",
+      "wordcount.py"
+    ]
   }
 }
