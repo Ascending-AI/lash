@@ -3,7 +3,9 @@
 //! arguments read from the call's list, and an async one's body started as
 //! a promise.
 
-use lash_kernel_doc::{self as k, Name, Site};
+use lash_kernel_doc as k;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
 
 use super::lift::{Lift, Lifter, refuse};
 use super::source::{Body, Expr, Function, Param, Type};

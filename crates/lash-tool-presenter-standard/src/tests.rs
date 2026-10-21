@@ -1,5 +1,6 @@
 use super::*;
-use lash_protocol_types::{JsonSchema, ToolDefinition};
+use lash_vocabulary::json_schema::JsonSchema;
+use lash_vocabulary::tool_contract::ToolDefinition;
 
 /// `tool` compacted under its own name and the standard config.
 fn compact(tool: &ToolDefinition) -> CompactToolContract {

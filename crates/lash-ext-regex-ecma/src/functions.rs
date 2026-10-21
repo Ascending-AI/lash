@@ -14,11 +14,17 @@ use std::borrow::Cow;
 use std::ops::{ControlFlow, Range};
 use std::sync::Arc;
 
+use lash_kernel_doc::Args;
+use lash_kernel_doc::Integer;
+use lash_kernel_doc::NativeCall;
+use lash_kernel_doc::NativeError;
+use lash_kernel_doc::NativeFunction;
+use lash_kernel_doc::NewObject;
+use lash_kernel_doc::Nursery;
+use lash_kernel_doc::Value;
+use lash_kernel_doc::WorkCounter;
 use lash_kernel_doc::arena::ShortText;
-use lash_kernel_doc::{
-    Args, FunctionId, Integer, NativeCall, NativeError, NativeFunction, NewObject, Nursery, Value,
-    WorkCounter,
-};
+use lash_vocabulary::legacy_names::FunctionId;
 use num_traits::ToPrimitive;
 
 use crate::definitions::{BRAND, LONE_SURROGATE_ERROR, Operation, SYNTAX_ERROR};

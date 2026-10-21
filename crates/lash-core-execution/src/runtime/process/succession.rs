@@ -23,7 +23,7 @@
 //! refused.
 
 use lash_execution_contracts::process::*;
-use lash_kernel_doc::EffectName;
+use lash_vocabulary::legacy_names::EffectName;
 
 use super::engine::ProcessEngineRegistry;
 
@@ -35,7 +35,7 @@ use lash_core_store::artifact_referrer::ArtifactReferrer;
 use lash_core_store::artifact_referrer::ReferrerClaim;
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::plugin_error::PluginError;
-use lash_protocol_types::ProcessId;
+use lash_vocabulary::identity::ProcessId;
 
 /// The refusal of a request whose new env links an effect of an admitted,
 /// unsettled step otherwise than `old` does.

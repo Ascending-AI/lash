@@ -3,7 +3,7 @@
 
 use crate::{ActorContext, AdmittedScope, RuntimeEffectControllerError};
 
-fn process_id(name: &str) -> crate::ProcessId {
+fn process_id(name: &str) -> lash_vocabulary::identity::ProcessId {
     crate::process_id_for_test(name)
 }
 

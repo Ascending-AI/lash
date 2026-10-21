@@ -279,7 +279,10 @@ async fn payload(backend: &lash::Backend, text: &str) -> serde_json::Value {
     .expect("the input encodes")
 }
 
-async fn start(core: &lash::LashCore, payload: serde_json::Value) -> lash_core::ProcessId {
+async fn start(
+    core: &lash::LashCore,
+    payload: serde_json::Value,
+) -> lash_vocabulary::identity::ProcessId {
     start_under(core, &environment(), payload).await
 }
 
@@ -288,7 +291,7 @@ async fn start_under(
     core: &lash::LashCore,
     env: &lash::process::ProcessEnv,
     payload: serde_json::Value,
-) -> lash_core::ProcessId {
+) -> lash_vocabulary::identity::ProcessId {
     let env_ref = core
         .host_artifacts()
         .publish_process_env(&lash_core::HostArtifactPin::mint(), env)
@@ -350,7 +353,7 @@ async fn parked_cell(
     backend: &lash::Backend,
     session: &str,
 ) -> lash_core::durable_port::ActorSnapshot {
-    let id = lash::SessionId::parse(session).expect("a session id");
+    let id = lash_vocabulary::identity::SessionId::parse(session).expect("a session id");
     let actor = ActorKey::session(session).expect("a session actor key");
     let reads = backend.durable();
     let mut last = None;
@@ -431,7 +434,7 @@ async fn a_parked_process_is_migrated_and_finishes_on_the_next_kernel() {
 /// engine settings, and the components its environment names.
 async fn launch_of(
     backend: &lash::Backend,
-    process: &lash_core::ProcessId,
+    process: &lash_vocabulary::identity::ProcessId,
 ) -> (
     Option<lash_core::ProcessEnvRef>,
     Option<lash::process::EngineSettings>,
@@ -467,7 +470,7 @@ async fn launch_of(
 
 /// The session `id` of `core`, created if it is not there.
 async fn session(core: &lash::LashCore, id: &str) -> lash::LashSession {
-    let id = lash::SessionId::parse(id).expect("a session id");
+    let id = lash_vocabulary::identity::SessionId::parse(id).expect("a session id");
     match core
         .session(id.clone())
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
@@ -584,7 +587,7 @@ async fn a_parked_heap_cell_and_its_written_table_resume_on_the_next_kernel() {
         idle.formats
     );
     let read = new
-        .session(lash::SessionId::fixture(SESSION))
+        .session(lash_vocabulary::identity::SessionId::fixture(SESSION))
         .durable()
         .await
         .unwrap()
@@ -701,7 +704,7 @@ async fn the_closing_build_refuses_to_start_while_a_session_is_unmigrated_and_st
     assert_eq!(
         cell_finishes(
             &closing
-                .session(lash::SessionId::fixture(SESSION))
+                .session(lash_vocabulary::identity::SessionId::fixture(SESSION))
                 .durable()
                 .await
                 .expect("durable session")
@@ -751,9 +754,9 @@ fn hold_definition() -> lash::tools::ToolDefinition {
     )
     .expect("the hold tool's schemas")
     // The contract the laws' kernel texts pin.
-    .declared_contract(lash_core::ContractId::new("1"))
+    .declared_contract(lash_vocabulary::operations::ContractId::new("1"))
     .with_execution(Duration::from_secs(120))
-    .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
+    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(4).unwrap(),
         1,
         1,
@@ -764,8 +767,8 @@ fn hold_definition() -> lash::tools::ToolDefinition {
 /// the contract `contract` it declares.
 fn hold_definition_under(contract: &str) -> lash::tools::ToolDefinition {
     let mut definition = hold_definition();
-    definition.manifest.contract = lash_core::ContractSource::Declared {
-        id: lash_core::ContractId::new(contract),
+    definition.manifest.contract = lash_vocabulary::tool_contract::ContractSource::Declared {
+        id: lash_vocabulary::operations::ContractId::new(contract),
     };
     definition
 }
@@ -983,7 +986,7 @@ async fn payload_under(
 /// The actor row of `process` once no node owns it.
 async fn unowned(
     backend: &lash::Backend,
-    process: &lash_core::ProcessId,
+    process: &lash_vocabulary::identity::ProcessId,
 ) -> lash_core::durable_port::ActorSnapshot {
     let actor = ActorKey::process(process.as_str()).expect("a process actor key");
     for _ in 0..3000 {

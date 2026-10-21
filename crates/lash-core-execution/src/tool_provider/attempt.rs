@@ -74,7 +74,7 @@ impl<'run> AttemptContext<'run> {
     /// host-started process or an operation outside a turn. The full turn
     /// address of a process's starting run is on
     /// [`process_spawn_provenance`](Self::process_spawn_provenance).
-    pub fn logical_run(&self) -> Option<crate::TurnId> {
+    pub fn logical_run(&self) -> Option<lash_vocabulary::identity::TurnId> {
         match self.process_spawn_provenance.as_ref() {
             Some(provenance) => provenance.run.as_ref().map(|run| run.turn_id.clone()),
             None => self.parent_scope.scope().logical_run(),
@@ -256,7 +256,7 @@ impl<'run> AttemptContext<'run> {
     /// The execution binding of the deferred match this call runs on, its
     /// readability already checked against the provider's declared formats;
     /// `None` for a call that carries none.
-    pub fn tool_execution_binding(&self) -> Option<&crate::ExecutionBinding> {
+    pub fn tool_execution_binding(&self) -> Option<&lash_vocabulary::providers::ExecutionBinding> {
         self.tool_execution_binding.as_ref()
     }
 

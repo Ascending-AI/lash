@@ -1,8 +1,8 @@
 use super::*;
-use lash::ProcessId;
-use lash::SessionId;
-use lash::TurnId;
 use lash::{StreamBlockEvent, StreamBlockKind};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 #[path = "routes/host_streams.rs"]
 mod host_streams;

@@ -10,13 +10,19 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::{EffectName, OperationRequirement};
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::operations::OperationRequirement;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    EffectControl, Export, ExportView, PackagePath, QualifiedOperation, Segment, SpellKind,
-    Spelling, TypeMember,
-};
+use crate::EffectControl;
+use crate::Export;
+use crate::ExportView;
+use crate::SpellKind;
+use crate::Spelling;
+use crate::TypeMember;
+use lash_vocabulary::names::PackagePath;
+use lash_vocabulary::names::QualifiedOperation;
+use lash_vocabulary::names::Segment;
 
 /// What a cell or workflow is offered under one operation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -73,7 +79,7 @@ pub enum OfferedSource {
 /// The operations offered, one entry per operation (P1).
 pub type Operations = BTreeMap<QualifiedOperation, Offered>;
 
-pub use lash_vocabulary::{operation_keys, operation_text};
+use lash_vocabulary::{operation_keys, operation_text};
 
 /// `operation` as a dialect's source names it: its package path, then its
 /// name, each in the dialect's spelling. The one path renderer lowering
@@ -329,8 +335,8 @@ impl Namespaces {
     ///
     /// As [`Self::of_requirements`].
     pub fn of_effects(
-        signatures: &BTreeMap<EffectName, lash_kernel_doc::Signature>,
-        contract: &lash_kernel_doc::ContractId,
+        signatures: &BTreeMap<EffectName, lash_vocabulary::types::Signature>,
+        contract: &lash_vocabulary::operations::ContractId,
         controls: &BTreeMap<EffectName, BTreeSet<EffectControl>>,
     ) -> Result<Self, NamespaceRefusal> {
         let requirements = signatures
@@ -382,7 +388,7 @@ impl Namespaces {
     /// Each offered operation's effect name with its signature: what the
     /// checker admits a document against.
     #[must_use]
-    pub fn signatures(&self) -> BTreeMap<EffectName, lash_kernel_doc::Signature> {
+    pub fn signatures(&self) -> BTreeMap<EffectName, lash_vocabulary::types::Signature> {
         self.operations
             .iter()
             .map(|(operation, offered)| {

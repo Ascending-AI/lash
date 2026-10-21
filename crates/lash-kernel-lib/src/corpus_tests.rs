@@ -1,9 +1,14 @@
 //! Independent recorded native outcomes and charges.
 
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::Measure;
+use lash_kernel_doc::NativeError;
+use lash_kernel_doc::Operand;
+use lash_kernel_doc::Value;
+use lash_kernel_doc::WorkCounter;
 use lash_kernel_doc::arena::{ArenaHandle, Body};
-use lash_kernel_doc::{
-    Datum, FunctionId, FunctionRegistry, Measure, NativeError, Operand, Value, WorkCounter,
-};
+use lash_vocabulary::legacy_names::FunctionId;
 use num_traits::ToPrimitive;
 
 use crate::register_numbers;

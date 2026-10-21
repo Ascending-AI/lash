@@ -16,7 +16,9 @@ pub use parser::{
     parse_signature,
 };
 
-pub use printer::{print_definition, print_document, print_document_with_ranges, print_type};
+pub use printer::print_definition;
+pub use printer::print_document;
+pub use printer::print_document_with_ranges;
 
 /// A kernel text that is not a document or a definition, and where.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -57,5 +59,3 @@ pub enum ParseErrorReason {
     #[error("{problem}")]
     Malformed { problem: String },
 }
-
-pub(crate) use lash_vocabulary::type_text::is_keyword;

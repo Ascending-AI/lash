@@ -12,7 +12,7 @@ use super::*;
 pub(super) fn occupied_node_ids_conn(
     tx: &crate::conn::FencedTx<'_>,
     nodes: &[lash_core_store::session_graph::SessionNodeRecord],
-) -> Result<std::collections::HashSet<lash_protocol_types::NodeId>, StoreError> {
+) -> Result<std::collections::HashSet<lash_vocabulary::identity::NodeId>, StoreError> {
     let mut occupied = std::collections::HashSet::new();
     if nodes.is_empty() {
         return Ok(occupied);
@@ -32,7 +32,7 @@ pub(super) fn occupied_node_ids_conn(
             .query_map(params![encoded], |row| row.get::<_, String>(0))
             .map_err(sqlite_error)?;
         for node_id in rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)? {
-            occupied.insert(lash_protocol_types::NodeId::parse(node_id)?);
+            occupied.insert(lash_vocabulary::identity::NodeId::parse(node_id)?);
         }
     }
     Ok(occupied)

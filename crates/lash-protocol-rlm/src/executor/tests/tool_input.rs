@@ -4,8 +4,11 @@
 use super::*;
 
 /// A `forms.<operation>` tool of `input` schema that answers its input.
-fn form(operation: &str, input: serde_json::Value) -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn form(
+    operation: &str,
+    input: serde_json::Value,
+) -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:forms_{operation}"),
         format!("forms.{operation}"),
         "Answers the input it was called with.",
@@ -32,7 +35,7 @@ const REFUSING: [&str; 7] = [
     "text",
 ];
 
-fn forms() -> Vec<lash_core::ToolDefinition> {
+fn forms() -> Vec<lash_vocabulary::tool_contract::ToolDefinition> {
     vec![
         form(
             OPTIONAL,
@@ -96,7 +99,7 @@ impl Forms {
         self.executed.lock().expect("executed calls").clone()
     }
 
-    fn definition(key: &str) -> Option<lash_core::ToolDefinition> {
+    fn definition(key: &str) -> Option<lash_vocabulary::tool_contract::ToolDefinition> {
         forms()
             .into_iter()
             .find(|tool| tool.manifest.tool() == key || tool.manifest.id.as_str() == key)
@@ -109,20 +112,20 @@ impl lash_core::ToolProvider for Forms {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(forms()
             .iter()
-            .map(lash_core::ToolDefinition::manifest)
+            .map(lash_vocabulary::tool_contract::ToolDefinition::manifest)
             .collect())
     }
 
     fn resolve_manifest_by_id(
         &self,
-        id: &lash_core::ToolId,
+        id: &lash_vocabulary::tool_contract::ToolId,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<lash_core::ToolManifest> {
+    ) -> Option<lash_vocabulary::tool_contract::ToolManifest> {
         Self::definition(id.as_str()).map(|tool| tool.manifest())
     }
 
@@ -130,7 +133,7 @@ impl lash_core::ToolProvider for Forms {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         Self::definition(name).map(|tool| Arc::new(tool.contract()))
     }
 

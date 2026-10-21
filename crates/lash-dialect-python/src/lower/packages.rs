@@ -22,15 +22,27 @@
 
 use std::collections::BTreeMap;
 
+use lash_kernel_dialect::Export;
+use lash_kernel_dialect::ExportView;
+use lash_kernel_dialect::Member;
+use lash_kernel_dialect::Namespaces;
+use lash_kernel_dialect::Resolution;
+use lash_kernel_dialect::SpellKind;
+use lash_kernel_dialect::Spelling;
+use lash_kernel_dialect::TypeMember;
 use lash_kernel_dialect::dispatch::{self, Brand, Filled, Selection, Target};
-use lash_kernel_dialect::{
-    Export, ExportView, Member, Namespaces, PackagePath, Resolution, SpellKind, Spelling,
-    TypeMember,
-};
-use lash_kernel_doc::{
-    Expr, FunctionRepresentation, Literal, Name, Param, Place, RecordEntry, Rhs, Signature,
-    StartAdapter, StartConvention,
-};
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::FunctionRepresentation;
+use lash_kernel_doc::Literal;
+use lash_kernel_doc::Place;
+use lash_kernel_doc::RecordEntry;
+use lash_kernel_doc::Rhs;
+use lash_kernel_doc::StartAdapter;
+use lash_kernel_doc::StartConvention;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::names::PackagePath;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::Signature;
 use ruff_python_ast::{self as ast, Expr as PyExpr};
 use ruff_text_size::{Ranged, TextRange};
 
@@ -458,7 +470,7 @@ impl<'a> Lowerer<'a> {
         receiver: &Operand,
         name: &str,
         targets: &[Target<'a>],
-    ) -> Lowering<(Operand, lash_kernel_doc::FunctionId)> {
+    ) -> Lowering<(Operand, lash_vocabulary::legacy_names::FunctionId)> {
         let brand = self.invoke(
             dispatch::BRAND_OF,
             std::slice::from_ref(receiver),
@@ -486,7 +498,7 @@ impl<'a> Lowerer<'a> {
     fn branches(
         &mut self,
         selected: &Operand,
-        same: lash_kernel_doc::FunctionId,
+        same: lash_vocabulary::legacy_names::FunctionId,
         targets: &[Target<'a>],
         mut branch: impl FnMut(&mut Self, Option<usize>) -> Lowering<Operand>,
     ) -> Lowering<Operand> {

@@ -17,10 +17,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-pub use lash_kernel_doc::{
-    ArtifactDigest, EffectName, ExecutionRequirements, FunctionId, NodeCapabilities,
-    PackageSetDigest,
-};
+pub use lash_kernel_doc::ArtifactDigest;
+pub use lash_kernel_doc::ExecutionRequirements;
+pub use lash_kernel_doc::NodeCapabilities;
+pub use lash_kernel_doc::PackageSetDigest;
+pub use lash_vocabulary::legacy_names::EffectName;
+pub use lash_vocabulary::legacy_names::FunctionId;
 
 use crate::formats::FormatSet;
 use crate::{DurableError, StoreFailure, StoreFailureKind};
@@ -251,7 +253,7 @@ pub fn requirement_rows(
 /// code's.
 #[must_use]
 pub fn strand(requires: &[String], live: &[NodeCapability]) -> Option<ExecutionRequirements> {
-    let record = lash_core_store::obligations::ObligationToken::requirements_of(
+    let record = lash_vocabulary::claims::ObligationToken::requirements_of(
         requires.iter().map(String::as_str),
     );
     if record.is_empty() {

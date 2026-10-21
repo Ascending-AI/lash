@@ -31,7 +31,7 @@ pub struct BuiltPackage {
     /// Its code, validated against the packages it requires.
     pub image: &'static [u8],
     /// This build's native implementations, sorted by function identity.
-    pub natives: &'static [(lash_kernel_doc::FunctionId, &'static str)],
+    pub natives: &'static [(lash_vocabulary::legacy_names::FunctionId, &'static str)],
 }
 
 impl BuiltPackage {
@@ -40,8 +40,8 @@ impl BuiltPackage {
     /// resolve an implementation's dependencies through a global name index.
     pub fn native_callees(
         &self,
-        function: &lash_kernel_doc::FunctionId,
-    ) -> Result<Vec<(lash_kernel_doc::FunctionId, &'static str)>, String> {
+        function: &lash_vocabulary::legacy_names::FunctionId,
+    ) -> Result<Vec<(lash_vocabulary::legacy_names::FunctionId, &'static str)>, String> {
         let image = lash_kernel_doc::ReleasedFunctions::read(self.image)
             .map_err(|error| error.to_string())?;
         let at = image

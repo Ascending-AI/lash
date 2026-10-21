@@ -2,7 +2,7 @@
 //! transcript holds only its own turn.
 
 use super::*;
-use lash::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 /// The text of every user row `session_id` renders.
 async fn user_rows(state: &AppState, session_id: &SessionId) -> Vec<String> {

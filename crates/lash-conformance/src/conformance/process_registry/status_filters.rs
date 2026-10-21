@@ -47,7 +47,7 @@ pub async fn process_roster_pages_match_status_sets_and_definition(
                     since_ms: i64::try_from(record.created_at_ms).unwrap_or(i64::MAX),
                     kind: crate::WaitKind::Call {
                         call_id: lash_protocol_types::ToolCallId::fixture("process-wait-law"),
-                        tool_id: lash_protocol_types::ToolId::new("process_wait"),
+                        tool_id: lash_vocabulary::tool_contract::ToolId::new("process_wait"),
                     },
                     site: None,
                 },

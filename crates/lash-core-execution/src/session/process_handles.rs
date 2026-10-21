@@ -14,7 +14,9 @@ impl RuntimeExecutionContext<'_> {
     /// [`ProcessHandleView`](lash_execution_contracts::process::ProcessHandleView) carries it: the process
     /// tools take a `process_id`, and reading one out of the handle id is
     /// exactly what the opaque id forbids.
-    pub fn process_handle_json(process_id: &crate::ProcessId) -> serde_json::Value {
+    pub fn process_handle_json(
+        process_id: &lash_vocabulary::identity::ProcessId,
+    ) -> serde_json::Value {
         let mut record = lash_protocol_types::handle::handle_record_json(
             &lash_protocol_types::handle::HandleId::process(process_id),
         );
@@ -35,14 +37,14 @@ impl RuntimeExecutionContext<'_> {
     /// (ADR 0095), so core and the language agree on what a handle is.
     pub(super) fn parse_process_handle(
         handle: &serde_json::Value,
-    ) -> Result<crate::ProcessId, String> {
+    ) -> Result<lash_vocabulary::identity::ProcessId, String> {
         crate::process_id_from_handle_json(handle)
     }
 
     /// FIG-653: observer validation enforces subscription relationships, not authorization.
     async fn authorize_handle(
         &self,
-        process_id: &crate::ProcessId,
+        process_id: &lash_vocabulary::identity::ProcessId,
     ) -> Result<HandleAuthority, lash_execution_contracts::plugin_error::PluginError> {
         if self.is_run_local_process(process_id) {
             return Ok(HandleAuthority::RunLocalPossession);

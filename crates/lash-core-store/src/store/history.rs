@@ -10,10 +10,14 @@ const LASH_HISTORY_LINEAGE_DOMAIN_VERSION: &str = "lash-history-lineage/v1";
 use std::num::{NonZeroU32, NonZeroU64};
 
 use super::{BlobRef, HydratedSessionCheckpoint, SessionHeadRef, StoreError};
-use crate::{
-    FrameNodeId, NodeId, PersistedSessionConfig, SessionGraph, SessionId, SessionNodeRecord,
-    TurnFailureSettlement, TurnId,
-};
+use crate::FrameNodeId;
+use crate::PersistedSessionConfig;
+use crate::SessionGraph;
+use crate::SessionNodeRecord;
+use crate::TurnFailureSettlement;
+use lash_vocabulary::identity::NodeId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 /// Which head a window read resolves its leaf from.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -374,7 +378,7 @@ pub struct CommittedTurnNodesPage {
 #[derive(Clone, Debug)]
 pub struct CommittedTurnReceipt {
     turn: CommittedTurnNodes,
-    appended: Vec<crate::NodeId>,
+    appended: Vec<lash_vocabulary::identity::NodeId>,
 }
 
 impl CommittedTurnReceipt {
@@ -433,7 +437,7 @@ impl CommittedTurnReceipt {
     }
 
     /// The nodes the commit appended, in append order.
-    pub fn appended(&self) -> &[crate::NodeId] {
+    pub fn appended(&self) -> &[lash_vocabulary::identity::NodeId] {
         &self.appended
     }
 

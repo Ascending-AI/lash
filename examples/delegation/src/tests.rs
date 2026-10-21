@@ -5,12 +5,18 @@
 use lash::plugins::PluginError;
 use std::sync::{Arc, Mutex};
 
+use lash::MaxToolCalls;
+use lash::SessionSpec;
+use lash::ToolCallId;
+use lash::TurnBudget;
 use lash::plugins::{
     AdmittedPluginConfig, PluginHost, PluginOptions, PluginSessionRequest, SessionAuthorityContext,
     SessionStateService,
 };
 use lash::tools::{PendingToolCall, StaticToolExecute, ToolCallOutcome, ToolOutcome};
-use lash::{MaxToolCalls, ProcessId, RuntimeOwner, SessionId, SessionSpec, ToolCallId, TurnBudget};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::RuntimeOwner;
+use lash_vocabulary::identity::SessionId;
 use serde_json::json;
 
 use super::*;

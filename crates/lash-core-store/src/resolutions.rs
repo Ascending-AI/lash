@@ -47,3 +47,11 @@ pub struct ResolutionRecord {
     pub requested: QualifiedName,
     pub entry: ResolutionEntry,
 }
+
+/// Trusted host policy output, validated before publishing a new execution.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResolutionSeed {
+    pub use_: OperationUse,
+    pub entry: ResolutionEntry,
+}

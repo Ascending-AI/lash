@@ -1,5 +1,5 @@
 use crate::support::{EmbedError, LashCore, Result};
-use lash_protocol_types::ProcessId;
+use lash_vocabulary::identity::ProcessId;
 // `PluginQuery` / `PluginCommand` / `PluginTask` bound the plugin operation runners, but their home is `crate::plugins`: authoring surface a plugin
 // implements, not a name a host writes to invoke one (ADR 0051, FIG-1921).
 pub use lash_core::facade_support::AcceptedInjectedTurnInput;
@@ -159,7 +159,7 @@ impl SessionAdmin {
     /// own options. It reads the live providers and records nothing; which
     /// tools a provider offers is that provider's config, and a committed
     /// run keeps the surface it recorded.
-    pub async fn offered_tools(&self) -> Result<Vec<lash_core::ToolManifest>> {
+    pub async fn offered_tools(&self) -> Result<Vec<lash_vocabulary::tool_contract::ToolManifest>> {
         self.context
             .with_writer(async |runtime: &mut crate::support::LashRuntime| {
                 runtime.reload_invalidated_resident_session_state().await?;

@@ -17,13 +17,20 @@ use lash_trace::{
 };
 
 use super::session::TurnRow;
+use crate::TurnFinish;
+use crate::TurnStop;
 use crate::store::{RunCommittedOutcome, RunTerminalCause};
 use crate::trace::TraceRuntime;
-use crate::{SessionId, TurnFinish, TurnId, TurnStop};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 /// The ids of a turn's records: its session, itself, and the send its head
 /// input names, the one whose producer parents it.
-fn context(session: &SessionId, run: &TurnId, send: Option<&crate::InputId>) -> TraceContext {
+fn context(
+    session: &SessionId,
+    run: &TurnId,
+    send: Option<&lash_vocabulary::identity::InputId>,
+) -> TraceContext {
     let mut context = TraceContext::default()
         .for_session(session.clone())
         .for_turn(run.clone());
@@ -41,7 +48,7 @@ pub(super) fn started(
     run: &TurnId,
     scope: Option<&DurableTraceScope>,
     inputs: usize,
-    send: Option<&crate::InputId>,
+    send: Option<&lash_vocabulary::identity::InputId>,
 ) {
     let (Some(tracing), Some(scope)) = (tracing, scope) else {
         return;

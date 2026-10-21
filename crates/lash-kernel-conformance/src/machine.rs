@@ -175,9 +175,9 @@ pub(crate) fn case_program(library: &PreparedLibrary, case: &Case) -> Option<Pro
             .map(|(effect, signature)| {
                 (
                     effect.clone(),
-                    lash_kernel_doc::OperationRequirement::new(
+                    lash_vocabulary::operations::OperationRequirement::new(
                         signature.clone(),
-                        lash_kernel_doc::ContractId::new("conformance"),
+                        lash_vocabulary::operations::ContractId::new("conformance"),
                     ),
                 )
             })
@@ -414,10 +414,10 @@ impl Host for ScriptHost<'_> {
 
     fn perform(
         &mut self,
-        effect: &lash_kernel_doc::EffectName,
+        effect: &lash_vocabulary::legacy_names::EffectName,
         args: &[Datum],
-        _site: &lash_kernel_doc::PositionLabel,
-        _origin: &lash_kernel_doc::Site,
+        _site: &lash_vocabulary::sites::PositionLabel,
+        _origin: &lash_vocabulary::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, HostFault> {
         match self.answers.pop_front() {
             Some(HostAnswer::Perform(perform))

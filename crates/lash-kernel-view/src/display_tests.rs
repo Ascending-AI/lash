@@ -2,9 +2,14 @@
 
 use lash_helper_labels::Comparison;
 use lash_kernel_check::WorkflowDocument;
-use lash_kernel_dialect::{MemberPath, PackagePath, Segment};
-use lash_kernel_doc::{FunctionName, Name, WorkflowDocumentEntry, parse_document};
+use lash_kernel_doc::WorkflowDocumentEntry;
+use lash_kernel_doc::parse_document;
 use lash_kernel_package::{HeldPackages, Package, PackageSources};
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::names::MemberPath;
+use lash_vocabulary::names::PackagePath;
+use lash_vocabulary::names::Segment;
 
 use crate::{ComparisonView, derive};
 
@@ -98,7 +103,10 @@ fn labels_are_keyed_by_package_and_member_in_the_selected_set() {
     }
     let removed = FunctionName::new("future.removed_helper").unwrap();
     assert_eq!(
-        built_view.title(&lash_kernel_doc::FunctionId::from_bytes([0; 32]), &removed),
+        built_view.title(
+            &lash_vocabulary::legacy_names::FunctionId::from_bytes([0; 32]),
+            &removed
+        ),
         removed.as_str()
     );
     let mut packages = own_packages(&built);

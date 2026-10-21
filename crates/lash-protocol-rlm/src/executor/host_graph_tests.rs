@@ -7,8 +7,10 @@ use lash_core_store::checkpoint_graph::{
     DecodeLimits, EncodeBudget, EncodedNode, ExplicitLimit, GraphDecoder, GraphRefusal,
     GraphStaging, NodeId, NodeKind, parse_envelope,
 };
-use lash_kernel_doc::{EffectId, Site, Unit};
 use lash_vm_broker::round_graph::CallOutcome;
+use lash_vocabulary::sites::EffectId;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 use super::*;
 
@@ -44,8 +46,8 @@ fn collected(
 }
 
 fn identity(occurrence: u64) -> EffectId {
-    lash_kernel_doc::testkit::effect(
-        lash_kernel_doc::testkit::root_task(),
+    lash_vocabulary::sites::testkit::effect(
+        lash_vocabulary::sites::testkit::root_task(),
         Site {
             unit: Unit::Main,
             path: vec![0],
@@ -255,7 +257,7 @@ fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
         "1",
         lash_kernel_doc::SourceLanguage::TypeScript,
         vec![lash_kernel_doc::SourceSite {
-            site: lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, vec![0]),
+            site: lash_vocabulary::sites::Site::new(lash_vocabulary::sites::Unit::Main, vec![0]),
             ranges: vec![lash_kernel_doc::Span::new(0, 1).unwrap()],
             implicit: None,
         }],
@@ -272,15 +274,15 @@ fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
         effects: [(
             operation(),
             RecordedEffect {
-                tool: lash_core::ToolId::new("read"),
-                requirement: lash_kernel_doc::OperationRequirement::new(
-                    lash_kernel_doc::Signature {
+                tool: lash_vocabulary::tool_contract::ToolId::new("read"),
+                requirement: lash_vocabulary::operations::OperationRequirement::new(
+                    lash_vocabulary::types::Signature {
                         params: Vec::new(),
-                        result: lash_kernel_doc::Type::Any,
+                        result: lash_vocabulary::types::Type::Any,
                     },
-                    lash_kernel_doc::ContractId::new("1"),
+                    lash_vocabulary::operations::ContractId::new("1"),
                 ),
-                controls: lash_core::TurnControls::default(),
+                controls: lash_vocabulary::tool_declaration::TurnControls::default(),
             },
         )]
         .into_iter()
@@ -300,7 +302,7 @@ fn a_cells_envelope_is_one_node_and_its_end_reads_back_after_collection() {
     // what it reaches.
     let session = lash_vm_broker::kernel::pages::frame_page(&lash_kernel_state::paged::PageBody {
         kind: lash_kernel_state::paged::PageKind::SESSION_ROOT,
-        tokens: lash_kernel_doc::graph_tokens::encode_body(&0_u64),
+        tokens: lash_vocabulary::tokens::encode_body(&0_u64),
         children: Vec::new(),
     })
     .unwrap()

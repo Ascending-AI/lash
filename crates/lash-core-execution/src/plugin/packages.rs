@@ -5,13 +5,13 @@ use super::{OwnerConfigView, PluginRegistrar};
 use crate::deferred_provider::DeferredResolveContext;
 use lash_core_store::artifact_referrer::ReferrerClaim;
 use lash_core_store::{
-    packages::linked::PublicationRecord, process_env::linked::ProcessEnv,
-    resolutions::ResolutionEntry, tool_surface::linked::OperationRoute,
+    process_env::linked::ProcessEnv, resolutions::ResolutionEntry,
+    tool_surface::linked::OperationRoute,
 };
-use lash_execution_contracts::{
-    PluginError,
-    process::{EngineSettings, linking::*},
-};
+use lash_execution_contracts::PluginError;
+use lash_execution_contracts::process::EngineSettings;
+use lash_vocabulary::package::PublicationRecord;
+use lash_vocabulary::types::*;
 use lash_vocabulary::{
     ToolDefinition, identity::ProcessId, names::*, package::*, providers::ToolProviderKey,
 };
@@ -54,13 +54,7 @@ pub trait PackagePublisher: Send + Sync {
         request: PublishPackage,
     ) -> Result<PublicationRecord, EnginePortError>;
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-/// A trusted host policy pin validated for scope, identity, mode, codec and target debt before start.
-pub struct ResolutionSeed {
-    pub use_: OperationUse,
-    pub entry: ResolutionEntry,
-}
+use lash_core_store::resolutions::ResolutionSeed;
 #[derive(Debug)]
 /// Trusted host-selected start, arguments, complete environment/settings and explicit initial pins.
 pub struct StartLinked {

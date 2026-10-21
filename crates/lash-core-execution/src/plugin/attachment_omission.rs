@@ -12,8 +12,11 @@ use std::collections::BTreeMap;
 
 use super::PluginTraceEmitter;
 use super::SessionReadView;
-use crate::{Message, Part, PartKind, SessionId};
+use crate::Message;
+use crate::Part;
+use crate::PartKind;
 use lash_execution_contracts::plugin_error::PluginError;
+use lash_vocabulary::identity::SessionId;
 
 /// Part identities and plugin-authored replacement text, applied in history order.
 pub type AttachmentOmissions = BTreeMap<HistoryPartId, String>;

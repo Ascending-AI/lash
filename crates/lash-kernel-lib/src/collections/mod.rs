@@ -7,7 +7,11 @@ mod tests;
 
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{FunctionId, FunctionRegistry, ParseError, RegistryError, parse_definition};
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::ParseError;
+use lash_kernel_doc::RegistryError;
+use lash_kernel_doc::parse_definition;
+use lash_vocabulary::legacy_names::FunctionId;
 
 /// A collection registry could not resolve a required definition or admit a body.
 #[derive(Debug)]

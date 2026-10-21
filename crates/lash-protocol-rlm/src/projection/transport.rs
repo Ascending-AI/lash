@@ -1,5 +1,6 @@
-use lash_core::{SessionAppendNode, ToolArgumentProjectionPolicy};
+use lash_core::SessionAppendNode;
 use lash_rlm_types::{CodeModeProjectedSeedEntry, PROJECTED_JSON_TAG};
+use lash_vocabulary::tool_contract::ToolArgumentProjectionPolicy;
 use serde_json::Value;
 
 #[derive(Debug, thiserror::Error)]

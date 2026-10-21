@@ -25,7 +25,7 @@
 
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::Type;
+use lash_vocabulary::types::Type;
 
 use crate::adapter::{BinaryOp, TypeAnnotation, TypeShape, UnaryOp};
 

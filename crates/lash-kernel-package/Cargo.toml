@@ -32,6 +32,7 @@ synthetic-next = [
 workspace = true
 
 [dependencies]
+lash-vocabulary = { workspace = true }
 lash-kernel-vm = { workspace = true }
 rmp-serde = { workspace = true }
 blake3 = { workspace = true }

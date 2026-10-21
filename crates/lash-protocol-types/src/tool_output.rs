@@ -90,13 +90,12 @@ pub struct ToolCallRecord {
 
 /// Generates the canonical tool-intent kind set from the vocabulary in
 /// [`crate::tool_intents`].
-pub use lash_vocabulary::ToolIntentKind;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ToolIntentIdentity {
     /// The runtime whose authority declared the intent: a session, or a
     /// process runtime.
-    pub owner: crate::RuntimeOwner,
+    pub owner: lash_vocabulary::identity::RuntimeOwner,
     /// The enclosing execution-scope id: a turn id for turn scope and a
     /// process id for process scope.
     pub execution_scope_id: String,
@@ -149,7 +148,7 @@ impl ToolCallOutput {
     }
 
     /// End the caller's turn with `value`. The tool must declare
-    /// [`TurnControlKind::Finish`](crate::TurnControlKind::Finish).
+    /// [`TurnControlKind::Finish`](lash_vocabulary::tool_declaration::TurnControlKind::Finish).
     pub fn finish(value: impl Into<ToolValue>) -> Self {
         Self::turn_control(TurnControl::Finish {
             value: value.into(),
@@ -159,7 +158,7 @@ impl ToolCallOutput {
 
     /// Switch the caller to a fresh agent frame whose follow-on runs under
     /// `next_run`. The tool must declare
-    /// [`TurnControlKind::SwitchAgentFrame`](crate::TurnControlKind::SwitchAgentFrame).
+    /// [`TurnControlKind::SwitchAgentFrame`](lash_vocabulary::tool_declaration::TurnControlKind::SwitchAgentFrame).
     pub fn switch_agent_frame(
         frame_key: crate::FrameKey,
         task: impl Into<String>,
@@ -176,7 +175,7 @@ impl ToolCallOutput {
 
     /// The kind of turn control this result is, when it is one: what its
     /// tool's declaration must name.
-    pub fn turn_control_kind(&self) -> Option<crate::TurnControlKind> {
+    pub fn turn_control_kind(&self) -> Option<lash_vocabulary::tool_declaration::TurnControlKind> {
         self.as_turn_control().map(TurnControl::kind)
     }
 
@@ -196,20 +195,20 @@ impl ToolCallOutput {
     ///
     /// # Errors
     ///
-    /// [`DeclarationRefusal::UndeclaredControl`](crate::DeclarationRefusal::UndeclaredControl):
+    /// [`DeclarationRefusal::UndeclaredControl`](lash_vocabulary::tool_declaration::DeclarationRefusal::UndeclaredControl):
     /// a control the declaration does not name.
-    /// [`DeclarationRefusal::OutputValueMismatch`](crate::DeclarationRefusal::OutputValueMismatch):
+    /// [`DeclarationRefusal::OutputValueMismatch`](lash_vocabulary::tool_declaration::DeclarationRefusal::OutputValueMismatch):
     /// a success whose value `output_schema` does not admit.
-    /// [`DeclarationRefusal::UndeclaredOutput`](crate::DeclarationRefusal::UndeclaredOutput):
+    /// [`DeclarationRefusal::UndeclaredOutput`](lash_vocabulary::tool_declaration::DeclarationRefusal::UndeclaredOutput):
     /// a tool that declares a turn control succeeded with a value and no
     /// control.
-    /// [`DeclarationRefusal::FinishValueMismatch`](crate::DeclarationRefusal::FinishValueMismatch):
+    /// [`DeclarationRefusal::FinishValueMismatch`](lash_vocabulary::tool_declaration::DeclarationRefusal::FinishValueMismatch):
     /// a Finish whose value the declared schema does not admit.
     pub fn settled(
         mut self,
-        declaration: &crate::ToolDeclaration,
-        output_schema: &crate::JsonSchema,
-    ) -> Result<Self, crate::DeclarationRefusal> {
+        declaration: &lash_vocabulary::tool_declaration::ToolDeclaration,
+        output_schema: &lash_vocabulary::json_schema::JsonSchema,
+    ) -> Result<Self, lash_vocabulary::tool_declaration::DeclarationRefusal> {
         let ToolCallOutcome::Success(value) = &self.outcome else {
             if self.as_turn_control().is_some() {
                 self.control = None;
@@ -219,19 +218,25 @@ impl ToolCallOutput {
         if let Some(control) = self.turn_control_kind()
             && !declaration.controls.contains(control)
         {
-            return Err(crate::DeclarationRefusal::UndeclaredControl { control });
+            return Err(
+                lash_vocabulary::tool_declaration::DeclarationRefusal::UndeclaredControl {
+                    control,
+                },
+            );
         }
         if declaration.controls.is_empty() {
             crate::result_fit::admit_value(output_schema, || self.value_for_projection()).map_err(
-                |mismatch| crate::DeclarationRefusal::OutputValueMismatch {
-                    output_schema: Box::new(output_schema.clone()),
-                    mismatch: Box::new(mismatch),
+                |mismatch| {
+                    lash_vocabulary::tool_declaration::DeclarationRefusal::OutputValueMismatch {
+                        output_schema: Box::new(output_schema.clone()),
+                        mismatch: Box::new(mismatch),
+                    }
                 },
             )?;
             return Ok(self);
         }
         if self.as_turn_control().is_none() && !value.to_json_value().is_null() {
-            return Err(crate::DeclarationRefusal::UndeclaredOutput);
+            return Err(lash_vocabulary::tool_declaration::DeclarationRefusal::UndeclaredOutput);
         }
         if let Some(ToolControl::Turn {
             control:
@@ -243,9 +248,11 @@ impl ToolCallOutput {
             && let Some(declared) = declaration.controls.finish_declaration()
         {
             crate::result_fit::admit_value(&declared.value_schema, || value.to_json_value())
-                .map_err(|mismatch| crate::DeclarationRefusal::FinishValueMismatch {
-                    value_schema: Box::new(declared.value_schema.clone()),
-                    mismatch: Box::new(mismatch),
+                .map_err(|mismatch| {
+                    lash_vocabulary::tool_declaration::DeclarationRefusal::FinishValueMismatch {
+                        value_schema: Box::new(declared.value_schema.clone()),
+                        mismatch: Box::new(mismatch),
+                    }
                 })?;
             *value_schema = Some(declared.value_schema.clone());
         }
@@ -404,7 +411,7 @@ pub enum ToolCallOutcome {
 /// A provider that forwards a call to a remote tool host returns the host's
 /// answer as this value, with [`ToolCallOutput::success_tool_value`]. The
 /// host answers the typed value the tool's contract declares
-/// ([`ToolContract::output_schema`](crate::ToolContract::output_schema)), never
+/// ([`ToolContract::output_schema`](lash_vocabulary::tool_contract::ToolContract::output_schema)), never
 /// model-facing presentation parts. Lash takes it from there:
 ///
 /// - Lash admits the value against the call's declared output schema when
@@ -412,7 +419,7 @@ pub enum ToolCallOutcome {
 ///   instance of the whole schema, as JSON Schema validates it, and decode by
 ///   the result type the schema gives a code cell (`K-EFF-007`). A value that
 ///   fails either check settles the call as a typed failure
-///   ([`DeclarationRefusal::OutputValueMismatch`](crate::DeclarationRefusal::OutputValueMismatch))
+///   ([`DeclarationRefusal::OutputValueMismatch`](lash_vocabulary::tool_declaration::DeclarationRefusal::OutputValueMismatch))
 ///   naming the tool and the JSON pointer of the part that does not fit; no
 ///   cell, model or caller receives it. The host need not check the value
 ///   itself.
@@ -938,13 +945,13 @@ pub enum TurnControl {
         #[serde(serialize_with = "crate::durable_serde::serialize")]
         value: ToolValue,
         /// The schema `value` was checked against when its call settled: the
-        /// admitted declaration's ([`FinishDeclaration`](crate::FinishDeclaration)).
+        /// admitted declaration's ([`FinishDeclaration`](lash_vocabulary::tool_declaration::FinishDeclaration)).
         /// A body's own Finish states none; settlement stamps it, and every
         /// later reader — a completion candidate, a replay, a batch that
         /// folds the call — keeps the schema the value settled under rather
         /// than reading a live one.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        value_schema: Option<crate::JsonSchema>,
+        value_schema: Option<lash_vocabulary::json_schema::JsonSchema>,
     },
     /// End the turn by switching to a fresh agent frame that starts on
     /// `task` with `initial_nodes`, its follow-on running under `next_run`.
@@ -981,10 +988,12 @@ impl NextRun {
 }
 
 impl TurnControl {
-    pub fn kind(&self) -> crate::TurnControlKind {
+    pub fn kind(&self) -> lash_vocabulary::tool_declaration::TurnControlKind {
         match self {
-            Self::Finish { .. } => crate::TurnControlKind::Finish,
-            Self::SwitchAgentFrame { .. } => crate::TurnControlKind::SwitchAgentFrame,
+            Self::Finish { .. } => lash_vocabulary::tool_declaration::TurnControlKind::Finish,
+            Self::SwitchAgentFrame { .. } => {
+                lash_vocabulary::tool_declaration::TurnControlKind::SwitchAgentFrame
+            }
         }
     }
 }
@@ -994,7 +1003,7 @@ impl TurnControl {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolControl {
     /// A turn-ending control the tool declared
-    /// ([`TurnControls`](crate::TurnControls)): the call's whole result.
+    /// ([`TurnControls`](lash_vocabulary::tool_declaration::TurnControls)): the call's whole result.
     Turn {
         #[serde(serialize_with = "crate::durable_serde::serialize")]
         control: TurnControl,

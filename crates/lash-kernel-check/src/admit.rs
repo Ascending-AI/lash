@@ -3,18 +3,25 @@
 use lash_kernel_doc::core_support::RegisteredFunctionCoreSupport;
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::{
-    Document, DocumentId, EffectName, FunctionCatalog, FunctionDefinition, InvalidReason, Name,
-    OperationRequirement, Unit, validate_definition, validate_document,
-};
+use lash_kernel_doc::Document;
+use lash_kernel_doc::FunctionCatalog;
+use lash_kernel_doc::FunctionDefinition;
+use lash_kernel_doc::InvalidReason;
+use lash_kernel_doc::validate_definition;
+use lash_kernel_doc::validate_document;
+use lash_vocabulary::legacy_names::DocumentId;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::operations::OperationRequirement;
+use lash_vocabulary::sites::Unit;
 
 use crate::flow;
 use crate::graph::Graph;
 use crate::link::Linker;
 use crate::manifest;
 use crate::refusal::{Refusal, RefusalReason, Refused, refused};
-use crate::types::serves;
 use crate::typing::Typer;
+use lash_vocabulary::type_relations::serves;
 
 /// What an embedder provides a document with (`K-ADM-001` to `K-ADM-004`).
 pub struct Environment<'a> {
@@ -343,7 +350,7 @@ fn unregistered_library(
 
 fn library_graph(
     definition: &FunctionDefinition,
-    function: lash_kernel_doc::FunctionId,
+    function: lash_vocabulary::legacy_names::FunctionId,
     catalog: &dyn FunctionCatalog,
     errors: &mut Vec<Refused>,
 ) -> Graph {

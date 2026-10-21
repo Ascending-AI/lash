@@ -18,11 +18,11 @@
 
 #![deny(clippy::future_not_send)]
 
-use lash_protocol_types::TurnId;
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
 pub use lash_tool_presenter_api::{
     PresentationRefusal, PresentedToolSection, RecordedToolPresenter, ToolPresenterSlot,
 };
+use lash_vocabulary::identity::TurnId;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -162,7 +162,7 @@ pub struct StandardProtocolPluginFactory {
 /// deployment opens it (FIG-4398).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StandardProtocolConfig {
-    pub discovery: Option<lash_core::ToolDiscovery>,
+    pub discovery: Option<lash_vocabulary::tool_contract::ToolDiscovery>,
     pub render: StandardRenderConfig,
     pub renderer: ToolOutputRendererSlot,
     pub batch: BatchSugar,
@@ -228,7 +228,7 @@ impl StandardProtocolConfig {
         self.discovery = behaviour
             .discovery_operation
             .clone()
-            .map(|operation| lash_core::ToolDiscovery { operation });
+            .map(|operation| lash_vocabulary::tool_contract::ToolDiscovery { operation });
         self.batch = behaviour.batch;
         self.render = behaviour.render.clone();
         self.tool_presentation = behaviour.tool_presenter.config.clone();
@@ -817,30 +817,15 @@ impl ProtocolDriverPlugin for StandardProtocolDriver {
     fn prompt_tools(
         &self,
         catalog: Arc<lash_core::ToolCatalog>,
-        packages: &dyn lash_kernel_dialect::ExportView,
     ) -> lash_core::plugin::prompt::OfferedTools {
-        lash_core::plugin::prompt::OfferedTools::new(
-            Arc::new(catalog.public_operations(packages)),
-            self.config.discovery.is_some(),
-        )
+        lash_core::plugin::prompt::OfferedTools::new(catalog, self.config.discovery.is_some())
     }
 
-    fn model_catalog(
-        &self,
-        catalog: &lash_core::ToolCatalog,
-        packages: &dyn lash_kernel_dialect::ExportView,
-    ) -> lash_core::ToolCatalog {
-        catalog.public_operations(packages)
+    fn model_catalog(&self, catalog: &lash_core::ToolCatalog) -> lash_core::ToolCatalog {
+        catalog.clone()
     }
 
     fn build_preamble(&self, input: ProtocolBuildInput) -> TurnDriverPreamble {
-        let public = input
-            .tool_catalog
-            .public_operations(input.packages.as_ref());
-        let input = ProtocolBuildInput {
-            tool_catalog: Arc::new(public),
-            ..input
-        };
         let tool_names = input.tool_catalog.tool_names();
         let visible_catalog;
         let catalog = if self.config.discovery.is_some() {

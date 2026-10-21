@@ -1,6 +1,13 @@
 //! External authorship proof. The only production dependency is lash.
 #![allow(unused_imports, unused_variables, dead_code)]
 
+use lash::AwaitEventKey;
+use lash::AwaitEventWaitIdentity;
+use lash::CancellationToken;
+use lash::Resolution;
+use lash::ResolveOutcome;
+use lash::SessionError;
+use lash::TurnAttach;
 use lash::attachments::*;
 use lash::direct::*;
 use lash::durability::*;
@@ -12,11 +19,11 @@ use lash::process::*;
 use lash::provider::*;
 use lash::runtime::*;
 use lash::tools::*;
-use lash::*;
-use lash::{
-    AwaitEventKey, AwaitEventWaitIdentity, CancellationToken, NodeId, ProcessId, Resolution,
-    ResolveOutcome, SessionError, SessionId, TurnAttach, TurnId,
-};
+use lash_vocabulary::identity::NodeId;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
+use lash_vocabulary::schema_contract::*;
 use std::collections::BTreeSet;
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::result::Result;

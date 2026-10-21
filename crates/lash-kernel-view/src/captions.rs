@@ -5,10 +5,16 @@
 use std::collections::BTreeMap;
 
 use lash_kernel_check::WorkflowDocument;
-use lash_kernel_doc::{
-    Caption, CaptionTarget, Captions, Document, DocumentId, FieldPath, Name, ParamTarget, Site,
-    Unit,
-};
+use lash_kernel_doc::Caption;
+use lash_kernel_doc::CaptionTarget;
+use lash_kernel_doc::Captions;
+use lash_kernel_doc::Document;
+use lash_kernel_doc::FieldPath;
+use lash_kernel_doc::ParamTarget;
+use lash_vocabulary::legacy_names::DocumentId;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

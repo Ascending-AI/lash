@@ -88,7 +88,8 @@ await control.finish(await handle);"#,
     )
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session_id =
-        lash::SessionId::parse("agent-scenario-process-llm-query").expect("nonblank host identity");
+        lash_vocabulary::identity::SessionId::parse("agent-scenario-process-llm-query")
+            .expect("nonblank host identity");
     let session = created_session(&core, session_id.clone())
         .await
         .open()
@@ -140,8 +141,8 @@ await control.finish(await handle);"#,
 /// is asked once per attempt, each under its own attempt number.
 struct RetryingDirectTools;
 
-fn retrying_direct_tool_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn retrying_direct_tool_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:retrying_direct",
         "tools.retrying_direct",
         "Call a direct completion and retry the complete attempt once.",
@@ -150,7 +151,7 @@ fn retrying_direct_tool_definition() -> lash_core::ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
+    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(2).expect("nonzero attempt bound"),
         0,
         0,
@@ -158,15 +159,20 @@ fn retrying_direct_tool_definition() -> lash_core::ToolDefinition {
 }
 
 /// The component that serves `retrying_direct` to a process body.
-const RETRYING_DIRECT_COMPONENT: lash_core::ProcessConfigKey<()> =
-    lash_core::ProcessConfigKey::new("retrying-direct", lash_core::FormatVersion::ONE);
+const RETRYING_DIRECT_COMPONENT: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
+    "retrying-direct",
+    lash_vocabulary::providers::FormatVersion::ONE,
+);
 
 #[async_trait]
 impl ToolProvider for RetryingDirectTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![retrying_direct_tool_definition().manifest()])
     }
 
@@ -174,7 +180,7 @@ impl ToolProvider for RetryingDirectTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.retrying_direct")
             .then(|| Arc::new(retrying_direct_tool_definition().contract()))
     }
@@ -245,8 +251,10 @@ await control.finish(await handle);"#,
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("agent-scenario-direct-completion-attempt-retry")
-            .expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(
+            "agent-scenario-direct-completion-attempt-retry",
+        )
+        .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -277,8 +285,8 @@ await control.finish(await handle);"#,
 /// overflow is scripted because a model window cannot be shrunk by a fixture.
 struct OverflowPayloadTools(Arc<AtomicUsize>);
 
-fn overflow_payload_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn overflow_payload_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:overflow_payload",
         "tools.overflow_payload",
         "Return the oversized report.",
@@ -294,7 +302,10 @@ impl ToolProvider for OverflowPayloadTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![overflow_payload_definition().manifest()])
     }
 
@@ -302,7 +313,7 @@ impl ToolProvider for OverflowPayloadTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.overflow_payload")
             .then(|| Arc::new(overflow_payload_definition().contract()))
     }
@@ -372,8 +383,10 @@ async fn context_overflow_mid_turn_continues_on_the_same_session() -> Result<()>
                     Arc::new(OverflowPayloadTools(Arc::clone(&tool_calls))),
                 )
                 .build(lash_facade_tests::runtime_lease_owner())?;
-        let session_id = lash::SessionId::parse(format!("overflow-continuation-{classified}"))
-            .expect("nonblank session identity");
+        let session_id = lash_vocabulary::identity::SessionId::parse(format!(
+            "overflow-continuation-{classified}"
+        ))
+        .expect("nonblank session identity");
         let session = created_session(&core, session_id.clone())
             .await
             .open()

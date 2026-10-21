@@ -4,8 +4,10 @@
 use std::path::Path;
 use std::time::Duration;
 
+use lash::LashCore;
 use lash::mcp::events::{McpEventClient, McpEventOccurrence, McpEventPoll, McpEventRequest};
-use lash::{LashCore, SessionId, TurnId};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use rusqlite::{Connection, OptionalExtension as _, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};

@@ -171,7 +171,7 @@ fn decode_stored_edge(kind: &str, id: &str) -> Result<ArtifactReferrer, StoreErr
 pub(crate) fn acquire_process_env_tx(
     tx: &rusqlite::Connection,
     env: &lash_core_store::process_identity::ProcessEnvRef,
-    process: &lash_protocol_types::ProcessId,
+    process: &lash_vocabulary::identity::ProcessId,
 ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
     let referrer = ArtifactReferrer::ProcessRecord(process.clone());
     if artifact_fenced_tx(tx, &referrer).map_err(artifact_sqlite_error)? {

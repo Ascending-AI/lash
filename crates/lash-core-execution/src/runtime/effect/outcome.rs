@@ -257,7 +257,7 @@ pub fn llm_call_error_from_transport(err: LlmTransportError) -> LlmCallError {
 }
 
 pub fn direct_trace_context(
-    owner: &crate::RuntimeOwner,
+    owner: &lash_vocabulary::identity::RuntimeOwner,
     llm_call_id: Option<&str>,
     caused_by: Option<&CausalRef>,
 ) -> lash_trace::TraceContext {

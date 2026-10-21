@@ -34,11 +34,12 @@ pub fn dataframe(kernel: &Package) -> Result<Package, PackageRefusal> {
 pub fn kernel_and_dataframe(
     register: &dyn Fn(&mut lash_kernel_doc::FunctionRegistry) -> Result<(), String>,
 ) -> Result<(Package, Package), PackageRefusal> {
-    let path =
-        crate::PackagePath::parse("kernel").map_err(|invalid| PackageRefusal::NotCanonical {
+    let path = lash_vocabulary::names::PackagePath::parse("kernel").map_err(|invalid| {
+        PackageRefusal::NotCanonical {
             role: crate::NameRole::Path,
             text: invalid.text,
-        })?;
+        }
+    })?;
     let mut probe = lash_kernel_doc::FunctionRegistry::new();
     register(&mut probe).map_err(|message| PackageRefusal::Registry {
         package: path.clone(),

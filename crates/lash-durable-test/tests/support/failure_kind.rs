@@ -189,8 +189,8 @@ async fn protocol_before_model_refusal_keeps_its_specific_cause_after_crash_and_
     let backend = served::configured_backend(stores, sim::settings(), Vec::new());
     let hooks = Arc::new(AtomicUsize::new(0));
     let first = core(backend.clone(), Arc::clone(&hooks), "first");
-    let session_id = lash::SessionId::from("refusal-cause");
-    let run = lash::TurnId::from("refusal-run");
+    let session_id = lash_vocabulary::identity::SessionId::from("refusal-cause");
+    let run = lash_vocabulary::identity::TurnId::from("refusal-run");
     let session = first
         .session(session_id.clone())
         .create(lash::SessionCreation::root(served::spec(1)))
@@ -281,8 +281,8 @@ async fn before_llm_call_plugin_failure_keeps_its_stage_after_store_reopen() {
     let path = dir.path().join("plugin-stage.db");
     let clock = SimClock::new();
     let hooks = Arc::new(AtomicUsize::new(0));
-    let session_id = lash::SessionId::from("plugin-stage");
-    let run = lash::TurnId::from("plugin-stage-run");
+    let session_id = lash_vocabulary::identity::SessionId::from("plugin-stage");
+    let run = lash_vocabulary::identity::TurnId::from("plugin-stage-run");
     let committed = {
         let stores = Arc::new(sim::file(&path, Arc::clone(&clock)).await);
         let database: Arc<dyn DurableStore> = Arc::new(stores.durable_store());

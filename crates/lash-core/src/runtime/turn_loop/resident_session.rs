@@ -10,7 +10,7 @@
 //! once, and a full durable adoption settles the same four.
 
 use super::*;
-use crate::TurnId;
+use lash_vocabulary::identity::TurnId;
 
 /// Validity state of in-memory resident session/plugin state on a [`LashRuntime`].
 #[derive(Debug, Clone, PartialEq, Eq)]

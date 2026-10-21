@@ -13,8 +13,8 @@
 use crate::support::{Arc, EmbedError, LashCore, Result};
 use lash_core::ActorContext;
 
-use lash_protocol_types::ProcessId;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 
 async fn await_process_terminal(
     process_work: &dyn lash_core::ProcessWorkSubstrate,
@@ -55,7 +55,7 @@ pub enum ProcessAuthority {
         engine_settings: Option<lash_execution_contracts::process::EngineSettings>,
         /// The components `env` names that this core declares retired, in
         /// env order: the process builds without them (FIG-6296).
-        retired: Vec<lash_core::ProcessComponentId>,
+        retired: Vec<lash_vocabulary::providers::ProcessComponentId>,
     },
     SessionTurn {
         session: SessionId,
@@ -867,7 +867,7 @@ impl Processes {
         payload: &serde_json::Value,
         env: &lash_core::ProcessEnv,
         fits: &std::collections::BTreeMap<
-            lash_core::EffectName,
+            lash_vocabulary::legacy_names::EffectName,
             lash_execution_contracts::process::FitPolicy,
         >,
     ) -> Result<()> {
@@ -1217,7 +1217,7 @@ pub(crate) fn host_start_refusal(
 
 #[cfg(test)]
 mod terminal_wait_tests {
-    use super::*;
+    use lash_vocabulary::schema_contract::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct ReattachOnce {
@@ -1229,14 +1229,14 @@ mod terminal_wait_tests {
     impl lash_core::ProcessWorkSubstrate for ReattachOnce {
         async fn await_process_terminal(
             &self,
-            process_id: &lash_core::ProcessId,
+            process_id: &lash_vocabulary::identity::ProcessId,
         ) -> std::result::Result<
             lash_core::ProcessTerminalWait,
             lash_execution_contracts::plugin_error::PluginError,
         > {
             assert_eq!(
                 process_id,
-                &lash_core::ProcessId::fixture("admin-reattach-process")
+                &lash_vocabulary::identity::ProcessId::fixture("admin-reattach-process")
             );
             if self.waits.fetch_add(1, Ordering::SeqCst) == 0 {
                 Ok(lash_core::ProcessTerminalWait::Reattach)
@@ -1249,7 +1249,7 @@ mod terminal_wait_tests {
 
         async fn deliver_cancel(
             &self,
-            _process_id: &lash_core::ProcessId,
+            _process_id: &lash_vocabulary::identity::ProcessId,
             _request: &lash_core::CancelRequest,
             _key: &str,
         ) -> std::result::Result<(), lash_execution_contracts::plugin_error::PluginError> {
@@ -1269,7 +1269,7 @@ mod terminal_wait_tests {
 
         let output = await_process_terminal(
             &port,
-            &lash_core::ProcessId::fixture("admin-reattach-process"),
+            &lash_vocabulary::identity::ProcessId::fixture("admin-reattach-process"),
         )
         .await
         .expect("reattachment reaches terminal output");

@@ -2,8 +2,6 @@
 
 use lash_core::ProcessWorkflowOverlay;
 use lash_execution_contracts::process::PROCESS_EVENT_VOCABULARY_VERSION;
-use lash_kernel_doc::KERNEL_VERSION;
-use lash_kernel_migrate::{KernelMigrationRefusal, ParkedRefusal};
 use schemars::JsonSchema;
 use serde_json::{Value, json};
 
@@ -27,19 +25,11 @@ fn document<T: JsonSchema>(
 fn main() -> Result<(), serde_json::Error> {
     println!(
         "{}",
-        json!([
-            document::<ProcessWorkflowOverlay>(
-                "process-workflow-overlay",
-                PROCESS_EVENT_VOCABULARY_VERSION,
-                "PROCESS_EVENT_VOCABULARY_VERSION"
-            )?,
-            document::<KernelMigrationRefusal>(
-                "kernel-migration-refusal",
-                KERNEL_VERSION,
-                "KERNEL_VERSION"
-            )?,
-            document::<ParkedRefusal>("kernel-parked-refusal", KERNEL_VERSION, "KERNEL_VERSION")?,
-        ])
+        json!([document::<ProcessWorkflowOverlay>(
+            "process-workflow-overlay",
+            PROCESS_EVENT_VOCABULARY_VERSION,
+            "PROCESS_EVENT_VOCABULARY_VERSION"
+        )?,])
     );
     Ok(())
 }

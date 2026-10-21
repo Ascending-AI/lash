@@ -22,7 +22,8 @@ mod tool_call_reads {
         DurableInstant, DurableReads, DurableStore, Epoch, HeartbeatOutcome, MailCommit, MailTx,
         NodeLease, NodeSpec, Reaped,
     };
-    use lash_protocol_types::{ProcessId, SessionId};
+    use lash_vocabulary::identity::ProcessId;
+    use lash_vocabulary::identity::SessionId;
     use std::result::Result;
     use std::sync::{Arc, Mutex};
 
@@ -31,7 +32,7 @@ mod tool_call_reads {
         /// Ledger reads, by owner.
         owners: Mutex<Vec<OwnerKey>>,
         /// Transcript hydrates, by run (FIG-6601).
-        transcripts: Mutex<Vec<crate::TurnId>>,
+        transcripts: Mutex<Vec<lash_vocabulary::identity::TurnId>>,
         /// Reads of the session's unfinished turn.
         turns: Mutex<usize>,
     }
@@ -40,7 +41,10 @@ mod tool_call_reads {
         LashCore,
         crate::DurableSession,
         Arc<ReadProbe>,
-        Vec<(crate::TurnId, Vec<crate::tools::ToolCallRecord>)>,
+        Vec<(
+            lash_vocabulary::identity::TurnId,
+            Vec<crate::tools::ToolCallRecord>,
+        )>,
     )> {
         let stores = sqlite_memory_store_set().await;
         let probe = Arc::new(ReadProbe {
@@ -57,13 +61,16 @@ mod tool_call_reads {
         .serve_test_llm_profile(text_provider("tool-read-cost", typescript_block("await tools.appLookup({}); await tools.appLookup({}); await control.finish(\"done\");")), mock_llm_profile_spec())
         .tools(crate::tool_provider_key!("tools"), Arc::new(AppTools))
         .build(crate::tests::host::runtime_lease_owner())?;
-        let session = created_session(&core, crate::SessionId::fixture("tool-read-cost"))
-            .await
-            .open()
-            .await?;
+        let session = created_session(
+            &core,
+            lash_vocabulary::identity::SessionId::fixture("tool-read-cost"),
+        )
+        .await
+        .open()
+        .await?;
         let mut turns = Vec::new();
         for index in 0..5 {
-            let turn = crate::TurnId::fixture(format!("tool-read-{index}"));
+            let turn = lash_vocabulary::identity::TurnId::fixture(format!("tool-read-{index}"));
             let output = session
                 .send(crate::TurnInput::text("lookup"))
                 .id(turn.clone())
@@ -180,7 +187,7 @@ mod tool_call_reads {
     impl DurableReads for ReadProbe {
         async fn model_call_pins(
             &self,
-            session: &lash_protocol_types::SessionId,
+            session: &lash_vocabulary::identity::SessionId,
             owner: &str,
         ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
             self.inner.model_call_pins(session, owner).await
@@ -188,7 +195,7 @@ mod tool_call_reads {
 
         async fn model_calls(
             &self,
-            session: &lash_protocol_types::SessionId,
+            session: &lash_vocabulary::identity::SessionId,
             owner: &str,
         ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
             self.inner.model_calls(session, owner).await
@@ -202,7 +209,7 @@ mod tool_call_reads {
         async fn turn_namespaces(
             &self,
             session: &SessionId,
-            run: &lash_protocol_types::TurnId,
+            run: &lash_vocabulary::identity::TurnId,
         ) -> Result<Vec<lash_durable::domain::TurnNamespace>, DurableError> {
             self.inner.turn_namespaces(session, run).await
         }
@@ -210,7 +217,7 @@ mod tool_call_reads {
         async fn turn_end(
             &self,
             session: &SessionId,
-            run: &lash_protocol_types::TurnId,
+            run: &lash_vocabulary::identity::TurnId,
         ) -> Result<Option<lash_durable::domain::TurnEnd>, DurableError> {
             self.inner.turn_end(session, run).await
         }
@@ -245,15 +252,15 @@ mod tool_call_reads {
 
         async fn cell_roots(
             &self,
-            session: &lash_protocol_types::SessionId,
-            run: &lash_protocol_types::TurnId,
+            session: &lash_vocabulary::identity::SessionId,
+            run: &lash_vocabulary::identity::TurnId,
         ) -> Result<Vec<ExecRootRow>, DurableError> {
             self.inner.cell_roots(session, run).await
         }
         async fn cell_roots_within(
             &self,
-            session: &lash_protocol_types::SessionId,
-            run: &lash_protocol_types::TurnId,
+            session: &lash_vocabulary::identity::SessionId,
+            run: &lash_vocabulary::identity::TurnId,
             max_rows: usize,
         ) -> Result<Vec<lash_durable::domain::ExecRootRow>, DurableError> {
             self.inner.cell_roots_within(session, run, max_rows).await
@@ -319,7 +326,7 @@ mod tool_call_reads {
 
         async fn session_mailbox(
             &self,
-            session: &lash_protocol_types::SessionId,
+            session: &lash_vocabulary::identity::SessionId,
         ) -> Result<lash_durable::domain::SessionMailbox, DurableError> {
             self.inner.session_mailbox(session).await
         }
@@ -425,10 +432,10 @@ mod tool_call_reads {
 
         async fn package_paths(
             &self,
-            functions: &[lash_durable::packages::FunctionId],
+            functions: &[lash_vocabulary::legacy_names::FunctionId],
         ) -> Result<
             std::collections::BTreeMap<
-                lash_durable::packages::FunctionId,
+                lash_vocabulary::legacy_names::FunctionId,
                 std::collections::BTreeSet<String>,
             >,
             DurableError,
@@ -438,10 +445,10 @@ mod tool_call_reads {
 
         async fn internal_operations(
             &self,
-            operations: &[lash_durable::packages::EffectName],
+            operations: &[lash_vocabulary::legacy_names::EffectName],
         ) -> Result<
             std::collections::BTreeMap<
-                lash_durable::packages::EffectName,
+                lash_vocabulary::legacy_names::EffectName,
                 std::collections::BTreeSet<String>,
             >,
             DurableError,

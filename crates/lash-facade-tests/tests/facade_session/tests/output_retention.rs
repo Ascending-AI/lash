@@ -44,8 +44,8 @@ fn appendix_text() -> String {
 
 struct RetentionTools;
 
-fn retention_tool(name: &str) -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn retention_tool(name: &str) -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{name}"),
         format!("tools.{name}"),
         "A tool whose output is larger than history keeps.",
@@ -63,7 +63,10 @@ impl ToolProvider for RetentionTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok({
             TOOLS
                 .iter()
@@ -76,7 +79,7 @@ impl ToolProvider for RetentionTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         let Some(("tools", name)) = name.split_once('.') else {
             return None;
         };
@@ -213,7 +216,7 @@ async fn oversized_tool_output_is_retained_before_it_enters_history(
         .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(SESSION).expect("nonblank host identity"),
     )
     .await
     .open()
@@ -294,7 +297,7 @@ await control.finish({ rows });"#,
         .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(SESSION).expect("nonblank host identity"),
     )
     .await
     .open()
@@ -466,7 +469,8 @@ for (let i = 0; i < 200; i++) {
         .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("aggregate-prints").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("aggregate-prints")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -581,7 +585,7 @@ where
         .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse(session_id).expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(session_id).expect("nonblank host identity"),
     )
     .await
     .open()
@@ -756,7 +760,8 @@ async fn step_archive_refetch_survives_cold_reopen_branch_and_continue_as_on_sql
         .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("archive-history").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("archive-history")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -820,7 +825,10 @@ for (let i = 0; i < history.length; i++) {
         .build(lash_facade_tests::runtime_lease_owner())?;
     sweep_without_grace(&backend).await;
     let session = core
-        .session(lash::SessionId::parse("archive-history").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("archive-history")
+                .expect("nonblank host identity"),
+        )
         .open()
         .await?;
     let cold = session
@@ -845,7 +853,10 @@ for (let i = 0; i < history.length; i++) {
     )
     .await?;
     let branch = core
-        .session(lash::SessionId::parse("archive-branch").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("archive-branch")
+                .expect("nonblank host identity"),
+        )
         .open()
         .await?;
     let branched = branch

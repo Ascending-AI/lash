@@ -18,8 +18,9 @@
 use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
+use lash_core::RunSpec;
 use lash_core::runtime::{TurnInputAcceptanceReceipt, TurnInputIngress};
-use lash_core::{RunSpec, TurnId};
+use lash_vocabulary::identity::TurnId;
 
 use super::{HandleShared, SendHandle, SendTarget};
 use crate::error::Result;

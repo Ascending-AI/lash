@@ -194,7 +194,7 @@ struct KernelSteps {
     backend: Mutex<Option<lash::Backend>>,
     clock: Mutex<Option<Arc<SimClock>>>,
     core: Mutex<Option<lash::LashCore>>,
-    process: Mutex<Option<lash_core::ProcessId>>,
+    process: Mutex<Option<lash_vocabulary::identity::ProcessId>>,
 }
 
 impl KernelSteps {
@@ -266,11 +266,11 @@ impl KernelSteps {
             .clone()
     }
 
-    fn process(&self) -> Option<lash_core::ProcessId> {
+    fn process(&self) -> Option<lash_vocabulary::identity::ProcessId> {
         self.process.lock_recover().clone()
     }
 
-    async fn start_process(&self) -> Result<lash_core::ProcessId, String> {
+    async fn start_process(&self) -> Result<lash_vocabulary::identity::ProcessId, String> {
         let core = self.core();
         let document = match self.language {
             None => lash::workflow::document::parse_document(self.source)

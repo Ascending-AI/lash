@@ -27,14 +27,23 @@
 
 use std::collections::BTreeSet;
 
-use lash_core::{
-    ProcessId, ToolCallId, ToolCallLimitExceeded, ToolCallLimitScope, TurnControlKind,
-};
-use lash_core_store::checkpoint_graph::{
-    GraphDecoder, GraphRefusal, GraphStaging, NodeId, NodeKind, TokenCodec, TokenError,
-    TokenReader, TokenWriter,
-};
-use lash_kernel_doc::{Datum, EffectId, EffectName};
+use lash_core::ToolCallId;
+use lash_core::ToolCallLimitExceeded;
+use lash_core::ToolCallLimitScope;
+use lash_core_store::checkpoint_graph::GraphDecoder;
+use lash_core_store::checkpoint_graph::GraphRefusal;
+use lash_core_store::checkpoint_graph::GraphStaging;
+use lash_core_store::checkpoint_graph::NodeId;
+use lash_core_store::checkpoint_graph::NodeKind;
+use lash_kernel_doc::Datum;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::sites::EffectId;
+use lash_vocabulary::tokens::TokenCodec;
+use lash_vocabulary::tokens::TokenError;
+use lash_vocabulary::tokens::TokenReader;
+use lash_vocabulary::tokens::TokenWriter;
+use lash_vocabulary::tool_declaration::TurnControlKind;
 
 /// Items per page and children per index.
 pub const FANOUT: u64 = 32;

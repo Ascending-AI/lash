@@ -12,7 +12,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{SessionId, TurnId};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 /// The registered durable format of a [`ControlIntent`] record.
 /// version_surface = "coexist"

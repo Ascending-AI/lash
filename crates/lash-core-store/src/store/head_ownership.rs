@@ -26,7 +26,8 @@
 //! head to own (FIG-4099), so creation is never refused.
 //!
 
-use crate::{SessionId, TurnId};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 use super::{RuntimeCommit, StoreError};
 

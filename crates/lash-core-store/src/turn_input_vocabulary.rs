@@ -16,13 +16,16 @@ const LASH_TURN_INPUT_DOMAIN_VERSION: &str = "lash-turn-input/v2";
 /// version_guard(items(LASH_KEYED_TURN_INPUT_DOMAIN_VERSION, keyed_input_id))
 const LASH_KEYED_TURN_INPUT_DOMAIN_VERSION: &str = "lash-keyed-turn-input/v1";
 
+use crate::CheckpointKind;
+use crate::PluginMessage;
 pub use crate::run_spec::{
     BindingId, CapabilityRef, ContractRef, DefinitionRef, NoRunOptionsOwner, OwnerRunOptions,
     RecordedRender, RenderFault, RenderRefusal, ResolvedRun, RunDefinition, RunDefinitionRefusal,
     RunDefinitions, RunOptionsEncodeError, RunOptionsKey, RunOptionsOwner, RunOverrides,
     RunResolveError, RunShapeRefusal, RunSpec, RunSpecHash, SlotId,
 };
-use crate::{CheckpointKind, PluginMessage, SessionId, TurnId};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use std::any::Any;
 use std::fmt;
 use std::sync::Arc;
@@ -38,8 +41,10 @@ use std::sync::Arc;
 /// unique across sessions. Format: `ti:<blake3-hex>`, the shape every other
 /// pending turn-input id has.
 #[must_use]
-pub fn provisioned_turn_input_id(acceptance: &crate::EffectAddress) -> crate::InputId {
-    crate::InputId::prefixed(
+pub fn provisioned_turn_input_id(
+    acceptance: &crate::EffectAddress,
+) -> lash_vocabulary::identity::InputId {
+    lash_vocabulary::identity::InputId::prefixed(
         "ti:",
         crate::stable_hash::blake3_hex(
             LASH_ACCEPTED_TURN_INPUT_DOMAIN_VERSION,
@@ -61,8 +66,8 @@ pub fn derive_pending_turn_input_id(
     source_key: Option<&str>,
     now_epoch_ms: u64,
     nonce: u64,
-) -> crate::InputId {
-    crate::InputId::prefixed(
+) -> lash_vocabulary::identity::InputId {
+    lash_vocabulary::identity::InputId::prefixed(
         "ti:",
         crate::stable_hash::blake3_hex(
             LASH_TURN_INPUT_DOMAIN_VERSION,
@@ -76,7 +81,7 @@ pub fn derive_pending_turn_input_id(
 #[serde(tag = "scope", rename_all = "snake_case")]
 pub enum TurnInputIngress {
     ActiveTurn {
-        turn_id: crate::TurnId,
+        turn_id: lash_vocabulary::identity::TurnId,
         #[serde(default)]
         min_boundary: TurnInputCheckpointBoundary,
     },
@@ -86,7 +91,7 @@ impl TurnInputIngress {
     /// Routes an input to an active turn at or after the named checkpoint boundary for turn-input
     /// store implementors.
     pub fn active_turn(
-        turn_id: impl Into<crate::TurnId>,
+        turn_id: impl Into<lash_vocabulary::identity::TurnId>,
         min_boundary: TurnInputCheckpointBoundary,
     ) -> Self {
         Self::ActiveTurn {
@@ -149,7 +154,7 @@ impl TurnInputCheckpointBoundary {
 /// [`TurnInputState`] variant the persisted CHECKs pin to that scope.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ActiveTurnIngress {
-    pub turn_id: crate::TurnId,
+    pub turn_id: lash_vocabulary::identity::TurnId,
     #[serde(default)]
     pub min_boundary: TurnInputCheckpointBoundary,
 }
@@ -358,7 +363,7 @@ impl TurnInputState {
 pub struct PendingTurnInputDraft {
     pub session_id: SessionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub input_id: Option<crate::InputId>,
+    pub input_id: Option<lash_vocabulary::identity::InputId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_key: Option<String>,
     pub ingress: TurnInputIngress,
@@ -431,8 +436,11 @@ impl PendingTurnInputDraft {
     /// A host that knows the key it sent under can re-attach to the input
     /// after a restart without any read (FIG-3837).
     #[must_use]
-    pub fn keyed_input_id(session_id: &SessionId, source_key: &str) -> crate::InputId {
-        crate::InputId::prefixed(
+    pub fn keyed_input_id(
+        session_id: &SessionId,
+        source_key: &str,
+    ) -> lash_vocabulary::identity::InputId {
+        lash_vocabulary::identity::InputId::prefixed(
             "ti:",
             crate::stable_hash::blake3_hex(
                 LASH_KEYED_TURN_INPUT_DOMAIN_VERSION,
@@ -444,7 +452,10 @@ impl PendingTurnInputDraft {
 
     /// Sets the input id carried by a `PendingTurnInputDraft` for store and durable-substrate
     /// implementors while admitting and settling durable turn inputs.
-    pub fn with_input_id(mut self, input_id: impl Into<crate::InputId>) -> Self {
+    pub fn with_input_id(
+        mut self,
+        input_id: impl Into<lash_vocabulary::identity::InputId>,
+    ) -> Self {
         self.input_id = Some(input_id.into());
         self
     }
@@ -730,7 +741,7 @@ impl<T: schemars::JsonSchema> schemars::JsonSchema for SubmittedBody<T> {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PendingTurnInput {
-    pub input_id: crate::InputId,
+    pub input_id: lash_vocabulary::identity::InputId,
     pub session_id: SessionId,
     pub enqueue_seq: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -778,7 +789,7 @@ impl PendingTurnInputRead {
     }
 
     /// Project a row bound to the run that admitted it.
-    pub fn admitted(input: PendingTurnInput, run: crate::TurnId) -> Self {
+    pub fn admitted(input: PendingTurnInput, run: lash_vocabulary::identity::TurnId) -> Self {
         Self {
             input,
             status: PendingTurnInputReadStatus::Admitted { run },
@@ -796,7 +807,9 @@ pub enum PendingTurnInputReadStatus {
     Open,
     /// Run `run` admitted the row; only that run's commit or terminal
     /// settles or releases it.
-    Admitted { run: crate::TurnId },
+    Admitted {
+        run: lash_vocabulary::identity::TurnId,
+    },
 }
 
 /// Durable acceptance evidence returned to an ingress caller.
@@ -808,7 +821,7 @@ pub enum PendingTurnInputReadStatus {
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub struct TurnInputAcceptanceReceipt {
-    pub input_id: crate::InputId,
+    pub input_id: lash_vocabulary::identity::InputId,
     pub session_id: SessionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_key: Option<String>,
@@ -824,10 +837,10 @@ pub struct TurnInputAcceptanceReceipt {
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub struct TurnInputApplication {
-    pub input_id: crate::InputId,
+    pub input_id: lash_vocabulary::identity::InputId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_key: Option<String>,
-    pub turn_id: crate::TurnId,
+    pub turn_id: lash_vocabulary::identity::TurnId,
     pub committed_message_id: String,
     /// Present for active-turn checkpoint application and absent when the
     /// input formed the initial canonical input of an idle queued turn.
@@ -912,7 +925,7 @@ pub enum PendingTurnInputCancelOutcome {
     /// the host cancels the run instead (FIG-3927).
     AlreadyAdmitted {
         input: PendingTurnInput,
-        run: crate::TurnId,
+        run: lash_vocabulary::identity::TurnId,
     },
     AlreadyCompleted(PendingTurnInput),
     AlreadyCancelled(PendingTurnInput),
@@ -957,14 +970,14 @@ pub enum PendingTurnInputSuffixCancelOutcome {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TurnInputAdmissionMode {
     ActiveTurn {
-        turn_id: crate::TurnId,
+        turn_id: lash_vocabulary::identity::TurnId,
         checkpoint: CheckpointKind,
     },
     NextTurn,
 }
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TurnInputCompletionData {
-    pub input_ids: Vec<crate::InputId>,
+    pub input_ids: Vec<lash_vocabulary::identity::InputId>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub applications: Vec<TurnInputApplication>,
 }
@@ -1013,7 +1026,7 @@ impl AdmittedTurnInputs {
     }
 
     /// The admitted inputs' ids, in admission order.
-    pub fn input_ids(&self) -> Vec<crate::InputId> {
+    pub fn input_ids(&self) -> Vec<lash_vocabulary::identity::InputId> {
         self.inputs
             .iter()
             .map(|input| input.input_id.clone())
@@ -1023,7 +1036,7 @@ impl AdmittedTurnInputs {
     /// Records evidence for each input's own opening message.
     pub fn record_initial_turn_application(
         &mut self,
-        turn_id: &crate::TurnId,
+        turn_id: &lash_vocabulary::identity::TurnId,
         committed_messages: &[crate::Message],
     ) {
         self.applications.clear();
@@ -1034,7 +1047,7 @@ impl AdmittedTurnInputs {
     /// IDs appear in the committed checkpoint messages.
     pub fn record_checkpoint_applications(
         &mut self,
-        turn_id: &crate::TurnId,
+        turn_id: &lash_vocabulary::identity::TurnId,
         checkpoint: CheckpointKind,
         committed_messages: &[crate::Message],
     ) {
@@ -1043,7 +1056,7 @@ impl AdmittedTurnInputs {
 
     fn record_applications(
         &mut self,
-        turn_id: &crate::TurnId,
+        turn_id: &lash_vocabulary::identity::TurnId,
         checkpoint: Option<CheckpointKind>,
         committed_messages: &[crate::Message],
     ) {
@@ -1088,7 +1101,7 @@ impl AdmittedTurnInputs {
     /// resolving attachments and omitting inputs that produce no committed message.
     pub async fn materialize_checkpoint_turn_input(
         &self,
-        turn_id: &crate::TurnId,
+        turn_id: &lash_vocabulary::identity::TurnId,
     ) -> Result<QueuedCheckpointTurnInput, String> {
         let mut messages = Vec::new();
         for input in &self.inputs {
@@ -1140,7 +1153,7 @@ pub(crate) fn plugin_message_from_turn_input(input: &TurnInput) -> Option<Plugin
 
 async fn committed_message_from_pending_input(
     pending: &PendingTurnInput,
-    turn_id: &crate::TurnId,
+    turn_id: &lash_vocabulary::identity::TurnId,
 ) -> Result<Option<crate::Message>, String> {
     let input = pending
         .input

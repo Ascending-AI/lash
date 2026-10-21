@@ -22,7 +22,7 @@ fn record(subject: TraceRuntimeSubject, occurrence: u64) -> TraceRecord {
     let payload = if occurrence == 0 {
         TraceLanguageExecutionPayload::ExecutionStarted {
             subject: subject.clone(),
-            observation: lash_kernel_doc::RunObservation::Off,
+            observation: lash_vocabulary::observation::RunObservation::Off,
         }
     } else {
         TraceLanguageExecutionPayload::Node {
@@ -40,7 +40,7 @@ fn record(subject: TraceRuntimeSubject, occurrence: u64) -> TraceRecord {
                 identity: TraceLanguageExecutionIdentity {
                     scope: TraceRuntimeScope::none(),
                     document: lash_trace::WorkflowDocumentRef {
-                        document: lash_kernel_doc::DocumentId::from_bytes([7; 32]),
+                        document: lash_vocabulary::legacy_names::DocumentId::from_bytes([7; 32]),
                         entry: lash_trace::WorkflowDocumentEntry::Main,
                     },
                     entry_name: "main".into(),
@@ -218,7 +218,7 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
         .expect("the step's site");
     assert!(matches!(
         stepped.state.occurrence,
-        WorkflowOverlayOccurrence::Running { occurrence, .. } if occurrence == lash_kernel_doc::testkit::visit(1)
+        WorkflowOverlayOccurrence::Running { occurrence, .. } if occurrence == lash_vocabulary::sites::testkit::visit(1)
     ));
     assert_eq!(
         stepped.state.call.as_ref().map(|call| &call.call_id),
@@ -329,7 +329,7 @@ async fn language_ingress_overflow_resnapshots_every_session_and_continues() {
                     &session.session_id(),
                     revision,
                     vec![LiveReplayEventDraft::new(
-                        None::<lash_core::TurnId>,
+                        None::<lash_vocabulary::identity::TurnId>,
                         SessionObservationEventPayload::ResidentChanged,
                     )],
                 )
@@ -482,7 +482,7 @@ impl Dispatch {
             since_ms: 0,
             kind: lash_execution_contracts::process::WaitKind::Call {
                 call_id: lash_core::ToolCallId::fixture("dispatched"),
-                tool_id: lash_core::ToolId::from("dispatched"),
+                tool_id: lash_vocabulary::tool_contract::ToolId::from("dispatched"),
             },
             site: None,
         };
@@ -719,7 +719,7 @@ async fn an_oversized_committed_fact_invalidates_only_its_own_process() {
             since_ms: 0,
             kind: lash_execution_contracts::process::WaitKind::Call {
                 call_id: lash_core::ToolCallId::fixture("oversized"),
-                tool_id: lash_core::ToolId::from("x".repeat(2 * LIMIT)),
+                tool_id: lash_vocabulary::tool_contract::ToolId::from("x".repeat(2 * LIMIT)),
             },
             site: None,
         };

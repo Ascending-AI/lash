@@ -2,10 +2,13 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{
-    ProcessChangeCursor, ProcessId, ProcessListFilter, ProcessOriginatorFilter, ProcessRecord,
-    ProcessStatusFilter, ScopeId,
-};
+use super::ProcessChangeCursor;
+use super::ProcessListFilter;
+use super::ProcessOriginatorFilter;
+use super::ProcessRecord;
+use super::ProcessStatusFilter;
+use super::ScopeId;
+use lash_vocabulary::identity::ProcessId;
 
 /// Host-selected maximum bytes in a roster transport token, including its version
 /// prefix and hex-encoded JSON. Use the same budget for encoding and decoding.

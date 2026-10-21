@@ -691,9 +691,9 @@ fn domain_subject_owns_the_span_and_intent_kind_attribute() {
             name: Some("example".into()),
         },
         TraceDomainSubject::WorkflowNode {
-            at: lash_protocol_types::workflow_testkit::effect(
-                lash_protocol_types::workflow_testkit::root_task(),
-                lash_protocol_types::Site::new(lash_protocol_types::Unit::Main, [2, 0]),
+            at: lash_vocabulary::sites::testkit::effect(
+                lash_vocabulary::sites::testkit::root_task(),
+                lash_vocabulary::sites::Site::new(lash_vocabulary::sites::Unit::Main, [2, 0]),
                 1,
                 Vec::new(),
             ),
@@ -701,7 +701,7 @@ fn domain_subject_owns_the_span_and_intent_kind_attribute() {
     ]
     .into_iter()
     .chain(
-        lash_protocol_types::ToolIntentKind::ALL
+        lash_vocabulary::ToolIntentKind::ALL
             .iter()
             .map(|kind| TraceDomainSubject::ToolIntent { kind: *kind }),
     );
@@ -1043,7 +1043,7 @@ fn a_discarded_cell_is_a_tool_span_that_did_not_fail() {
 fn correlation_ids_are_attributes_with_payload_export_off() {
     let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
     let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
-    let process_id = lash_protocol_types::ProcessId::fixture("process");
+    let process_id = lash_vocabulary::identity::ProcessId::fixture("process");
     let process_value = process_id.to_string();
     let owners = [
         (
@@ -1056,7 +1056,7 @@ fn correlation_ids_are_attributes_with_payload_export_off() {
         ),
         (
             TraceScopeOwner::Process {
-                process_id: lash_protocol_types::ProcessId::fixture("process"),
+                process_id: lash_vocabulary::identity::ProcessId::fixture("process"),
             },
             None,
             Some(process_value.as_str()),
@@ -1075,7 +1075,7 @@ fn correlation_ids_are_attributes_with_payload_export_off() {
         (
             TraceScopeOwner::Tool {
                 owner: TraceToolOwner::Process {
-                    process_id: lash_protocol_types::ProcessId::fixture("process"),
+                    process_id: lash_vocabulary::identity::ProcessId::fixture("process"),
                 },
                 call_id: "tool".into(),
             },
@@ -1084,8 +1084,8 @@ fn correlation_ids_are_attributes_with_payload_export_off() {
         ),
         (
             TraceScopeOwner::ToolIntent {
-                owner: lash_protocol_types::RuntimeOwner::Process(
-                    lash_protocol_types::ProcessId::fixture("process"),
+                owner: lash_vocabulary::identity::RuntimeOwner::Process(
+                    lash_vocabulary::identity::ProcessId::fixture("process"),
                 ),
                 replay_key: "intent".into(),
             },
@@ -1094,7 +1094,7 @@ fn correlation_ids_are_attributes_with_payload_export_off() {
         ),
         (
             TraceScopeOwner::ToolIntent {
-                owner: lash_protocol_types::RuntimeOwner::Session("conversation".into()),
+                owner: lash_vocabulary::identity::RuntimeOwner::Session("conversation".into()),
                 replay_key: "intent".into(),
             },
             None,
@@ -2387,7 +2387,7 @@ fn abandoned_tool_spans_omit_unavailable_arguments_but_keep_real_null() {
             provider_call_id: None,
             name: if index == 0 {
                 crate::TraceToolName::Identity {
-                    tool_id: lash_protocol_types::ToolId::new("tool:read"),
+                    tool_id: lash_vocabulary::tool_contract::ToolId::new("tool:read"),
                 }
             } else {
                 "read".into()

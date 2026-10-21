@@ -1,7 +1,12 @@
 use super::Selection;
 use std::borrow::Cow;
 
-use lash_kernel_doc::{Args, BytesView, NativeCall, NativeError, Type, Value};
+use lash_kernel_doc::Args;
+use lash_kernel_doc::BytesView;
+use lash_kernel_doc::NativeCall;
+use lash_kernel_doc::NativeError;
+use lash_kernel_doc::Value;
+use lash_vocabulary::types::Type;
 
 use super::text::position;
 use super::{

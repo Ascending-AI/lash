@@ -92,7 +92,7 @@ fn node_identity(index: usize, run: &str) -> lash::persistence::LeaseOwnerIdenti
 
 /// The tools every observation workload's processes and turns may call.
 struct Tools {
-    mark: lash_core::ToolDefinition,
+    mark: lash_vocabulary::tool_contract::ToolDefinition,
     meter: Meter,
 }
 
@@ -102,8 +102,8 @@ const WORKLOAD_TOOLS: ProcessConfigKey<()> =
     ProcessConfigKey::new("workload-tools", lash::plugins::FormatVersion::ONE);
 
 /// The workload's one tool, `mark`.
-fn mark_definition() -> Result<lash_core::ToolDefinition> {
-    Ok(lash_core::ToolDefinition::raw(
+fn mark_definition() -> Result<lash_vocabulary::tool_contract::ToolDefinition> {
+    Ok(lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:mark",
         "tools.mark",
         "Synthetic observation workload step",
@@ -141,7 +141,7 @@ impl lash_core::ToolProvider for Tools {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![self.mark.manifest()])
@@ -150,7 +150,7 @@ impl lash_core::ToolProvider for Tools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.mark").then(|| Arc::new(self.mark.contract()))
     }
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {

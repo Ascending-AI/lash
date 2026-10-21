@@ -34,14 +34,16 @@ async fn a_follower_past_a_restarted_stream_reads_what_the_restart_published() -
     let fixture = fixture(1).await?;
     let session = created_session(
         &fixture.core,
-        crate::SessionId::parse("send-restarted-stream").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("send-restarted-stream")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
     .await?;
     let handle = session
         .send(TurnInput::text(HELD))
-        .id(crate::TurnId::parse("restarted-run").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("restarted-run")
+            .expect("nonblank host identity"))
         .await?;
     provider_called(&fixture, 1).await;
     // The run's own activity names its physical turn and revision.
@@ -140,7 +142,7 @@ impl FaultyReplay {
 impl lash_core::LiveReplayStore for FaultyReplay {
     async fn publish(
         &self,
-        session: &lash_core::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         revision: lash_core::SessionRevision,
         events: Vec<lash_core::LiveReplayEventDraft>,
     ) -> std::result::Result<
@@ -196,19 +198,22 @@ impl lash_core::LiveReplayStore for FaultyReplay {
 
     fn current_cursor(
         &self,
-        session: &lash_core::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         revision: lash_core::SessionRevision,
     ) -> lash_core::SessionCursor {
         self.inner.current_cursor(session, revision)
     }
 
-    fn tail_cursor(&self, session_id: &lash_core::SessionId) -> lash_core::SessionCursor {
+    fn tail_cursor(
+        &self,
+        session_id: &lash_vocabulary::identity::SessionId,
+    ) -> lash_core::SessionCursor {
         self.inner.tail_cursor(session_id)
     }
 
     fn earliest_cursor(
         &self,
-        session: &lash_core::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         revision: lash_core::SessionRevision,
     ) -> lash_core::SessionCursor {
         self.inner.earliest_cursor(session, revision)
@@ -220,14 +225,14 @@ impl lash_core::LiveReplayStore for FaultyReplay {
 
     async fn invalidate_session(
         &self,
-        session: &lash_core::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
     ) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
         self.inner.invalidate_session(session).await
     }
 
     async fn trim_session(
         &self,
-        session: &lash_core::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
     ) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
         self.inner.trim_session(session).await
     }
@@ -274,14 +279,18 @@ async fn a_follower_answers_a_run_whose_node_died_after_its_commit_at_once() -> 
     let core = core_publishing_to(sqlite_memory_store_backend().await, replay.clone())?;
     let session = created_session(
         &core,
-        crate::SessionId::parse("send-unpublished-commit").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("send-unpublished-commit")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
     .await?;
     let handle = session
         .send(TurnInput::text("watch me"))
-        .id(crate::TurnId::parse("unpublished-commit-run").expect("nonblank host identity"))
+        .id(
+            lash_vocabulary::identity::TurnId::parse("unpublished-commit-run")
+                .expect("nonblank host identity"),
+        )
         .await?;
     let watched = tokio::time::timeout(std::time::Duration::from_secs(3), handle.outcome())
         .await
@@ -305,14 +314,16 @@ async fn a_runs_terminal_is_durable_only_once_its_activity_is_published() -> Res
     let core = core_publishing_to(sqlite_memory_store_backend().await, replay.clone())?;
     let session = created_session(
         &core,
-        crate::SessionId::parse("send-lagging-replay").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("send-lagging-replay")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
     .await?;
     let handle = session
         .send(TurnInput::text("watch me"))
-        .id(crate::TurnId::parse("lagging-run").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("lagging-run")
+            .expect("nonblank host identity"))
         .await?;
     let input_id = handle.input_id().clone();
     let watching = tokio::spawn(handle.outcome());

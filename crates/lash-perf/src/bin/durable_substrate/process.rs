@@ -117,7 +117,7 @@ impl std::fmt::Debug for BenchEngine {
 fn pin(index: u64) -> EngineAction {
     EngineAction::PinKey {
         name: KeyName(format!("w{index}")),
-        bound: lash_core::ParkBound::Within(Duration::from_secs(3_600)),
+        bound: lash_vocabulary::tool_contract::ParkBound::Within(Duration::from_secs(3_600)),
     }
 }
 
@@ -379,8 +379,8 @@ impl ProcessSteps for BenchSteps {
     ) -> Result<StepAdmission, StepRefusal> {
         let _ = step;
         Ok(StepAdmission::new(
-            lash_protocol_types::ToolId::new("probe"),
-            lash_protocol_types::ExecutionPolicy::Once,
+            lash_vocabulary::tool_contract::ToolId::new("probe"),
+            lash_vocabulary::tool_contract::ExecutionPolicy::Once,
             lash_protocol_types::ExecutionLimit::starting_at(
                 now_ms,
                 Duration::from_secs(60),
@@ -446,8 +446,8 @@ fn probe_step(n: u64) -> Result<EngineAction, ProcessInfraError> {
     Ok(EngineAction::Steps {
         steps: vec![StepRequest::Tool {
             step: lash_execution_contracts::process::StepName(format!("probe-{n}")),
-            effect: lash_core_execution::EffectName::new("probe").map_err(infra)?,
-            contract: lash_kernel_doc::ContractId::new("probe"),
+            effect: lash_vocabulary::legacy_names::EffectName::new("probe").map_err(infra)?,
+            contract: lash_vocabulary::operations::ContractId::new("probe"),
             input: json!({}),
             site: None,
             matched: None,

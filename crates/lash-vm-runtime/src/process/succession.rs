@@ -15,12 +15,13 @@
 
 use std::collections::BTreeMap;
 
-use lash_core::ProcessId;
 use lash_execution_contracts::process::EngineState;
 use lash_execution_contracts::process::SuccessionError;
 use lash_execution_contracts::process::SuccessorCarry;
-use lash_kernel_doc::{FunctionId, FunctionName};
 use lash_kernel_migrate::Relink;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
 
 use super::helpers::{HelperAdoptionRefusal, plan_carry};
 use super::state::{KernelProcessInput, Phase};

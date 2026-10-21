@@ -11,16 +11,34 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 
-use crate::ast::{
-    ActExpr, ActKind, Action, AssignOrder, Atom, Block, Callee, Closure, Expr, Literal, Member,
-    Node, Place, Protocol, Rhs, Site, Stmt, Unit,
-};
+use crate::ast::ActExpr;
+use crate::ast::ActKind;
+use crate::ast::Action;
+use crate::ast::AssignOrder;
+use crate::ast::Atom;
+use crate::ast::Block;
+use crate::ast::Callee;
+use crate::ast::Closure;
+use crate::ast::Expr;
+use crate::ast::Literal;
+use crate::ast::Member;
+use crate::ast::Node;
+use crate::ast::Place;
+use crate::ast::Protocol;
+use crate::ast::Rhs;
+use crate::ast::Stmt;
 use crate::document::Document;
 use crate::function::{Formula, FunctionDefinition, Implementation, Operand};
-use crate::name::{EffectName, FunctionId, FunctionName, Name};
 use crate::native::FunctionCatalog;
-use crate::types::{Signature, Type};
 use crate::version::KernelVersion;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 /// Why a document or a definition is refused, and the node at fault.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -236,13 +254,17 @@ pub fn validate_document(
     document: &Document,
     catalog: &dyn FunctionCatalog,
 ) -> Result<(), Invalid> {
-    validate_document_with_limits(document, catalog, crate::KernelDataLimits::standard())
+    validate_document_with_limits(
+        document,
+        catalog,
+        lash_vocabulary::data_limits::KernelDataLimits::standard(),
+    )
 }
 /// Validate under a deployment's document recursion safety policy.
 pub fn validate_document_with_limits(
     document: &Document,
     catalog: &dyn FunctionCatalog,
-    limits: crate::KernelDataLimits,
+    limits: lash_vocabulary::data_limits::KernelDataLimits,
 ) -> Result<(), Invalid> {
     let Some(version) = KernelVersion::of(document.manifest.kernel) else {
         return Err(invalid(
@@ -326,13 +348,17 @@ pub fn validate_definition(
     definition: &FunctionDefinition,
     catalog: &dyn FunctionCatalog,
 ) -> Result<(), Invalid> {
-    validate_definition_with_limits(definition, catalog, crate::KernelDataLimits::standard())
+    validate_definition_with_limits(
+        definition,
+        catalog,
+        lash_vocabulary::data_limits::KernelDataLimits::standard(),
+    )
 }
 /// Validate under a deployment's document recursion safety policy.
 pub fn validate_definition_with_limits(
     definition: &FunctionDefinition,
     catalog: &dyn FunctionCatalog,
-    limits: crate::KernelDataLimits,
+    limits: lash_vocabulary::data_limits::KernelDataLimits,
 ) -> Result<(), Invalid> {
     validate_identified_definition(definition, catalog, limits).map(|_| ())
 }
@@ -341,8 +367,8 @@ pub fn validate_definition_with_limits(
 pub(crate) fn validate_identified_definition(
     definition: &FunctionDefinition,
     catalog: &dyn FunctionCatalog,
-    limits: crate::KernelDataLimits,
-) -> Result<Option<crate::FunctionId>, Invalid> {
+    limits: lash_vocabulary::data_limits::KernelDataLimits,
+) -> Result<Option<lash_vocabulary::legacy_names::FunctionId>, Invalid> {
     let Some(version) = KernelVersion::of(definition.kernel) else {
         return Err(invalid(
             None,
@@ -477,14 +503,17 @@ fn native_call(function: &FunctionId, catalog: &dyn FunctionCatalog) -> Result<(
 }
 
 struct Scope<'a> {
-    limits: crate::KernelDataLimits,
+    limits: lash_vocabulary::data_limits::KernelDataLimits,
     /// The document being validated, or `None` inside a library body.
     document: Option<&'a Document>,
     /// The library functions this code may name.
     functions: &'a std::collections::BTreeMap<FunctionId, FunctionName>,
     /// The operations this code may perform: the document's manifest, or
     /// the body's own `effects`.
-    effects: &'a std::collections::BTreeMap<EffectName, crate::OperationRequirement>,
+    effects: &'a std::collections::BTreeMap<
+        EffectName,
+        lash_vocabulary::operations::OperationRequirement,
+    >,
     catalog: &'a dyn FunctionCatalog,
     /// The code is a body that stands beside a native implementation.
     native_body: bool,

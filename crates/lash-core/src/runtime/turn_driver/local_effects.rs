@@ -342,12 +342,12 @@ mod tests {
         let backend = crate::testing::sqlite_recording_backend().await;
         let scoped = crate::ActorContext::detached(backend.clone())
             .scoped(crate::AdmittedScope::turn(
-                crate::SessionId::from("session"),
-                crate::TurnId::from("turn"),
+                lash_vocabulary::identity::SessionId::from("session"),
+                lash_vocabulary::identity::TurnId::from("turn"),
             ))
             .expect("admit the turn scope");
-        let turn_id = crate::TurnId::from("turn");
-        let session_id = crate::SessionId::from("session");
+        let turn_id = lash_vocabulary::identity::TurnId::from("turn");
+        let session_id = lash_vocabulary::identity::SessionId::from("session");
 
         let mut driver_cursor =
             crate::runtime::turn_loop::turn_observation_cursor(&scoped, &turn_id, "shift");

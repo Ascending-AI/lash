@@ -112,7 +112,10 @@ where
     let key = artifact.key().to_owned();
     let bytes = artifact.to_store_bytes().expect("module bytes");
     let frame = ArtifactReferrer::FrameEnvironment(FrameEnvironmentId::new(
-        lash_core::SessionId::fixture(format!("artifact-race-{}", HostArtifactPin::mint())),
+        lash_vocabulary::identity::SessionId::fixture(format!(
+            "artifact-race-{}",
+            HostArtifactPin::mint()
+        )),
         lash_core::FrameNodeId::new("frame-1").expect("frame node id"),
     ));
     let frame_claim = ReferrerClaim::unguarded(frame.clone()).expect("frame claim");
@@ -402,10 +405,12 @@ where
         .expect("journal identity");
     let values = [
         ArtifactReferrer::FrameEnvironment(FrameEnvironmentId::new(
-            lash_core::SessionId::from("canonical-session"),
+            lash_vocabulary::identity::SessionId::from("canonical-session"),
             lash_core::FrameNodeId::new("canonical-frame").expect("frame id"),
         )),
-        ArtifactReferrer::ProcessRecord(lash_core::ProcessId::fixture("canonical-process")),
+        ArtifactReferrer::ProcessRecord(lash_vocabulary::identity::ProcessId::fixture(
+            "canonical-process",
+        )),
         ArtifactReferrer::Start(lash_core::StartKey::for_host("canonical-start")),
         ArtifactReferrer::StartInput {
             start_key: lash_core::StartKey::for_host("canonical-start"),
@@ -413,9 +418,11 @@ where
         },
         ArtifactReferrer::Execution(journal),
         ArtifactReferrer::HostPin(HostArtifactPin::mint()),
-        ArtifactReferrer::Session(lash_core::SessionId::from("canonical-session")),
+        ArtifactReferrer::Session(lash_vocabulary::identity::SessionId::from(
+            "canonical-session",
+        )),
         ArtifactReferrer::Upload(lash_core::UploadReferrerId::mint(
-            lash_core::SessionId::from("canonical-session"),
+            lash_vocabulary::identity::SessionId::from("canonical-session"),
         )),
         ArtifactReferrer::Source(Box::new(lash_core::AwaitEventKey {
             scope: lash_core::ExecutionScope::turn("canonical-session", "canonical-turn"),
@@ -480,10 +487,10 @@ where
             .await
             .expect("capture publishes");
     }
-    let first = ArtifactReferrer::ProcessRecord(lash_core::ProcessId::fixture(
+    let first = ArtifactReferrer::ProcessRecord(lash_vocabulary::identity::ProcessId::fixture(
         "captured-environment-first",
     ));
-    let second = ArtifactReferrer::ProcessRecord(lash_core::ProcessId::fixture(
+    let second = ArtifactReferrer::ProcessRecord(lash_vocabulary::identity::ProcessId::fixture(
         "captured-environment-second",
     ));
     for reader in [&first, &second] {

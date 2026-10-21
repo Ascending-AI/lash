@@ -11,11 +11,27 @@ mod text;
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use lash_kernel_doc::{
-    Args, Formula, FunctionDefinition, FunctionName, FunctionRegistry, Implementation, Integer,
-    KERNEL_VERSION, Name, NativeCall, NativeError, NativeFunction, Nursery, Operand, Param,
-    PreparedNative, RegistryError, Signature, TextView, Type, Value,
-};
+use lash_kernel_doc::Args;
+use lash_kernel_doc::Formula;
+use lash_kernel_doc::FunctionDefinition;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::Implementation;
+use lash_kernel_doc::Integer;
+use lash_kernel_doc::KERNEL_VERSION;
+use lash_kernel_doc::NativeCall;
+use lash_kernel_doc::NativeError;
+use lash_kernel_doc::NativeFunction;
+use lash_kernel_doc::Nursery;
+use lash_kernel_doc::Operand;
+use lash_kernel_doc::PreparedNative;
+use lash_kernel_doc::RegistryError;
+use lash_kernel_doc::TextView;
+use lash_kernel_doc::Value;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 pub use json::{decode_number, parse_json, stringify_json};
 

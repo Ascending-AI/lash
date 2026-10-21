@@ -1,7 +1,7 @@
 use crate::session_sql::session_sql;
 use crate::*;
-use lash_protocol_types::SessionId;
-use lash_protocol_types::TurnId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 pub(crate) async fn allocate_ingress_sequence_tx(
     tx: &mut sqlx::PgConnection,

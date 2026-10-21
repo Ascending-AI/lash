@@ -50,8 +50,8 @@ use lash_postgres_store::host::{
 use lash_postgres_store::{
     PostgresConnectionFactory, PostgresEndpoints, PostgresHostConfigError, TransactionPrelude,
 };
-use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
+use lash_vocabulary::identity::SessionId;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 

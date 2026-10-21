@@ -1,9 +1,20 @@
 //! Calls: functions, tools, built-ins, methods and asyncio.
 
-use lash_kernel_doc::{
-    ActExpr, ActKind, Action, Atom, Callee, EffectName, Expr, Literal, Name, RecordEntry,
-    RecordType, Rhs, Signature, Stmt, Type,
-};
+use lash_kernel_doc::ActExpr;
+use lash_kernel_doc::ActKind;
+use lash_kernel_doc::Action;
+use lash_kernel_doc::Atom;
+use lash_kernel_doc::Callee;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Literal;
+use lash_kernel_doc::RecordEntry;
+use lash_kernel_doc::Rhs;
+use lash_kernel_doc::Stmt;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::types::RecordType;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 use ruff_python_ast::{self as ast, Expr as PyExpr};
 use ruff_text_size::{Ranged, TextRange};
 
@@ -283,11 +294,11 @@ impl Lowerer<'_> {
         if package.is_empty()
             || !package
                 .iter()
-                .all(|segment| lash_kernel_dialect::Segment::is_canonical(segment))
+                .all(|segment| lash_vocabulary::names::Segment::is_canonical(segment))
         {
             return Ok(None);
         }
-        if lash_kernel_dialect::Segment::is_canonical(name) {
+        if lash_vocabulary::names::Segment::is_canonical(name) {
             return Ok(Some(path.to_owned()));
         }
         let Some(canonical) =

@@ -6,20 +6,40 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
-use lash_kernel_dialect::{
-    CellEnvironment, Environment, Export, ExportView, Member, Mode, NamedLibrary, Namespaces,
-    Offered, PackagePath, QualifiedOperation, Segment,
-};
-use lash_kernel_doc::{
-    ContractId, Datum, EffectName, ErrorDatum, FunctionId, FunctionName, FunctionRegistry, Handle,
-    Integer, Name, OperationRequirement, Param, RecordType, RecordTypeField, Signature, Timestamp,
-    Type,
-};
+use lash_kernel_dialect::CellEnvironment;
+use lash_kernel_dialect::Environment;
+use lash_kernel_dialect::Export;
+use lash_kernel_dialect::ExportView;
+use lash_kernel_dialect::Member;
+use lash_kernel_dialect::Mode;
+use lash_kernel_dialect::NamedLibrary;
+use lash_kernel_dialect::Namespaces;
+use lash_kernel_dialect::Offered;
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::ErrorDatum;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::Handle;
+use lash_kernel_doc::Integer;
+use lash_kernel_doc::Timestamp;
 use lash_kernel_package::{HeldPackages, Package, testing};
 use lash_kernel_vm::{
     Bounds, CellStart, EffectRequest, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary,
     Program, Request, Step, Target,
 };
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::names::PackagePath;
+use lash_vocabulary::names::QualifiedOperation;
+use lash_vocabulary::names::Segment;
+use lash_vocabulary::operations::ContractId;
+use lash_vocabulary::operations::OperationRequirement;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::RecordType;
+use lash_vocabulary::types::RecordTypeField;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 use crate::Code;
 

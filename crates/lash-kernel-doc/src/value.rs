@@ -12,8 +12,11 @@ use std::sync::Arc;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::name::{Name, parse_hex, string_schema, write_hex};
 use crate::number::{Float, Integer, NumberToken};
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::legacy_names::parse_hex;
+use lash_vocabulary::legacy_names::string_schema;
+use lash_vocabulary::legacy_names::write_hex;
 
 /// A task's handle within one run. `main` is task 0 and every `spawn` takes
 /// the next number (`K-TASK-002`).

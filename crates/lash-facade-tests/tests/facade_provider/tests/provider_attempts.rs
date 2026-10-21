@@ -40,7 +40,7 @@ fn core_over(
 }
 
 async fn created(core: &LashCore, id: &'static str) -> lash::DurableSession {
-    core.session(lash::SessionId::from(id))
+    core.session(lash_vocabulary::identity::SessionId::from(id))
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created")
@@ -466,7 +466,7 @@ async fn retryable_mid_stream_failure_preserves_durable_charge_safety_evidence()
         );
     }
 
-    let session_id = lash::SessionId::from("paid-output-retry");
+    let session_id = lash_vocabulary::identity::SessionId::from("paid-output-retry");
     let view = lash_execution_contracts::deployment::live_session_view(
         &backend.session_store_factory(),
         &session_id,
@@ -555,7 +555,7 @@ async fn authentication_failure_stops_unretried_and_permits_the_next_turn() {
     let session = created(&core, "authentication-failure").await;
     let first = session
         .send(lash::TurnInput::text("invalid credentials"))
-        .id(lash::TurnId::parse("auth-turn-0").expect("a turn id"))
+        .id(lash_vocabulary::identity::TurnId::parse("auth-turn-0").expect("a turn id"))
         .output()
         .await
         .expect("the failed turn settles");
@@ -593,7 +593,7 @@ async fn authentication_failure_stops_unretried_and_permits_the_next_turn() {
 
     let second = session
         .send(lash::TurnInput::text("fresh valid request"))
-        .id(lash::TurnId::parse("auth-turn-1").expect("a turn id"))
+        .id(lash_vocabulary::identity::TurnId::parse("auth-turn-1").expect("a turn id"))
         .output()
         .await
         .expect("the next turn answers");
@@ -1361,7 +1361,7 @@ async fn provider_stop_cause_survives_owner_replacement() {
     let backend = sqlite_memory_store_backend().await;
     let running = core_over(backend.clone(), model.clone());
     let session = created(&running, "provider-stop-cause").await;
-    let run = lash::TurnId::from("provider-stop-cause-run");
+    let run = lash_vocabulary::identity::TurnId::from("provider-stop-cause-run");
     let live = session
         .send(lash::TurnInput::text("fail"))
         .id(run.clone())
@@ -1373,7 +1373,9 @@ async fn provider_stop_cause_survives_owner_replacement() {
     running.shutdown().await.expect("shutdown");
     let reopened = core_over(backend, model);
     let report = reopened
-        .session(lash::SessionId::from("provider-stop-cause"))
+        .session(lash_vocabulary::identity::SessionId::from(
+            "provider-stop-cause",
+        ))
         .open()
         .await
         .expect("open")
@@ -1449,7 +1451,7 @@ async fn a_default_response_answers_the_call_and_completes_its_attempt() {
         .into_handle();
     let core = core_over(sqlite_memory_store_backend().await, model);
     let session = created(&core, "default-response-call-attempt").await;
-    let turn_id = lash::TurnId::from("default-response-call-attempt-run");
+    let turn_id = lash_vocabulary::identity::TurnId::from("default-response-call-attempt-run");
     let held = session
         .send(TurnInput::text("answer"))
         .id(turn_id.clone())
@@ -1573,7 +1575,7 @@ async fn retried_and_cancelled_calls_keep_each_attempts_provider_evidence() {
     .build(lash_facade_tests::runtime_lease_owner())
     .expect("core");
     let session = created(&core, "attempt-evidence").await;
-    let turn_id = lash::TurnId::from("attempt-evidence-turn");
+    let turn_id = lash_vocabulary::identity::TurnId::from("attempt-evidence-turn");
     let held = session
         .send(TurnInput::text("lookup then answer"))
         .id(turn_id.clone())

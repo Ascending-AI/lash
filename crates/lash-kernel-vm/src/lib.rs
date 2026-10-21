@@ -50,9 +50,11 @@ mod laws;
 pub(crate) use compile::Layout;
 pub use compile::{PreparedLibrary, body_census};
 pub use functions::{MachineFunctions, implement_machine_functions, register_machine_functions};
-pub use lash_kernel_doc::ExecutionPath;
+pub use lash_vocabulary::observation::ExecutionPath;
+pub use lash_vocabulary::observation::RunObservation;
+pub use lash_vocabulary::observation::SiteCounts;
 pub use machine::KernelMachine;
-pub use observe::{ChargeTape, ObservationMode, SiteCounts};
+pub use observe::ChargeTape;
 pub use paged::{SealedRoot, validate_foreign_checkpoint};
 pub use save::CellSaveContext;
 pub use session_editor::{SessionEditor, SessionValue};
@@ -64,12 +66,43 @@ pub use session_editor::{SessionEditor, SessionValue};
 #[doc(hidden)]
 pub mod kernel_internals;
 
-pub use interface::{
-    Bound, BoundExceeded, Bounds, CellSave, CellStart, Charge, ChargeLimiter, DeliverError,
-    Delivered, EffectMode, EffectModes, EffectRequest, End, Finished, Host, HostFault,
-    LimitDecision, Machine, MachineError, MachineOptions, MemoryLimiter, MemoryMeter, Meters,
-    OpenError, Outcome, Park, Program, Request, RunError, RunObserver, SaveCell, SavedCell,
-    SealError, SleepRequest, StartError, Step, Target, WaitId,
-};
+pub use interface::Bound;
+pub use interface::BoundExceeded;
+pub use interface::Bounds;
+pub use interface::CellSave;
+pub use interface::CellStart;
+pub use interface::Charge;
+pub use interface::ChargeLimiter;
+pub use interface::DeliverError;
+pub use interface::Delivered;
+pub use interface::EffectMode;
+pub use interface::EffectModes;
+pub use interface::EffectRequest;
+pub use interface::End;
+pub use interface::Finished;
+pub use interface::Host;
+pub use interface::HostFault;
+pub use interface::LimitDecision;
+pub use interface::Machine;
+pub use interface::MachineError;
+pub use interface::MachineOptions;
+pub use interface::MemoryLimiter;
+pub use interface::MemoryMeter;
+pub use interface::Meters;
+pub use interface::OpenError;
+pub use interface::Outcome;
+pub use interface::Park;
+pub use interface::Program;
+pub use interface::Request;
+pub use interface::RunError;
+pub use interface::RunObserver;
+pub use interface::SaveCell;
+pub use interface::SavedCell;
+pub use interface::SealError;
+pub use interface::SleepRequest;
+pub use interface::StartError;
+pub use interface::Step;
+pub use interface::Target;
+pub use lash_vocabulary::sites::WaitId;
 
 pub use functions::machine_native;

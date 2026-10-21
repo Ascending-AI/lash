@@ -20,8 +20,9 @@ use lash_durable::domain::{
     TurnEnd, TurnNamespace, TurnRow, TurnWrite, UnfinishedPhase,
 };
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch, Woken};
-use lash_protocol_types::{SessionId, TurnId};
 use lash_store_sql::durable::turns::TurnStatements;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use rusqlite::{Connection, OptionalExtension};
 
 use super::{Answer, Committing, corrupt, integer, node_ref};

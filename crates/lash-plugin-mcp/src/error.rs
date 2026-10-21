@@ -6,7 +6,7 @@ use lash_core::facade_support::ReconfigureError;
 #[non_exhaustive]
 pub enum McpError {
     #[error("{0}")]
-    UnusableSchema(#[from] lash_core::ToolCatalogBuildError),
+    UnusableSchema(#[from] lash_vocabulary::ToolCatalogBuildError),
     #[error("MCP connection pool has shut down")]
     PoolShutDown,
     #[error("{0}")]

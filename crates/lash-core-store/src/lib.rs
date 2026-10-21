@@ -37,9 +37,12 @@ pub mod effect_opener;
 pub mod executable_generation;
 pub mod execution_limits;
 pub mod execution_state;
+#[cfg(test)]
+mod history_growth_law;
 pub mod input_normalization;
 pub mod message_projection;
 pub mod obligations;
+mod persisted_session_config;
 mod persistent_map;
 pub mod plugin_state;
 pub mod process_env;
@@ -49,15 +52,11 @@ pub mod protocol_turn_options;
 pub mod queued_drain_policy;
 pub mod queued_work_vocabulary;
 pub mod run_spec;
-pub mod runtime_owner;
-pub mod scope_identity;
-pub use runtime_owner::RuntimeOwner;
-#[cfg(test)]
-mod history_growth_law;
-mod persisted_session_config;
 pub mod runtime_error;
 #[cfg(test)]
 mod runtime_error_tests;
+pub mod runtime_owner;
+pub mod scope_identity;
 pub mod session_append;
 pub mod session_catalog;
 pub mod session_graph;
@@ -96,13 +95,25 @@ pub(crate) use lash_core_llm::llm_profile::{LlmProfileConfig, LlmProfileKey, Rec
 pub(crate) use lash_core_llm::provider;
 pub(crate) use lash_core_llm::session_model::ChargeSafetyPolicy;
 pub(crate) use lash_protocol_types::AcceptedInjectedTurnInput;
+pub(crate) use lash_protocol_types::AttachmentRef;
+pub(crate) use lash_protocol_types::AttachmentTypeMetadata;
+pub(crate) use lash_protocol_types::CausalRef;
+pub(crate) use lash_protocol_types::CheckpointKind;
+pub(crate) use lash_protocol_types::EffectAddress;
+pub(crate) use lash_protocol_types::ExecutionScope;
+pub(crate) use lash_protocol_types::FrameKey;
+pub(crate) use lash_protocol_types::LlmUsage;
+pub(crate) use lash_protocol_types::Message;
+pub(crate) use lash_protocol_types::MessageOrigin;
+pub(crate) use lash_protocol_types::MessageRole;
+pub(crate) use lash_protocol_types::Part;
+pub(crate) use lash_protocol_types::PartKind;
+pub(crate) use lash_protocol_types::PluginMessage;
+pub(crate) use lash_protocol_types::SessionAppendNode;
+pub(crate) use lash_protocol_types::TurnOutputSource;
+pub(crate) use lash_protocol_types::TurnReply;
 pub(crate) use lash_protocol_types::llm::types::ChargeSafetyDecision;
-pub(crate) use lash_protocol_types::{
-    AttachmentRef, AttachmentTypeMetadata, BatchId, BlankIdentity, CausalRef, CheckpointKind,
-    EffectAddress, ExecutionScope, FrameKey, InputId, LlmUsage, Message, MessageOrigin,
-    MessageRole, NodeId, Part, PartKind, PluginMessage, ProcessId, SessionAppendNode, TurnId,
-    TurnOutputSource, TurnReply, shared_parts,
-};
+pub(crate) use lash_protocol_types::shared_parts;
 pub(crate) use lash_protocol_types::{
     llm::types::ChargeSafetyDenialReason, llm::types::GenerationOptions,
     llm::types::ProtocolPosition,
@@ -115,7 +126,7 @@ pub(crate) use lash_protocol_types::{
     session_model::ToolCallLimitExceeded, session_model::message::BaseRenderCache,
     session_model::message::MessageSequence,
 };
-pub(crate) use lash_protocol_types::{tool_contract::ToolDefinition, tool_contract::ToolId};
+pub(crate) use lash_vocabulary::identity::TurnId;
 
 pub(crate) type SessionHistoryRecord =
     lash_protocol_types::session_model::SessionHistoryRecord<ProtocolEvent>;
@@ -218,8 +229,6 @@ pub(crate) use lash_protocol_types::attachment::MediaType;
 #[allow(unused_imports)]
 pub(crate) use lash_protocol_types::llm::types::LlmResponse;
 #[allow(unused_imports)]
-pub(crate) use lash_protocol_types::tool_contract::ToolContract;
-#[allow(unused_imports)]
 pub(crate) use lash_protocol_types::tool_output::AttachmentMaterializationReason;
 #[allow(unused_imports)]
 pub(crate) use lash_protocol_types::{
@@ -230,6 +239,8 @@ pub(crate) use lash_protocol_types::{
     llm::capability::OpenAiReasoningContext, llm::capability::ReasoningRetentionCapability,
     llm::capability::ReasoningRetentionSelection,
 };
+#[allow(unused_imports)]
+use lash_vocabulary::tool_contract::ToolContract;
 #[allow(unused_imports)]
 pub(crate) use queued_drain_policy::{
     DrainMode, DrainModePolicy, QueuedDrainSelection, default_queued_drain_policy,
@@ -277,7 +288,8 @@ pub mod plugin_registrations;
 pub mod model_calls;
 
 #[doc(hidden)]
-pub use lash_protocol_types::{AttachmentId, SessionId};
+pub use lash_protocol_types::AttachmentId;
+use lash_vocabulary::identity::SessionId;
 
 pub mod packages;
 pub mod resolutions;

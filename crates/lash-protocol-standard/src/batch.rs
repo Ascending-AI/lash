@@ -8,11 +8,11 @@
 
 use std::num::NonZeroUsize;
 
-use lash_core::ToolDefinition;
 use lash_core::facade_support::{ModelToolReturn, ModelToolReturnPart};
 use lash_core::sansio::{CompletedToolCall, ExpandedRow, ExpandedWrapper, ToolExpansionPlan};
 use lash_core::{ToolCallOutput, ToolControl};
 use lash_tool_support::object_schema;
+use lash_vocabulary::tool_contract::ToolDefinition;
 use serde_json::Value;
 
 pub type BatchResultRow = lash_protocol_types::BatchResultRow;
@@ -28,7 +28,9 @@ const BATCH_OPERATION: &str = "standard.batch";
     clippy::expect_used,
     reason = "this module declares the tool or payload schema and admission checks its invariant"
 )]
-pub(crate) fn batch_tool_definition(max_members: NonZeroUsize) -> lash_core::ToolDraft {
+pub(crate) fn batch_tool_definition(
+    max_members: NonZeroUsize,
+) -> lash_vocabulary::tool_contract::ToolDraft {
     ToolDefinition::raw(
         "tool:batch",
         BATCH_OPERATION,

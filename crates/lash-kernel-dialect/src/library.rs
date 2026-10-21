@@ -3,10 +3,14 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use lash_kernel_doc::{
-    FunctionCatalog, FunctionDefinition, FunctionId, FunctionName, FunctionRegistry, Manifest,
-    RegisteredFunction, performed_by,
-};
+use lash_kernel_doc::FunctionCatalog;
+use lash_kernel_doc::FunctionDefinition;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::Manifest;
+use lash_kernel_doc::RegisteredFunction;
+use lash_kernel_doc::performed_by;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
 
 /// One function per name: the choice of identities a front end lowers
 /// against.

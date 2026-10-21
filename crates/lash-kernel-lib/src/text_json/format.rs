@@ -1,7 +1,13 @@
 use super::Selection;
 use std::fmt::Write as _;
 
-use lash_kernel_doc::{Formula, NativeCall, NativeError, NewObject, Nursery, Type, Value};
+use lash_kernel_doc::Formula;
+use lash_kernel_doc::NativeCall;
+use lash_kernel_doc::NativeError;
+use lash_kernel_doc::NewObject;
+use lash_kernel_doc::Nursery;
+use lash_kernel_doc::Value;
+use lash_vocabulary::types::Type;
 use num_traits::ToPrimitive;
 
 use super::{

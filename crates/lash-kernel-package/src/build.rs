@@ -4,14 +4,28 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use lash_kernel_dialect::{
-    Export, Member, MemberPath, NamedLibrary, PackagePath, Segment, define_functions,
-    define_functions_with,
-};
-use lash_kernel_doc::{
-    ActKind, Action, ArtifactDigest, Expr, Formula, FunctionDefinition, FunctionId, FunctionName,
-    FunctionRegistry, Implementation, Node, Operand, Type, parse_definition,
-};
+use lash_kernel_dialect::Export;
+use lash_kernel_dialect::Member;
+use lash_kernel_dialect::NamedLibrary;
+use lash_kernel_dialect::define_functions;
+use lash_kernel_dialect::define_functions_with;
+use lash_kernel_doc::ActKind;
+use lash_kernel_doc::Action;
+use lash_kernel_doc::ArtifactDigest;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Formula;
+use lash_kernel_doc::FunctionDefinition;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::Implementation;
+use lash_kernel_doc::Node;
+use lash_kernel_doc::Operand;
+use lash_kernel_doc::parse_definition;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::names::MemberPath;
+use lash_vocabulary::names::PackagePath;
+use lash_vocabulary::names::Segment;
+use lash_vocabulary::types::Type;
 
 use crate::package::{Code, digest_of};
 use crate::shape::{STALE_VALUE, Shapes};
@@ -359,7 +373,7 @@ fn check_slots(
     let mut charge = vec![definition.charge.clone()];
     for slot in slots {
         charge.push(Formula::DeepSize(Operand::Param(
-            lash_kernel_doc::Name::new(slot),
+            lash_vocabulary::legacy_names::Name::new(slot),
         )));
     }
     definition.charge = Formula::Sum(charge);

@@ -3,11 +3,15 @@
 use std::collections::BTreeMap;
 
 use super::kernel;
+use crate::MemberDisplay;
+use crate::Package;
+use crate::PackageDisplay;
+use crate::PackageRefusal;
+use crate::PackageSources;
+use crate::Root;
 use crate::testing::{DATAFRAME, RELEASE, dataframe};
-use crate::{
-    MemberDisplay, MemberPath, Package, PackageDisplay, PackagePath, PackageRefusal,
-    PackageSources, Root,
-};
+use lash_vocabulary::names::MemberPath;
+use lash_vocabulary::names::PackagePath;
 
 /// JSON-LABELS-PRESERVE: mechanically converted labels retain exactly the
 /// former TSV values. Counts and FNV-1a digests were captured before deletion,

@@ -14,10 +14,25 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use lash_kernel_dialect::{CellEnvironment, Environment, Library, Lowered, Mode, workflow};
-use lash_kernel_doc::{
-    AssignOrder, Block, Callee, Catch, Closure, Document, EffectName, Expr, Float, FunctionId,
-    FunctionName, Literal, Member, Name, NumberPolicy, Place, Rhs, Stmt, TryStmt,
-};
+use lash_kernel_doc::AssignOrder;
+use lash_kernel_doc::Block;
+use lash_kernel_doc::Callee;
+use lash_kernel_doc::Catch;
+use lash_kernel_doc::Closure;
+use lash_kernel_doc::Document;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Float;
+use lash_kernel_doc::Literal;
+use lash_kernel_doc::Member;
+use lash_kernel_doc::NumberPolicy;
+use lash_kernel_doc::Place;
+use lash_kernel_doc::Rhs;
+use lash_kernel_doc::Stmt;
+use lash_kernel_doc::TryStmt;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::legacy_names::Name;
 
 use crate::adapter as ast;
 use crate::builtins::{self, Table};
@@ -316,7 +331,7 @@ pub(crate) struct Lowerer<'a> {
     /// and is written only where it can.
     namespaces: &'a lash_kernel_dialect::Namespaces,
     /// The effects the document performs, for its manifest (`K-DOC-002`).
-    performed: BTreeMap<EffectName, lash_kernel_doc::OperationRequirement>,
+    performed: BTreeMap<EffectName, lash_vocabulary::operations::OperationRequirement>,
     session: &'a BTreeSet<Name>,
     table: &'static Table,
     /// Every word of the source, every session binding and every name
@@ -555,8 +570,8 @@ pub(crate) fn lower_beside(
             && let Some(written) = &function.written
         {
             layers.written.insert(
-                lash_kernel_doc::Site::new(
-                    lash_kernel_doc::Unit::Function(function.name.clone()),
+                lash_vocabulary::sites::Site::new(
+                    lash_vocabulary::sites::Unit::Function(function.name.clone()),
                     Vec::new(),
                 ),
                 written.clone(),
@@ -1110,7 +1125,7 @@ impl Lowerer<'_> {
         let ty = if ty == Ty::Unknown
             && header
                 .as_ref()
-                .is_some_and(|header| header.signature.result == lash_kernel_doc::Type::Text)
+                .is_some_and(|header| header.signature.result == lash_vocabulary::types::Type::Text)
         {
             Ty::Text
         } else {

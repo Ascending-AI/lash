@@ -3,12 +3,20 @@
 //! history. Lash decodes facts here: roles, content blocks, tool calls and
 //! results, code cells and their results, and the sealed reply. It renders nothing: hosts own every presentation decision.
 
-use crate::{
-    AttachmentRef, InputId, Message, MessageOrigin, MessageRole, NodeId, Part, ProtocolEvent,
-    SessionHistoryRecord, SessionNodePayload, SessionNodeRecord, TurnId,
-};
+use crate::AttachmentRef;
+use crate::Message;
+use crate::MessageOrigin;
+use crate::MessageRole;
+use crate::Part;
+use crate::ProtocolEvent;
+use crate::SessionHistoryRecord;
+use crate::SessionNodePayload;
+use crate::SessionNodeRecord;
 use lash_protocol_types::tool_output::ModelToolReturnPart;
 use lash_protocol_types::{CellRecord, RetainedOutput, ToolCallId};
+use lash_vocabulary::identity::InputId;
+use lash_vocabulary::identity::NodeId;
+use lash_vocabulary::identity::TurnId;
 use std::sync::Arc;
 
 /// Opaque entry identity. Equality and transport do not expose its spelling.

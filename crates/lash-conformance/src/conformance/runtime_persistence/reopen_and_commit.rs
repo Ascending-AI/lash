@@ -364,7 +364,7 @@ pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimeSto
         crate::FrameKey::from_caller_material("collision-frame").expect("non-empty frame material");
     let colliding_id = crate::session_graph::frame_node_id(&state.session_id, frame_key.as_str());
     let original = crate::SessionNodeRecord {
-        node_id: lash_core::NodeId::fixture(colliding_id.to_string()),
+        node_id: lash_vocabulary::identity::NodeId::fixture(colliding_id.to_string()),
         parent_node_id: None,
         timestamp: "2026-07-26T10:00:00.000000000Z"
             .parse()
@@ -381,7 +381,9 @@ pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimeSto
     };
     state.session_graph = crate::SessionGraph::from_nodes(
         vec![original.clone()],
-        Some(lash_core::NodeId::fixture(colliding_id.to_string())),
+        Some(lash_vocabulary::identity::NodeId::fixture(
+            colliding_id.to_string(),
+        )),
     )
     .expect("collision fixture seed graph is valid");
     let initial = RuntimeCommit::persisted_state_for_test(&state);

@@ -22,7 +22,7 @@ testing = []
 workspace = true
 
 [dependencies]
-lash-kernel-doc = { workspace = true }
+lash-vocabulary = { workspace = true }
 blake3 = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 schemars = { workspace = true }

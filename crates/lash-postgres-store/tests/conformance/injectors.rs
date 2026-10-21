@@ -2,7 +2,7 @@
 //! PostgreSQL state: lineage forcing and fence-integrity injection.
 
 use super::*;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 pub(crate) struct PostgresLineageConformanceInjector {
     pub(crate) storage: Arc<PostgresStorage>,
@@ -54,7 +54,7 @@ impl LineageConformanceInjector for PostgresLineageConformanceInjector {
         .map(|(ancestor_session_id, fork_node_id, fork_generation)| {
             lash_core_store::store::ForkLineageAncestor {
                 ancestor_session_id: SessionId::fixture(ancestor_session_id),
-                fork_node_id: lash_protocol_types::NodeId::fixture(fork_node_id),
+                fork_node_id: lash_vocabulary::identity::NodeId::fixture(fork_node_id),
                 fork_generation: u64::try_from(fork_generation)
                     .expect("non-negative fork generation"),
             }
@@ -72,7 +72,7 @@ impl LineageConformanceInjector for PostgresLineageConformanceInjector {
         .fetch_optional(self.storage.pool())
         .await
         .expect("read Postgres lineage head")
-        .map(lash_protocol_types::NodeId::fixture);
+        .map(lash_vocabulary::identity::NodeId::fixture);
         let mut path = Vec::new();
         while let Some(node_id) = current {
             let index = facts
@@ -101,13 +101,13 @@ impl LineageConformanceInjector for PostgresLineageConformanceInjector {
         .expect("observe Postgres graph facts")
         .into_iter()
         .map(|row| GraphFactObservation {
-            node_id: lash_protocol_types::NodeId::fixture(row.get::<String, _>(0)),
+            node_id: lash_vocabulary::identity::NodeId::fixture(row.get::<String, _>(0)),
             parent_node_id: row
                 .get::<Option<String>, _>(1)
-                .map(lash_protocol_types::NodeId::fixture),
+                .map(lash_vocabulary::identity::NodeId::fixture),
             owning_session_id: SessionId::fixture(row.get::<String, _>(2)),
             generation: u64::try_from(row.get::<i64, _>(3)).expect("non-negative generation"),
-            frame_node_id: lash_protocol_types::NodeId::fixture(row.get::<String, _>(4)),
+            frame_node_id: lash_vocabulary::identity::NodeId::fixture(row.get::<String, _>(4)),
             is_frame: row.get(5),
         })
         .collect()

@@ -16,14 +16,25 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
-use lash_kernel_doc::{
-    self as k, FunctionCatalog, FunctionId, FunctionName, Name, SourceLanguage, SourceMap,
-};
+use lash_kernel_doc as k;
+use lash_kernel_doc::FunctionCatalog;
+use lash_kernel_doc::SourceLanguage;
+use lash_kernel_doc::SourceMap;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::legacy_names::Name;
 
-use crate::{
-    EffectControl, Library, Lowered, NamespaceRefusal, Namespaces, PrintError, PrintOptions,
-    PrintedSource, QualifiedOperation, SourceFormat, require_through_bodies,
-};
+use crate::EffectControl;
+use crate::Library;
+use crate::Lowered;
+use crate::NamespaceRefusal;
+use crate::Namespaces;
+use crate::PrintError;
+use crate::PrintOptions;
+use crate::PrintedSource;
+use crate::SourceFormat;
+use crate::require_through_bodies;
+use lash_vocabulary::names::QualifiedOperation;
 
 /// The functions a document lists: those it calls and those their bodies
 /// reach (`K-DOC-002`).

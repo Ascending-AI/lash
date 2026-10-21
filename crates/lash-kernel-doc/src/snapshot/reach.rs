@@ -6,8 +6,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::ControlFlow;
 
+use crate::Document;
 use crate::heap::{Element, EntityId, HeapFault, PageValue};
-use crate::{Document, Name, Unit};
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Unit;
 
 use super::collect::{SnapshotHeap, closure_at, closure_held, members, text_of, token_closure};
 use super::reads::CodeReads;

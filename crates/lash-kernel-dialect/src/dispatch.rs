@@ -26,10 +26,17 @@
 //! leaves it out. A rest slot is one `List` slot that gathers every
 //! argument from its position on.
 
-use lash_kernel_doc::{Expr, FunctionId, Integer, Literal, Member as Place, Signature, Type};
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Integer;
+use lash_kernel_doc::Literal;
+use lash_kernel_doc::Member as Place;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 use crate::exports::{BRAND_FIELD, Export, ExportView, Member, TypeMember, ValueType};
-use crate::names::{PackagePath, Segment};
+use lash_vocabulary::names::PackagePath;
+use lash_vocabulary::names::Segment;
 
 /// The library function a front end reads a value's brand with: a text
 /// pair, or `absent` for a value of no package type.
@@ -314,7 +321,7 @@ pub enum KeywordRefusal {
 
 /// The fields of a slot that takes options: a record of declared fields,
 /// or such a record or `absent`. A package value's slot takes none.
-pub fn options_fields(ty: &Type) -> Option<&[lash_kernel_doc::RecordTypeField]> {
+pub fn options_fields(ty: &Type) -> Option<&[lash_vocabulary::types::RecordTypeField]> {
     match ty {
         Type::Record(record) if Brand::of_type(ty).is_none() && !record.fields.is_empty() => {
             Some(&record.fields)
@@ -500,7 +507,9 @@ pub fn fill_placed<T>(
 mod tests {
     use std::collections::BTreeMap;
 
-    use lash_kernel_doc::{FunctionName, Name, Param};
+    use lash_vocabulary::legacy_names::FunctionName;
+    use lash_vocabulary::legacy_names::Name;
+    use lash_vocabulary::types::Param;
 
     use super::*;
 
@@ -553,7 +562,7 @@ mod tests {
     #[test]
     fn slots_fill_by_the_canonical_convention() {
         let optional = Type::Union(vec![
-            Type::Record(lash_kernel_doc::RecordType {
+            Type::Record(lash_vocabulary::types::RecordType {
                 fields: Vec::new(),
                 rest: Some(Box::new(Type::Any)),
             }),
@@ -654,8 +663,8 @@ mod tests {
             typed_packages(&view),
             vec![PackagePath::parse("df").expect("canonical")]
         );
-        let brand = Type::Record(lash_kernel_doc::RecordType {
-            fields: vec![lash_kernel_doc::RecordTypeField {
+        let brand = Type::Record(lash_vocabulary::types::RecordType {
+            fields: vec![lash_vocabulary::types::RecordTypeField {
                 name: BRAND_FIELD.into(),
                 ty: Type::Tuple(vec![
                     Type::Enum(vec!["df".into()]),

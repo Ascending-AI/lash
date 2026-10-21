@@ -5,13 +5,31 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_dialect::{Dialect, EffectControl, Environment, Mode, NamedLibrary, SourceFormat};
-use lash_kernel_doc::{
-    ActKind, Action, Caption, CaptionEntry, CaptionField, CaptionKind, CaptionRefusal,
-    CaptionTarget, Captions, CaptionsRefusal, Document, EffectName, Expr, Literal, Name, Node,
-    Param, Signature, Site, Stmt, Type, Unit, parse_document,
-};
+use lash_kernel_doc::ActKind;
+use lash_kernel_doc::Action;
+use lash_kernel_doc::Caption;
+use lash_kernel_doc::CaptionEntry;
+use lash_kernel_doc::CaptionField;
+use lash_kernel_doc::CaptionKind;
+use lash_kernel_doc::CaptionRefusal;
+use lash_kernel_doc::CaptionTarget;
+use lash_kernel_doc::Captions;
+use lash_kernel_doc::CaptionsRefusal;
+use lash_kernel_doc::Document;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Literal;
+use lash_kernel_doc::Node;
+use lash_kernel_doc::Stmt;
+use lash_kernel_doc::parse_document;
 use lash_kernel_edit::authoring::{Branch, DataValue, Operation, ValueTarget, Wrapper};
 use lash_kernel_edit::{Draft, Position, Transaction};
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 use crate::captions::{CaptionCorpus, CaptionDialect};
 
@@ -61,7 +79,7 @@ fn each_dialect(law: impl Fn(&CaptionDialect<'_>) -> Result<(), crate::HarnessEr
     ];
     let namespaces = lash_kernel_dialect::Namespaces::of_effects(
         &effects,
-        &lash_kernel_doc::ContractId::new("1"),
+        &lash_vocabulary::operations::ContractId::new("1"),
         &controls,
     )
     .expect("the test's effects are operations");
@@ -428,7 +446,7 @@ fn signature_targets() {
     let mut environment = lash_kernel_check::Environment::new(&registry);
     environment.effects.insert(
         send.clone(),
-        lash_kernel_doc::OperationRequirement::new(
+        lash_vocabulary::operations::OperationRequirement::new(
             Signature {
                 params: vec![Param {
                     name: Name::new("value"),
@@ -437,7 +455,7 @@ fn signature_targets() {
                 }],
                 result: Type::Any,
             },
-            lash_kernel_doc::ContractId::new("1"),
+            lash_vocabulary::operations::ContractId::new("1"),
         ),
     );
     let mut draft = Draft::open(document.clone()).expect("a draft");
@@ -647,7 +665,7 @@ fn rekey() {
     let mut environment = lash_kernel_check::Environment::new(&registry);
     environment.effects.insert(
         EffectName::new("send").expect("a tool's name"),
-        lash_kernel_doc::OperationRequirement::new(
+        lash_vocabulary::operations::OperationRequirement::new(
             Signature {
                 params: vec![Param {
                     name: Name::new("value"),
@@ -656,7 +674,7 @@ fn rekey() {
                 }],
                 result: Type::Any,
             },
-            lash_kernel_doc::ContractId::new("1"),
+            lash_vocabulary::operations::ContractId::new("1"),
         ),
     );
     let captionable = CaptionKind::captionable(&document);
@@ -853,9 +871,9 @@ fn rekey_imported(dialect: &CaptionDialect<'_>) -> Result<(), crate::HarnessErro
                 .map(|(effect, signature)| {
                     (
                         effect.clone(),
-                        lash_kernel_doc::OperationRequirement::new(
+                        lash_vocabulary::operations::OperationRequirement::new(
                             signature.clone(),
-                            lash_kernel_doc::ContractId::new("1"),
+                            lash_vocabulary::operations::ContractId::new("1"),
                         ),
                     )
                 })
@@ -947,9 +965,9 @@ fn rekey_canvas_edits(dialect: &CaptionDialect<'_>) -> Result<(), crate::Harness
                 .map(|(effect, signature)| {
                     (
                         effect.clone(),
-                        lash_kernel_doc::OperationRequirement::new(
+                        lash_vocabulary::operations::OperationRequirement::new(
                             signature.clone(),
-                            lash_kernel_doc::ContractId::new("1"),
+                            lash_vocabulary::operations::ContractId::new("1"),
                         ),
                     )
                 })

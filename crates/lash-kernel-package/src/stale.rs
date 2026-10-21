@@ -1,8 +1,11 @@
 //! A `package.stale_value` error as a host shows it: its two artifacts by
 //! their release labels.
 
-use lash_kernel_dialect::PackagePath;
-use lash_kernel_doc::{ArtifactDigest, Datum, ErrorDatum, FunctionId};
+use lash_kernel_doc::ArtifactDigest;
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::ErrorDatum;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::names::PackagePath;
 
 use crate::HeldPackages;
 use crate::shape::STALE_VALUE;

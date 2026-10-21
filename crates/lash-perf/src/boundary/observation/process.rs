@@ -442,12 +442,12 @@ async fn append_facts(
     meter: &Meter,
 ) -> Result<(lash::ProcessId, lash_core::ProcessObservation)> {
     use lash_core::ToolCallId;
-    use lash_core::ToolId;
     use lash_execution_contracts::process::ProcessCompletionAuthority;
     use lash_execution_contracts::process::ProcessEventAppendRequest;
     use lash_execution_contracts::process::ProcessRegistration;
     use lash_execution_contracts::process::WaitKind;
     use lash_execution_contracts::process::WaitState;
+    use lash_vocabulary::tool_contract::ToolId;
     lash_execution_contracts::testing::process_execution_env_fixture(
         node.stores.process_env_store().as_ref(),
     )

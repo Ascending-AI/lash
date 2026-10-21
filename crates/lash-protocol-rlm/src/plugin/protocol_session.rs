@@ -165,7 +165,7 @@ impl std::error::Error for RlmSessionConfigDecodeError {}
 
 #[cfg(test)]
 mod tests {
-    use lash_protocol_types::SessionId;
+    use lash_vocabulary::identity::SessionId;
     use std::sync::Arc;
 
     use super::*;
@@ -180,8 +180,8 @@ mod tests {
     impl lash_core::plugin::SessionReadService for NoopPromptManager {
         async fn committed_turn(
             &self,
-            _session_id: &lash_core::SessionId,
-            _turn_id: &lash_core::TurnId,
+            _session_id: &lash_vocabulary::identity::SessionId,
+            _turn_id: &lash_vocabulary::identity::TurnId,
         ) -> Result<
             Option<lash_core::transcript::CommittedTurnWithCalls>,
             lash_core::plugin::CommittedTurnReadError,
@@ -379,7 +379,10 @@ mod tests {
                 input_tokens: 8,
                 ..Default::default()
             }),
-            ..lash_core::SessionSnapshot::new(lash_core::SessionId::from("session"), policy)
+            ..lash_core::SessionSnapshot::new(
+                lash_vocabulary::identity::SessionId::from("session"),
+                policy,
+            )
         };
         let directives = session
             .soft_warn_contributions(lash_core::plugin::CheckpointHookContext {
@@ -426,7 +429,10 @@ mod tests {
                 input_tokens: 40_999,
                 ..Default::default()
             }),
-            ..lash_core::SessionSnapshot::new(lash_core::SessionId::from("session"), policy)
+            ..lash_core::SessionSnapshot::new(
+                lash_vocabulary::identity::SessionId::from("session"),
+                policy,
+            )
         };
 
         let directives = session
@@ -478,7 +484,10 @@ mod tests {
                 input_tokens: used,
                 ..Default::default()
             }),
-            ..lash_core::SessionSnapshot::new(lash_core::SessionId::from("session"), policy)
+            ..lash_core::SessionSnapshot::new(
+                lash_vocabulary::identity::SessionId::from("session"),
+                policy,
+            )
         };
         lash_core::plugin::CheckpointHookContext {
             session_id: SessionId::from("root"),

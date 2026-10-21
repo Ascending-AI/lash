@@ -21,7 +21,7 @@ pub(super) fn admit(
     packages: &crate::CellPackages,
 ) -> Result<(), Refused> {
     let catalog = packages.view().catalog();
-    let internal = |effect: &lash_kernel_doc::EffectName| {
+    let internal = |effect: &lash_vocabulary::legacy_names::EffectName| {
         boundary.effect(effect).is_some_and(|(_, offered)| {
             offered.visibility == lash_kernel_dialect::Visibility::Internal
         })

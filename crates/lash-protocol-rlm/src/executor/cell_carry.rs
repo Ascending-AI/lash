@@ -164,7 +164,7 @@ pub(super) async fn carry(
         let mut decoder = GraphDecoder::new(&read.graph, read.read_limits);
         let c = &plan.rewritten.correspondence;
         let identify =
-            |effect: &lash_kernel_doc::EffectId| -> Result<lash_kernel_doc::EffectId, String> {
+            |effect: &lash_vocabulary::sites::EffectId| -> Result<lash_vocabulary::sites::EffectId, String> {
                 lash_kernel_migrate::carry_effect(c, effect).map_err(|error| error.to_string())
             };
         let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));

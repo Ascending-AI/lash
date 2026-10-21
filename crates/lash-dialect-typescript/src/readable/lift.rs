@@ -6,7 +6,14 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::{self as k, Caption, CaptionTarget, FieldPath, FieldRoot, Name, Site, Unit};
+use lash_kernel_doc as k;
+use lash_kernel_doc::Caption;
+use lash_kernel_doc::CaptionTarget;
+use lash_kernel_doc::FieldPath;
+use lash_kernel_doc::FieldRoot;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 use super::source::{self, Item, Param, Property, Stmt, Type};
 

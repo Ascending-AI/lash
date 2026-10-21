@@ -43,7 +43,7 @@ use lash_core::{
     LiveReplaySubscribeOutcome, LiveReplaySubscription, SessionObservationEvent,
     SessionObservationEventPayload, SessionRevision,
 };
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 use crate::session::SessionObservationStreamItem;
 use crate::support::{
@@ -791,8 +791,8 @@ pub(crate) fn live_replay_error(err: LiveReplayStoreError) -> EmbedError {
 
 #[cfg(test)]
 mod cancellation_law {
-    use super::*;
     use crate::tests::*;
+    use lash_vocabulary::schema_contract::*;
 
     /// A consumed divergence must complete its durable rebuild while tool
     /// traffic arrives; dropping the read loses the only commit notification.

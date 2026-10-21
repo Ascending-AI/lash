@@ -35,13 +35,22 @@ mod laws;
 pub use build::PackageSources;
 pub use held::{HeldPackages, PackageView, SharedPackageView};
 pub use install::PackageInstall;
-pub use lash_kernel_dialect::{
-    Export, Intent, Member, MemberPath, OperationExport, PackagePath, QualifiedOperation, Segment,
-    TypeMember, ValueType, Visibility,
-};
-pub use lash_kernel_doc::{
-    ArtifactDigest, ContractId, InvalidDigest, OperationRequirement, PackageSetDigest,
-};
+pub use lash_kernel_dialect::Export;
+pub use lash_kernel_dialect::Intent;
+pub use lash_kernel_dialect::Member;
+pub use lash_kernel_dialect::OperationExport;
+pub use lash_kernel_dialect::TypeMember;
+pub use lash_kernel_dialect::ValueType;
+pub use lash_kernel_dialect::Visibility;
+pub use lash_kernel_doc::ArtifactDigest;
+pub use lash_kernel_doc::InvalidDigest;
+pub use lash_kernel_doc::PackageSetDigest;
+pub use lash_vocabulary::names::MemberPath;
+pub use lash_vocabulary::names::PackagePath;
+pub use lash_vocabulary::names::QualifiedOperation;
+pub use lash_vocabulary::names::Segment;
+pub use lash_vocabulary::operations::ContractId;
+pub use lash_vocabulary::operations::OperationRequirement;
 pub use package::{ArtifactKey, Code, Origin, Package, PackageDisplay, PackageHeader, Root};
 pub use refusal::{Declared, NameRole, PackageRefusal, SetHolds};
 pub use selection::{PackageSelection, SelectedCatalog, SelectedPackages};
@@ -52,7 +61,7 @@ pub use snapshot::{
 };
 pub use stale::StaleValue;
 
-use lash_kernel_doc::FunctionName;
+use lash_vocabulary::legacy_names::FunctionName;
 
 /// Every member a package's `exports` declare, with the definition that
 /// implements it.

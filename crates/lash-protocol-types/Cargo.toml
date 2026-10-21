@@ -33,9 +33,6 @@ synthetic-next = []
 [dependencies]
 lash-vocabulary = { workspace = true }
 blake3 = { workspace = true }
-lash-kernel-check = { workspace = true }
-lash-kernel-dialect = { workspace = true }
-lash-kernel-doc = { workspace = true }
 jsonschema = { workspace = true, default-features = false }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }

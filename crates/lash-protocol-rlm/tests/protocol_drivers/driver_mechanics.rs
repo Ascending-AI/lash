@@ -1,7 +1,7 @@
 use super::support::*;
 use lash_protocol_types::ReportedFailure;
-use lash_protocol_types::TurnId;
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+use lash_vocabulary::identity::TurnId;
 
 // Focused RLM driver mechanics: malformed options, driver-state ownership, and checkpoint restore internals.
 

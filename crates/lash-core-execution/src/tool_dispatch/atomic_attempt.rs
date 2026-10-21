@@ -9,7 +9,11 @@ use std::sync::Arc;
 
 use super::context::{ToolCallIds, ToolDispatchContext, attempt_done, runtime_failure};
 use super::retry::{execute_leaf_tool_attempt, normalized_outcome};
-use crate::{PreparedToolCall, ToolContext, ToolFailureClass, ToolManifest, ToolOutcome};
+use crate::PreparedToolCall;
+use crate::ToolContext;
+use crate::ToolFailureClass;
+use crate::ToolOutcome;
+use lash_vocabulary::tool_contract::ToolManifest;
 
 /// Runtime-only execution of one already prepared attempt. Its consuming
 /// entry point returns facts; it cannot issue a retry or drive a child.
@@ -99,9 +103,9 @@ pub(super) enum AttemptAuthority<'a> {
     /// resolved by the prepared tool id.
     Catalog {
         manifest: &'a ToolManifest,
-        contract: &'a crate::ToolContract,
+        contract: &'a lash_vocabulary::tool_contract::ToolContract,
         /// The codec payload the call's surface entry's link recorded.
-        payload: Option<&'a crate::ExecutionBinding>,
+        payload: Option<&'a lash_vocabulary::providers::ExecutionBinding>,
     },
     /// An execution grant admitted the call. The grant *is* the authority, so
     /// the catalog lookup is skipped entirely.
@@ -115,7 +119,7 @@ impl<'a> AttemptAuthority<'a> {
     /// non-member resolves to `None`.
     pub(super) fn resolve(
         context: &'a ToolDispatchContext<'_>,
-        tool_id: &crate::ToolId,
+        tool_id: &lash_vocabulary::tool_contract::ToolId,
         grant: Option<&'a crate::ToolExecutionGrant>,
     ) -> Option<Self> {
         match grant {
@@ -145,7 +149,7 @@ impl<'a> AttemptAuthority<'a> {
 
     /// The contract the call was prepared under, which its success settles
     /// against.
-    pub(super) fn contract(&self) -> &'a crate::ToolContract {
+    pub(super) fn contract(&self) -> &'a lash_vocabulary::tool_contract::ToolContract {
         match self {
             Self::Catalog { contract, .. } => contract,
             Self::Granted(grant) => grant.contract(),
@@ -193,15 +197,15 @@ impl<'a> AttemptAuthority<'a> {
 }
 
 /// The failure an outcome its admitted declaration does not admit answers
-/// with. Typed by its [`crate::DeclarationRefusal`], so a host can tell an
+/// with. Typed by its [`lash_vocabulary::tool_declaration::DeclarationRefusal`], so a host can tell an
 /// authoring defect from a tool's own failure.
 /// `result` settled as a call under `declaration` and `contract`, after
 /// every result transform: a control call's result stays its control alone,
 /// and a success's value fits the contract's output schema.
 pub(super) fn settled_outcome(
     result: ToolOutcome,
-    declaration: &crate::ToolDeclaration,
-    contract: &crate::ToolContract,
+    declaration: &lash_vocabulary::tool_declaration::ToolDeclaration,
+    contract: &lash_vocabulary::tool_contract::ToolContract,
     tool_name: &str,
 ) -> ToolOutcome {
     match result.into_done_output() {
@@ -213,7 +217,10 @@ pub(super) fn settled_outcome(
     }
 }
 
-fn declaration_refused(tool_name: &str, refusal: crate::DeclarationRefusal) -> ToolOutcome {
+fn declaration_refused(
+    tool_name: &str,
+    refusal: lash_vocabulary::tool_declaration::DeclarationRefusal,
+) -> ToolOutcome {
     ToolOutcome::failure(
         crate::ToolFailure::runtime(
             ToolFailureClass::Internal,
@@ -234,7 +241,7 @@ type BodyState = Option<Box<Result<crate::plugin::Proposal, String>>>;
 fn body_state(
     context: &ToolDispatchContext<'_>,
     authority: &AttemptAuthority<'_>,
-    tool_id: &crate::ToolId,
+    tool_id: &lash_vocabulary::tool_contract::ToolId,
     ids: &ToolCallIds,
     attempt: u32,
     state: lash_execution_contracts::state_commands::StateCommands,
@@ -358,7 +365,7 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
                 .settled(&declaration, &contract.output_schema.canonical)
                 .and_then(|output| {
                     declaration
-                        .admits(crate::OutcomeShape::Done {
+                        .admits(lash_vocabulary::tool_declaration::OutcomeShape::Done {
                             intents: &kinds,
                             control: output.turn_control_kind(),
                         })
@@ -379,7 +386,9 @@ async fn dispatch_prepared_tool_attempt_launch<'run>(
         crate::ToolAttemptOutcome::Pending(_) => {
             // An undeclared Deferred never parks: no key was reserved for it,
             // and the refusal names the declaration rather than the key.
-            if let Err(refusal) = declaration.admits(crate::OutcomeShape::Deferred) {
+            if let Err(refusal) =
+                declaration.admits(lash_vocabulary::tool_declaration::OutcomeShape::Deferred)
+            {
                 let refused = declaration_refused(&tool_name, refusal);
                 return Ok(attempt_done(
                     normalized_outcome(context, &ids, tool_name, args, refused).await,

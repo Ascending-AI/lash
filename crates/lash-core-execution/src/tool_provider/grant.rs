@@ -1,5 +1,8 @@
 //! Authority carried by a recorded deferred match.
-use crate::{OperationLink, ToolContract, ToolDefinition, ToolManifest};
+use crate::OperationLink;
+use lash_vocabulary::tool_contract::ToolContract;
+use lash_vocabulary::tool_contract::ToolDefinition;
+use lash_vocabulary::tool_contract::ToolManifest;
 use serde::{Deserialize, Serialize};
 
 /// The authority to execute a tool a recorded deferred match resolved,
@@ -40,7 +43,7 @@ impl ToolExecutionGrant {
     /// A grant of `definition`, executed by the provider declared as
     /// `provider`.
     pub fn from_definition(
-        provider: crate::plugin::ToolProviderHandle,
+        provider: lash_vocabulary::providers::ToolProviderHandle,
         definition: ToolDefinition,
     ) -> Self {
         Self {
@@ -61,7 +64,7 @@ impl ToolExecutionGrant {
     }
 
     /// The declared provider that prepares and executes this grant's calls.
-    pub fn provider(&self) -> &crate::plugin::ToolProviderHandle {
+    pub fn provider(&self) -> &lash_vocabulary::providers::ToolProviderHandle {
         &self.link.provider
     }
 
@@ -81,13 +84,16 @@ impl ToolExecutionGrant {
     }
 
     /// The match's codec payload, passed to prepare and execute contexts.
-    pub fn payload(&self) -> Option<&crate::ExecutionBinding> {
+    pub fn payload(&self) -> Option<&lash_vocabulary::providers::ExecutionBinding> {
         self.link.payload.as_ref()
     }
 
     /// The grant with the match's codec payload.
     #[must_use]
-    pub fn with_execution_binding(mut self, payload: Option<crate::ExecutionBinding>) -> Self {
+    pub fn with_execution_binding(
+        mut self,
+        payload: Option<lash_vocabulary::providers::ExecutionBinding>,
+    ) -> Self {
         self.link.payload = payload;
         self
     }
@@ -95,7 +101,9 @@ impl ToolExecutionGrant {
     /// The callbacks a call under this grant runs on: its provider, then
     /// its payload's codec when it carries one. What a cell holding the
     /// grant owes until it ends (S7).
-    pub fn callbacks(&self) -> impl Iterator<Item = crate::plugin::PluginCallbackIdentity> + '_ {
+    pub fn callbacks(
+        &self,
+    ) -> impl Iterator<Item = lash_vocabulary::providers::PluginCallbackIdentity> + '_ {
         self.link.callbacks()
     }
 }

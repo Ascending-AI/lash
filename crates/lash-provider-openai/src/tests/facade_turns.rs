@@ -65,15 +65,17 @@ pub(super) async fn session(
     model: &str,
     session_id: &str,
 ) -> lash::DurableSession {
-    core.session(lash::SessionId::fixture(session_id.to_owned()))
-        .create(lash::SessionCreation::root(lash::SessionSpec::new(
-            model,
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(1024),
-            lash_core::NoProgressBudget::bounded(12),
-        )))
-        .await
-        .expect("the session is created")
+    core.session(lash_vocabulary::identity::SessionId::fixture(
+        session_id.to_owned(),
+    ))
+    .create(lash::SessionCreation::root(lash::SessionSpec::new(
+        model,
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+        lash_core::NoProgressBudget::bounded(12),
+    )))
+    .await
+    .expect("the session is created")
 }
 
 /// Send `session` the text `input`; the core's node runs the turn and the
@@ -391,7 +393,7 @@ async fn mixed_model_stream_recovery_obeys_recorded_allowances() {
             ))
             .expect("core");
         let session = core
-            .session(lash::SessionId::fixture(format!(
+            .session(lash_vocabulary::identity::SessionId::fixture(format!(
                 "mixed-recovery-{max_attempts}"
             )))
             .create(lash::SessionCreation::root(

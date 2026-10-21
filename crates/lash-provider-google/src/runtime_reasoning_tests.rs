@@ -44,8 +44,8 @@ impl lash_llm_transport::LlmHttpTransport for ScriptedSseTransport {
 
 struct RuntimeLookupTool;
 
-fn runtime_lookup_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn runtime_lookup_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:lookup",
         "tools.lookup",
         "Look up a value.",
@@ -67,7 +67,7 @@ impl lash_core::ToolProvider for RuntimeLookupTool {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![runtime_lookup_definition().manifest()])
@@ -77,7 +77,7 @@ impl lash_core::ToolProvider for RuntimeLookupTool {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.lookup").then(|| Arc::new(runtime_lookup_definition().contract()))
     }
 
@@ -297,13 +297,15 @@ async fn durable_backend() -> lash::Backend {
 
 /// Create the root session `session_id` on the test model.
 async fn created_session(core: &lash::LashCore, session_id: &str) -> lash::DurableSession {
-    core.session(lash::SessionId::fixture(session_id.to_owned()))
-        .create(lash::SessionCreation::root(lash::SessionSpec::new(
-            "gemini-test",
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(1024),
-            lash_core::NoProgressBudget::bounded(12),
-        )))
-        .await
-        .expect("the session is created")
+    core.session(lash_vocabulary::identity::SessionId::fixture(
+        session_id.to_owned(),
+    ))
+    .create(lash::SessionCreation::root(lash::SessionSpec::new(
+        "gemini-test",
+        lash::TurnBudget::Unbounded,
+        lash::MaxToolCalls::new(1024),
+        lash_core::NoProgressBudget::bounded(12),
+    )))
+    .await
+    .expect("the session is created")
 }

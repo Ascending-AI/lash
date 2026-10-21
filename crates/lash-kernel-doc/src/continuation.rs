@@ -18,10 +18,18 @@
 //! and the value of a `let` expression is held by its binding, so neither
 //! is a role inside the branches or the body.
 
-use crate::ast::{
-    ActKind, AssignOrder, Block, Callee, Expr, Member, Node, Place, Site, Stmt, Unit,
-};
+use crate::ast::ActKind;
+use crate::ast::AssignOrder;
+use crate::ast::Block;
+use crate::ast::Callee;
+use crate::ast::Expr;
+use crate::ast::Member;
+use crate::ast::Node;
+use crate::ast::Place;
+use crate::ast::Stmt;
 use crate::document::Document;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 /// Why [`live_roles`] gives no answer.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]

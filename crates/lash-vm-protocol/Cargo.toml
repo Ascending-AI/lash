@@ -25,6 +25,7 @@ workspace = true
 # type-level proof that it cannot decode them is that nothing here can
 # (ADR 0123).
 [dependencies]
+lash-vocabulary = { workspace = true }
 lash-protocol-types = { workspace = true }
 rmp-serde = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

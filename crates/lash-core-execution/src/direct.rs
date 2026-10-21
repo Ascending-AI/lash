@@ -1,5 +1,4 @@
 use crate::AttachmentRef;
-use crate::SchemaContract;
 use crate::llm::types::{
     LlmContentBlock, LlmEventSender, LlmJsonSchema, LlmMessage, LlmOutputSpec, LlmRequest,
     LlmRequestScope, LlmResponse, LlmRole, LlmStreamEvent, LlmToolChoice,
@@ -13,6 +12,7 @@ use crate::provider::{
 };
 use lash_trace::{TraceContext, TraceSink};
 use lash_transport_failure::LlmTransportError;
+use lash_vocabulary::schema_contract::SchemaContract;
 use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -159,7 +159,7 @@ pub enum DirectLlmError {
     },
     #[error("invalid response: {source}")]
     InvalidResponse {
-        source: crate::ValueMismatch,
+        source: lash_vocabulary::json_schema::ValueMismatch,
         result: Box<DirectLlmOutcome>,
     },
     #[error("transport error: {0}")]
@@ -167,7 +167,7 @@ pub enum DirectLlmError {
 }
 
 impl DirectLlmError {
-    pub fn value_mismatch(&self) -> Option<&crate::ValueMismatch> {
+    pub fn value_mismatch(&self) -> Option<&lash_vocabulary::json_schema::ValueMismatch> {
         match self {
             Self::InvalidResponse { source, .. } => Some(source),
             Self::LeadingSystemMessage | Self::InvalidRequest { .. } | Self::Transport(_) => None,
@@ -512,16 +512,17 @@ pub fn build_llm_request(
 fn validate_direct_output(
     output: &DirectOutputSpec,
     response: &LlmResponse,
-) -> Result<(), crate::ValueMismatch> {
+) -> Result<(), lash_vocabulary::json_schema::ValueMismatch> {
     let DirectOutputSpec::JsonSchema(schema) = output else {
         return Ok(());
     };
     let response_text = response.full_text();
-    let parsed: serde_json::Value =
-        serde_json::from_str(response_text.trim()).map_err(|err| crate::ValueMismatch {
+    let parsed: serde_json::Value = serde_json::from_str(response_text.trim()).map_err(|err| {
+        lash_vocabulary::json_schema::ValueMismatch {
             instance_path: String::new(),
             message: format!("expected JSON: {err}"),
-        })?;
+        }
+    })?;
     schema.schema.canonical.validate(&parsed)
 }
 
@@ -591,7 +592,7 @@ mod tests {
             "return items",
             DirectJsonSchema {
                 name: "items_result".to_string(),
-                schema: lash_protocol_types::SchemaContract::admit(json!({
+                schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({
                     "type": "object",
                     "required": ["items"],
                     "properties": {

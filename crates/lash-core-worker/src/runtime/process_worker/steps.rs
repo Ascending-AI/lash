@@ -191,7 +191,7 @@ impl DurableProcessWorker {
         runtime: &Arc<StepRuntime>,
         process: &ProcessRecord,
         execution: &AdmittedExecution,
-        effect: &lash_core::EffectName,
+        effect: &lash_vocabulary::legacy_names::EffectName,
         input: serde_json::Value,
     ) -> MemberOutcome {
         let call = lash_core_execution::sansio::PendingToolCall {
@@ -417,7 +417,7 @@ impl ProcessSteps for WorkerSteps {
         process: &ProcessRecord,
         _steps: &[StepRequest],
     ) -> Result<
-        Option<std::collections::BTreeSet<lash_core::ObligationToken>>,
+        Option<std::collections::BTreeSet<lash_vocabulary::claims::ObligationToken>>,
         lash_core::durable_port::DurableError,
     > {
         if process.env_ref().is_none() {
@@ -671,7 +671,7 @@ impl ProcessSteps for WorkerSteps {
     /// would, so its engine reads the failure as the call's output.
     fn admitted_output(
         &self,
-        process: &lash_core_execution::ProcessId,
+        process: &lash_vocabulary::identity::ProcessId,
         step: &StepRequest,
         call: &lash_core_execution::ToolCallId,
         output: SettledOutput,
@@ -691,7 +691,7 @@ impl ProcessSteps for WorkerSteps {
 
     fn engine_output(
         &self,
-        process: &lash_core_execution::ProcessId,
+        process: &lash_vocabulary::identity::ProcessId,
         step: &StepRequest,
         output: SettledOutput,
     ) -> SettledOutput {
@@ -851,7 +851,7 @@ fn failure_outcome(process: &ProcessRecord, failure: crate::ToolFailure) -> Memb
 fn dispatch_missing(
     process: &ProcessRecord,
     call: &lash_core_execution::sansio::PendingToolCall,
-    effect: &lash_core::EffectName,
+    effect: &lash_vocabulary::legacy_names::EffectName,
     execution: &AdmittedExecution,
     error: &lash_execution_contracts::plugin_error::PluginError,
 ) -> MemberOutcome {

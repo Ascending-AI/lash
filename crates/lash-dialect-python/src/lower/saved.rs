@@ -1,10 +1,14 @@
 //! Python's saved call shape and executable start adapter.
 
 use lash_kernel_dialect::{CallParam, CallShape, SavedFunction, Written};
-use lash_kernel_doc::{
-    FunctionRepresentation, Name, Param, Signature, SourceLanguage, StartAdapter, StartConvention,
-    Type,
-};
+use lash_kernel_doc::FunctionRepresentation;
+use lash_kernel_doc::SourceLanguage;
+use lash_kernel_doc::StartAdapter;
+use lash_kernel_doc::StartConvention;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 use ruff_python_ast::{self as ast, Expr as PyExpr};
 use ruff_text_size::Ranged;
 

@@ -12,10 +12,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use lash::Backend;
 use lash::durable::ActorKey;
 use lash::provider::{LlmRequest, LlmResponse, LlmRole, ProviderHandle};
 use lash::tools::{ExecutionPolicy, StaticToolExecute, StaticToolProvider, ToolCall, ToolOutcome};
-use lash::{Backend, SessionId, TurnId};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 use crate::events::{Event, report};
 use crate::witness::{Hold, Witness};

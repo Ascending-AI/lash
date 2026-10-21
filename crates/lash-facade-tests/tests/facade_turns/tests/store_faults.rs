@@ -35,9 +35,10 @@
 
 use super::*;
 
-use lash::{SessionId, TurnInput};
+use lash::TurnInput;
 use lash_core::testing::runtime_helpers::LayeredStores;
 use lash_core::testing::{Call, Op, Phase, Script, StoreOp};
+use lash_vocabulary::identity::SessionId;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -803,11 +804,13 @@ mod sweep {
                 durable
                     .send_batch([
                         (
-                            lash::TurnId::parse("sweep-b").expect("nonblank host identity"),
+                            lash_vocabulary::identity::TurnId::parse("sweep-b")
+                                .expect("nonblank host identity"),
                             TurnInput::text("second"),
                         ),
                         (
-                            lash::TurnId::parse("sweep-c").expect("nonblank host identity"),
+                            lash_vocabulary::identity::TurnId::parse("sweep-c")
+                                .expect("nonblank host identity"),
                             TurnInput::text("third"),
                         ),
                     ])
@@ -815,7 +818,8 @@ mod sweep {
             } else {
                 durable
                     .send(TurnInput::text("first"))
-                    .id(lash::TurnId::parse("sweep-a").expect("nonblank host identity"))
+                    .id(lash_vocabulary::identity::TurnId::parse("sweep-a")
+                        .expect("nonblank host identity"))
                     .await
                     .map(|handle| vec![handle])
             };
@@ -906,7 +910,7 @@ mod sweep {
         }
     }
 
-    async fn start_child(core: &LashCore) -> Result<lash_core::ProcessId> {
+    async fn start_child(core: &LashCore) -> Result<lash_vocabulary::identity::ProcessId> {
         let started = core
             .processes()
             .start(
@@ -931,7 +935,10 @@ mod sweep {
         Ok(started.process_id)
     }
 
-    async fn child_answer(core: &LashCore, process: &lash_core::ProcessId) -> Result<Answer> {
+    async fn child_answer(
+        core: &LashCore,
+        process: &lash_vocabulary::identity::ProcessId,
+    ) -> Result<Answer> {
         let output = core.processes().await_output(process).await?;
         let lash_execution_contracts::process::ProcessAwaitOutput::Settled { output } = output
         else {
@@ -1429,7 +1436,10 @@ mod sweep {
             .await
             .expect("durable handle")
             .send(TurnInput::text("first"))
-            .id(lash::TurnId::parse(format!("{id}-input")).expect("nonblank host identity"))
+            .id(
+                lash_vocabulary::identity::TurnId::parse(format!("{id}-input"))
+                    .expect("nonblank host identity"),
+            )
             .await
             .expect("accept before the open");
         (accepting, sent)

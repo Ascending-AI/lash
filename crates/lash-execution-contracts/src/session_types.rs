@@ -4,7 +4,7 @@ pub use lash_core_store::session_identity::{
     SessionObservedProcessReceipt, SessionObserverIntent, SessionRelation, SessionSnapshot,
 };
 
-use crate::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 use serde::{Deserialize, Serialize};
 
@@ -97,7 +97,7 @@ pub struct SessionCreateRequest {
     /// has a store, and reported per process on the returned [`SessionHandle`].
     /// Unknown or pruned ids do not fail session creation.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub observed_processes: Vec<crate::ProcessId>,
+    pub observed_processes: Vec<lash_vocabulary::identity::ProcessId>,
     /// Plugin-owned options that configure plugin behavior at session
     /// creation time. Each plugin decodes only the entry keyed by its id.
     #[serde(default)]
@@ -224,7 +224,7 @@ impl SessionCreateRequest {
     /// implementors while persisting and coordinating durable process execution.
     pub fn with_observed_processes(
         mut self,
-        process_ids: impl IntoIterator<Item = impl Into<crate::ProcessId>>,
+        process_ids: impl IntoIterator<Item = impl Into<lash_vocabulary::identity::ProcessId>>,
     ) -> Self {
         self.observed_processes = process_ids.into_iter().map(Into::into).collect();
         self

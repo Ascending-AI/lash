@@ -1,6 +1,12 @@
 //! Statements and control flow.
 
-use lash_kernel_doc::{AssignOrder, Expr, Literal, Member, Name, Place, Stmt};
+use lash_kernel_doc::AssignOrder;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Literal;
+use lash_kernel_doc::Member;
+use lash_kernel_doc::Place;
+use lash_kernel_doc::Stmt;
+use lash_vocabulary::legacy_names::Name;
 
 use super::patterns::Mode;
 use super::{

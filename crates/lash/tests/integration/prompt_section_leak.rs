@@ -276,7 +276,8 @@ async fn section_text_never_enters_history_or_a_compaction_seed() {
     let runs = ["hello", "again"].map(|text| {
         (
             text,
-            lash::TurnId::parse(format!("section-leak-{text}")).expect("run id"),
+            lash_vocabulary::identity::TurnId::parse(format!("section-leak-{text}"))
+                .expect("run id"),
         )
     });
     for (text, run) in &runs {

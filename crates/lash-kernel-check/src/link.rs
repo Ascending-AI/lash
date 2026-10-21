@@ -6,10 +6,21 @@
 //! and its site come from the same traversal. It runs only on a tree
 //! structural validation has accepted, which bounds its depth.
 
-use lash_kernel_doc::{
-    ActKind, Action, Atom, Block, Callee, Expr, Member, Name, Place, Rhs, Signature, Site, Stmt,
-    Type, Unit,
-};
+use lash_kernel_doc::ActKind;
+use lash_kernel_doc::Action;
+use lash_kernel_doc::Atom;
+use lash_kernel_doc::Block;
+use lash_kernel_doc::Callee;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Member;
+use lash_kernel_doc::Place;
+use lash_kernel_doc::Rhs;
+use lash_kernel_doc::Stmt;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 use crate::graph::{
     ActNode, ActionNode, AtomNode, Binding, BindingId, BindingKind, CalleeNode, CatchNode,

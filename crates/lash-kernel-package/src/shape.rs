@@ -16,9 +16,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_dialect::{BRAND_FIELD, BUILT_FIELD, brand_type};
-use lash_kernel_doc::{RecordType, Signature, Type};
+use lash_vocabulary::types::RecordType;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
-use lash_kernel_dialect::PackagePath;
+use lash_vocabulary::names::PackagePath;
 
 /// The error kind of a value a release of its package built with another
 /// representation.

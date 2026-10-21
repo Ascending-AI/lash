@@ -938,3 +938,11 @@ No permanent parallel build system is retained in Lash.
 
 Deployment order, rollback, evidence and coordinator measurements are recorded
 in [the migration report](buck2-migration.md).
+
+The package layering law L-SEAMS runs with
+`kiln gate lash <fork> -- python3 scripts/check-package-seams.py`. It checks
+Core and Standard's complete production dependency closure from Cargo's resolved
+all-feature graph, including target-specific edges. Plugin runtime dependencies
+are permitted; plugin dependencies on protocol implementations are refused.
+Development-only paths are reported separately. The check has no dependency
+allowlist.

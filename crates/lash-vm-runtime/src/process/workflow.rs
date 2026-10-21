@@ -15,9 +15,11 @@ use std::sync::Arc;
 
 use lash_kernel_check::Environment;
 pub use lash_kernel_check::{WorkflowAdmissionRefusal, WorkflowDocument, WorkflowDocumentError};
-use lash_kernel_doc::{
-    FunctionRegistry, IdentifiedDocument, Name, WorkflowDocumentEntry, WorkflowDocumentRef,
-};
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::IdentifiedDocument;
+use lash_kernel_doc::WorkflowDocumentEntry;
+use lash_kernel_doc::WorkflowDocumentRef;
+use lash_vocabulary::legacy_names::Name;
 
 use super::{
     KernelProcessDefinition, KernelProcessEngine, LASH_VM_ENGINE_KIND, definition_draft,
@@ -69,7 +71,7 @@ impl WorkflowEnvironment {
         let mut environment = Environment::new(self.functions.as_ref());
         environment.effects = requirements(&self.operations);
         environment.internal = Box::new(|effect| {
-            lash_kernel_dialect::QualifiedOperation::from_effect(effect)
+            lash_vocabulary::names::QualifiedOperation::from_effect(effect)
                 .ok()
                 .and_then(|operation| self.operations.get(&operation))
                 .is_some_and(|offered| {
@@ -84,8 +86,10 @@ impl WorkflowEnvironment {
 /// name with the requirement it is offered under.
 fn requirements(
     operations: &lash_kernel_dialect::Operations,
-) -> std::collections::BTreeMap<lash_kernel_doc::EffectName, lash_kernel_doc::OperationRequirement>
-{
+) -> std::collections::BTreeMap<
+    lash_vocabulary::legacy_names::EffectName,
+    lash_vocabulary::operations::OperationRequirement,
+> {
     operations
         .iter()
         .map(|(operation, offered)| (operation.effect_name(), offered.requirement.clone()))
@@ -435,7 +439,8 @@ impl lash_execution_contracts::process::ProcessDocumentProvider for KernelDocume
         &self,
         settings: Option<&lash_execution_contracts::process::EngineSettings>,
     ) -> bool {
-        super::KernelRecordedSettings::observed(settings) == lash_kernel_vm::ObservationMode::Counts
+        super::KernelRecordedSettings::observed(settings)
+            == lash_vocabulary::observation::RunObservation::Counts
     }
 
     async fn admit(
@@ -489,7 +494,7 @@ impl lash_execution_contracts::process::ProcessDocumentProvider for KernelDocume
             environment.effects = requirements(boundary.operations())
                 .into_iter()
                 .filter(|(effect, _)| {
-                    lash_kernel_dialect::QualifiedOperation::from_effect(effect)
+                    lash_vocabulary::names::QualifiedOperation::from_effect(effect)
                         .is_ok_and(|operation| selected.permits_operation(&operation))
                 })
                 .collect();

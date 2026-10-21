@@ -17,13 +17,13 @@ struct SchemaChangingTool {
 }
 
 impl SchemaChangingTool {
-    fn definition(&self) -> lash_core::ToolDefinition {
+    fn definition(&self) -> lash_vocabulary::tool_contract::ToolDefinition {
         let field = if *self.revision.lock_recover() == 1 {
             "first_value"
         } else {
             "second_value"
         };
-        lash_core::ToolDefinition::raw(
+        lash_vocabulary::tool_contract::ToolDefinition::raw(
             "tool:schema_changing",
             "tools.schema_changing",
             "A stable member whose contract can refresh",
@@ -46,7 +46,7 @@ impl lash_core::ToolProvider for SchemaChangingTool {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![self.definition().manifest()])
@@ -56,7 +56,7 @@ impl lash_core::ToolProvider for SchemaChangingTool {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.schema_changing").then(|| Arc::new(self.definition().contract()))
     }
 
@@ -114,7 +114,7 @@ impl lash_core::ToolProvider for PendingEchoTool {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![pending_echo_tool_definition().manifest()])
@@ -124,7 +124,7 @@ impl lash_core::ToolProvider for PendingEchoTool {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.echo_tool").then(|| Arc::new(pending_echo_tool_definition().contract()))
     }
 
@@ -153,8 +153,8 @@ impl lash_core::ToolProvider for PendingEchoTool {
     }
 }
 
-fn pending_echo_tool_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn pending_echo_tool_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:echo_tool",
         "tools.echo_tool",
         "Return a tool payload",
@@ -169,8 +169,8 @@ fn pending_echo_tool_definition() -> lash_core::ToolDefinition {
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
     .with_declaration(
-        lash_core::ToolDeclaration::deferring(),
-        Some(lash_core::ParkBound::Within(
+        lash_vocabulary::tool_declaration::ToolDeclaration::deferring(),
+        Some(lash_vocabulary::tool_contract::ParkBound::Within(
             std::time::Duration::from_secs(120),
         )),
     )

@@ -73,7 +73,7 @@ impl WaitDeadline {
 }
 
 /// What a call's admission pinned for its park: the deadline its
-/// [`ParkBound`](crate::ParkBound) set, or none for a park that lasts until
+/// [`ParkBound`](lash_vocabulary::tool_contract::ParkBound) set, or none for a park that lasts until
 /// its scope ends. Computed once, at admission, and recorded once, as the
 /// deadline of the completion wait the admission pins: a crash or takeover
 /// reads it back from that wait's row, never computes it again.
@@ -89,10 +89,12 @@ pub enum ParkDeadline {
 impl ParkDeadline {
     /// What a park bounded by `bound` and admitted at `now` pins.
     #[must_use]
-    pub fn admitted(bound: crate::ParkBound, now: DurableInstant) -> Self {
+    pub fn admitted(bound: lash_vocabulary::tool_contract::ParkBound, now: DurableInstant) -> Self {
         match bound {
-            crate::ParkBound::Within(wait) => Self::At(WaitDeadline::after(wait, now)),
-            crate::ParkBound::UntilScopeEnd => Self::UntilScopeEnd,
+            lash_vocabulary::tool_contract::ParkBound::Within(wait) => {
+                Self::At(WaitDeadline::after(wait, now))
+            }
+            lash_vocabulary::tool_contract::ParkBound::UntilScopeEnd => Self::UntilScopeEnd,
         }
     }
 

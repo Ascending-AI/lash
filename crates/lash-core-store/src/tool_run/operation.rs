@@ -19,7 +19,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::effect_opener::EffectOpener;
-use crate::{SessionId, TurnId};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 /// What a logical Run executes.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

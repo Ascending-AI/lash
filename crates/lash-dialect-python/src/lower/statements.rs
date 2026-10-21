@@ -2,9 +2,16 @@
 
 use std::collections::BTreeSet;
 
-use lash_kernel_doc::{
-    AssignOrder, Closure, Expr, Literal, Member, Name, Place, Protocol, Rhs, Stmt,
-};
+use lash_kernel_doc::AssignOrder;
+use lash_kernel_doc::Closure;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Literal;
+use lash_kernel_doc::Member;
+use lash_kernel_doc::Place;
+use lash_kernel_doc::Protocol;
+use lash_kernel_doc::Rhs;
+use lash_kernel_doc::Stmt;
+use lash_vocabulary::legacy_names::Name;
 use ruff_python_ast::{self as ast, Expr as PyExpr, Stmt as PyStmt};
 use ruff_text_size::{Ranged, TextRange};
 

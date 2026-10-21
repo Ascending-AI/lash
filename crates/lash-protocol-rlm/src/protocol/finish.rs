@@ -1,7 +1,7 @@
 use crate::dialect::SessionDialect;
 use lash_core::facade_support::reasoning_part;
 use lash_core::session_model::{Message, MessageRole, Part, shared_parts};
-use lash_protocol_types::TurnId;
+use lash_vocabulary::identity::TurnId;
 
 use crate::driver_state::RlmReasoningPart;
 

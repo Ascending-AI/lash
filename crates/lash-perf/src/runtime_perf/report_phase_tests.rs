@@ -116,7 +116,9 @@ async fn postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads() {
         lash_core::perf_witness::Collector::install().expect("install pool checkout witness");
 
     let batches = store
-        .list_queued_work(&lash_core::SessionId::from("pool-wait-witness"))
+        .list_queued_work(&lash_vocabulary::identity::SessionId::from(
+            "pool-wait-witness",
+        ))
         .await
         .expect("read queued work through the runtime store");
     assert!(batches.is_empty());

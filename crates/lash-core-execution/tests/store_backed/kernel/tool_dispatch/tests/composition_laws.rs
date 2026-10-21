@@ -27,7 +27,7 @@ impl ToolProvider for CountingTools {
         &self,
         _config: &crate::plugin::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<crate::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(manifests(vec![named_beta_tool("beta")]))
@@ -37,7 +37,7 @@ impl ToolProvider for CountingTools {
         &self,
         name: &str,
         _config: &crate::plugin::OwnerConfigView,
-    ) -> Option<Arc<crate::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         contract_from(vec![named_beta_tool("beta")], name)
     }
 
@@ -63,9 +63,9 @@ impl ToolProvider for CountingTools {
 }
 
 fn contract_from(
-    definitions: Vec<crate::ToolDefinition>,
+    definitions: Vec<lash_vocabulary::tool_contract::ToolDefinition>,
     name: &str,
-) -> Option<Arc<crate::ToolContract>> {
+) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
     definitions
         .into_iter()
         .find(|tool| tool.manifest.tool() == name)
@@ -717,7 +717,7 @@ async fn displaced_terminals_are_published_as_composition_evidence() {
 
         async fn append_session_nodes(
             &self,
-            _session_id: &crate::SessionId,
+            _session_id: &lash_vocabulary::identity::SessionId,
             _request: crate::AppendSessionNodesRequest,
         ) -> Result<
             crate::AppendSessionNodesOutcome,

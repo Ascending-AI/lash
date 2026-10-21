@@ -10,9 +10,12 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use crate::{
-    Document, FunctionCatalog, FunctionDeclarations, FunctionDefinition, FunctionId, FunctionName,
-};
+use crate::Document;
+use crate::FunctionCatalog;
+use crate::FunctionDeclarations;
+use crate::FunctionDefinition;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
 
 /// Why a set of declarations is not the one a document uses.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -196,7 +199,7 @@ impl CheckedDeclarations {
                 },
                 None => CheckedDeclaration {
                     definition: Arc::new(definition.clone()),
-                    image: Arc::from(crate::graph_tokens::encode_body(definition)),
+                    image: Arc::from(lash_vocabulary::tokens::encode_body(definition)),
                 },
             };
             held.insert(function, declaration);

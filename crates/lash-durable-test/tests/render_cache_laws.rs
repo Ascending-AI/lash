@@ -139,8 +139,8 @@ fn owner(build: &'static str) -> lash::persistence::LeaseOwnerIdentity {
     )
 }
 
-fn session_id(name: &str) -> lash::SessionId {
-    lash::SessionId::try_from(name.to_owned()).expect("a session id")
+fn session_id(name: &str) -> lash_vocabulary::identity::SessionId {
+    lash_vocabulary::identity::SessionId::try_from(name.to_owned()).expect("a session id")
 }
 
 /// Send `input` on `session`'s core, with `options` as its run's protocol
@@ -215,7 +215,7 @@ impl lash::render::ToolOutputRenderer for SwitchingRenderer {
     fn tool_output(
         &self,
         output: &lash_core::ToolCallOutput,
-        tool: &lash_core::ToolId,
+        tool: &lash_vocabulary::tool_contract::ToolId,
         params: &lash::render::ToolRenderParams,
     ) -> lash::render::Rendered<Vec<lash_core::facade_support::ModelToolReturnPart>> {
         if self.mode.load(Ordering::SeqCst) == 0 {
@@ -231,12 +231,12 @@ impl lash::render::ToolOutputRenderer for SwitchingRenderer {
     }
 }
 
-fn fixture_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn fixture_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "law:fixture",
         "tools.fixture",
         "Return a long result",
-        lash_core::ToolDefinition::default_input_schema(),
+        lash_vocabulary::tool_contract::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "string" }),
     )
     .expect("valid declared tool schemas")
@@ -256,7 +256,7 @@ impl lash_core::ToolProvider for FixtureTool {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![fixture_definition().manifest()])
@@ -266,7 +266,7 @@ impl lash_core::ToolProvider for FixtureTool {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.fixture").then(|| Arc::new(fixture_definition().contract()))
     }
 

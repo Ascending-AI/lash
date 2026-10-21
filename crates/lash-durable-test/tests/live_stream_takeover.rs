@@ -42,8 +42,8 @@ use lash_core::{
 };
 use lash_durable::{ActorKey, ActorState, CommitLabel};
 use lash_durable_test::{Fault, Matrix, Script, SimClock, SimNodes, SimNodesConfig, Tripwire};
-use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
+use lash_vocabulary::identity::SessionId;
 
 use dialect::Dialect;
 
@@ -769,7 +769,7 @@ async fn a_resend_after_retention_trimmed_the_abandoned_attempt_gaps_on_sqlite_m
 
 fn activity(label: &str) -> LiveReplayEventDraft {
     LiveReplayEventDraft::new(
-        None::<lash_core::TurnId>,
+        None::<lash_vocabulary::identity::TurnId>,
         SessionObservationEventPayload::TurnActivity(TurnActivity::independent(
             TurnEvent::StreamBlock(StreamBlockEvent::Delta {
                 kind: StreamBlockKind::AssistantText,

@@ -19,10 +19,14 @@ use lash_core_store::run_spec::ResolvedRun;
 use super::ProcessDefinitionId;
 use super::ProcessEngineRegistry;
 use super::model::ProcessEnvRef;
-use crate::{EffectName, ExecutionOwner, ProcessId, SurfaceTools, ToolExecutionGrant};
+use crate::ExecutionOwner;
+use crate::SurfaceTools;
+use crate::ToolExecutionGrant;
 use lash_execution_contracts::process::EngineLaunch;
 use lash_execution_contracts::process::EngineSettings;
 use lash_execution_contracts::process::ProcessSignature;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::legacy_names::EffectName;
 
 /// Chooses the environment and engine settings of a model's process start.
 ///
@@ -187,7 +191,7 @@ impl<'a> ProcessEnvCx<'a> {
                 .registry
                 .keys()
                 .find(|twin| {
-                    twin.registry() == crate::RegistryKind::Process
+                    twin.registry() == lash_vocabulary::claims::RegistryKind::Process
                         && twin.owner() == provider.owner()
                         && twin.key() == provider.key()
                 })
@@ -229,7 +233,7 @@ impl<'a> ProcessEnvCx<'a> {
                                 .to_owned(),
                         }
                     })?;
-                    Ok(crate::ExecutionBinding { codec, ..payload })
+                    Ok(lash_vocabulary::providers::ExecutionBinding { codec, ..payload })
                 })
                 .transpose()?;
             let link = crate::OperationLink {
@@ -325,7 +329,10 @@ impl ProcessEngineRegistry {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProcessStartChoice {
     /// Per-effect fit checked before holding the launch; never stored.
-    pub fits: BTreeMap<crate::EffectName, lash_execution_contracts::process::FitPolicy>,
+    pub fits: BTreeMap<
+        lash_vocabulary::legacy_names::EffectName,
+        lash_execution_contracts::process::FitPolicy,
+    >,
     pub env: ProcessEnvChoice,
     pub engine_settings: Option<EngineSettings>,
 }

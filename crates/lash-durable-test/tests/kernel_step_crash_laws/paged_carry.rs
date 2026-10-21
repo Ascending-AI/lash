@@ -175,7 +175,7 @@ fn park_with(
     let root = machine.checkpoint().unwrap();
     (machine, root, request)
 }
-fn finish(machine: &mut KernelMachine, wait: lash_kernel_vm::WaitId) -> Datum {
+fn finish(machine: &mut KernelMachine, wait: lash_vocabulary::sites::WaitId) -> Datum {
     machine
         .deliver(
             wait,
@@ -303,7 +303,7 @@ async fn atomic_carry(tier: super::served::Tier) {
                 declared_packages: held_a.surface().selection(),
                 document: document.identity(),
                 functions: document.manifest.functions.keys().copied().collect(),
-                entry: lash_kernel_doc::Name::new("run"),
+                entry: lash_vocabulary::legacy_names::Name::new("run"),
                 args: Default::default(),
             })
             .unwrap(),
@@ -401,7 +401,7 @@ async fn atomic_carry(tier: super::served::Tier) {
     let mut tx = store.begin(&actor, claim.epoch).await.unwrap();
     tx.stage_all(staging).write(write);
     let tokens: Vec<String> =
-        lash_core_store::obligations::ObligationToken::for_requirements(&requirements_b)
+        lash_vocabulary::claims::ObligationToken::for_requirements(&requirements_b)
             .map(String::from)
             .collect();
     tx.set_requires(tokens);

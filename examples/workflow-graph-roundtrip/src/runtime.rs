@@ -478,7 +478,7 @@ impl Overlay {
     ) -> Result<Self, RunError> {
         let definition = document.identity().to_string();
         let mut accumulator = WorkflowExecutionOverlayAccumulator::default();
-        accumulator.set_document(lash::workflow::WorkflowOverlayDocument::of(document));
+        accumulator.set_document(lash::workflow::workflow_overlay_document(document));
         Ok(Self {
             view: lash::workflow::view::derive(document, packages)
                 .map_err(|error| RunError::Invalid(error.to_string()))?,

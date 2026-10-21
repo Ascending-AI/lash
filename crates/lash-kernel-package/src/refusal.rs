@@ -1,8 +1,14 @@
 //! Why a package, a set or an install is refused: one typed enum that
 //! crosses the pool wire intact.
 
-use lash_kernel_dialect::{MemberPath, PackagePath, Segment};
-use lash_kernel_doc::{ArtifactDigest, EffectName, FunctionId, FunctionName, Signature};
+use lash_kernel_doc::ArtifactDigest;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::names::MemberPath;
+use lash_vocabulary::names::PackagePath;
+use lash_vocabulary::names::Segment;
+use lash_vocabulary::types::Signature;
 use serde::{Deserialize, Serialize};
 
 use crate::ArtifactKey;

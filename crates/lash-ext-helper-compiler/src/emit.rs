@@ -19,10 +19,19 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::{
-    ActKind, Action, AssignOrder, Atom, Callee, Expr, FunctionId, Literal, Member, Name, Place,
-    Rhs, Stmt,
-};
+use lash_kernel_doc::ActKind;
+use lash_kernel_doc::Action;
+use lash_kernel_doc::AssignOrder;
+use lash_kernel_doc::Atom;
+use lash_kernel_doc::Callee;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Literal;
+use lash_kernel_doc::Member;
+use lash_kernel_doc::Place;
+use lash_kernel_doc::Rhs;
+use lash_kernel_doc::Stmt;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::Name;
 
 use crate::library::Library;
 

@@ -20,7 +20,8 @@ use lash_durable::{
 use lash_execution_contracts::scope::scope_id;
 use lash_execution_contracts::scope::scope_index;
 use lash_execution_contracts::scope::subtree_roots;
-use lash_protocol_types::{CancelOrigin, ProcessId};
+use lash_protocol_types::CancelOrigin;
+use lash_vocabulary::identity::ProcessId;
 use rusqlite::{Connection, OptionalExtension};
 
 use super::{Answer, Committing, SQL, actor_key, integer, wake_within};

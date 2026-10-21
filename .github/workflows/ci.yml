@@ -1242,6 +1242,9 @@ jobs:
       - name: Check law tick lanes
         run: python3 scripts/check_law_tick_lanes.py
 
+      - name: Check package dependency seams
+        run: python3 scripts/check-package-seams.py
+
       - name: Check substrate boundary
         run: bash scripts/check-substrate-boundary.sh
 

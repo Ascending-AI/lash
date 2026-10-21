@@ -623,7 +623,7 @@ pub enum Body {
     /// its captured variables' cells, and the code a call last found for
     /// the site.
     Closure {
-        site: std::sync::Arc<crate::Site>,
+        site: std::sync::Arc<lash_vocabulary::sites::Site>,
         captures: Box<[ArenaHandle]>,
         code: Option<LocalCode>,
     },

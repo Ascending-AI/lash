@@ -8,24 +8,18 @@
 //! records, trace facts, the overlay) holds these values as the machine
 //! computed them; lash derives none of its own.
 
-pub use lash_kernel_doc::{
-    EffectId, LoopCounts, ObservationReader, PositionLabel, Site, TaskLabel, Unit, VisitId, WaitId,
-};
-
 /// Occurrence `occurrence` of the body of a function named `label`, run by
 /// `main` outside every loop, in a test fixture.
 #[cfg(any(test, feature = "testing"))]
 #[doc(hidden)]
-pub fn effect_identity_fixture(label: &str, occurrence: u64) -> EffectId {
-    lash_kernel_doc::testkit::effect(
-        lash_kernel_doc::testkit::root_task(),
-        Site::new(
-            Unit::Function(lash_kernel_doc::Name::new(label)),
+pub fn effect_identity_fixture(label: &str, occurrence: u64) -> lash_vocabulary::sites::EffectId {
+    lash_vocabulary::sites::testkit::effect(
+        lash_vocabulary::sites::testkit::root_task(),
+        lash_vocabulary::sites::Site::new(
+            lash_vocabulary::sites::Unit::Function(lash_vocabulary::legacy_names::Name::new(label)),
             Vec::new(),
         ),
         occurrence,
         Vec::new(),
     )
 }
-
-pub use lash_kernel_doc::testkit as workflow_testkit;

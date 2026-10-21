@@ -1,5 +1,5 @@
-use lash_protocol_types::SessionId;
-use lash_protocol_types::TurnId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use std::sync::Arc;
 
 use crate::sansio::{TurnMachine, TurnMachineConfig, TurnProtocol, UnitTurnProtocol};

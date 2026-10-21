@@ -19,10 +19,16 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::{
-    Document, EffectName, FunctionCatalog, FunctionId, Literal, Name, OperationRequirement, Site,
-    Type, Unit,
-};
+use lash_kernel_doc::Document;
+use lash_kernel_doc::FunctionCatalog;
+use lash_kernel_doc::Literal;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::operations::OperationRequirement;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
+use lash_vocabulary::types::Type;
 
 use crate::graph::{
     ActNode, ActionNode, AtomNode, BindingId, CalleeNode, ExprNode, Graph, NodeId, NodeKind,
@@ -383,7 +389,7 @@ fn may_hold_function(ty: &Type) -> bool {
 /// The derived body's value-call flag also follows body-backed helper calls.
 fn library_calls_values(
     catalog: &dyn FunctionCatalog,
-    function: &lash_kernel_doc::FunctionId,
+    function: &lash_vocabulary::legacy_names::FunctionId,
 ) -> bool {
     let Some(definition) = catalog.definition(function) else {
         return true;

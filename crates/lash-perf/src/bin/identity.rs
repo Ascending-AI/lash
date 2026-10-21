@@ -8,7 +8,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result, ensure};
-use lash_kernel_doc::{Document, EffectName, Name, Param, Signature, Type};
+use lash_kernel_doc::Document;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 #[repr(C)]
 #[derive(Default)]
@@ -169,7 +174,7 @@ fn lower(
     let functions = BTreeMap::new();
     let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
         &effects,
-        &lash_kernel_doc::ContractId::new("1"),
+        &lash_vocabulary::operations::ContractId::new("1"),
         &controls,
     )
     .ok()?;

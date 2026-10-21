@@ -22,13 +22,14 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ToolDefinition, ToolId};
-use lash_protocol_types::QualifiedOperation;
+use lash_vocabulary::names::QualifiedOperation;
+use lash_vocabulary::tool_contract::ToolDefinition;
+use lash_vocabulary::tool_contract::ToolId;
 
 /// The static, author-declared key a tool provider is registered under: the
 /// identity of its owning plugin or process component and the key it
 /// declared. A provider's existence never depends on config.
-pub type ProviderKey = crate::plugin_registrations::ToolProviderHandle;
+pub type ProviderKey = lash_vocabulary::providers::ToolProviderHandle;
 
 /// A refused change to a session's registered tool providers or the surface
 /// they advertise.
@@ -85,7 +86,7 @@ pub struct RecordedSurface {
     #[serde(
         default,
         skip_serializing_if = "BTreeMap::is_empty",
-        with = "lash_protocol_types::operation_keys"
+        with = "lash_vocabulary::operation_keys"
     )]
     tools: BTreeMap<QualifiedOperation, SurfaceEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -188,7 +189,7 @@ impl RecordedSurface {
     }
 
     /// The entry a Standard-mode model calls as `name`, its derived
-    /// model-facing name ([`lash_protocol_types::ToolManifest::standard_name`]).
+    /// model-facing name ([`lash_vocabulary::tool_contract::ToolManifest::standard_name`]).
     pub fn entry_named(&self, name: &str) -> Option<&SurfaceEntry> {
         self.tools
             .values()
@@ -246,9 +247,9 @@ pub struct OperationLink {
     pub provider: ProviderKey,
     /// The execution policy captured from the runner's manifest at link
     /// time: the only policy a call through this link is admitted under.
-    pub policy: lash_protocol_types::ExecutionPolicy,
+    pub policy: lash_vocabulary::tool_contract::ExecutionPolicy,
     #[serde(default, skip_serializing_if = "is_default_projection")]
-    pub projection: lash_protocol_types::ToolArgumentProjectionPolicy,
+    pub projection: lash_vocabulary::tool_contract::ToolArgumentProjectionPolicy,
     /// The runner's codec payload, read back from the call's context and
     /// never compared.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -365,7 +366,7 @@ impl OperationLink {
     /// its payload's codec when it carries one.
     pub fn callbacks(
         &self,
-    ) -> impl Iterator<Item = crate::store::plugin_writers::PluginCallbackIdentity> + '_ {
+    ) -> impl Iterator<Item = lash_vocabulary::providers::PluginCallbackIdentity> + '_ {
         std::iter::once(self.provider.callback_identity()).chain(
             self.payload
                 .iter()
@@ -374,7 +375,9 @@ impl OperationLink {
     }
 }
 
-fn is_default_projection(projection: &lash_protocol_types::ToolArgumentProjectionPolicy) -> bool {
+fn is_default_projection(
+    projection: &lash_vocabulary::tool_contract::ToolArgumentProjectionPolicy,
+) -> bool {
     projection.is_materialize_projected_values()
 }
 
@@ -387,8 +390,8 @@ pub enum Judgement {
     Missing,
     /// The runner serves the linked tool under another contract.
     ContractChanged {
-        pinned: lash_kernel_doc::ContractId,
-        live: lash_kernel_doc::ContractId,
+        pinned: lash_vocabulary::operations::ContractId,
+        live: lash_vocabulary::operations::ContractId,
     },
 }
 
@@ -399,7 +402,7 @@ pub enum Judgement {
 /// The live contract id must equal the pinned one; nothing else about the
 /// live tool is compared.
 pub fn judge(
-    pinned: &lash_kernel_doc::ContractId,
+    pinned: &lash_vocabulary::operations::ContractId,
     link: &OperationLink,
     live: Option<&ToolDefinition>,
 ) -> Judgement {
@@ -486,12 +489,10 @@ pub fn provider_key(provider: &ProviderKey) -> String {
     format!("{}/{}", provider.owner(), provider.key())
 }
 
-pub use lash_vocabulary::providers::{
-    DeferredResolutionPolicy, ExecutionBinding, ExecutionBindingUnreadable,
-};
+use lash_vocabulary::providers::{DeferredResolutionPolicy, ExecutionBinding};
 
 pub mod linked {
-    use crate::packages::linked::PublicationRecord;
+    use lash_vocabulary::package::PublicationRecord;
     use lash_vocabulary::{
         ExecutionPolicy, ToolArgumentProjectionPolicy, ToolDefinition, ToolId, claims::*, names::*,
         operations::*, package::*, providers::*,

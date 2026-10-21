@@ -147,7 +147,7 @@ fn park_with(
     let root = machine.checkpoint().unwrap();
     (machine, root, request)
 }
-fn finish(machine: &mut KernelMachine, wait: lash_kernel_vm::WaitId) -> Datum {
+fn finish(machine: &mut KernelMachine, wait: lash_vocabulary::sites::WaitId) -> Datum {
     machine
         .deliver(
             wait,

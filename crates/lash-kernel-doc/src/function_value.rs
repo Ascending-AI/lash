@@ -12,8 +12,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::document::Document;
-use crate::name::{FunctionId, Name};
-use crate::types::Signature;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::types::Signature;
 
 /// The record key a function value's transport wraps it under:
 /// `{"$lash_function": <FunctionValue>}`. Only the typed encoder writes it;
@@ -244,7 +245,7 @@ impl FunctionValue {
         &self,
         catalog: &dyn crate::FunctionCatalog,
         limits: FunctionValueLimits,
-        data: crate::KernelDataLimits,
+        data: lash_vocabulary::data_limits::KernelDataLimits,
     ) -> Result<(), FunctionValueRefusal> {
         let bytes = self
             .counted_bytes()
@@ -288,7 +289,7 @@ impl FunctionValue {
         json: &serde_json::Value,
         catalog: &dyn crate::FunctionCatalog,
         limits: FunctionValueLimits,
-        data: crate::KernelDataLimits,
+        data: lash_vocabulary::data_limits::KernelDataLimits,
     ) -> Result<Self, FunctionValueRefusal> {
         let serde_json::Value::Object(wrapper) = json else {
             return Err(FunctionValueRefusal::NotTagged);
@@ -305,7 +306,7 @@ impl FunctionValue {
     /// document's own version and depth rules.
     fn from_payload(
         payload: &serde_json::Value,
-        data: crate::KernelDataLimits,
+        data: lash_vocabulary::data_limits::KernelDataLimits,
     ) -> Result<Self, FunctionValueRefusal> {
         let decode = |problem: String| FunctionValueRefusal::Decode { problem };
         let serde_json::Value::Object(fields) = payload else {

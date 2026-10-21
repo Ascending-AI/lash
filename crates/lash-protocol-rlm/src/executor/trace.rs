@@ -9,7 +9,6 @@
 
 use lash_core::RuntimeExecutionContext;
 use lash_core::plugin::PluginExecutionTrace;
-use lash_kernel_doc::{DocumentId, EffectId};
 use lash_protocol_types::sync::MutexExt as _;
 use lash_trace::{
     TraceEvent, TraceLanguageExecution, TraceLanguageExecutionFailure,
@@ -17,6 +16,8 @@ use lash_trace::{
     TraceNodeFact, TraceRuntimeScope, TraceRuntimeSubject, WorkflowDocumentEntry,
     WorkflowDocumentRef,
 };
+use lash_vocabulary::legacy_names::DocumentId;
+use lash_vocabulary::sites::EffectId;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -84,7 +85,7 @@ pub(super) struct CellTrace {
     /// it: nothing of the cell is traced before a commit holds it
     /// (FIG-6000).
     held: Option<lash_core::HeldResponse>,
-    observation: lash_kernel_doc::RunObservation,
+    observation: lash_vocabulary::observation::RunObservation,
     segment: String,
     counts: Arc<Mutex<CellCounts>>,
 }
@@ -114,7 +115,9 @@ impl CellTrace {
         Some(Self {
             observation: ctx
                 .run_spec()
-                .map_or(lash_kernel_doc::RunObservation::Off, |spec| spec.observe),
+                .map_or(lash_vocabulary::observation::RunObservation::Off, |spec| {
+                    spec.observe
+                }),
             segment,
             counts: Arc::default(),
             tracing,
@@ -151,7 +154,7 @@ impl CellTrace {
 
     /// A cell reports cumulative counts within its stable activation segment.
     /// The fold uses maxima, so recovery, duplicates and reordering add nothing.
-    pub(super) fn ran(&self, delta: &lash_kernel_vm::SiteCounts) {
+    pub(super) fn ran(&self, delta: &lash_vocabulary::observation::SiteCounts) {
         let mut counts = self.counts.lock_recover();
         for (ordinal, count) in delta {
             let total = counts.ran.entry(*ordinal).or_default();
@@ -222,7 +225,7 @@ impl CellTrace {
         self.node(at, fact);
     }
 
-    pub(super) fn origin(&self, at: &EffectId, origin: &lash_kernel_doc::Site) {
+    pub(super) fn origin(&self, at: &EffectId, origin: &lash_vocabulary::sites::Site) {
         self.node(
             at,
             TraceNodeFact::Origin {

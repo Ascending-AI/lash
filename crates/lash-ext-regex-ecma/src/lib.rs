@@ -49,7 +49,9 @@ mod testsupport;
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{FunctionId, FunctionRegistry, RegistryError};
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::RegistryError;
+use lash_vocabulary::legacy_names::FunctionId;
 
 pub use definitions::{
     BRAND, CHARGE_BASE, CHARGE_PER_PATTERN_UNIT, GUARD_BASE, GUARD_PER_INPUT_UNIT, GUARD_UNIT,

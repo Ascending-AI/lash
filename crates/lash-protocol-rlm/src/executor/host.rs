@@ -29,7 +29,8 @@ use lash_core::facade_support::ToolInvocation;
 use lash_core::tool_dispatch::{CellCall, CellMember, CellMembers};
 use lash_core::{RuntimeExecutionContext, ToolExecutionGrant};
 use lash_core_store::checkpoint_graph::{GraphStaging, NodeId};
-use lash_kernel_doc::{Datum, EffectId, EffectName, ErrorDatum};
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::ErrorDatum;
 use lash_kernel_vm::{EffectRequest, Outcome};
 use lash_protocol_types::sync::MutexExt;
 use lash_vm_broker::kernel::graph::{FrozenRequest, Projections};
@@ -39,6 +40,8 @@ use lash_vm_broker::kernel::{
 };
 use lash_vm_broker::{MemberDraft, ParentFault};
 use lash_vm_runtime::HostBoundary;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::sites::EffectId;
 
 use super::envelope::CellEnvelope;
 use super::host_graph::{HostState, PrintEvent, ProcessEvent};
@@ -192,7 +195,7 @@ pub(super) struct CellHost<'run> {
     pub boundary: HostBoundary,
     /// The grants the session's deferred resolutions recorded, for a tool
     /// outside the catalog.
-    pub grants: BTreeMap<lash_core::ToolId, ToolExecutionGrant>,
+    pub grants: BTreeMap<lash_vocabulary::tool_contract::ToolId, ToolExecutionGrant>,
     /// The cell's admitted calls, by call: what their bodies run.
     pub members: Arc<CellMembers>,
     pub opener: lash_core::EffectOpener,
@@ -203,7 +206,7 @@ pub(super) struct CellHost<'run> {
     pub trace: Option<super::trace::CellTrace>,
     /// The effect identity each open call was performed at: where its
     /// terminal fact is published.
-    pub sites: Mutex<BTreeMap<lash_core::ToolCallId, lash_kernel_doc::EffectId>>,
+    pub sites: Mutex<BTreeMap<lash_core::ToolCallId, lash_vocabulary::sites::EffectId>>,
     /// What every park commits of the cell beside the ledgers and prints.
     pub envelope: CellEnvelope,
     /// The cell's host state as graph nodes, as its last park left it.
@@ -249,7 +252,7 @@ pub(super) fn tool_failed(failure: &lash_core::ToolFailure) -> ErrorDatum {
 
 /// The refusal of a control call, carrying its typed cause as data.
 fn control_refused(
-    effect: &lash_kernel_doc::EffectName,
+    effect: &lash_vocabulary::legacy_names::EffectName,
     cause: lash_core::ToolFailureCause,
 ) -> ErrorDatum {
     let message = match &cause {
@@ -326,7 +329,7 @@ impl CellHost<'_> {
         &self,
         request: &EffectRequest,
         call: lash_core::ToolCallId,
-        tool: lash_core::ToolId,
+        tool: lash_vocabulary::tool_contract::ToolId,
         args: serde_json::Value,
     ) -> ToolInvocation {
         let mut invocation = ToolInvocation::new(call, tool, args)
@@ -448,21 +451,22 @@ impl KernelEffects for CellHost<'_> {
             )));
         }
         if control {
-            let cause = if !lash_kernel_doc::ObservationReader::is_root_task(&request.identity) {
-                Some(lash_core::ToolFailureCause::ControlFromSpawnedTask)
-            } else if outstanding > 0 || live > 0 {
-                Some(lash_core::ToolFailureCause::ControlWithOutstandingTasks)
-            } else if self
-                .ledgers
-                .lock_recover()
-                .calls
-                .iter()
-                .any(|call| call.control(&self.boundary))
-            {
-                Some(lash_core::ToolFailureCause::ControlAttemptSpent)
-            } else {
-                None
-            };
+            let cause =
+                if !lash_vocabulary::sites::ObservationReader::is_root_task(&request.identity) {
+                    Some(lash_core::ToolFailureCause::ControlFromSpawnedTask)
+                } else if outstanding > 0 || live > 0 {
+                    Some(lash_core::ToolFailureCause::ControlWithOutstandingTasks)
+                } else if self
+                    .ledgers
+                    .lock_recover()
+                    .calls
+                    .iter()
+                    .any(|call| call.control(&self.boundary))
+                {
+                    Some(lash_core::ToolFailureCause::ControlAttemptSpent)
+                } else {
+                    None
+                };
             if let Some(cause) = cause {
                 return Ok(Err(control_refused(&request.effect, cause)));
             }

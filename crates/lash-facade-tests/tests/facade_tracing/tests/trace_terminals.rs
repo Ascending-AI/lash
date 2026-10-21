@@ -20,8 +20,8 @@ const ECHO_OPERATION: &str = "tools.echo_now";
 const HOLD: &str = "hold_open";
 const HOLD_OPERATION: &str = "tools.hold_open";
 
-fn definition(name: &str) -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn definition(name: &str) -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{name}"),
         format!("tools.{name}"),
         "A terminal-closure probe.",
@@ -56,7 +56,10 @@ impl ToolProvider for Tools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![
             definition(ECHO).manifest(),
             definition(HOLD).manifest(),
@@ -67,7 +70,7 @@ impl ToolProvider for Tools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         let Some(("tools", name)) = name.split_once('.') else {
             return None;
         };
@@ -129,7 +132,7 @@ async fn held_round(id: &str, tools: &Tools) -> Result<(Observed, LashCore, lash
     let (observed, builder) = Observed::install(builder);
     let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
     let session = core
-        .session(lash::SessionId::parse(id).expect("nonblank host identity"))
+        .session(lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"))
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;
     let handle = session.send(TurnInput::text("use both tools")).await?;

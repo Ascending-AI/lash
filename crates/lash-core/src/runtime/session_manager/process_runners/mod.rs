@@ -20,7 +20,7 @@ impl RuntimeSessionServices {
         let core = &self.current.host.core;
         let (routes, catalog) = engine.composition.linked_tools(
             &engine.env,
-            crate::RuntimeOwner::Process(process_id.clone()),
+            lash_vocabulary::identity::RuntimeOwner::Process(process_id.clone()),
             &core.process_engines.components().host().extensions,
             core.process_engines.engine_kinds(),
         )?;
@@ -138,8 +138,8 @@ impl lash_core_execution::runtime::process::steps::ProcessStepContext for Runtim
     /// pinned to `contract` (D3), judged now.
     fn step_link(
         &self,
-        effect: &lash_kernel_doc::EffectName,
-        contract: &lash_kernel_doc::ContractId,
+        effect: &lash_vocabulary::legacy_names::EffectName,
+        contract: &lash_vocabulary::operations::ContractId,
     ) -> Result<crate::plugin::StepLink, lash_execution_contracts::plugin_error::PluginError> {
         let (_, engine) = self.current.engine_process()?;
         Ok(engine.composition.step_link(&engine.env, effect, contract))
@@ -166,7 +166,7 @@ impl lash_core_execution::runtime::process::steps::ProcessStepContext for Runtim
     /// for `input`, through the deferred provider its grant links (P6).
     async fn resolve_dispatch(
         &self,
-        effect: &lash_kernel_doc::EffectName,
+        effect: &lash_vocabulary::legacy_names::EffectName,
         input: &serde_json::Value,
     ) -> Result<
         Result<crate::DeferredMatch, lash_core_execution::DispatchRefusal>,
@@ -184,7 +184,7 @@ impl lash_core_execution::runtime::process::steps::ProcessStepContext for Runtim
     /// resolved, as the grant at `effect` names them again for `input`.
     fn dispatch_args(
         &self,
-        effect: &lash_kernel_doc::EffectName,
+        effect: &lash_vocabulary::legacy_names::EffectName,
         input: &serde_json::Value,
         matched: &crate::DeferredMatch,
     ) -> Result<
@@ -202,7 +202,7 @@ impl lash_core_execution::runtime::process::steps::ProcessStepContext for Runtim
     fn requirements(
         &self,
     ) -> Result<
-        std::collections::BTreeSet<crate::ObligationToken>,
+        std::collections::BTreeSet<lash_vocabulary::claims::ObligationToken>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         let (_, engine) = self.current.engine_process()?;
@@ -213,7 +213,7 @@ impl lash_core_execution::runtime::process::steps::ProcessStepContext for Runtim
                 engine.state.as_ref(),
                 entry.id().as_str(),
             );
-            requires.insert(crate::ObligationToken::for_component(
+            requires.insert(lash_vocabulary::claims::ObligationToken::for_component(
                 entry.id(),
                 namespace.format_version,
             ));

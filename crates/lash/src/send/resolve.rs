@@ -7,11 +7,11 @@
 //! read, however deep the engine's queues are (FIG-4345), and the same read
 //! answers the input's binding and the session's park (FIG-7045).
 
-use lash_core::TurnId;
 use lash_core::facade_support::TurnOutcome;
 use lash_core::store::{
     FollowFacts, FollowSubject, InputFollowFacts, RunFollowFacts, RunTerminalCause,
 };
+use lash_vocabulary::identity::TurnId;
 
 use super::SendParts;
 use super::follow::Subject;

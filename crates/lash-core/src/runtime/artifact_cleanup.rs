@@ -25,7 +25,6 @@ use crate::ArtifactStoreId;
 use crate::ProcessDefinitionId;
 use crate::ProcessEngineRegistry;
 use crate::ProcessEnvRef;
-use crate::ProcessId;
 use crate::ReferrerClaim;
 use crate::ReferrerGuard;
 use crate::ResolvedArtifactCleanup;
@@ -41,6 +40,7 @@ use lash_execution_contracts::process::ProcessEnvStore;
 use lash_execution_contracts::process::ProcessInput;
 use lash_execution_contracts::process::ProcessRegistry;
 use lash_execution_contracts::process::artifact_referrer_ended;
+use lash_vocabulary::identity::ProcessId;
 
 /// The record a start key registered, as a start's guard carries onto it.
 #[derive(Clone, Debug, PartialEq)]
@@ -378,7 +378,7 @@ impl ArtifactCleanupRelay {
     /// Where `session` stands for its upload and session guards.
     async fn session_state(
         &self,
-        session: &crate::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
     ) -> Result<crate::SessionReferrerState, DeliveryFailure> {
         self.ports
             .attachments

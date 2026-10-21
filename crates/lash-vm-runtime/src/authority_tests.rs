@@ -4,11 +4,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use lash_kernel_doc::graph_tokens::encode_body;
-use lash_kernel_doc::{
-    EffectName, FunctionDefinition, FunctionId, KernelDataLimits, parse_definition,
-};
+use lash_kernel_doc::FunctionDefinition;
+use lash_kernel_doc::parse_definition;
 use lash_vm_broker::kernel::loader::{LoadRefusal, decode};
+use lash_vocabulary::data_limits::KernelDataLimits;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::tokens::encode_body;
 
 use super::{AuthorityUnread, InternalAuthority, admit_internal};
 
@@ -250,7 +252,7 @@ async fn a_start_is_judged_by_the_declarations_of_the_set_it_was_linked_under() 
             declared_packages: sets.writer.surface().selection(),
             document: document.identity(),
             functions: BTreeSet::new(),
-            entry: lash_kernel_doc::Name::new("work"),
+            entry: lash_vocabulary::legacy_names::Name::new("work"),
             packages,
             args: serde_json::Map::new(),
         })
@@ -274,10 +276,17 @@ async fn a_start_is_judged_by_the_declarations_of_the_set_it_was_linked_under() 
 
 /// A function value whose entry `run` answers its argument.
 fn identity_function() -> lash_kernel_doc::FunctionValue {
-    use lash_kernel_doc::{
-        Document, Entry, Expr, Function, Name, NumberPolicy, Param, Signature, StartConvention,
-        Stmt, Type,
-    };
+    use lash_kernel_doc::Document;
+    use lash_kernel_doc::Entry;
+    use lash_kernel_doc::Expr;
+    use lash_kernel_doc::Function;
+    use lash_kernel_doc::NumberPolicy;
+    use lash_kernel_doc::StartConvention;
+    use lash_kernel_doc::Stmt;
+    use lash_vocabulary::legacy_names::Name;
+    use lash_vocabulary::types::Param;
+    use lash_vocabulary::types::Signature;
+    use lash_vocabulary::types::Type;
     let run = Name::new(lash_kernel_doc::FUNCTION_VALUE_ENTRY);
     let mut document = Document::new(NumberPolicy::Float, Vec::new());
     document.functions.insert(

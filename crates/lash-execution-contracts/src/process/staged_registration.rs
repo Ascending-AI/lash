@@ -10,7 +10,7 @@ pub struct StagedRegistration {
     /// The sessions that observe the process from its creation.
     pub observers: Vec<SessionId>,
     /// The process id the registrar minted.
-    pub process_id: crate::ProcessId,
+    pub process_id: lash_vocabulary::identity::ProcessId,
     /// When the registration was prepared: the row's creation instant.
     pub prepared_at_ms: u64,
 }

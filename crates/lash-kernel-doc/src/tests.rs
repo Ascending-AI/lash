@@ -5,13 +5,36 @@ use std::collections::BTreeMap;
 
 use crate::arena::ShortText;
 
-use crate::{
-    Action, AssignOrder, Atom, Callee, Document, Expr, Float, Formula, FunctionDefinition,
-    FunctionId, FunctionRegistry, Implementation, InvalidReason, Literal, MAX_NESTING_DEPTH, Name,
-    Node, NumberPolicy, ParseErrorReason, Place, RegistryError, ReleasedFunctions, Rhs,
-    StatementForm, Stmt, parse_definition, parse_document, print_definition, print_document,
-    validate_document,
-};
+use crate::Action;
+use crate::AssignOrder;
+use crate::Atom;
+use crate::Callee;
+use crate::Document;
+use crate::Expr;
+use crate::Float;
+use crate::Formula;
+use crate::FunctionDefinition;
+use crate::FunctionRegistry;
+use crate::Implementation;
+use crate::InvalidReason;
+use crate::Literal;
+use crate::MAX_NESTING_DEPTH;
+use crate::Node;
+use crate::NumberPolicy;
+use crate::ParseErrorReason;
+use crate::Place;
+use crate::RegistryError;
+use crate::ReleasedFunctions;
+use crate::Rhs;
+use crate::StatementForm;
+use crate::Stmt;
+use crate::parse_definition;
+use crate::parse_document;
+use crate::print_definition;
+use crate::print_document;
+use crate::validate_document;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::Name;
 
 /// FIG-6977: all short-text constructors produce the same zero-padded word,
 /// and refuse bytes outside their length or ASCII contract.
@@ -653,12 +676,12 @@ fn identity_is_stable_across_encodings_and_moves_with_behaviour() {
         "0905090403010a000a000c00000a000a00090009010c09010c00010c0401060000000000000080"
     );
     assert_eq!(
-        crate::graph_tokens::decode_body::<Document>(&bytes).unwrap(),
+        lash_vocabulary::tokens::decode_body::<Document>(&bytes).unwrap(),
         pinned
     );
     assert_eq!(
         pinned.identity().as_bytes(),
-        &crate::graph_tokens::logical_digest(&bytes)
+        &lash_vocabulary::tokens::logical_digest(&bytes)
     );
     assert_eq!(
         pinned.identity().to_string(),
@@ -918,7 +941,10 @@ fn a_release_image_registers_without_decoding_a_definition() {
     assert_eq!(held.kernel(), 1);
     assert_eq!(
         held.listed(),
-        vec![(base, crate::FunctionName::new("helper.base").unwrap())]
+        vec![(
+            base,
+            lash_vocabulary::legacy_names::FunctionName::new("helper.base").unwrap()
+        )]
     );
     assert_eq!(held.census(), Some(census));
     assert_eq!(
@@ -1076,7 +1102,10 @@ fn registered_declarations_check_without_identifying_again() {
     );
     for (function, image) in &first {
         let definition = registry.get(function).unwrap().definition();
-        assert_eq!(&**image, crate::graph_tokens::encode_body(&**definition));
+        assert_eq!(
+            &**image,
+            lash_vocabulary::tokens::encode_body(&**definition)
+        );
     }
 }
 
@@ -1158,9 +1187,9 @@ fn child() { return null }
             .unwrap(),
         document
     );
-    let bytes = crate::graph_tokens::encode_body(&document);
+    let bytes = lash_vocabulary::tokens::encode_body(&document);
     assert_eq!(
-        crate::graph_tokens::decode_body::<crate::Document>(&bytes).unwrap(),
+        lash_vocabulary::tokens::decode_body::<crate::Document>(&bytes).unwrap(),
         document
     );
 }
@@ -1336,10 +1365,10 @@ fn a_body_performs_only_what_its_effects_list() {
         parse_definition(&print_definition(&listed)).unwrap(),
         listed
     );
-    let fetch = crate::EffectName::new("web.fetch").unwrap();
+    let fetch = lash_vocabulary::legacy_names::EffectName::new("web.fetch").unwrap();
     assert_eq!(
         listed.body().unwrap().effects[&fetch].contract,
-        crate::ContractId::new("3")
+        lash_vocabulary::operations::ContractId::new("3")
     );
     let unlisted = parse_definition(&text("", "")).unwrap();
     assert_ne!(unlisted.identity(), listed.identity());
@@ -1384,7 +1413,7 @@ charge 1
         .unwrap()
     };
     let (three, four) = (listed("3"), listed("4"));
-    let fetch = crate::EffectName::new("web.fetch").unwrap();
+    let fetch = lash_vocabulary::legacy_names::EffectName::new("web.fetch").unwrap();
     let required =
         |definition: &crate::FunctionDefinition| definition.body().unwrap().effects[&fetch].clone();
     assert_eq!(required(&three).signature, required(&four).signature);

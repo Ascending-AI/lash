@@ -3,10 +3,10 @@
 //! The attachment layer moved to `lash-core-store`; these cases shift it
 //! through a SQLite memory backend's session catalog and attachment store.
 
-use crate::SessionId;
 use lash_core_store::attachments::*;
 use lash_protocol_types::sync::MutexExt;
 use lash_protocol_types::{AttachmentCreateMeta, AttachmentId, AttachmentRef};
+use lash_vocabulary::identity::SessionId;
 use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 
@@ -14,9 +14,12 @@ fn now_epoch_ms() -> u64 {
     <crate::SystemClock as crate::ClockWallTime>::timestamp_ms(&crate::SystemClock)
 }
 
+use crate::ArtifactReferrer;
+use crate::AttachmentWrite;
+use crate::ReferrerClaim;
 use crate::store::{AttachmentReferrers, AttachmentWriteFence};
-use crate::{ArtifactReferrer, AttachmentWrite, ReferrerClaim, RuntimeOwner};
 use lash_protocol_types::{AttachmentTypeMetadata, MediaType};
+use lash_vocabulary::identity::RuntimeOwner;
 
 fn session_owner(session_id: &str) -> RuntimeOwner {
     RuntimeOwner::Session(SessionId::fixture(session_id))
@@ -1584,7 +1587,7 @@ async fn a_bound_execution_holds_its_puts_and_an_unbound_put_its_upload() {
 #[tokio::test]
 async fn a_process_runtime_put_is_held_by_its_record() {
     let manifest = Arc::new(RecordingReferrers::default());
-    let process_id = crate::ProcessId::fixture("process-1");
+    let process_id = lash_vocabulary::identity::ProcessId::fixture("process-1");
     let store = Arc::new(RuntimeAttachmentStore::new(
         crate::testing::sqlite_memory_store_set()
             .await

@@ -4,7 +4,9 @@
 use std::sync::Arc;
 
 use lash_kernel_dialect::NamedLibrary;
-use lash_kernel_doc::{FunctionDefinition, FunctionId, FunctionRegistry};
+use lash_kernel_doc::FunctionDefinition;
+use lash_kernel_doc::FunctionRegistry;
+use lash_vocabulary::legacy_names::FunctionId;
 
 /// A dialect whose helpers the compiler reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,7 +78,7 @@ impl Library {
         };
         let requires: Vec<_> = packages.iter().collect();
         let helpers_package = lash_kernel_package::Package::lash(
-            lash_kernel_package::PackagePath::parse(path).map_err(|e| e.to_string())?,
+            lash_vocabulary::names::PackagePath::parse(path).map_err(|e| e.to_string())?,
             "1.0",
             [lash_kernel_package::Root::new(root)],
             &requires,
@@ -171,7 +173,9 @@ fn package(
     requires: &[&lash_kernel_package::Package],
     mut define: impl FnMut(&mut FunctionRegistry) -> Result<(), String>,
 ) -> Result<lash_kernel_package::Package, String> {
-    use lash_kernel_package::{Package, PackagePath, Root};
+    use lash_kernel_package::Package;
+    use lash_kernel_package::Root;
+    use lash_vocabulary::names::PackagePath;
     use std::collections::BTreeSet;
     let mut registered = |registry: &mut FunctionRegistry| {
         let before: BTreeSet<_> = registry.iter().map(|(id, _)| *id).collect();
@@ -227,7 +231,9 @@ fn ordered(
 
 #[cfg(test)]
 mod tests {
-    use lash_kernel_package::{Package, PackagePath, Root};
+    use lash_kernel_package::Package;
+    use lash_kernel_package::Root;
+    use lash_vocabulary::names::PackagePath;
 
     use super::*;
 

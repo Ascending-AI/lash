@@ -4,7 +4,10 @@
 
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{EffectName, Signature, Type, print_document};
+use lash_kernel_doc::print_document;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 use super::{lower_against, main_text};
 
@@ -547,7 +550,7 @@ fn plain_record_fresh_literal_field_aliases_keep_admission() {
 #[test]
 fn plain_record_restored_brand_markers_keep_admission() {
     let bindings = super::pages::Session::seeded([(
-        lash_kernel_doc::Name::new("marker"),
+        lash_vocabulary::legacy_names::Name::new("marker"),
         lash_kernel_doc::Datum::Tuple(vec![
             lash_kernel_doc::Datum::Text("date.ecma".into()),
             lash_kernel_doc::Datum::Text("invalid_date".into()),
@@ -614,7 +617,7 @@ fn plain_record_proofs_hold_for_function_locals_and_numeric_writes() {
 #[test]
 fn plain_record_keys_that_may_be_text_keep_brand_admission() {
     let bindings = super::pages::Session::seeded([(
-        lash_kernel_doc::Name::new("marker"),
+        lash_vocabulary::legacy_names::Name::new("marker"),
         lash_kernel_doc::Datum::Tuple(vec![
             lash_kernel_doc::Datum::Text("date.ecma".into()),
             lash_kernel_doc::Datum::Text("invalid_date".into()),
@@ -712,7 +715,7 @@ fn plain_record_proofs_survive_text_keys_with_an_ordinary_prefix() {
 #[test]
 fn plain_record_text_keys_that_may_be_the_brand_keep_admission() {
     let bindings = super::pages::Session::seeded([(
-        lash_kernel_doc::Name::new("marker"),
+        lash_vocabulary::legacy_names::Name::new("marker"),
         lash_kernel_doc::Datum::Tuple(vec![
             lash_kernel_doc::Datum::Text("date.ecma".into()),
             lash_kernel_doc::Datum::Text("invalid_date".into()),
@@ -934,7 +937,8 @@ fn stable_paths_keep_hop_failures_and_lazy_evaluation() {
 /// a mid-loop park cannot share source facts with a later guest mutation.
 #[test]
 fn stable_paths_keep_restored_roots_and_nonterminal_effects_guarded() {
-    use lash_kernel_doc::{Datum, Name};
+    use lash_kernel_doc::Datum;
+    use lash_vocabulary::legacy_names::Name;
     let source = "let sum = 0; for (let i = 0; i < 2; i++) { sum += r.a.b.leaf; r.a.b = { leaf: 7 }; } await control.finish(sum);";
     let bindings = super::pages::Session::seeded([(
         Name::new("r"),

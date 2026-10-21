@@ -62,8 +62,8 @@ impl Calls {
 #[derive(Clone)]
 struct HeldTool(Calls);
 
-fn tool_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn tool_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{TOOL}"),
         TOOL_OPERATION,
         "A call that never answers.",
@@ -79,7 +79,10 @@ impl ToolProvider for HeldTool {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![tool_definition().manifest()])
     }
 
@@ -87,7 +90,7 @@ impl ToolProvider for HeldTool {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == TOOL_OPERATION).then(|| Arc::new(tool_definition().contract()))
     }
 
@@ -157,7 +160,9 @@ impl Stranded {
     /// the session's requirements.
     async fn turn(&self, core: &LashCore, id: &str) -> Result<lash::SendHandle> {
         let session = core.session(SessionId::fixture(id)).open().await?;
-        Ok(session.attach_id(lash::TurnId::parse(RUN).expect("nonblank host identity")))
+        Ok(session.attach_id(
+            lash_vocabulary::identity::TurnId::parse(RUN).expect("nonblank host identity"),
+        ))
     }
 }
 
@@ -189,7 +194,7 @@ pub(super) async fn stranded_over(
         .await?;
     let handle = session
         .send(TurnInput::text("use the tool"))
-        .id(lash::TurnId::parse(RUN).expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse(RUN).expect("nonblank host identity"))
         .await?;
     calls.entered.notified().await;
     drop((handle, session));

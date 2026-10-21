@@ -20,7 +20,6 @@ mod imperative;
 mod library;
 mod metadata;
 mod name_plan;
-mod names;
 mod namespaces;
 mod notes;
 pub mod readability;
@@ -48,18 +47,24 @@ pub use exports::{
     PackagePathClass, Reserving, TypeMember, ValueType, Visibility, brand_tuple, brand_type,
     classify_package_path, operation_visibility,
 };
-pub use lash_kernel_state::WaitId;
-pub use library::{Library, LibraryError, NamedLibrary, require_through_bodies};
-pub use metadata::{check_metadata_uniqueness, metadata_json};
-pub use name_plan::NamePlan;
-pub use names::{
+use lash_vocabulary::names::{
     EmptyPath, InvalidOperation, InvalidSegment, MemberPath, PackagePath, QualifiedOperation,
     Segment, Vec1,
 };
-pub use namespaces::{
-    Misspelled, NamespaceRefusal, Namespaces, Offered, OfferedSource, Operations, Resolution,
-    operation_keys, operation_text, spell_operation,
-};
+use lash_vocabulary::operation_keys;
+use lash_vocabulary::operation_text;
+use lash_vocabulary::sites::WaitId;
+pub use library::{Library, LibraryError, NamedLibrary, require_through_bodies};
+pub use metadata::{check_metadata_uniqueness, metadata_json};
+pub use name_plan::NamePlan;
+pub use namespaces::Misspelled;
+pub use namespaces::NamespaceRefusal;
+pub use namespaces::Namespaces;
+pub use namespaces::Offered;
+pub use namespaces::OfferedSource;
+pub use namespaces::Operations;
+pub use namespaces::Resolution;
+pub use namespaces::spell_operation;
 pub use notes::{Note, SiteLayers, SiteLayersRefusal, site_layers};
 pub use saved::{
     Bundle, BundleBody, BundleRefusal, CaptureRefusal, DOCUMENT_NODE_KIND,

@@ -1,9 +1,12 @@
 use super::*;
-use lash_core_store::checkpoint_graph::{
-    EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TokenWriter, TypedBody,
-};
+use lash_core_store::checkpoint_graph::EncodeBudget;
+use lash_core_store::checkpoint_graph::ExplicitLimit;
+use lash_core_store::checkpoint_graph::GraphStaging;
+use lash_core_store::checkpoint_graph::NodeKind;
+use lash_core_store::checkpoint_graph::TypedBody;
 use lash_durable::DurableReads;
 use lash_durable::domain::{OwnerKey, RunSeq};
+use lash_vocabulary::tokens::TokenWriter;
 
 /// RUN-READ: the fact walk reads all selected roots and their shared
 /// descendants in one PostgreSQL round trip, for either read shape.

@@ -80,13 +80,16 @@ use std::time::Duration;
 use dialect::Dialect;
 use lash::provider::{LlmTransportError, TransportRetryVerdict};
 use lash::tools::{StaticToolExecute, StaticToolProvider};
+use lash_core::LlmOutputPart;
+use lash_core::LlmUsage;
+use lash_core::ToolCall;
+use lash_core::ToolOutcome;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{
     LlmRequest, LlmResponse, LlmRole, LlmStreamEvent, StreamBlockEvent, StreamBlockIdentity,
     StreamBlockKind,
 };
 use lash_core::runtime::durable::session::SessionActivation;
-use lash_core::{ExecutionPolicy, LlmOutputPart, LlmUsage, ToolCall, ToolOutcome};
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, CommitLabel};
 use lash_durable_test::{
@@ -95,8 +98,9 @@ use lash_durable_test::{
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::backend::BackendParts;
 use lash_execution_contracts::projection::NoProjectionProviders;
-use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::tool_contract::ExecutionPolicy;
 use serde_json::{Value, json};
 
 const SESSION: &str = "model-answer-receipt";
@@ -571,8 +575,8 @@ impl StaticToolExecute for Writes {
     }
 }
 
-fn write_tool() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn write_tool() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         WRITE,
         WRITE_OPERATION,
         "A host write the receipt laws count.",
@@ -1846,7 +1850,9 @@ async fn a_cancel_only_node_ending_an_answered_phase_publishes_the_record_once()
 
 /// Read only the committed-turn surface, so the missing retained record is
 /// observable on the unfixed implementation as well as after this change.
-async fn retained_model_rows(durable: &lash::DurableSession) -> (lash::TurnId, Vec<Value>) {
+async fn retained_model_rows(
+    durable: &lash::DurableSession,
+) -> (lash_vocabulary::identity::TurnId, Vec<Value>) {
     let page = durable
         .committed_turns(None, std::num::NonZeroU32::MIN)
         .await

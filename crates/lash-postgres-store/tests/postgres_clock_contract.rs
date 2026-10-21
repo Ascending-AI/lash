@@ -1,6 +1,6 @@
 //! Behavioral laws and lexical fences for PostgreSQL clock provenance.
 
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 use std::sync::Arc;
 
 use lash_core_ids::clock::Clock;
@@ -26,8 +26,8 @@ use lash_core_store::turn_input_vocabulary::PendingTurnInputReadStatus;
 use lash_core_store::turn_input_vocabulary::TurnInput;
 use lash_core_store::turn_input_vocabulary::TurnInputIngress;
 use lash_postgres_store::PostgresStorage;
-use lash_protocol_types::TurnId;
 use lash_protocol_types::plugin::CheckpointKind;
+use lash_vocabulary::identity::TurnId;
 
 // Keep subsequent lines stable for machine-checked public API evidence anchors.
 // Shared test support now lives at the grouped integration-harness run.

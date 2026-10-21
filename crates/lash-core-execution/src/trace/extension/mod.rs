@@ -4,7 +4,7 @@
 //!
 //! Lash binds every [`ExtensionTrace`] privately from the registered
 //! callback it is about to run, positions it at the anchored container its
-//! slot names ([`TraceScopeOf`](lash_core_store::tool_run::TraceScopeOf)),
+//! slot names ([`TraceScopeOf`](lash_vocabulary::providers::TraceScopeOf)),
 //! and revokes it when that body exits, however it exits. A plugin cannot
 //! choose a parent, open a root, set a span id or emit in another plugin's
 //! name.
@@ -12,13 +12,13 @@
 use std::borrow::Cow;
 use std::sync::{Arc, Mutex};
 
-use lash_core_store::store::plugin_writers::PluginCallbackIdentity;
-use lash_core_store::tool_run::CallbackSlot;
 use lash_protocol_types::sync::MutexExt as _;
 use lash_trace::{
     ContentPolicy, PublicationHold, SpanSpec, ToolSpanAnnotations, TraceCarrier, TraceContext,
     TraceOmissionDiagnostic, TraceParent, TraceSpanKind, WriterRemaining,
 };
+use lash_vocabulary::providers::CallbackSlot;
+use lash_vocabulary::providers::PluginCallbackIdentity;
 
 use super::TraceStanding;
 
@@ -317,7 +317,7 @@ impl ExtensionTrace {
     /// when the callback's slot is untraced.
     pub(crate) fn for_callback(&self, identity: &PluginCallbackIdentity) -> (Self, BodyTrace) {
         let callback = BoundCallback::of(identity).filter(|bound| {
-            bound.slot.trace_scope() != lash_core_store::tool_run::TraceScopeOf::Untraced
+            bound.slot.trace_scope() != lash_vocabulary::providers::TraceScopeOf::Untraced
         });
         let (Some(cap), Some(callback)) = (&self.inner, callback) else {
             return (Self::untraced(), BodyTrace::untraced());

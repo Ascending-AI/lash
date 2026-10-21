@@ -3,8 +3,8 @@
     reason = "scripted conformance fixture construction uses admitted pages; a refusal is a defect in the fixture"
 )]
 //! Test-owned page storage; execution and accounting are the real S4/S7 implementations.
+use lash_kernel_doc::Datum;
 use lash_kernel_doc::heap::*;
-use lash_kernel_doc::{Datum, Name};
 use lash_kernel_state::kernel_internals::{
     PagedHeap,
     census_impl::Census,
@@ -13,6 +13,7 @@ use lash_kernel_state::kernel_internals::{
 use lash_kernel_state::paged::*;
 #[cfg(test)]
 use lash_kernel_vm::kernel_internals::Layout;
+use lash_vocabulary::legacy_names::Name;
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc, sync::Arc};
 #[derive(Clone, Default)]
 pub(crate) struct Source {
@@ -106,8 +107,8 @@ impl Session {
                     BindingRecord {
                         name: NameRef::new(&name, heap.pages()).unwrap(),
                         declared: SiteRef::new(
-                            &lash_kernel_doc::Site {
-                                unit: lash_kernel_doc::Unit::Main,
+                            &lash_vocabulary::sites::Site {
+                                unit: lash_vocabulary::sites::Unit::Main,
                                 path: Vec::new(),
                             },
                             heap.pages(),

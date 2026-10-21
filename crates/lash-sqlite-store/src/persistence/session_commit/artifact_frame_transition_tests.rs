@@ -12,7 +12,7 @@ fn first_commit_may_end_its_own_appended_frame_open() {
     let successor = FrameNodeId::new("successor-frame").expect("frame id");
     let graph = lash_core_store::store::GraphAppend::Extend {
         nodes: vec![lash_core_store::session_graph::SessionNodeRecord {
-            node_id: lash_core::NodeId::fixture(first.as_str().to_owned()),
+            node_id: lash_vocabulary::identity::NodeId::fixture(first.as_str().to_owned()),
             parent_node_id: None,
             timestamp: "2026-09-29T00:00:00.000000000Z"
                 .parse()

@@ -1,7 +1,7 @@
 use lash_protocol_types::ReportedFailure;
-use lash_protocol_types::SessionId;
-use lash_protocol_types::TurnId;
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -1871,11 +1871,11 @@ fn recorded_environment(tool: &str) -> ExecutionEnvironmentSync {
         tool_specs: Arc::new(vec![lash_protocol_types::llm::types::LlmToolSpec {
             name: tool.to_string(),
             description: "desc".to_string(),
-            input_schema: lash_protocol_types::SchemaContract::admit(
+            input_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
                 serde_json::json!({ "type": "object" }),
             )
             .expect("valid declared schema"),
-            output_schema: lash_protocol_types::SchemaContract::admit(
+            output_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
                 serde_json::json!({ "type": "object" }),
             )
             .expect("valid declared schema"),

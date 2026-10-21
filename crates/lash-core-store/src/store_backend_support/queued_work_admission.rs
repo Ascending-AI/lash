@@ -7,8 +7,11 @@
 //! compare only admission-time digests and recorded turn evidence, so
 //! deciding them never decodes a stored payload.
 
+use crate::QueuedWorkBatchDraft;
 use crate::store::StoreError;
-use crate::{BatchId, QueuedWorkBatchDraft, SessionId, TurnId};
+use lash_vocabulary::identity::BatchId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 fn require_source_key_kind(
     session_id: &SessionId,
@@ -84,11 +87,11 @@ pub fn decide_queued_work_draft_admission(
                 return Err(StoreError::QueuedWorkSourceKeyConflict {
                     session_id: draft.session_id.clone(),
                     source_key: source_key.to_string(),
-                    existing_batch_id: crate::BatchId::parse(batch_id)?,
+                    existing_batch_id: lash_vocabulary::identity::BatchId::parse(batch_id)?,
                 });
             }
             Ok(QueuedWorkDraftAdmission::Existing {
-                batch_id: crate::BatchId::parse(batch_id)?,
+                batch_id: lash_vocabulary::identity::BatchId::parse(batch_id)?,
             })
         }
         _ => Ok(QueuedWorkDraftAdmission::New),

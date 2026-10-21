@@ -3,10 +3,23 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::{
-    ActKind, Action, Atom, Block, Callee, Document, EffectName, Expr, FunctionCatalog, FunctionId,
-    FunctionName, InvalidReason, Literal, Name, Node, OperationRequirement, performed_by,
-};
+use lash_kernel_doc::ActKind;
+use lash_kernel_doc::Action;
+use lash_kernel_doc::Atom;
+use lash_kernel_doc::Block;
+use lash_kernel_doc::Callee;
+use lash_kernel_doc::Document;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::FunctionCatalog;
+use lash_kernel_doc::InvalidReason;
+use lash_kernel_doc::Literal;
+use lash_kernel_doc::Node;
+use lash_kernel_doc::performed_by;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::operations::OperationRequirement;
 
 use crate::refusal::{RefusalReason, Refused, RequiredBy, refused};
 

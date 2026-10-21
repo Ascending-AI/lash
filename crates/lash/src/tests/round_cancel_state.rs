@@ -11,9 +11,9 @@ const STATE_PLUGIN: &str = "round-cancel-state";
 const SET: &str = "state_set";
 const SET_OPERATION: &str = "tools.state_set";
 
-fn set_definition() -> lash_core::ToolDefinition {
+fn set_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
-    lash_core::ToolDefinition::raw(
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{SET}"),
         SET_OPERATION,
         "Sets the plugin's key to the call's symbol.",
@@ -99,7 +99,10 @@ impl ToolProvider for StatePlugin {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, crate::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        crate::plugins::PluginError,
+    > {
         Ok(vec![set_definition().manifest()])
     }
 
@@ -107,7 +110,7 @@ impl ToolProvider for StatePlugin {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == SET_OPERATION).then(|| Arc::new(set_definition().contract()))
     }
 
@@ -144,7 +147,7 @@ async fn committed_values(
 ) -> Result<std::collections::BTreeMap<String, serde_json::Value>> {
     let store = lash_execution_contracts::deployment::live_session_view(
         &core.store_factory,
-        &crate::SessionId::fixture(id.to_string()),
+        &lash_vocabulary::identity::SessionId::fixture(id.to_string()),
     )
     .await?
     .expect("the session's store");
@@ -214,7 +217,7 @@ async fn cancelled_sibling(answer: Answer) -> Result<CancelledRound> {
     .plugin(Arc::new(plugin.clone()))
     .build(crate::tests::host::runtime_lease_owner())?;
     let session = core
-        .session(crate::SessionId::parse(&id).expect("nonblank host identity"))
+        .session(lash_vocabulary::identity::SessionId::parse(&id).expect("nonblank host identity"))
         .create(crate::SessionCreation::root(mock_session_spec()))
         .await?;
     let handle = session.send(TurnInput::text("set both")).await?;

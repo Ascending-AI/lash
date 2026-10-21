@@ -133,7 +133,7 @@ pub(crate) fn print_regions(
 /// No printed local shadows its root ([`NamePlan`]), so the reader resolves
 /// it against the base document's effects alone.
 pub(crate) fn operation_path(effect: &k::EffectName) -> String {
-    match lash_kernel_dialect::QualifiedOperation::from_effect(effect) {
+    match lash_vocabulary::names::QualifiedOperation::from_effect(effect) {
         Ok(operation) => lash_kernel_dialect::spell_operation(
             lash_kernel_dialect::Spelling::TypeScript,
             &operation,

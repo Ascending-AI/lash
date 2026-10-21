@@ -1,4 +1,4 @@
-use crate::SessionId;
+use lash_vocabulary::identity::SessionId;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -304,7 +304,7 @@ impl SessionConfigField {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModelCallAddress {
     pub session_id: SessionId,
-    pub turn_id: crate::TurnId,
+    pub turn_id: lash_vocabulary::identity::TurnId,
     pub call_id: crate::LlmCallId,
     /// None before dispatch; otherwise the ordinal on the provider's request scope.
     pub attempt: Option<u32>,
@@ -329,7 +329,7 @@ pub struct SessionConfigChangedContext {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TurnFinalized {
     pub session_id: SessionId,
-    pub turn_id: crate::TurnId,
+    pub turn_id: lash_vocabulary::identity::TurnId,
     /// The same outcome kind the committed-turn reader returns.
     pub outcome: crate::store::TurnCommitOutcome,
 }
@@ -380,9 +380,9 @@ pub struct TurnHookReport {
 #[derive(Clone)]
 pub struct ToolResultProjectionContext {
     /// Who the call runs for: a session, or a process runtime.
-    pub owner: crate::RuntimeOwner,
+    pub owner: lash_vocabulary::identity::RuntimeOwner,
     pub call_id: crate::ToolCallId,
-    pub tool_id: crate::ToolId,
+    pub tool_id: lash_vocabulary::tool_contract::ToolId,
     /// Presentation decision input supplied before the call's settling commit (rule A).
     pub tool_name: String,
     /// Presentation decision input supplied before the call's settling commit (rule A).
@@ -521,12 +521,12 @@ pub struct AssistantStreamFinishedContext {
 /// The session `owner` names, or [`PluginError::NotASessionRuntime`] naming
 /// `operation` for a process runtime.
 pub fn require_session_owner<'a>(
-    owner: &'a crate::RuntimeOwner,
+    owner: &'a lash_vocabulary::identity::RuntimeOwner,
     operation: &'static str,
 ) -> Result<&'a SessionId, PluginError> {
     match owner {
-        crate::RuntimeOwner::Session(session_id) => Ok(session_id),
-        crate::RuntimeOwner::Process(process_id) => {
+        lash_vocabulary::identity::RuntimeOwner::Session(session_id) => Ok(session_id),
+        lash_vocabulary::identity::RuntimeOwner::Process(process_id) => {
             Err(crate::runtime::not_a_session_runtime(operation, process_id))
         }
     }
@@ -534,11 +534,13 @@ pub fn require_session_owner<'a>(
 
 /// The trace context of work `owner` does: its session, or none for a
 /// process runtime.
-pub(crate) fn owner_trace_context(owner: &crate::RuntimeOwner) -> lash_trace::TraceContext {
+pub(crate) fn owner_trace_context(
+    owner: &lash_vocabulary::identity::RuntimeOwner,
+) -> lash_trace::TraceContext {
     match owner {
-        crate::RuntimeOwner::Session(session_id) => {
+        lash_vocabulary::identity::RuntimeOwner::Session(session_id) => {
             lash_trace::TraceContext::default().for_session(session_id.clone())
         }
-        crate::RuntimeOwner::Process(_) => lash_trace::TraceContext::default(),
+        lash_vocabulary::identity::RuntimeOwner::Process(_) => lash_trace::TraceContext::default(),
     }
 }

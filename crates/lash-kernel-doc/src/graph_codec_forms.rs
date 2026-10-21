@@ -5,16 +5,51 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{unsupported, variant};
-use crate::graph_tokens::{
-    CanonicalFault, CodecVariant, TokenCodec, TokenError, TokenReader, TokenWriter,
-};
-use crate::{
-    ActExpr, ActKind, Action, AssignOrder, Atom, Block, Bytes, Callee, Catch, Closure, Document,
-    Expr, Float, Formula, Function, FunctionBody, FunctionDefinition, FunctionId, Guard,
-    Implementation, Integer, JoinMode, Literal, Manifest, MapEntry, Member, Name, NumberPolicy,
-    Operand, Place, ProjectionRead, Protocol, QualifiedName, RecordEntry, Rhs, Signature, Stmt,
-    TryStmt, Type,
-};
+use crate::ActExpr;
+use crate::ActKind;
+use crate::Action;
+use crate::AssignOrder;
+use crate::Atom;
+use crate::Block;
+use crate::Bytes;
+use crate::Callee;
+use crate::Catch;
+use crate::Closure;
+use crate::Document;
+use crate::Expr;
+use crate::Float;
+use crate::Formula;
+use crate::Function;
+use crate::FunctionBody;
+use crate::FunctionDefinition;
+use crate::Guard;
+use crate::Implementation;
+use crate::Integer;
+use crate::JoinMode;
+use crate::Literal;
+use crate::Manifest;
+use crate::MapEntry;
+use crate::Member;
+use crate::NumberPolicy;
+use crate::Operand;
+use crate::Place;
+use crate::ProjectionRead;
+use crate::Protocol;
+use crate::RecordEntry;
+use crate::Rhs;
+use crate::Stmt;
+use crate::TryStmt;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::legacy_names::QualifiedName;
+use lash_vocabulary::tokens::CanonicalFault;
+use lash_vocabulary::tokens::CodecVariant;
+use lash_vocabulary::tokens::TokenCodec;
+use lash_vocabulary::tokens::TokenError;
+use lash_vocabulary::tokens::TokenReader;
+use lash_vocabulary::tokens::TokenWriter;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 use crate::{FunctionRepresentation, FunctionValue, StartAdapter, StartConvention};
 
@@ -1132,7 +1167,8 @@ impl TokenCodec for Implementation {
 /// decoding its body (FIG-6931): the fields before the implementation, and
 /// which implementation it states.
 pub(crate) fn decode_header(bytes: &[u8]) -> Result<crate::FunctionHeader, TokenError> {
-    let mut input = TokenReader::new(bytes).with_data_limits(crate::KernelDataLimits::standard());
+    let mut input = TokenReader::new(bytes)
+        .with_data_limits(lash_vocabulary::data_limits::KernelDataLimits::standard());
     input.expect_struct(8)?;
     Ok(crate::FunctionHeader {
         kernel: input.unsigned_u32()?,

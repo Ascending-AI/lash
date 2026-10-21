@@ -1,7 +1,7 @@
 //! Host front-door admission for durable tool intents.
 
-use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt;
+use lash_vocabulary::identity::SessionId;
 use tracing::Instrument;
 
 /// Typed idempotency key for one host-submitted tool intent.
@@ -48,7 +48,7 @@ impl ToolIntentIngressKey {
         intent_index: u32,
     ) -> Self {
         let identity = lash_execution_contracts::tool_intent::derive_tool_intent_identity(
-            &lash_core::RuntimeOwner::Session(session_id.clone()),
+            &lash_vocabulary::identity::RuntimeOwner::Session(session_id.clone()),
             execution_scope_id.as_ref(),
             tool_call_id,
             intent_index,
@@ -107,14 +107,14 @@ pub enum ToolIntentIngressRefusal {
     /// Refuses an identity already bound to a different intent kind.
     IdentityBoundToDifferentIntent {
         /// Intent kind already bound to this identity.
-        recorded_kind: lash_core::ToolIntentKind,
+        recorded_kind: lash_vocabulary::ToolIntentKind,
         /// Intent kind supplied by the rejected submission.
-        submitted_kind: lash_core::ToolIntentKind,
+        submitted_kind: lash_vocabulary::ToolIntentKind,
     },
     /// Refuses a duplicate intent identity.
     DuplicateIdentity {
         /// Intent kind associated with the duplicate identity.
-        kind: lash_core::ToolIntentKind,
+        kind: lash_vocabulary::ToolIntentKind,
     },
     /// Refuses a recorded outcome that is not part of the intent protocol.
     RecordedOutcomeOutsideIntentProtocol {
@@ -203,7 +203,7 @@ impl SubmissionTrace {
 enum RealizationFailure {
     Refused(ToolIntentIngressRefusal),
     Command(
-        lash_core::ToolIntentKind,
+        lash_vocabulary::ToolIntentKind,
         lash_execution_contracts::plugin_error::PluginError,
     ),
 }
@@ -517,7 +517,7 @@ impl ToolIntentIngress {
                 recorded_replay_key: identity.replay_key.clone(),
             });
         }
-        let own = lash_core::RuntimeOwner::Session(self.session_id.clone());
+        let own = lash_vocabulary::identity::RuntimeOwner::Session(self.session_id.clone());
         if identity.owner != own {
             return Some(ToolIntentIngressRefusal::ForeignSession {
                 expected: own.to_string(),
@@ -585,14 +585,14 @@ impl ToolIntentIngress {
                     )
                 }
                 lash_core::ProcessEffectOutcome::Definition { definition } => match kind {
-                    lash_core::ToolIntentKind::PublishDefinition => {
+                    lash_vocabulary::ToolIntentKind::PublishDefinition => {
                         lash_execution_contracts::tool_intent_outcome::ToolIntentRealized::PublishDefinition(definition)
                     }
-                    lash_core::ToolIntentKind::GetDefinition => {
+                    lash_vocabulary::ToolIntentKind::GetDefinition => {
                         lash_execution_contracts::tool_intent_outcome::ToolIntentRealized::GetDefinition(definition)
                     }
-                    lash_core::ToolIntentKind::StartProcess
-                    | lash_core::ToolIntentKind::CancelProcess => {
+                    lash_vocabulary::ToolIntentKind::StartProcess
+                    | lash_vocabulary::ToolIntentKind::CancelProcess => {
                         return Err(Self::outside_protocol_outcome("definition"));
                     }
                 },
@@ -743,7 +743,7 @@ impl ToolIntentIngress {
         // the identity answers the process the key first minted, as the
         // registry would.
         if existing.payload_hash != submitted.payload_hash
-            && kind != lash_core::ToolIntentKind::StartProcess
+            && kind != lash_vocabulary::ToolIntentKind::StartProcess
         {
             return Err(RealizationFailure::Refused(
                 ToolIntentIngressRefusal::DuplicateIdentity { kind },
@@ -881,7 +881,7 @@ impl ToolIntentIngress {
     /// Retained identities fence starts and cancellations. Changed content
     /// reaches the host as a typed duplicate-identity refusal.
     fn realization_failure(
-        kind: lash_core::ToolIntentKind,
+        kind: lash_vocabulary::ToolIntentKind,
         error: lash_execution_contracts::plugin_error::PluginError,
     ) -> RealizationFailure {
         if lash_execution_contracts::plugin_error::is_durable_identity_conflict(&error) {

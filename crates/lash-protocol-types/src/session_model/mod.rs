@@ -235,10 +235,10 @@ impl NoProgressBudget {
 }
 
 use crate::MessageOrigin;
-use crate::ToolDefinition;
 use crate::TurnReply;
 use crate::llm::types::LlmToolSpec;
 use crate::plugin::{CheckpointKind, PluginMessage, PluginRuntimeEvent};
+use lash_vocabulary::tool_contract::ToolDefinition;
 
 mod protocol_payload;
 pub use protocol_payload::ProtocolPayload;

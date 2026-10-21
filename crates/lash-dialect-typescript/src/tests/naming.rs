@@ -4,7 +4,12 @@
 use std::collections::BTreeMap;
 
 use lash_kernel_dialect::readability::SurfacePrinter as _;
-use lash_kernel_doc::{self as k, EffectName, Name, Param, Signature, Type};
+use lash_kernel_doc as k;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 use super::{lower_against, print_document};
 use crate::TypeScript;

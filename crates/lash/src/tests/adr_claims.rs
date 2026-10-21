@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::support::TurnInput;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 /// The RLM factory's plugin-owned `lash_vm` engine is installed for a
 /// root and for a child session alike, and again by a cold core; each
@@ -19,31 +19,42 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
             .build(crate::tests::host::runtime_lease_owner())
     };
     let core = build()?;
-    core.session(crate::SessionId::parse("materialize-run").expect("nonblank host identity"))
-        .create(crate::SessionCreation::root(mock_session_spec()))
-        .await?;
-    core.session(crate::SessionId::parse("materialize-child").expect("nonblank host identity"))
-        .create(crate::SessionCreation::child_of(
-            "materialize-run".into(),
-            mock_session_spec(),
-        ))
-        .await?;
-    core.session(crate::SessionId::parse("materialize-stated").expect("nonblank host identity"))
-        .create(crate::SessionCreation {
-            parent: Some("materialize-run".into()),
-            prompt_plan: None,
-            spec: mock_session_spec().plugin_options(
-                lash_core::PluginOptions::typed(
-                    lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
-                    lash_rlm_types::RlmCreateExtras::default(),
-                )
-                .map_err(EmbedError::ProtocolTurnOptions)?,
-            ),
-        })
-        .await?;
+    core.session(
+        lash_vocabulary::identity::SessionId::parse("materialize-run")
+            .expect("nonblank host identity"),
+    )
+    .create(crate::SessionCreation::root(mock_session_spec()))
+    .await?;
+    core.session(
+        lash_vocabulary::identity::SessionId::parse("materialize-child")
+            .expect("nonblank host identity"),
+    )
+    .create(crate::SessionCreation::child_of(
+        "materialize-run".into(),
+        mock_session_spec(),
+    ))
+    .await?;
+    core.session(
+        lash_vocabulary::identity::SessionId::parse("materialize-stated")
+            .expect("nonblank host identity"),
+    )
+    .create(crate::SessionCreation {
+        parent: Some("materialize-run".into()),
+        prompt_plan: None,
+        spec: mock_session_spec().plugin_options(
+            lash_core::PluginOptions::typed(
+                lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
+                lash_rlm_types::RlmCreateExtras::default(),
+            )
+            .map_err(EmbedError::ProtocolTurnOptions)?,
+        ),
+    })
+    .await?;
     for id in ["materialize-run", "materialize-child", "materialize-stated"] {
         let session = core
-            .session(crate::SessionId::parse(id).expect("nonblank host identity"))
+            .session(
+                lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"),
+            )
             .open()
             .await?;
         assert_eq!(
@@ -59,7 +70,9 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
     );
     for id in ["materialize-run", "materialize-child"] {
         let session = cold
-            .session(crate::SessionId::parse(id).expect("nonblank host identity"))
+            .session(
+                lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"),
+            )
             .open()
             .await?;
         assert_eq!(
@@ -85,7 +98,10 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
         "two plugin-owned engines of one kind must be refused"
     );
     let bad = cold
-        .session(crate::SessionId::parse("materialize-refused").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("materialize-refused")
+                .expect("nonblank host identity"),
+        )
         .create(crate::SessionCreation {
             parent: Some("materialize-run".into()),
             prompt_plan: None,
@@ -101,7 +117,8 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
     assert!(bad.is_err(), "unknown creation options must be refused");
     assert!(matches!(
         cold.session(
-            crate::SessionId::parse("materialize-refused").expect("nonblank host identity")
+            lash_vocabulary::identity::SessionId::parse("materialize-refused")
+                .expect("nonblank host identity")
         )
         .open()
         .await,
@@ -133,21 +150,24 @@ async fn resumed_session_observe_wait_cancel_shift_keep_original_owners() -> Res
     let receiving = build(receiving_backend.clone(), "receiving-answer")?;
     let id = "owner-operation-matrix";
     for core in [&source, &receiving] {
-        core.session(crate::SessionId::parse(id).expect("nonblank host identity"))
-            .create(crate::SessionCreation::root(mock_session_spec()))
-            .await?;
+        core.session(
+            lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"),
+        )
+        .create(crate::SessionCreation::root(mock_session_spec()))
+        .await?;
     }
     let session = source
-        .session(crate::SessionId::parse(id).expect("nonblank host identity"))
+        .session(lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"))
         .open()
         .await?;
     let receiving_session = receiving
-        .session(crate::SessionId::parse(id).expect("nonblank host identity"))
+        .session(lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"))
         .open()
         .await?;
     let receiving_output = receiving_session
         .send(TurnInput::text("receiving-row"))
-        .id(crate::TurnId::parse("receiving-run").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("receiving-run")
+            .expect("nonblank host identity"))
         .output()
         .await?;
     assert_eq!(
@@ -230,7 +250,7 @@ async fn resumed_session_observe_wait_cancel_shift_keep_original_owners() -> Res
     let output = resumed
         .durable()
         .send(TurnInput::text("run on the original backend"))
-        .id(crate::TurnId::parse("source-run").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("source-run").expect("nonblank host identity"))
         .output()
         .await?;
     assert_eq!(

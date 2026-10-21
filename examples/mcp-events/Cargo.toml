@@ -13,6 +13,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+lash-vocabulary = { workspace = true }
 lash = { workspace = true, features = ["mcp"] }
 serde_json = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

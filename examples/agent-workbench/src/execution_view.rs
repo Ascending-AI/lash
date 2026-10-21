@@ -12,7 +12,6 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use lash::ProcessId;
 use lash::tracing::{
     TraceLanguageExecutionIdentity, TraceLanguageExecutionStatus, TraceRuntimeScope,
     TraceRuntimeSubject,
@@ -27,6 +26,7 @@ use lash::workflow::{
     WorkflowOverlayOccurrence, WorkflowOverlaySettlement, WorkflowOverlaySite,
     WorkflowOverlaySiteReport,
 };
+use lash_vocabulary::identity::ProcessId;
 use serde::Serialize;
 
 /// One execution as the page draws it.

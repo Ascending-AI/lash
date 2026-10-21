@@ -540,10 +540,6 @@
       ],
       "type": "object"
     },
-    "DocumentId": {
-      "pattern": "^[0-9a-f]{64}$",
-      "type": "string"
-    },
     "Duration": {
       "properties": {
         "nanos": {
@@ -1154,6 +1150,27 @@
         "wait_deadline"
       ],
       "type": "string"
+    },
+    "LinkId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "LinkedStart": {
+      "additionalProperties": false,
+      "description": "The immutable Link and selected start that determine process definition identity.",
+      "properties": {
+        "link": {
+          "$ref": "#/$defs/LinkId"
+        },
+        "selector": {
+          "$ref": "#/$defs/StartSelector"
+        }
+      },
+      "required": [
+        "link",
+        "selector"
+      ],
+      "type": "object"
     },
     "LlmOutputPart": {
       "oneOf": [
@@ -2073,7 +2090,7 @@
           "type": "object"
         },
         {
-          "description": "A composition whose members no kernel type states, or whose meet\ngrows past the projection's bound\n([`lash_kernel_check::MAX_PROJECTED_TYPE_NODES`]), at the JSON\npointer `schema_path`: a value of the schema could not be typed.",
+          "description": "A composition whose members no kernel type states, or whose meet\ngrows past the projection's bound\n([`crate::schema::MAX_PROJECTED_TYPE_NODES`]), at the JSON\npointer `schema_path`: a value of the schema could not be typed.",
           "properties": {
             "kind": {
               "const": "unprojectable",
@@ -2138,6 +2155,41 @@
           "const": "event",
           "description": "A live record inside the span.",
           "type": "string"
+        }
+      ]
+    },
+    "StartSelector": {
+      "description": "Main requires a main block; Export names a top-level function and never runs main.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "main",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "export",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/Name"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -2452,6 +2504,7 @@
       "type": "string"
     },
     "ToolIntentIdentity": {
+      "description": "Generates the canonical tool-intent kind set from the vocabulary in\n[`crate::tool_intents`].",
       "properties": {
         "execution_scope_id": {
           "description": "The enclosing execution-scope id: a turn id for turn scope and a\nprocess id for process scope.",
@@ -3295,7 +3348,7 @@
         "document": {
           "anyOf": [
             {
-              "$ref": "#/$defs/WorkflowDocumentRef"
+              "$ref": "#/$defs/LinkedStart"
             },
             {
               "type": "null"
@@ -3498,7 +3551,7 @@
           "type": "integer"
         },
         "document": {
-          "$ref": "#/$defs/WorkflowDocumentRef"
+          "$ref": "#/$defs/LinkedStart"
         },
         "engine_execution_id": {
           "type": [
@@ -6069,60 +6122,6 @@
           "type": "object"
         }
       ]
-    },
-    "WorkflowDocumentEntry": {
-      "description": "The entry of a [`WorkflowDocumentRef`].",
-      "oneOf": [
-        {
-          "description": "The document's `main`: a session cell.",
-          "properties": {
-            "kind": {
-              "const": "main",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind"
-          ],
-          "type": "object"
-        },
-        {
-          "description": "One entry of the document: a declared function a host may start,\nwhich is what a process runs.",
-          "properties": {
-            "function": {
-              "$ref": "#/$defs/Name"
-            },
-            "kind": {
-              "const": "entry",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "function"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "WorkflowDocumentRef": {
-      "additionalProperties": false,
-      "description": "Which workflow document an execution runs, and where it enters it. It\nnames the document; it is never the document. A host reads the document\nthe reference names through the facade's workflow inspection and may\ncache it under this value, which is immutable for a process: a running\ninstance keeps the document it was admitted under.",
-      "properties": {
-        "document": {
-          "$ref": "#/$defs/DocumentId",
-          "description": "The identity of the admitted kernel document: the hash of its\ncontent, kernel version and manifest included."
-        },
-        "entry": {
-          "$ref": "#/$defs/WorkflowDocumentEntry",
-          "description": "Where the execution enters the document."
-        }
-      },
-      "required": [
-        "document",
-        "entry"
-      ],
-      "type": "object"
     }
   },
   "$id": "https://lash.dev/schemas/trace-record/v37",

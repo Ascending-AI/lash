@@ -3,8 +3,8 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::NodeId;
 use crate::session_graph::{SessionGraph, SessionNodeRecord};
+use lash_vocabulary::identity::NodeId;
 
 /// The base of a store-read window: the current frame's `FrameOpen`, which
 /// is the one node of the graph allowed a parent outside it (ADR 0112 §5).

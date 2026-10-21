@@ -6,12 +6,20 @@ use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::ast::{Block, Function, Node, Site};
-use crate::graph_tokens::{encode_body, logical_digest};
-use crate::name::{DocumentId, EffectName, FunctionId, FunctionName, Name};
+use crate::ast::Block;
+use crate::ast::Function;
+use crate::ast::Node;
 use crate::number::NumberPolicy;
-use crate::requirement::OperationRequirement;
-use crate::types::Signature;
+use lash_vocabulary::legacy_names::DocumentId;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::operations::OperationRequirement;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::tokens::encode_body;
+use lash_vocabulary::tokens::logical_digest;
+use lash_vocabulary::types::Signature;
 
 /// The kernel version this crate's forms, values, evaluation order,
 /// nested-action positions, task scheduling, site derivation and canonical form are
@@ -180,10 +188,13 @@ impl Document {
     fn walk_sites(&self) -> (Vec<(Site, Node<'_>)>, Vec<Site>) {
         let mut nodes = Vec::new();
         let mut actions = Vec::new();
-        let units = std::iter::once((crate::Unit::Main, &self.main)).chain(
-            self.functions
-                .iter()
-                .map(|(name, function)| (crate::Unit::Function(name.clone()), &function.body)),
+        let units = std::iter::once((lash_vocabulary::sites::Unit::Main, &self.main)).chain(
+            self.functions.iter().map(|(name, function)| {
+                (
+                    lash_vocabulary::sites::Unit::Function(name.clone()),
+                    &function.body,
+                )
+            }),
         );
         let mut path = Vec::new();
         let mut pending = Vec::new();
@@ -236,12 +247,15 @@ impl Document {
     }
 
     pub fn from_json(text: &str) -> Result<Self, DecodeError> {
-        Self::from_json_with_limits(text, crate::KernelDataLimits::standard())
+        Self::from_json_with_limits(
+            text,
+            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+        )
     }
     /// Read under the host's recursive JSON safety policy.
     pub fn from_json_with_limits(
         text: &str,
-        limits: crate::KernelDataLimits,
+        limits: lash_vocabulary::data_limits::KernelDataLimits,
     ) -> Result<Self, DecodeError> {
         crate::document_work::note(|work| work.json_decodes += 1);
         from_versioned_json_with_limits(text, limits)
@@ -282,7 +296,7 @@ pub(crate) fn to_json<T: Serialize>(value: &T) -> Result<String, EncodeError> {
 
 pub(crate) fn from_json_with_limits<T: DeserializeOwned>(
     text: &str,
-    limits: crate::KernelDataLimits,
+    limits: lash_vocabulary::data_limits::KernelDataLimits,
 ) -> Result<T, DecodeError> {
     let limit = limits.document_json_depth();
     let depth = json_depth(text);
@@ -340,7 +354,7 @@ fn json_depth(text: &str) -> usize {
 /// build cannot disguise an unsupported version as a form decoding fault.
 pub(crate) fn from_versioned_json_with_limits<T: DeserializeOwned>(
     text: &str,
-    limits: crate::KernelDataLimits,
+    limits: lash_vocabulary::data_limits::KernelDataLimits,
 ) -> Result<T, DecodeError> {
     #[derive(Deserialize)]
     struct Version {

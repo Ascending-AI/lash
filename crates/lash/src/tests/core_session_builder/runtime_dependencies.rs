@@ -5,8 +5,8 @@ use lash_execution_contracts::process::ProcessLifecycle as _;
 use lash_execution_contracts::process::ProcessObserverRegistry as _;
 use lash_execution_contracts::process::ProcessRegistrar as _;
 use lash_execution_contracts::process::ProcessRetention as _;
-use lash_protocol_types::ProcessId;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 
 // =============================================================================
 // Runtime dependencies come from one backend
@@ -481,7 +481,8 @@ async fn fork_observer_selection_is_recoverable_and_selective() -> Result<()> {
         .expect("remove the partially published observer");
     created_session(
         &core,
-        crate::SessionId::parse("fork-observer-branch").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("fork-observer-branch")
+            .expect("nonblank host identity"),
     )
     .await
     .open_with_state(lash_core::RuntimeSessionState {
@@ -530,7 +531,8 @@ async fn fork_observer_selection_is_recoverable_and_selective() -> Result<()> {
         .expect("deliberately remove the recovered observer");
     created_session(
         &core,
-        crate::SessionId::parse("fork-observer-branch").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("fork-observer-branch")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -796,7 +798,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
     );
     created_session(
         &core,
-        crate::SessionId::parse(session_id).expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(session_id).expect("nonblank host identity"),
     )
     .await
     .open()
@@ -821,7 +823,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
     );
     created_session(
         &core,
-        crate::SessionId::parse(session_id).expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(session_id).expect("nonblank host identity"),
     )
     .await
     .open()
@@ -855,7 +857,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
         .await?;
     created_session(
         &core,
-        crate::SessionId::parse(session_id).expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(session_id).expect("nonblank host identity"),
     )
     .await
     .open()
@@ -909,7 +911,7 @@ async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Re
                 session_id: session_id.clone(),
                 relation: lash_core::SessionRelation::Fork {
                     source_session_id: SessionId::fixture(format!("nested-source-{case}")),
-                    source_node_id: Some(lash_core::NodeId::fixture(format!(
+                    source_node_id: Some(lash_vocabulary::identity::NodeId::fixture(format!(
                         "nested-source-node-{case}"
                     ))),
                 },
@@ -1025,7 +1027,8 @@ async fn a_fork_runs_under_its_branch_points_generation_not_what_the_host_passes
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .build(crate::tests::host::runtime_lease_owner())?;
     core.session(
-        crate::SessionId::parse("generation-fork-host-default").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("generation-fork-host-default")
+            .expect("nonblank host identity"),
     )
     .create(crate::SessionCreation::root(
         mock_session_spec().generation(host_generation.clone()),
@@ -1097,7 +1100,10 @@ async fn a_fork_runs_under_its_branch_points_generation_not_what_the_host_passes
     .await?;
 
     let branch = core
-        .session(crate::SessionId::parse("generation-fork-branch").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("generation-fork-branch")
+                .expect("nonblank host identity"),
+        )
         .open()
         .await?;
     let branch_state = branch.admin().state().persist_current().await?;

@@ -127,7 +127,8 @@ async fn compacted_with(provider: ProviderHandle, script: Script) -> Result<Answ
     .serve_test_llm_profile(provider, mock_llm_profile_spec())
     .plugin(Arc::new(compactor))
     .build(lash_facade_tests::runtime_lease_owner())?;
-    let id = lash::SessionId::parse("direct-lanes").expect("nonblank host identity");
+    let id = lash_vocabulary::identity::SessionId::parse("direct-lanes")
+        .expect("nonblank host identity");
     core.session(id.clone())
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;

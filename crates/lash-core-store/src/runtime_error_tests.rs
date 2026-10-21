@@ -1,5 +1,5 @@
-use crate::SessionId;
 use crate::runtime_error::{RuntimeError, RuntimeErrorClass, RuntimeErrorCode};
+use lash_vocabulary::identity::SessionId;
 
 /// The retired replacement-abort codes are not aliased (clean cutover): a
 /// stored error carrying one decodes as a foreign code, never as the
@@ -668,7 +668,7 @@ mod typed_refusal_causes {
             at: RefusalSite::Creation,
             ..owner_refusal()
         };
-        let session_id = crate::SessionId::from("child");
+        let session_id = lash_vocabulary::identity::SessionId::from("child");
         let error = RuntimeError::session_config_refused(&session_id, refusal.clone());
         assert_eq!(error.code, RuntimeErrorCode::SessionConfigRefused);
         assert!(error.is_terminal() && !error.is_retryable());
@@ -690,7 +690,7 @@ mod typed_refusal_causes {
 #[test]
 fn worker_exhaustion_exposes_its_host_resource() {
     use crate::runtime_error::RuntimeErrorCause;
-    use lash_vm_protocol::{
+    use lash_protocol_types::engine_fault::{
         InfrastructureOutcome,
         page::{HeapFault, HostResource, PageRefusal},
     };

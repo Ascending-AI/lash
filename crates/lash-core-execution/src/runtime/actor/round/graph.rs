@@ -26,14 +26,23 @@
 
 use std::cell::Cell;
 
-use lash_core_store::checkpoint_graph::{
-    DecodeLimits, GraphDecoder, GraphRefusal, GraphStaging, NodeId, NodeKind, TokenCodec,
-    TokenError, TokenReader, TokenWriter, TypedBody,
-};
-use lash_core_store::tool_run::{
-    AttemptOutcome, AvailableEvidence, CompletionSource, KnownFailure, KnownFailureReason,
-    LimitCause, MaterialDigest, MaterialLocation, MaterialOwner, MaterialRef, MaterialRole,
-};
+use lash_core_store::checkpoint_graph::DecodeLimits;
+use lash_core_store::checkpoint_graph::GraphDecoder;
+use lash_core_store::checkpoint_graph::GraphRefusal;
+use lash_core_store::checkpoint_graph::GraphStaging;
+use lash_core_store::checkpoint_graph::NodeId;
+use lash_core_store::checkpoint_graph::NodeKind;
+use lash_core_store::checkpoint_graph::TypedBody;
+use lash_core_store::tool_run::AttemptOutcome;
+use lash_core_store::tool_run::AvailableEvidence;
+use lash_core_store::tool_run::CompletionSource;
+use lash_core_store::tool_run::KnownFailure;
+use lash_core_store::tool_run::KnownFailureReason;
+use lash_core_store::tool_run::MaterialDigest;
+use lash_core_store::tool_run::MaterialLocation;
+use lash_core_store::tool_run::MaterialOwner;
+use lash_core_store::tool_run::MaterialRef;
+use lash_core_store::tool_run::MaterialRole;
 use lash_durable::domain::graph::RunFactKind;
 use lash_protocol_types::{
     tool_output::graph::AnswerSlot, tool_output::graph::FrozenJson,
@@ -42,6 +51,11 @@ use lash_protocol_types::{
     tool_output::graph::decode_output, tool_output::graph::encode_json,
     tool_output::graph::encode_output,
 };
+use lash_vocabulary::tokens::TokenCodec;
+use lash_vocabulary::tokens::TokenError;
+use lash_vocabulary::tokens::TokenReader;
+use lash_vocabulary::tokens::TokenWriter;
+use lash_vocabulary::tool_contract::LimitCause;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -730,7 +744,7 @@ pub fn stage_value(
     value: &serde_json::Value,
 ) -> Result<MaterialNode, GraphRefusal> {
     let mut body = TokenWriter::new();
-    body.sum(lash_protocol_types::tool_output::graph::FROZEN_JSON, 1);
+    body.sum(lash_vocabulary::tokens::FROZEN_JSON, 1);
     encode_json(value, &mut body);
     staging
         .encode(
@@ -844,7 +858,7 @@ pub struct PinnedMember {
     pub call: ToolCallId,
     pub tool: String,
     pub request: MaterialRef,
-    pub policy: lash_protocol_types::ExecutionPolicy,
+    pub policy: lash_vocabulary::tool_contract::ExecutionPolicy,
     pub limit_expires_at_ms: u64,
     pub limit_max_slice_ms: u64,
     /// The completion wait pinned with the admission, by its id's hex: a
@@ -852,7 +866,7 @@ pub struct PinnedMember {
     /// park's deadline is the wait row's alone.
     pub wait_id: Option<String>,
     pub trace: Option<lash_trace::DurableTraceScope>,
-    pub declaration: Option<crate::ToolDeclaration>,
+    pub declaration: Option<lash_vocabulary::tool_declaration::ToolDeclaration>,
     /// The callbacks the admission bound ([`ExecutionDraft::binding`]).
     ///
     /// [`ExecutionDraft::binding`]: super::ExecutionDraft::binding
@@ -902,7 +916,7 @@ impl PinnedMember {
         owner: &lash_durable::domain::OwnerKey,
         waits: &super::PinnedWaits,
     ) -> Result<super::ExecutionDraft, &'static str> {
-        let tool = crate::ToolId::new(self.tool.clone());
+        let tool = lash_vocabulary::tool_contract::ToolId::new(self.tool.clone());
         let pinned = self
             .wait_id
             .as_deref()

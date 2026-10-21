@@ -55,8 +55,8 @@ pub fn assistant_prose(events: &[TurnActivity]) -> String {
 }
 
 /// `tools.app_lookup`, a tool whose attempt may defer.
-pub fn app_tool_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+pub fn app_tool_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:app_lookup",
         "tools.app_lookup",
         "Look up app state.",
@@ -70,8 +70,8 @@ pub fn app_tool_definition() -> lash_core::ToolDefinition {
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
     .with_declaration(
-        lash_core::ToolDeclaration::deferring(),
-        Some(lash_core::ParkBound::Within(
+        lash_vocabulary::tool_declaration::ToolDeclaration::deferring(),
+        Some(lash_vocabulary::tool_contract::ParkBound::Within(
             std::time::Duration::from_secs(120),
         )),
     )
@@ -86,7 +86,10 @@ impl ToolProvider for AppTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![app_tool_definition().manifest()])
     }
 
@@ -94,7 +97,7 @@ impl ToolProvider for AppTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.app_lookup").then(|| Arc::new(app_tool_definition().contract()))
     }
 
@@ -113,7 +116,10 @@ impl ToolProvider for FailingAppTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![app_tool_definition().manifest()])
     }
 
@@ -121,7 +127,7 @@ impl ToolProvider for FailingAppTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.app_lookup").then(|| Arc::new(app_tool_definition().contract()))
     }
 
@@ -152,7 +158,10 @@ impl ToolProvider for PendingAppTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![app_tool_definition().manifest()])
     }
 
@@ -160,7 +169,7 @@ impl ToolProvider for PendingAppTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.app_lookup").then(|| Arc::new(app_tool_definition().contract()))
     }
 

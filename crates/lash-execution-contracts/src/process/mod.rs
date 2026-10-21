@@ -39,18 +39,17 @@ pub use effect_summary::{
     ProcessEffectReport, ProcessEffectReportError, tool_failure_code,
 };
 pub use engine::{
-    AdmittedProcessIdentity, InlineDefinition, InlineStarts, InspectedProcessDefinition,
-    OwnedOperation, OwnedOperations, PerformedEffects, ProcessDocument, ProcessDocumentProvider,
-    ProcessDocumentRead, ProcessDocumentRefRead, ProcessEngine, ProcessEngineAdmission,
-    ProcessExecutionDocumentRead, ProcessInfraError, ProcessRunOutcome, ProcessTraceClass,
-    SettledRan,
+    AdmittedProcessIdentity, InlineCode, InlineDefinition, InlineRequest, InlineStarts,
+    InspectedProcessDefinition, ProcessDocument, ProcessDocumentProvider, ProcessDocumentRead,
+    ProcessDocumentRefRead, ProcessEngine, ProcessEngineAdmission, ProcessExecutionDocumentRead,
+    ProcessInfraError, ProcessRunOutcome, ProcessTraceClass, SettledRan,
 };
 pub use engine_state::{
     CapacityCause, CapacityVerdict, EngineAction, EngineEffectReads, EngineEvent, EngineReadError,
     EngineState, EngineStateFormat, EngineStateMigration, EngineStateRefusal, EngineStatus,
     EngineStatusProjection, EngineStepAnswer, EngineStepKind, EngineStepRefusal, EngineStepRun,
-    EngineSteps, EngineWake, KeyName, StepCandidate, StepManifest, StepName, StepPages,
-    StepPublication, StepRequest,
+    EngineSteps, EngineWake, KeyName, MigrationError, StepCandidate, StepManifest, StepName,
+    StepPages, StepPublication, StepRequest,
 };
 pub use events::{
     AbandonEvidence, AbandonWriter, ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEvent,
@@ -61,27 +60,93 @@ pub use events::{
     ReleasedProcessEvent, release_process_event_payload, restore_released_process_event,
     terminal_append_request,
 };
-pub use model::{
-    Ancestry, DeclaredDefinitionLaunch, DeclaredInlineLaunch, DeclaredLaunch,
-    DeclaredProcessIdentity, EngineLaunch, EngineSettings, HandleId, InvalidStartKey, Lifetime,
-    LifetimeDecision, LifetimePolicy, PreparedProcessRegistration, ProcessCancelReceipt,
-    ProcessChange, ProcessChangeCursor, ProcessChangeKind, ProcessCompletionOutcome,
-    ProcessComponentConfig, ProcessComponentEntry, ProcessComponentId, ProcessComponentIdError,
-    ProcessConfigKey, ProcessEnv, ProcessEnvBuilder, ProcessEnvLoadError, ProcessEnvRef,
-    ProcessEnvRefusal, ProcessEnvStore, ProcessExecutionContext, ProcessExternalRef,
-    ProcessHandleView, ProcessId, ProcessIdMint, ProcessIdentity, ProcessInput,
-    ProcessLifecycleState, ProcessLimits, ProcessLineage, ProcessListFilter, ProcessListMode,
-    ProcessModel, ProcessObserverBy, ProcessOriginator, ProcessOriginatorFilter, ProcessOutcome,
-    ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistrationOutcome,
-    ProcessRegistrationReceipt, ProcessSessionDeleteReport, ProcessStartDeclaration,
-    ProcessStartOptions, ProcessStartReceipt, ProcessStartRegistration, ProcessStartRequest,
-    ProcessStartTarget, ProcessStatus, ProcessStatusFilter, ProcessTombstone, ProcessWaits,
-    RetiredProcessStatus, SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef,
-    ScopeStorageError, SessionId, SessionScope, SessionScopeId, StartCx, StartCxError, StartKey,
-    StoreRealization, TerminalProcessStatus, WaitKind, WaitSiteUnavailable, WaitState,
-    artifact_referrer_ended, artifact_store_plugin_error, lifetime, load_process_env,
-    mint_process_id, process_child_session_id, process_session_id, process_session_turn_id,
-};
+pub use lash_vocabulary::identity::ProcessId;
+pub use lash_vocabulary::identity::SessionId;
+pub use model::Ancestry;
+pub use model::DeclaredDefinitionLaunch;
+pub use model::DeclaredInlineLaunch;
+pub use model::DeclaredLaunch;
+pub use model::DeclaredProcessIdentity;
+pub use model::EngineLaunch;
+pub use model::EngineSettings;
+pub use model::HandleId;
+pub use model::InvalidStartKey;
+pub use model::Lifetime;
+pub use model::LifetimeDecision;
+pub use model::LifetimePolicy;
+pub use model::PreparedProcessRegistration;
+pub use model::ProcessCancelReceipt;
+pub use model::ProcessChange;
+pub use model::ProcessChangeCursor;
+pub use model::ProcessChangeKind;
+pub use model::ProcessCompletionOutcome;
+pub use model::ProcessComponentConfig;
+pub use model::ProcessComponentEntry;
+pub use model::ProcessComponentId;
+pub use model::ProcessComponentIdError;
+pub use model::ProcessConfigKey;
+pub use model::ProcessEnv;
+pub use model::ProcessEnvBuilder;
+pub use model::ProcessEnvLoadError;
+pub use model::ProcessEnvRef;
+pub use model::ProcessEnvRefusal;
+pub use model::ProcessEnvStore;
+pub use model::ProcessExecutionContext;
+pub use model::ProcessExternalRef;
+pub use model::ProcessHandleView;
+pub use model::ProcessIdMint;
+pub use model::ProcessIdentity;
+pub use model::ProcessInput;
+pub use model::ProcessLifecycleState;
+pub use model::ProcessLimits;
+pub use model::ProcessLineage;
+pub use model::ProcessListFilter;
+pub use model::ProcessListMode;
+pub use model::ProcessModel;
+pub use model::ProcessObserverBy;
+pub use model::ProcessOriginator;
+pub use model::ProcessOriginatorFilter;
+pub use model::ProcessOutcome;
+pub use model::ProcessProvenance;
+pub use model::ProcessRecord;
+pub use model::ProcessRegistration;
+pub use model::ProcessRegistrationOutcome;
+pub use model::ProcessRegistrationReceipt;
+pub use model::ProcessSessionDeleteReport;
+pub use model::ProcessStartDeclaration;
+pub use model::ProcessStartOptions;
+pub use model::ProcessStartReceipt;
+pub use model::ProcessStartRegistration;
+pub use model::ProcessStartRequest;
+pub use model::ProcessStartTarget;
+pub use model::ProcessStatus;
+pub use model::ProcessStatusFilter;
+pub use model::ProcessTombstone;
+pub use model::ProcessWaits;
+pub use model::RetiredProcessStatus;
+pub use model::SCOPE_STORAGE_PAYLOAD_VERSION;
+pub use model::ScopeGrant;
+pub use model::ScopeId;
+pub use model::ScopeRef;
+pub use model::ScopeStorageError;
+pub use model::SessionScope;
+pub use model::SessionScopeId;
+pub use model::StartCx;
+pub use model::StartCxError;
+pub use model::StartKey;
+pub use model::StoreRealization;
+pub use model::TerminalProcessStatus;
+pub use model::WaitKind;
+pub use model::WaitSiteUnavailable;
+pub use model::WaitState;
+pub use model::artifact_referrer_ended;
+pub use model::artifact_store_plugin_error;
+pub use model::lifetime;
+pub use model::load_process_env;
+pub use model::mint_process_id;
+pub use model::process_child_session_id;
+pub use model::process_session_id;
+pub use model::process_session_turn_id;
 pub use model::{ConsumerHold, SessionTurnOutcome};
 pub use observation::{
     ObservedProcess, ObservedProcessChange, ObservedProcessChangeKind, ObservedProcessEvent,
@@ -112,7 +177,8 @@ pub use roster::{
 };
 pub use succession::{
     EngineSuccession, ProcessSuccession, ProcessSuccessor, ProcessSuccessorRefusal,
-    ProcessSuccessorRequest, SUCCESSOR_MAIL, SuccessionError, SuccessorCarry,
+    ProcessSuccessorRequest, SUCCESSOR_MAIL, SuccessionContext, SuccessionError, SuccessorCarry,
+    UseCorrespondence,
 };
 
 pub use validation::apply_successor_input;
@@ -123,9 +189,6 @@ pub use validation::{
     fold_process_record, prepare_process_event_append, prepare_process_registration,
     prepare_process_transition,
 };
-
-pub mod link_check;
-pub use link_check::{FitPolicy, check_links, check_runner};
 
 pub use registry_delegate::RegisteredProcess;
 

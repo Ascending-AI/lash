@@ -1,6 +1,6 @@
 use super::session_delete_faults::{CloseFault, SessionDeleteFaults};
 use super::*;
-use lash::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 async fn deleting_workbench() -> (Workbench, SessionId, Arc<SessionDeleteFaults>) {
     let sessions = WorkbenchSessions::fresh();

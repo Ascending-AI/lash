@@ -74,7 +74,7 @@ use lash_core::runtime::{
     PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget, PendingTurnInputRead,
     PendingTurnInputSuffixCancelOutcome, QueuedWorkBatch,
 };
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 use tokio::sync::OnceCell;
 
 /// How this handle obtains the session's store.
@@ -264,7 +264,7 @@ impl DurableSession {
     /// the terminal transcript of a cancelled turn without a final head commit.
     pub async fn read_turn_tool_calls(
         &self,
-        turn: &crate::TurnId,
+        turn: &lash_vocabulary::identity::TurnId,
     ) -> Result<Vec<crate::tools::ToolCallRecord>> {
         self.store().await?;
         let open = self.open_turn().await?;
@@ -275,7 +275,7 @@ impl DurableSession {
     /// This also reads calls from a cancelled turn without a final head commit.
     pub async fn read_turn_model_calls(
         &self,
-        turn: &crate::TurnId,
+        turn: &lash_vocabulary::identity::TurnId,
     ) -> Result<Vec<crate::turn::ModelCallRecord>> {
         self.effect_host
             .durable_reads()?
@@ -287,7 +287,7 @@ impl DurableSession {
             .map_err(EmbedError::Durable)
     }
 
-    async fn open_turn(&self) -> Result<Option<crate::TurnId>> {
+    async fn open_turn(&self) -> Result<Option<lash_vocabulary::identity::TurnId>> {
         use lash_core::runtime::durable::services::RuntimeTurnServices;
         RuntimeTurnServices::unfinished_run(&self.effect_host, &self.session_id)
             .await
@@ -298,8 +298,8 @@ impl DurableSession {
     /// `unfinished`, the session's unfinished turn.
     async fn turn_tool_call_bodies(
         &self,
-        turn: &crate::TurnId,
-        unfinished: Option<&crate::TurnId>,
+        turn: &lash_vocabulary::identity::TurnId,
+        unfinished: Option<&lash_vocabulary::identity::TurnId>,
     ) -> Result<(
         Vec<crate::tools::ToolCallRecord>,
         std::collections::BTreeSet<crate::ToolCallId>,
@@ -320,7 +320,7 @@ impl DurableSession {
     /// entry's turn provenance). Dispatches without host call ids are skipped.
     pub async fn read_cell_tool_calls(
         &self,
-        turn: &crate::TurnId,
+        turn: &lash_vocabulary::identity::TurnId,
         calls: &[crate::persistence::ExecutedCall],
     ) -> Result<Vec<crate::ToolCallRead>> {
         let calls = calls
@@ -525,18 +525,21 @@ impl DurableSession {
     /// [`id`](crate::SendBuilder::id), before sending or observing acceptance.
     /// Correlate every committed user row by `provenance.input_id`, including
     /// steering inputs that share another send's run. This performs no read.
-    pub fn input_id(&self, id: &crate::TurnId) -> crate::InputId {
+    pub fn input_id(
+        &self,
+        id: &lash_vocabulary::identity::TurnId,
+    ) -> lash_vocabulary::identity::InputId {
         lash_core::PendingTurnInputDraft::keyed_input_id(self.session_id(), id.as_str())
     }
 
     /// Re-attach to an input accepted earlier, by its input id.
-    pub fn attach(&self, input_id: lash_core::InputId) -> crate::SendHandle {
+    pub fn attach(&self, input_id: lash_vocabulary::identity::InputId) -> crate::SendHandle {
         crate::send::attach(crate::send::SendTarget::Durable(self.clone()), input_id)
     }
 
     /// Re-attach to the input a send accepted under host id `id`, with
     /// nothing but the id: see [`LashSession::attach_id`](crate::LashSession::attach_id).
-    pub fn attach_id(&self, id: lash_core::TurnId) -> crate::SendHandle {
+    pub fn attach_id(&self, id: lash_vocabulary::identity::TurnId) -> crate::SendHandle {
         crate::send::attach_id(crate::send::SendTarget::Durable(self.clone()), id)
     }
 
@@ -554,12 +557,12 @@ impl DurableSession {
     /// [`create`](crate::SessionBuilder::create): creating the session
     /// does not reopen the id. A deleted session refuses the forsake with
     /// [`StoreError::SessionDeleted`](lash_core::StoreError::SessionDeleted).
-    pub async fn forsake(&self, id: lash_core::TurnId) -> Result<crate::Forsaking> {
+    pub async fn forsake(&self, id: lash_vocabulary::identity::TurnId) -> Result<crate::Forsaking> {
         crate::send::forsake(crate::send::SendTarget::Durable(self.clone()), id).await
     }
 
     /// Re-await a logical run by id.
-    pub fn run(&self, run: crate::RunId) -> crate::RunHandle {
+    pub fn run(&self, run: lash_vocabulary::identity::RunId) -> crate::RunHandle {
         crate::send::run(crate::send::SendTarget::Durable(self.clone()), run)
     }
 
@@ -668,7 +671,7 @@ impl DurableSession {
     /// The session's unfinished run, if a turn is under way: the name a
     /// host pins out of band while the turn runs
     /// ([`Target::Turn`](lash_core::Target::Turn)).
-    pub async fn current_turn(&self) -> Result<Option<lash_core::TurnId>> {
+    pub async fn current_turn(&self) -> Result<Option<lash_vocabulary::identity::TurnId>> {
         Ok(self
             .unfinished_run()
             .await?
@@ -736,7 +739,7 @@ impl DurableSession {
     /// Cancels queued work batch.
     pub async fn cancel_queued_work_batch(
         &self,
-        batch_id: &lash_core::BatchId,
+        batch_id: &lash_vocabulary::identity::BatchId,
     ) -> Result<Option<QueuedWorkBatch>> {
         let store = self.store().await?;
         Ok(self.ops.cancel_queued_work_batch(store, batch_id).await?)
@@ -771,7 +774,7 @@ impl DurableSession {
     /// current committed head.
     pub async fn read_run(
         &self,
-        run: &crate::RunId,
+        run: &lash_vocabulary::identity::RunId,
     ) -> Result<Option<crate::persistence::SessionReadView>> {
         self.read_window(lash_core::store::WindowSelector::Terminal(
             run.turn_id().clone(),
@@ -830,7 +833,7 @@ impl DurableSession {
     /// running or cancelled-before-commit turn).
     pub async fn committed_turn(
         &self,
-        turn: &crate::TurnId,
+        turn: &lash_vocabulary::identity::TurnId,
     ) -> Result<Option<crate::transcript::CommittedTurnWithCalls>> {
         let store = self.store().await?;
         lash_core::runtime::durable::services::RuntimeTurnServices::committed_turn(
@@ -851,7 +854,7 @@ impl DurableSession {
     /// ids of a cancellation. `None` means no retained terminal exists.
     pub async fn run_terminal(
         &self,
-        run: &crate::RunId,
+        run: &lash_vocabulary::identity::RunId,
     ) -> Result<Option<crate::persistence::RunTerminal>> {
         Ok(self.store().await?.run_terminal(run.turn_id()).await?)
     }

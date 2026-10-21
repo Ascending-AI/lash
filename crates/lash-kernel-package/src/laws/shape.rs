@@ -6,7 +6,9 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{ErrorDatum, FunctionId, FunctionRegistry};
+use lash_kernel_doc::ErrorDatum;
+use lash_kernel_doc::FunctionRegistry;
+use lash_vocabulary::legacy_names::FunctionId;
 
 use super::{SHOUT, finished, functions, kernel, kernel_with, literal, raised, run, runtime};
 use crate::testing::{DATAFRAME, RELEASE, dataframe};

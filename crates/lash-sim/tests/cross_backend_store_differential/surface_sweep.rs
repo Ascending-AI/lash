@@ -674,7 +674,9 @@ impl BackendRunner {
                 let record = self
                     .lifecycle_backend
                     .process_authority_reads()
-                    .process_authority(&lash_core::ProcessId::fixture("surface:unknown-process"))
+                    .process_authority(&lash_vocabulary::identity::ProcessId::fixture(
+                        "surface:unknown-process",
+                    ))
                     .await?;
                 format!("present={}", record.is_some())
             }
@@ -841,7 +843,7 @@ impl BackendRunner {
                 // The keyed point read answers what the list answers for the
                 // row: `Open`, `Admitted` naming its run, or nothing once
                 // the row is terminal or unknown (FIG-3976).
-                let input = lash_core::InputId::fixture(if known {
+                let input = lash_vocabulary::identity::InputId::fixture(if known {
                     format!("{session_id}:input")
                 } else {
                     UNKNOWN_INPUT_ID.to_string()
@@ -889,7 +891,9 @@ impl BackendRunner {
                 let page = store
                     .load_ancestors(
                         &session_id,
-                        lash_core::store::HistoryAnchor::Node(lash_core::NodeId::fixture(node_id)),
+                        lash_core::store::HistoryAnchor::Node(
+                            lash_vocabulary::identity::NodeId::fixture(node_id),
+                        ),
                         lash_core::store::HistoryBudget {
                             max_nodes: std::num::NonZeroU32::MIN,
                             max_bytes: std::num::NonZeroU64::MIN.saturating_add(1024 * 1024 - 1),
@@ -902,9 +906,9 @@ impl BackendRunner {
                 let page = store
                     .load_ancestors(
                         &session_id,
-                        lash_core::store::HistoryAnchor::Node(lash_core::NodeId::from(
-                            "fig-2841-unknown-node",
-                        )),
+                        lash_core::store::HistoryAnchor::Node(
+                            lash_vocabulary::identity::NodeId::from("fig-2841-unknown-node"),
+                        ),
                         lash_core::store::HistoryBudget {
                             max_nodes: std::num::NonZeroU32::MIN,
                             max_bytes: std::num::NonZeroU64::MIN.saturating_add(1024 * 1024 - 1),
@@ -1024,8 +1028,8 @@ impl BackendRunner {
                 let admission = store
                     .admit_at_checkpoint(&lash_core::store::CheckpointAdmissionRequest {
                         session_id: session_id.clone(),
-                        run: lash_core::TurnId::from(SURFACE_CHECKPOINT_RUN_ID),
-                        turn_id: lash_core::TurnId::from("fig-2841-surface-turn"),
+                        run: lash_vocabulary::identity::TurnId::from(SURFACE_CHECKPOINT_RUN_ID),
+                        turn_id: lash_vocabulary::identity::TurnId::from("fig-2841-surface-turn"),
                         checkpoint: lash_core::CheckpointKind::AfterWork,
                         step: "fig-2841-surface-checkpoint".to_string(),
                         max_inputs: 1,
@@ -1088,7 +1092,7 @@ impl BackendRunner {
                 let exists = store
                     .committed_turn_exists(
                         &session_id,
-                        &lash_core::TurnId::from(SURFACE_COMMITTED_TURN_ID),
+                        &lash_vocabulary::identity::TurnId::from(SURFACE_COMMITTED_TURN_ID),
                     )
                     .await?;
                 format!("exists={exists}")
@@ -1097,7 +1101,7 @@ impl BackendRunner {
                 let exists = store
                     .committed_turn_exists(
                         &session_id,
-                        &lash_core::TurnId::from(UNCOMMITTED_TURN_ID),
+                        &lash_vocabulary::identity::TurnId::from(UNCOMMITTED_TURN_ID),
                     )
                     .await?;
                 format!("exists={exists}")
@@ -1105,7 +1109,7 @@ impl BackendRunner {
             SurfaceMethod::RunTerminal => {
                 // The kind and cause are caller-supplied facts; the instant
                 // is the backend clock's and is not compared.
-                let run = lash_core::TurnId::from(SURFACE_RUN_ID);
+                let run = lash_vocabulary::identity::TurnId::from(SURFACE_RUN_ID);
                 match store.run_terminal(&session_id, &run).await? {
                     Some(terminal) => {
                         let cause = match &terminal.cause {
@@ -1123,7 +1127,7 @@ impl BackendRunner {
                 }
             }
             SurfaceMethod::EndRefusedRun => {
-                let run = lash_core::TurnId::from(SURFACE_RUN_ID);
+                let run = lash_vocabulary::identity::TurnId::from(SURFACE_RUN_ID);
                 let refusal = lash_core::RuntimeError::new(
                     lash_core::RuntimeErrorCode::StoreCommitSuperseded,
                     "the head moved under the run's commit",
@@ -1142,8 +1146,9 @@ impl BackendRunner {
                 }
             }
             SurfaceMethod::EndCommandRun => {
-                let run =
-                    lash_core::TurnId::fixture(format!("shift-commands:{session_id}-surface"));
+                let run = lash_vocabulary::identity::TurnId::fixture(format!(
+                    "shift-commands:{session_id}-surface"
+                ));
                 let end = match store.end_command_run(&session_id, &run, 1).await? {
                     lash_core::store::RunEndOutcome::Ended(terminal) => {
                         format!("ended={:?}/{:?}", terminal.kind(), terminal.cause)
@@ -1160,14 +1165,16 @@ impl BackendRunner {
                 format!("{end} recorded={recorded:?}")
             }
             SurfaceMethod::RunBinding => {
-                let input = lash_core::InputId::fixture(format!("{session_id}:input"));
+                let input =
+                    lash_vocabulary::identity::InputId::fixture(format!("{session_id}:input"));
                 match store.run_binding(&session_id, &input).await? {
                     Some(run) => format!("bound={run}"),
                     None => "bound=none".to_string(),
                 }
             }
             SurfaceMethod::RunOfInput => {
-                let input = lash_core::InputId::fixture(format!("{session_id}:input"));
+                let input =
+                    lash_vocabulary::identity::InputId::fixture(format!("{session_id}:input"));
                 match store.run_of_input(&session_id, &input).await? {
                     Some(run) => format!("run={run}"),
                     None => "run=none".to_string(),
@@ -1186,7 +1193,8 @@ impl BackendRunner {
                         )
                     })
                 };
-                let input = lash_core::InputId::fixture(format!("{session_id}:input"));
+                let input =
+                    lash_vocabulary::identity::InputId::fixture(format!("{session_id}:input"));
                 let FollowFacts::Input(input) = store
                     .follow_facts(&session_id, &FollowSubject::Input(input))
                     .await?
@@ -1198,7 +1206,9 @@ impl BackendRunner {
                 let FollowFacts::Run(run) = store
                     .follow_facts(
                         &session_id,
-                        &FollowSubject::Run(lash_core::TurnId::from(SURFACE_RUN_ID)),
+                        &FollowSubject::Run(lash_vocabulary::identity::TurnId::from(
+                            SURFACE_RUN_ID,
+                        )),
                     )
                     .await?
                 else {
@@ -1217,7 +1227,7 @@ impl BackendRunner {
                 )
             }
             SurfaceMethod::BoundTurnScopes => {
-                let run = lash_core::TurnId::from(SURFACE_RUN_ID);
+                let run = lash_vocabulary::identity::TurnId::from(SURFACE_RUN_ID);
                 let scopes = store
                     .bound_turn_scopes(&session_id, &run)
                     .await?
@@ -1235,7 +1245,7 @@ impl BackendRunner {
                             TurnInput::text("input under a run spec"),
                         )
                         .with_source_key("surface:run-spec-input")
-                        .with_input_id(lash_core::InputId::fixture(format!(
+                        .with_input_id(lash_vocabulary::identity::InputId::fixture(format!(
                             "{session_id}:run-spec-input"
                         )))
                         .with_run_spec(surface_run_spec()),
@@ -1308,10 +1318,14 @@ impl BackendRunner {
                             // Every backend mints unkeyed ids its own way, so
                             // the sweep names each row it adds.
                             draft(added, "input added by a batch").with_input_id(
-                                lash_core::InputId::fixture(format!("{session_id}:{added}")),
+                                lash_vocabulary::identity::InputId::fixture(format!(
+                                    "{session_id}:{added}"
+                                )),
                             ),
                             draft("surface:run-spec-input", resent_text).with_input_id(
-                                lash_core::InputId::fixture(format!("{session_id}:run-spec-input")),
+                                lash_vocabulary::identity::InputId::fixture(format!(
+                                    "{session_id}:run-spec-input"
+                                )),
                             ),
                         ],
                     )?)
@@ -1333,7 +1347,9 @@ impl BackendRunner {
                         TurnInput::text(text),
                     )
                     .with_source_key(key)
-                    .with_input_id(lash_core::InputId::fixture(format!("{session_id}:{key}")))
+                    .with_input_id(lash_vocabulary::identity::InputId::fixture(format!(
+                        "{session_id}:{key}"
+                    )))
                     .with_run_spec(surface_run_spec())
                 };
                 let admission = store
@@ -1372,12 +1388,13 @@ impl BackendRunner {
                 }
             }
             SurfaceMethod::BindRunInputs { conflicting } => {
-                let run = lash_core::TurnId::from(if conflicting {
+                let run = lash_vocabulary::identity::TurnId::from(if conflicting {
                     SURFACE_OTHER_RUN_ID
                 } else {
                     SURFACE_RUN_ID
                 });
-                let input = lash_core::InputId::fixture(format!("{session_id}:input"));
+                let input =
+                    lash_vocabulary::identity::InputId::fixture(format!("{session_id}:input"));
                 store.bind_run_inputs(&session_id, &run, &[input]).await?;
                 "bound".to_string()
             }
@@ -1456,7 +1473,9 @@ impl BackendRunner {
             ),
             SurfaceMethod::EndAttachmentReferrer => {
                 let referrer = lash_core::ArtifactReferrer::ProcessRecord(
-                    lash_core::ProcessId::fixture(&format!("surface-ended:{session_id}")),
+                    lash_vocabulary::identity::ProcessId::fixture(&format!(
+                        "surface-ended:{session_id}"
+                    )),
                 );
                 store.end_attachment_referrer(&referrer).await?;
                 "ended".to_string()

@@ -34,7 +34,7 @@ pub struct ProcessRuntimePorts {
 
 /// An engine process's runtime: its recorded environment's composition.
 pub struct EngineProcessRuntime {
-    process_id: crate::ProcessId,
+    process_id: lash_vocabulary::identity::ProcessId,
     services: Arc<RuntimeSessionServices>,
 }
 
@@ -138,7 +138,7 @@ impl EngineProcessRuntime {
 /// A session-turn process's runtime: the host's session plugins, from which
 /// its child session is created (D5).
 pub struct SessionTurnRuntime {
-    process_id: crate::ProcessId,
+    process_id: lash_vocabulary::identity::ProcessId,
     services: Arc<RuntimeSessionServices>,
 }
 
@@ -279,7 +279,7 @@ impl SessionTurnRuntime {
 }
 
 fn require_own(
-    process_id: &crate::ProcessId,
+    process_id: &lash_vocabulary::identity::ProcessId,
     process: &lash_execution_contracts::process::ProcessRecord,
 ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
     if process.id == *process_id {
@@ -295,7 +295,7 @@ fn require_own(
 
 /// The services a process runtime runs through, keyed by `process_id`.
 fn process_services(
-    process_id: &crate::ProcessId,
+    process_id: &lash_vocabulary::identity::ProcessId,
     ports: ProcessRuntimePorts,
     engine: Option<Arc<EngineProcessParts>>,
     policy: Option<crate::SessionPolicy>,
@@ -315,7 +315,7 @@ fn process_services(
         crate::RuntimeAttachmentStore::new_with_clock(
             Arc::clone(host_attachments.backend()),
             core.backend().attachment_referrers(),
-            crate::RuntimeOwner::Process(process_id.clone()),
+            lash_vocabulary::identity::RuntimeOwner::Process(process_id.clone()),
             Arc::clone(&core.clock),
             host_attachments.policy(),
         )

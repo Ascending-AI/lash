@@ -8,11 +8,17 @@ use std::path::Path;
 use anyhow::{Context, Result, ensure};
 use lash_kernel_check::{Environment as Checker, WorkflowDocument};
 use lash_kernel_dialect::{CellEnvironment, Environment, Lowered, Mode, PrintOptions};
-use lash_kernel_doc::{
-    self as k, Captions, Document, Expr, Name, Node, Site, SourceLanguage, Unit,
-    WorkflowDocumentEntry,
-};
+use lash_kernel_doc as k;
+use lash_kernel_doc::Captions;
+use lash_kernel_doc::Document;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Node;
+use lash_kernel_doc::SourceLanguage;
+use lash_kernel_doc::WorkflowDocumentEntry;
 use lash_kernel_edit::{Draft, Transaction};
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 use serde::{Deserialize, Serialize};
 
 mod cell;

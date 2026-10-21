@@ -78,7 +78,7 @@ use lash_execution_contracts::process::ProcessEventQueryMode;
 use lash_execution_contracts::process::ProcessEventReadOutcome;
 use lash_execution_contracts::process::ProcessRegistry;
 use lash_execution_contracts::process::RetiredProcessStatus;
-use lash_protocol_types::ProcessId;
+use lash_vocabulary::identity::ProcessId;
 
 use crate::language_observation::CommittedPublication;
 use crate::support::{Arc, EmbedError, Result, RuntimeErrorCode};
@@ -395,17 +395,17 @@ impl ProcessFeedSource {
     fn observation(
         &self,
         process: &lash_execution_contracts::process::ObservedProcess,
-    ) -> lash_core::ProcessWorkflowObservation {
+    ) -> lash_vocabulary::observation::RunObservation {
         let lash_execution_contracts::process::ProcessInput::Engine { kind, launch, .. } =
             &process.input
         else {
-            return lash_core::ProcessWorkflowObservation::Off;
+            return lash_vocabulary::observation::RunObservation::Off;
         };
         match self.engines.document_provider(kind) {
             Some(provider) if provider.counts_statements(launch.settings.as_ref()) => {
-                lash_core::ProcessWorkflowObservation::Counts
+                lash_vocabulary::observation::RunObservation::Counts
             }
-            _ => lash_core::ProcessWorkflowObservation::Off,
+            _ => lash_vocabulary::observation::RunObservation::Off,
         }
     }
 

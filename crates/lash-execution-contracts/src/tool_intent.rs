@@ -2,9 +2,10 @@
 /// version_guard(items(LASH_TOOL_INTENT_PAYLOAD_DOMAIN_VERSION, new))
 const LASH_TOOL_INTENT_PAYLOAD_DOMAIN_VERSION: &str = "lash-tool-intent-payload/v3";
 
-use crate::ProcessId;
-use crate::RuntimeOwner;
-use crate::{ToolIntentIdentity, ToolIntentKind};
+use crate::ToolIntentIdentity;
+use lash_vocabulary::ToolIntentKind;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::RuntimeOwner;
 use serde::{Deserialize, Serialize};
 
 /// The only intent-to-command protocol understood by this build.
@@ -110,7 +111,7 @@ impl ToolIntent {
 
 /// The payload type each generated [`ToolIntent`] variant carries.
 ///
-/// One arm per variant of [`lash_protocol_types::tool_intent_variants!`]: a variant
+/// One arm per variant of [`lash_vocabulary::tool_intent_variants!`]: a variant
 /// added to that list without a payload here is a compile error, so the enum
 /// and the kind set cannot diverge.
 macro_rules! tool_intent_payload {
@@ -134,7 +135,7 @@ macro_rules! define_tool_intent {
     ($($variant:ident $wire:literal,)*) => {
         /// Durable follow-on work a recorded leaf attempt may request.
         ///
-        /// Generated from [`lash_protocol_types::tool_intent_variants!`] together with
+        /// Generated from [`lash_vocabulary::tool_intent_variants!`] together with
         /// [`ToolIntentKind`], so `kind()` is a projection of one list rather
         /// than a hand-kept mirror.
         /// **Integrator class 3: protocol and process-engine implementors.**
@@ -181,7 +182,7 @@ macro_rules! define_tool_intent {
     };
 }
 
-lash_protocol_types::tool_intent_variants!(define_tool_intent);
+lash_vocabulary::tool_intent_variants!(define_tool_intent);
 
 /// Durable submission-ledger row for one host-submitted tool-intent identity.
 ///
@@ -226,7 +227,7 @@ pub struct ToolIntentSubmissionRecord {
     /// when its execution scope named one: the run whose published revision
     /// retains the payload. `None` keeps the payload while the row lives.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub owning_run: Option<crate::TurnId>,
+    pub owning_run: Option<lash_vocabulary::identity::TurnId>,
 }
 
 /// A submission's first payload: retained, or expired with the revision of
@@ -261,7 +262,7 @@ struct ToolIntentSubmissionWire {
     intent: ToolIntentSubmissionPayload,
     settlement: Option<ToolIntentSubmissionSettlement>,
     trace: Option<lash_trace::DurableTraceScope>,
-    owning_run: Option<crate::TurnId>,
+    owning_run: Option<lash_vocabulary::identity::TurnId>,
 }
 
 impl TryFrom<ToolIntentSubmissionWire> for ToolIntentSubmissionRecord {
@@ -311,7 +312,10 @@ pub struct ToolIntentLedgerColumns {
     /// The first settlement; `None` while the submission is pending.
     pub settlement_json: Option<String>,
     /// The session and logical run that own the payload, both or neither.
-    pub owning_run: Option<(crate::SessionId, crate::TurnId)>,
+    pub owning_run: Option<(
+        lash_vocabulary::identity::SessionId,
+        lash_vocabulary::identity::TurnId,
+    )>,
 }
 
 /// One completed submission: its instant and outcome are inseparable.
@@ -393,7 +397,7 @@ impl ToolIntentSubmissionRecord {
     /// session: once the submission settles, its payload follows the
     /// revision that run publishes.
     #[must_use]
-    pub fn owned_by_run(mut self, run: crate::TurnId) -> Self {
+    pub fn owned_by_run(mut self, run: lash_vocabulary::identity::TurnId) -> Self {
         self.owning_run = Some(run);
         self
     }
@@ -806,7 +810,7 @@ impl lash_core_store::store::DurableRecord for ToolIntentSubmissionRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SessionId;
+    use lash_vocabulary::identity::SessionId;
 
     fn sample_intent(kind: ToolIntentKind) -> ToolIntent {
         let session_id = SessionId::from("session");
@@ -815,7 +819,7 @@ mod tests {
         match kind {
             ToolIntentKind::StartProcess => {
                 ToolIntent::StartProcess(Box::new(StartProcessIntent {
-                    owner: crate::RuntimeOwner::Session(session_id),
+                    owner: lash_vocabulary::identity::RuntimeOwner::Session(session_id),
                     declaration: crate::testing::held_engine_declaration(
                         serde_json::Value::Null,
                         crate::ProcessOriginator::host(),
@@ -824,7 +828,7 @@ mod tests {
                 }))
             }
             ToolIntentKind::CancelProcess => ToolIntent::CancelProcess(CancelProcessIntent {
-                owner: crate::RuntimeOwner::Session(session_id),
+                owner: lash_vocabulary::identity::RuntimeOwner::Session(session_id),
                 process_id: crate::process_id_for_test("process"),
             }),
             ToolIntentKind::GetDefinition => ToolIntent::GetDefinition(GetDefinitionIntent {
@@ -869,7 +873,7 @@ mod tests {
     #[test]
     fn intent_identity_has_a_literal_stable_oracle() {
         let identity = derive_tool_intent_identity(
-            &crate::RuntimeOwner::Session(SessionId::from("session-fig1292")),
+            &lash_vocabulary::identity::RuntimeOwner::Session(SessionId::from("session-fig1292")),
             "turn-7",
             &crate::ToolCallId::fixture("call-3"),
             2,

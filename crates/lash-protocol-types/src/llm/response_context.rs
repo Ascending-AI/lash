@@ -12,8 +12,8 @@ use super::types::{
     LlmEventSender, LlmOutputSpec, LlmProviderTraceSender, LlmRequest, LlmRequestScope,
     RecordedRequestTemplate,
 };
-use crate::SchemaContract;
 use crate::llm_profile::LlmProfileConfig;
+use lash_vocabulary::schema_contract::SchemaContract;
 
 /// A tool whose calls the response may carry: its name and the input schema
 /// its arguments are decoded against.

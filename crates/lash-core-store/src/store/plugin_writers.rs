@@ -21,7 +21,9 @@
 use std::collections::BTreeMap;
 
 use crate::compat::{CompatRefusal, VersionRange};
-use crate::plugin_state::{FormatNamespace, FormatVersion, PluginStateMap};
+use crate::plugin_state::FormatNamespace;
+use crate::plugin_state::PluginStateMap;
+use lash_vocabulary::providers::FormatVersion;
 
 use super::StoreError;
 
@@ -446,9 +448,7 @@ impl PluginAdmission {
     }
 }
 
-pub use lash_vocabulary::providers::{
-    PluginCallbackIdentity, declared_tool_provider, is_declared_tool_provider_key,
-};
+use lash_vocabulary::providers::PluginCallbackIdentity;
 
 #[cfg(test)]
 mod tests {

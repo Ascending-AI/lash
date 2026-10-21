@@ -2,9 +2,13 @@
 //! of a brand calls. A brand selects a package type's members; it is not a
 //! capability, so a member still checks its arguments.
 
-use lash_kernel_doc::{
-    FunctionId, FunctionRegistry, NativeCall, NativeError, NativeFunction, Value, parse_definition,
-};
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::NativeCall;
+use lash_kernel_doc::NativeError;
+use lash_kernel_doc::NativeFunction;
+use lash_kernel_doc::Value;
+use lash_kernel_doc::parse_definition;
+use lash_vocabulary::legacy_names::FunctionId;
 use std::sync::Arc;
 
 use crate::CollectionError;

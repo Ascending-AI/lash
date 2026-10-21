@@ -20,8 +20,8 @@
 
 use super::recipe::{ContributionDetails, ContributionKind};
 use crate::prompt_sections::PromptPurpose;
-use lash_core_store::obligations::RegistryKind;
-use lash_core_store::tool_run::CallbackSlot;
+use lash_vocabulary::claims::RegistryKind;
+use lash_vocabulary::providers::CallbackSlot;
 
 /// A registry a [`PluginRegistrar`](super::PluginRegistrar) declares for,
 /// as a type: [`Session`] or [`Process`]. A session recipe takes only a
@@ -85,7 +85,10 @@ macro_rules! contribution_table {
         /// Every contribution kind as a type, for the bounds of the
         /// registrar methods that declare it.
         pub mod contribution {
-            use super::{CallbackContribution, CallbackSlot, Contribution, ContributionKind};
+            use super::CallbackContribution;
+            use lash_vocabulary::providers::CallbackSlot;
+            use super::Contribution;
+            use super::ContributionKind;
             $(
                 #[doc = concat!("The `", stringify!($slot), "` callback slot.")]
                 #[derive(Clone, Copy, Debug)]
@@ -242,9 +245,11 @@ impl<R: Registry, D: Clone> RegistryRetirements<R, D> {
         std::sync::Arc::make_mut(&mut self.entries).insert(id.to_owned(), declaration);
         Ok(())
     }
-    pub fn served_tokens(&self) -> std::collections::BTreeSet<crate::ObligationToken> {
+    pub fn served_tokens(
+        &self,
+    ) -> std::collections::BTreeSet<lash_vocabulary::claims::ObligationToken> {
         self.ids()
-            .map(|id| crate::ObligationToken::for_retired_owner(R::KIND, id))
+            .map(|id| lash_vocabulary::claims::ObligationToken::for_retired_owner(R::KIND, id))
             .collect()
     }
     pub(super) fn check_state(&self, state: &super::PluginState) -> Result<(), super::PluginError> {

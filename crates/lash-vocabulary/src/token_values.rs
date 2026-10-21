@@ -488,27 +488,6 @@ fn variant(
     Ok(variant)
 }
 
-use crate::legacy_package_ids::PackageSetDigest;
-macro_rules! digest_codec {
-    ($($name:ident),*) => {$(
-        impl TokenCodec for $name {
-            fn encode(&self, out: &mut TokenWriter) {
-                out.bytes(self.as_bytes());
-            }
-
-            fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
-                let bytes: [u8; 32] = input
-                    .bytes()?
-                    .try_into()
-                    .map_err(|_| invalid(concat!(stringify!($name), " is not 32 bytes")))?;
-                Ok(Self::from_bytes(bytes))
-            }
-        }
-    )*};
-}
-
-digest_codec!(PackageSetDigest);
-
 use crate::sites::*;
 impl TokenCodec for Unit {
     fn encode(&self, out: &mut TokenWriter) {
@@ -684,6 +663,67 @@ impl TokenCodec for PluginCallbackIdentity {
         Ok(Self {
             owner: input.text()?.to_owned(),
             key: input.text()?.to_owned(),
+        })
+    }
+}
+
+impl TokenCodec for crate::LinkId {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.bytes(self.as_bytes());
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        let bytes = input
+            .bytes()?
+            .try_into()
+            .map_err(|_| TokenError::Invalid("a LinkId is 32 bytes".into()))?;
+        Ok(Self::from_bytes(bytes))
+    }
+}
+impl TokenCodec for crate::PackageId {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.bytes(self.as_bytes());
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        let bytes = input
+            .bytes()?
+            .try_into()
+            .map_err(|_| TokenError::Invalid("a PackageId is 32 bytes".into()))?;
+        Ok(Self::from_bytes(bytes))
+    }
+}
+impl TokenCodec for crate::ImportSlot {
+    fn encode(&self, out: &mut TokenWriter) {
+        self.0.encode(out);
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        u32::decode(input).map(Self)
+    }
+}
+impl TokenCodec for crate::OperationUse {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.seq(2);
+        self.link.encode(out);
+        self.slot.encode(out);
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input.expect_struct(2)?;
+        Ok(Self {
+            link: crate::LinkId::decode(input)?,
+            slot: crate::ImportSlot::decode(input)?,
+        })
+    }
+}
+impl TokenCodec for crate::CallableId {
+    fn encode(&self, out: &mut TokenWriter) {
+        out.seq(2);
+        self.link.encode(out);
+        self.function.encode(out);
+    }
+    fn decode(input: &mut TokenReader<'_>) -> Result<Self, TokenError> {
+        input.expect_struct(2)?;
+        Ok(Self {
+            link: crate::LinkId::decode(input)?,
+            function: crate::FunctionId::decode(input)?,
         })
     }
 }

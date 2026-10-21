@@ -148,7 +148,8 @@ pub fn node_activation(
 pub fn node_serves(core: &crate::LashCore) -> Vec<String> {
     let mut serves = core.node_serves();
     serves.extend(
-        lash_core::ObligationToken::for_capabilities(&core.node_offers()).map(String::from),
+        lash_vocabulary::claims::ObligationToken::for_capabilities(&core.node_offers())
+            .map(String::from),
     );
     serves.sort();
     serves.dedup();

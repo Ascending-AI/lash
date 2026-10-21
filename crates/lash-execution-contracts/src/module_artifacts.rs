@@ -36,7 +36,7 @@ pub enum ArtifactStoreError {
     ReferrerKindRefused { kind: crate::ArtifactReferrerKind },
     #[error("unusable payload schema: {source}")]
     UnusableSchema {
-        source: Box<crate::SchemaAdmissionError>,
+        source: Box<lash_vocabulary::json_schema::SchemaAdmissionError>,
     },
     #[error("failed to encode artifact: {0}")]
     Encode(String),

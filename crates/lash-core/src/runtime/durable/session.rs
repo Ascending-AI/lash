@@ -49,15 +49,15 @@ use super::{phases, turn_cancel, turn_trace};
 use crate::ActorContext;
 use crate::AdmittedScope;
 use crate::Effect;
-use crate::EffectId;
 use crate::HostTurnProtocol;
 use crate::LlmRequest;
-use crate::SessionId;
-use crate::TurnId;
 use crate::TurnMachine;
 use crate::TurnMachineConfig;
 use crate::TurnOutcome;
 use lash_execution_contracts::backend::Backend;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
+use lash_vocabulary::sites::EffectId;
 
 pub use lash_durable::domain::{
     ModelCall, ModelPin, TurnCancelAnswer, TurnCancelRequest, TurnRow, UnfinishedPhase,
@@ -267,7 +267,7 @@ pub struct TurnDone {
     /// The value schema its accepted finish was validated under: the
     /// witness its completion candidate kept. `None` when no finish tool
     /// ended it.
-    pub finish_value_schema: Option<crate::JsonSchema>,
+    pub finish_value_schema: Option<lash_vocabulary::json_schema::JsonSchema>,
 }
 
 impl TurnDone {

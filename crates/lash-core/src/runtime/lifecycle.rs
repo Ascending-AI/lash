@@ -219,7 +219,7 @@ impl LashRuntime {
                 crate::RuntimeAttachmentStore::new_with_clock(
                     backend,
                     manifest,
-                    crate::RuntimeOwner::Session(state.session_id.clone()),
+                    lash_vocabulary::identity::RuntimeOwner::Session(state.session_id.clone()),
                     Arc::clone(&host.core.clock),
                     previous_attachment_store.policy(),
                 )
@@ -812,7 +812,7 @@ impl LashRuntime {
 mod tests {
     use super::{initial_park_operation, initial_park_preview};
     use crate::SessionError;
-    use crate::SessionId;
+    use lash_vocabulary::identity::SessionId;
 
     fn user_message(id: &str, content: &str) -> crate::Message {
         crate::Message {

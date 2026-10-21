@@ -32,7 +32,7 @@ fn ingress_start_without_lifetime_is_refused_before_submission() {
 async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> {
     let (core, registry) = ingress_engine_core(sqlite_memory_store_backend().await).await?;
     let ingress = core.tool_intents(
-        lash::SessionId::parse(SESSION).expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(SESSION).expect("nonblank host identity"),
         lash_core::ExecutionScope::turn(SESSION, SCOPE),
     )?;
 
@@ -49,7 +49,7 @@ async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> 
         lash::tools::ToolIntentIngressOutcome::Admitted {
             outcome:
                 lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Refused {
-                    kind: lash_core::ToolIntentKind::StartProcess,
+                    kind: lash_vocabulary::ToolIntentKind::StartProcess,
                     refusal: lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::CommandFailed { cause, .. },
                     ..
                 },
@@ -162,7 +162,8 @@ async fn a_journaled_host_start_registers_the_settings_it_declared() -> Result<(
     };
     let first = node(5, "first")?;
     let later = node(6, "later")?;
-    let session = lash::SessionId::parse(SESSION).expect("nonblank host identity");
+    let session =
+        lash_vocabulary::identity::SessionId::parse(SESSION).expect("nonblank host identity");
     let _session = created_session(&first, session.clone())
         .await
         .open()
@@ -181,7 +182,7 @@ async fn a_journaled_host_start_registers_the_settings_it_declared() -> Result<(
     let start = || {
         lash_execution_contracts::tool_intent::ToolIntent::StartProcess(Box::new(
             lash_execution_contracts::tool_intent::StartProcessIntent {
-                owner: lash::RuntimeOwner::Session(session.clone()),
+                owner: lash_vocabulary::identity::RuntimeOwner::Session(session.clone()),
                 declaration: lash_execution_contracts::process::ProcessStartDeclaration::engine(
                     INGRESS_ENGINE_KIND,
                     payload.clone(),

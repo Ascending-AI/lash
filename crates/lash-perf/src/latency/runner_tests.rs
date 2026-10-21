@@ -73,7 +73,7 @@ async fn diagnostic_saturation_and_timeout_keep_every_disposition() {
     let session = SessionId::fixture("saturation");
     let mut completed = Vec::new();
     for index in 0..=diagnostics::PENDING_LIMIT {
-        let input = lash_core::InputId::fixture(format!("diagnostic-{index}"));
+        let input = lash_vocabulary::identity::InputId::fixture(format!("diagnostic-{index}"));
         let pending = diagnostics.start(&session, &input, std::future::pending());
         let mut sample = complete_sample(index);
         sample.session_id = session.to_string();
@@ -101,7 +101,7 @@ async fn diagnostic_saturation_and_timeout_keep_every_disposition() {
     let diagnostics = Diagnostics::default();
     diagnostics.start(
         &session,
-        &lash_core::InputId::fixture("cancelled"),
+        &lash_vocabulary::identity::InputId::fixture("cancelled"),
         async move {
             let _owner = owner;
             std::future::pending().await

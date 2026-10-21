@@ -389,3 +389,133 @@ impl std::fmt::Display for Site {
         Ok(())
     }
 }
+
+/// Engine-owned fixtures for host laws of identity equality and transport.
+pub mod testkit {
+    /// Delivery-address fixtures for host laws of matching and withdrawn waits.
+    pub const fn wait_id(ordinal: u64) -> crate::sites::WaitId {
+        crate::sites::WaitId(ordinal)
+    }
+
+    pub fn root_task() -> crate::sites::TaskLabel {
+        crate::sites::TaskLabel(crate::sites::TaskIdentity::Main)
+    }
+    pub fn spawned_task(
+        parent: crate::sites::TaskLabel,
+        site: impl Into<crate::sites::PositionLabel>,
+        occurrence: u64,
+    ) -> crate::sites::TaskLabel {
+        crate::sites::TaskLabel(crate::sites::TaskIdentity::Spawned(
+            crate::sites::SpawnIdentity {
+                parent: std::sync::Arc::new(parent.0),
+                site: site.into().0,
+                occurrence,
+            },
+        ))
+    }
+    pub const fn visit(ordinal: u64) -> crate::sites::VisitId {
+        crate::sites::VisitId(ordinal)
+    }
+    pub fn effect(
+        task: crate::sites::TaskLabel,
+        site: impl Into<crate::sites::PositionLabel>,
+        occurrence: u64,
+        loops: Vec<(crate::sites::Site, u64)>,
+    ) -> crate::sites::EffectId {
+        crate::sites::EffectId(crate::sites::EffectIdentity {
+            task: task.0,
+            site: site.into().0,
+            occurrence,
+            loops: loops
+                .into_iter()
+                .map(|(site, iteration)| crate::sites::LoopIteration { site, iteration })
+                .collect(),
+        })
+    }
+    /// Repeated-visit fixtures for the semantic live-frame folding laws.
+    pub fn with_visit(id: &crate::sites::EffectId, visit: u64) -> crate::sites::EffectId {
+        let mut raw = id.0.clone();
+        raw.occurrence = visit;
+        crate::sites::EffectId(raw)
+    }
+    /// Position fixtures for document-binding and mismatch laws.
+    pub fn with_position(
+        id: &crate::sites::EffectId,
+        position: impl Into<crate::sites::PositionLabel>,
+    ) -> crate::sites::EffectId {
+        let mut raw = id.0.clone();
+        raw.site = position.into().0;
+        crate::sites::EffectId(raw)
+    }
+    /// Fan-out fixtures for host observation attribution laws.
+    pub fn with_task(
+        id: &crate::sites::EffectId,
+        task: crate::sites::TaskLabel,
+    ) -> crate::sites::EffectId {
+        let mut raw = id.0.clone();
+        raw.task = task.0;
+        crate::sites::EffectId(raw)
+    }
+    /// Enclosing-loop fixtures for the host observation transport laws.
+    pub fn with_loops(
+        id: &crate::sites::EffectId,
+        loops: Vec<(crate::sites::Site, u64)>,
+    ) -> crate::sites::EffectId {
+        let mut raw = id.0.clone();
+        raw.loops = loops
+            .into_iter()
+            .map(|(site, iteration)| crate::sites::LoopIteration { site, iteration })
+            .collect();
+        crate::sites::EffectId(raw)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tokens::{TokenCodec, encode_body};
+    use serde::Serialize;
+    use serde::de::DeserializeOwned;
+
+    /// FIG-6711: host JSON carries typed opaque tokens, never engine records;
+    /// the binary checkpoint/admission identity encoding is unchanged.
+    #[test]
+    fn neutral_occurrence_tokens_preserve_binary_identity() {
+        fn token<T: TokenCodec + Serialize + DeserializeOwned + PartialEq + std::fmt::Debug>(
+            value: T,
+            baseline: Vec<u8>,
+            wrong_kind: serde_json::Value,
+        ) {
+            let json = serde_json::to_value(&value).unwrap();
+            assert!(json.is_string());
+            assert_eq!(serde_json::from_value::<T>(json).unwrap(), value);
+            assert!(serde_json::from_value::<T>(wrong_kind).is_err());
+            assert_eq!(encode_body(&value), baseline);
+        }
+        let task = TaskIdentity::Main;
+        let site = Site::new(crate::sites::Unit::Main, vec![2]);
+        let effect = EffectIdentity {
+            task: task.clone(),
+            site: site.clone(),
+            occurrence: 3,
+            loops: vec![],
+        };
+        token(
+            TaskLabel(task.clone()),
+            encode_body(&task),
+            serde_json::json!("w:0300"),
+        );
+        token(
+            PositionLabel(site.clone()),
+            encode_body(&site),
+            serde_json::json!({ "unit": "main", "path": [2] }),
+        );
+        token(
+            EffectId(effect.clone()),
+            encode_body(&effect),
+            serde_json::to_value(&effect).unwrap(),
+        );
+        token(VisitId(3), encode_body(&3_u64), serde_json::json!(3));
+        token(WaitId(3), encode_body(&3_u64), serde_json::json!(3));
+    }
+}

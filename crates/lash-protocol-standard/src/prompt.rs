@@ -45,9 +45,9 @@ pub(crate) fn register_sections<T: Send + Sync + 'static>(
                     .filter(|tool| {
                         tool.declaration()
                             .controls
-                            .contains(lash_core::TurnControlKind::Finish)
+                            .contains(lash_vocabulary::tool_declaration::TurnControlKind::Finish)
                     })
-                    .map(lash_core::ToolManifest::standard_name)
+                    .map(lash_vocabulary::tool_contract::ToolManifest::standard_name)
                     .collect::<Vec<_>>();
                 Ok(SectionText::Text(format!(
                     "## Execution\n\n{}",

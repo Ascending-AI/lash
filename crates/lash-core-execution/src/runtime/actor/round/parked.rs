@@ -10,15 +10,15 @@ use lash_durable::{
 
 use super::PinnedWait;
 use super::records::{self, Record};
-use crate::ProcessId;
-use crate::SessionId;
 use crate::ToolCallId;
-use crate::ToolId;
 use crate::runtime::actor::waits::WaitId;
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::waits::ParkDeadline;
 use lash_execution_contracts::waits::PinnedKey;
 use lash_execution_contracts::waits::WaitDeadline;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::tool_contract::ToolId;
 
 /// The actor whose admitted calls a host may discover.
 #[derive(Clone, Debug, PartialEq, Eq)]

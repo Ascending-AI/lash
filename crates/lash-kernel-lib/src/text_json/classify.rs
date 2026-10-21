@@ -4,7 +4,13 @@
 use super::Selection;
 use std::borrow::Cow;
 
-use lash_kernel_doc::{Args, Formula, NativeCall, NativeError, Operand, Type, Value};
+use lash_kernel_doc::Args;
+use lash_kernel_doc::Formula;
+use lash_kernel_doc::NativeCall;
+use lash_kernel_doc::NativeError;
+use lash_kernel_doc::Operand;
+use lash_kernel_doc::Value;
+use lash_vocabulary::types::Type;
 
 use super::{Function, arg, count_arg, definition, raise, text_arg};
 pub(super) fn functions(selection: &Selection<'_>) -> Vec<Function> {

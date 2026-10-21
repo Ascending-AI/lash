@@ -1163,3 +1163,10 @@ pub trait CodecVariant {
     /// This value's variant number.
     fn codec_variant(&self) -> u32;
 }
+
+/// The deepest value tree accepted by canonical value codecs.
+pub const MAX_DECODE_DEPTH: u64 = 512;
+/// Stable sum tags shared by runtime values and neutral JSON/tool values.
+pub const FROZEN_DATUM: u32 = 0;
+pub const FROZEN_TOOL_VALUE: u32 = 1;
+pub const FROZEN_JSON: u32 = 2;

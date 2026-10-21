@@ -374,8 +374,11 @@ impl contracts::EngineSteps for Capabilities {
         std::time::Duration::from_secs(1)
     }
 
-    fn retry(&self, _kind: &contracts::EngineStepKind) -> lash_protocol_types::ExecutionPolicy {
-        lash_protocol_types::ExecutionPolicy::default()
+    fn retry(
+        &self,
+        _kind: &contracts::EngineStepKind,
+    ) -> lash_vocabulary::tool_contract::ExecutionPolicy {
+        lash_vocabulary::tool_contract::ExecutionPolicy::default()
     }
 
     async fn run(

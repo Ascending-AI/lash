@@ -2,11 +2,16 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{Datum, ErrorDatum, Handle, Integer, Name, Timestamp};
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::ErrorDatum;
+use lash_kernel_doc::Handle;
+use lash_kernel_doc::Integer;
+use lash_kernel_doc::Timestamp;
 use lash_kernel_vm::{
     CellStart, Delivered, Host, KernelMachine, Machine, Meters, Outcome, Program, Request,
     StartError, Step, Target,
 };
+use lash_vocabulary::legacy_names::Name;
 
 use super::{Smith, library};
 use crate::HarnessError;

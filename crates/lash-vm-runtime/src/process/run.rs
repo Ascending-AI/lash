@@ -12,7 +12,6 @@
 
 use std::sync::Arc;
 
-use lash_core::ProcessId;
 use lash_core::tool_run::{KnownFailureReason, MaterialOwner, MaterialRole};
 use lash_core_store::tool_run::{Material, SettledOutput};
 use lash_execution_contracts::process::CapacityCause;
@@ -27,6 +26,7 @@ use lash_vm_broker::kernel::{
 };
 use lash_vm_client::{FrameEpoch, InfrastructureOutcome, OwnerEpoch, RunHost, VmOwner};
 use lash_vm_protocol::{PoolFault, ProtocolBreach};
+use lash_vocabulary::identity::ProcessId;
 use tokio_util::sync::CancellationToken;
 
 use super::pages::{RunCandidate, StepActivation};
@@ -128,12 +128,12 @@ struct StepHost {
     now_ms: i64,
     random: Arc<dyn Fn() -> u64 + Send + Sync>,
     providers: ProjectionCatalog,
-    observe: lash_kernel_vm::ObservationMode,
+    observe: lash_vocabulary::observation::RunObservation,
     reads: std::sync::Mutex<HostReads>,
     effect_reads: Arc<dyn lash_execution_contracts::process::EngineEffectReads>,
     required: std::collections::BTreeMap<
-        lash_kernel_doc::EffectName,
-        lash_kernel_doc::OperationRequirement,
+        lash_vocabulary::legacy_names::EffectName,
+        lash_vocabulary::operations::OperationRequirement,
     >,
     cancel: CancellationToken,
     parent_wait: std::time::Duration,
@@ -152,20 +152,20 @@ impl StepHost {
 
     /// The segment's tape, at `observe: counts`.
     fn tape(&self) -> Option<HostReads> {
-        (self.observe == lash_kernel_vm::ObservationMode::Counts)
+        (self.observe == lash_vocabulary::observation::RunObservation::Counts)
             .then(|| std::mem::take(&mut *self.taped()))
     }
 }
 
 #[async_trait::async_trait]
 impl RunHost for StepHost {
-    fn observe(&self) -> lash_kernel_vm::ObservationMode {
+    fn observe(&self) -> lash_vocabulary::observation::RunObservation {
         self.observe
     }
 
     /// A live delta is provisional: the segment's commit makes its total
     /// exact, as `process.ran`.
-    fn ran(&self, delta: &lash_kernel_vm::SiteCounts) {
+    fn ran(&self, delta: &lash_vocabulary::observation::SiteCounts) {
         if let Some(trace) = &self.trace {
             let frame = self
                 .deltas
@@ -178,14 +178,14 @@ impl RunHost for StepHost {
         self.trace.is_some()
     }
 
-    fn enter_site(&self, at: &lash_kernel_doc::EffectId) {
+    fn enter_site(&self, at: &lash_vocabulary::sites::EffectId) {
         if let Some(trace) = &self.trace {
             trace.node(at, lash_trace::TraceNodeFact::Started { call_id: None });
         }
     }
 
     async fn clock(&self) -> Result<Timestamp, ParentFault> {
-        if self.observe == lash_kernel_vm::ObservationMode::Counts {
+        if self.observe == lash_vocabulary::observation::RunObservation::Counts {
             self.taped().now_ms = Some(self.now_ms);
         }
         Ok(Timestamp {
@@ -195,7 +195,7 @@ impl RunHost for StepHost {
 
     async fn random(&self) -> Result<u64, ParentFault> {
         let bits = (self.random)();
-        if self.observe == lash_kernel_vm::ObservationMode::Counts {
+        if self.observe == lash_vocabulary::observation::RunObservation::Counts {
             self.taped().random.push(bits);
         }
         Ok(bits)
@@ -212,10 +212,10 @@ impl RunHost for StepHost {
     /// Read through the runner the process's environment recorded.
     async fn perform(
         &self,
-        effect: &lash_kernel_doc::EffectName,
+        effect: &lash_vocabulary::legacy_names::EffectName,
         args: &[Datum],
-        site: &lash_kernel_doc::PositionLabel,
-        origin: &lash_kernel_doc::Site,
+        site: &lash_vocabulary::sites::PositionLabel,
+        origin: &lash_vocabulary::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
         let requirement = self.required.get(effect).ok_or_else(|| {
             ParentFault(format!("the process reads undeclared effect `{effect}`"))
@@ -240,7 +240,7 @@ impl RunHost for StepHost {
                 .await
                 .map_err(|error| ParentFault(error.to_string()))?,
         );
-        if self.observe == lash_kernel_vm::ObservationMode::Counts {
+        if self.observe == lash_vocabulary::observation::RunObservation::Counts {
             self.taped().effects.push(super::state::EffectRead {
                 effect: effect.clone(),
                 args: args.to_vec(),
@@ -266,7 +266,7 @@ fn ended(
     Ok((
         KernelRunOutput::Ended {
             outcome: Box::new(outcome),
-            ran: lash_kernel_vm::SiteCounts::new(),
+            ran: lash_vocabulary::observation::SiteCounts::new(),
             caught: Vec::new(),
             reads: None,
             start: None,
@@ -375,10 +375,13 @@ async fn kernel_run(
         document.manifest.kernel,
         run.effects.values(),
     );
-    let counts = settings.observe == lash_kernel_vm::ObservationMode::Counts;
+    let counts = settings.observe == lash_vocabulary::observation::RunObservation::Counts;
     let start = counts.then(|| recorded_start(process_input.document, &input));
     // A recovered wait is reported by the occurrence it was delivered as.
-    let delivered: Vec<(lash_protocol_types::WaitId, lash_kernel_doc::EffectId)> = input
+    let delivered: Vec<(
+        lash_vocabulary::sites::WaitId,
+        lash_vocabulary::sites::EffectId,
+    )> = input
         .deliver
         .iter()
         .map(|delivery| (delivery.wait, delivery.identity.clone()))
@@ -386,7 +389,9 @@ async fn kernel_run(
     let modes = lash_kernel_vm::EffectModes::reading(
         run.effects
             .iter()
-            .filter(|(_, link)| link.policy == lash_core::ExecutionPolicy::Read)
+            .filter(|(_, link)| {
+                link.policy == lash_vocabulary::tool_contract::ExecutionPolicy::Read
+            })
             .map(|(effect, _)| effect.clone()),
     );
     let host = Arc::new(StepHost {
@@ -489,7 +494,7 @@ async fn kernel_run(
             let Some((state, candidate)) = state else {
                 return Err(RunFault("the run parked without a state".to_owned()).into());
             };
-            let withdrawn: Vec<lash_protocol_types::WaitId> = park.withdrawn.clone();
+            let withdrawn: Vec<lash_vocabulary::sites::WaitId> = park.withdrawn.clone();
             let issued = park
                 .requests
                 .into_iter()
@@ -530,7 +535,10 @@ async fn kernel_run(
 
 /// Where `input` starts, as a segment records it for a replay: each part
 /// by reference to the retained record that holds it.
-fn recorded_start(document: lash_kernel_doc::DocumentId, input: &KernelRunInput) -> RecordedStart {
+fn recorded_start(
+    document: lash_vocabulary::legacy_names::DocumentId,
+    input: &KernelRunInput,
+) -> RecordedStart {
     let from = match &input.parked {
         None => StartedFrom::Entry,
         Some(parked) => StartedFrom::Output {
@@ -568,10 +576,10 @@ fn recorded_start(document: lash_kernel_doc::DocumentId, input: &KernelRunInput)
 pub(super) struct Driven {
     pub(super) step: MachineStep,
     pub(super) parked: Option<(ParkedPage, RunCandidate)>,
-    pub(super) ran: lash_kernel_vm::SiteCounts,
-    pub(super) path: lash_kernel_vm::ExecutionPath,
+    pub(super) ran: lash_vocabulary::observation::SiteCounts,
+    pub(super) path: lash_vocabulary::observation::ExecutionPath,
     /// The waits whose failed outcome a `catch` recovered from.
-    pub(super) caught: Vec<lash_protocol_types::WaitId>,
+    pub(super) caught: Vec<lash_vocabulary::sites::WaitId>,
 }
 
 /// Starts or resumes the machine over a page activation of the process's
@@ -637,7 +645,7 @@ pub(super) async fn run_machine(
     activation: &mut StepActivation,
     binding: lash_core_store::checkpoint_graph::NodeId,
     deliver: Vec<(
-        lash_protocol_types::WaitId,
+        lash_vocabulary::sites::WaitId,
         lash_vm_client::wire::OutcomeWire,
     )>,
     slice: u64,
@@ -854,7 +862,7 @@ pub(super) fn entry_args(
 }
 
 /// The wait a request names and its admission.
-pub(super) fn admission_of(request: &Request) -> (lash_protocol_types::WaitId, Admission) {
+pub(super) fn admission_of(request: &Request) -> (lash_vocabulary::sites::WaitId, Admission) {
     match request {
         Request::Sleep(sleep) => (
             sleep.wait,
@@ -883,10 +891,13 @@ pub(super) fn admission_of(request: &Request) -> (lash_protocol_types::WaitId, A
 /// The link check at the start fitted each to the document's requirement,
 /// and a process links no turn control.
 fn issue(
-    effects: &std::collections::BTreeMap<lash_kernel_doc::EffectName, lash_core::OperationLink>,
+    effects: &std::collections::BTreeMap<
+        lash_vocabulary::legacy_names::EffectName,
+        lash_core::OperationLink,
+    >,
     required: &std::collections::BTreeMap<
-        lash_kernel_doc::EffectName,
-        lash_kernel_doc::OperationRequirement,
+        lash_vocabulary::legacy_names::EffectName,
+        lash_vocabulary::operations::OperationRequirement,
     >,
     now_ms: i64,
     request: Request,
@@ -1005,7 +1016,7 @@ pub(super) fn outcome_of_end(end: End) -> lash_execution_contracts::process::Pro
 /// cause, its message as the failure's, its data as the raw value.
 fn uncaught(
     error: Datum,
-    site: Option<lash_kernel_doc::Site>,
+    site: Option<lash_vocabulary::sites::Site>,
 ) -> lash_execution_contracts::process::ProcessOutcome {
     let json = |value: &Datum| {
         datum_to_json(value)

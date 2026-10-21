@@ -1,7 +1,14 @@
 //! Expressions: every one lowers to an operand, after the statements that
 //! compute it.
 
-use lash_kernel_doc::{Expr, Literal, Member, Name, Place, RecordEntry, Rhs, Stmt};
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Literal;
+use lash_kernel_doc::Member;
+use lash_kernel_doc::Place;
+use lash_kernel_doc::RecordEntry;
+use lash_kernel_doc::Rhs;
+use lash_kernel_doc::Stmt;
+use lash_vocabulary::legacy_names::Name;
 
 use super::calls::Key;
 use super::patterns::Mode;

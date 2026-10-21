@@ -17,8 +17,8 @@ mod composition_laws;
 mod live_fence_sweep;
 mod protocol_version_refusal;
 
-fn named_beta_tool(name: &str) -> crate::ToolDefinition {
-    crate::ToolDefinition::raw(
+fn named_beta_tool(name: &str) -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{name}"),
         format!("tools.{name}"),
         "",
@@ -36,7 +36,9 @@ fn named_beta_tool(name: &str) -> crate::ToolDefinition {
     .with_execution(std::time::Duration::from_secs(120))
 }
 
-fn manifests(definitions: Vec<crate::ToolDefinition>) -> Vec<crate::ToolManifest> {
+fn manifests(
+    definitions: Vec<lash_vocabulary::tool_contract::ToolDefinition>,
+) -> Vec<lash_vocabulary::tool_contract::ToolManifest> {
     definitions
         .into_iter()
         .map(|tool| tool.manifest())
@@ -61,7 +63,7 @@ impl ToolProvider for ExactDispatchTools {
         &self,
         _config: &crate::plugin::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<crate::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(Vec::new())
@@ -71,16 +73,16 @@ impl ToolProvider for ExactDispatchTools {
         &self,
         name: &str,
         _config: &crate::plugin::OwnerConfigView,
-    ) -> Option<crate::ToolManifest> {
+    ) -> Option<lash_vocabulary::tool_contract::ToolManifest> {
         (name == "tools.host_only").then(|| named_beta_tool("host_only").manifest())
     }
 
     fn resolve_manifest_by_id(
         &self,
-        id: &crate::ToolId,
+        id: &lash_vocabulary::tool_contract::ToolId,
         _config: &crate::plugin::OwnerConfigView,
-    ) -> Option<crate::ToolManifest> {
-        (id == &crate::ToolId::from("tool:host_only"))
+    ) -> Option<lash_vocabulary::tool_contract::ToolManifest> {
+        (id == &lash_vocabulary::tool_contract::ToolId::from("tool:host_only"))
             .then(|| named_beta_tool("host_only").manifest())
     }
 
@@ -88,7 +90,7 @@ impl ToolProvider for ExactDispatchTools {
         &self,
         name: &str,
         _config: &crate::plugin::OwnerConfigView,
-    ) -> Option<Arc<crate::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         self.contracts_resolved.fetch_add(1, Ordering::SeqCst);
         (self.contract_available && name == "tools.host_only")
             .then(|| Arc::new(named_beta_tool("host_only").contract()))
@@ -150,7 +152,7 @@ async fn refusing_dispatch_context(plugins: Arc<PluginSession>) -> ToolDispatchC
             &lash_execution_contracts::testing::process_env_with_limit(1024),
         ),
         owner: crate::ExecutionOwner::SessionFrame {
-            session_id: crate::SessionId::from("session"),
+            session_id: lash_vocabulary::identity::SessionId::from("session"),
             agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
         },
         observer: crate::engine::NullObservationSink::arc(),
@@ -221,8 +223,8 @@ async fn explicit_execution_grant_runs_non_catalog_tool_with_binding() {
     ))
     .await;
     let grant = crate::ToolExecutionGrant::from_definition(
-        crate::plugin::ToolProviderHandle::new(
-            crate::plugin::RegistryKind::Session,
+        lash_vocabulary::providers::ToolProviderHandle::new(
+            lash_vocabulary::claims::RegistryKind::Session,
             "test_tools",
             crate::tool_provider_key!("tools"),
         ),
@@ -272,18 +274,24 @@ async fn explicit_execution_grant_runs_non_catalog_tool_with_binding() {
 }
 
 /// What each call a provider ran saw: its execution binding and contract.
-type ObservedCalls =
-    Arc<std::sync::Mutex<Vec<(Option<crate::ExecutionBinding>, crate::ToolContract)>>>;
+type ObservedCalls = Arc<
+    std::sync::Mutex<
+        Vec<(
+            Option<lash_vocabulary::providers::ExecutionBinding>,
+            lash_vocabulary::tool_contract::ToolContract,
+        )>,
+    >,
+>;
 
 /// The binding the grant in these tests carries, in its provider's format.
-fn granted_binding() -> crate::ExecutionBinding {
-    crate::ExecutionBinding {
-        codec: crate::plugin::ToolProviderHandle::new(
-            crate::plugin::RegistryKind::Session,
+fn granted_binding() -> lash_vocabulary::providers::ExecutionBinding {
+    lash_vocabulary::providers::ExecutionBinding {
+        codec: lash_vocabulary::providers::ToolProviderHandle::new(
+            lash_vocabulary::claims::RegistryKind::Session,
             "test_tools",
             crate::tool_provider_key!("tools"),
         ),
-        format: crate::FormatVersion::ONE,
+        format: lash_vocabulary::providers::FormatVersion::ONE,
         payload: json!({ "kind": "test", "route": "deferred" }),
     }
 }
@@ -296,8 +304,8 @@ async fn dispatch_allows_unknown_mcp_args_when_schema_does_not_forbid_them() {
         executed: Arc<AtomicUsize>,
     }
 
-    fn definition() -> crate::ToolDefinition {
-        crate::ToolDefinition::raw(
+    fn definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+        lash_vocabulary::tool_contract::ToolDefinition::raw(
             "tool:mcp__appworld__venmo_show_transactions",
             "appworld.venmo_show_transactions",
             "Show Venmo transactions",
@@ -322,7 +330,7 @@ async fn dispatch_allows_unknown_mcp_args_when_schema_does_not_forbid_them() {
             &self,
             _config: &crate::plugin::OwnerConfigView,
         ) -> std::result::Result<
-            Vec<crate::ToolManifest>,
+            Vec<lash_vocabulary::tool_contract::ToolManifest>,
             lash_execution_contracts::plugin_error::PluginError,
         > {
             Ok(manifests(vec![definition()]))
@@ -332,7 +340,7 @@ async fn dispatch_allows_unknown_mcp_args_when_schema_does_not_forbid_them() {
             &self,
             name: &str,
             _config: &crate::plugin::OwnerConfigView,
-        ) -> Option<Arc<crate::ToolContract>> {
+        ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
             (name == "appworld.venmo_show_transactions").then(|| Arc::new(definition().contract()))
         }
 
@@ -374,18 +382,18 @@ async fn dispatch_allows_unknown_mcp_args_when_schema_does_not_forbid_them() {
 async fn before_tool_hook_receives_resolved_argument_projection_policy() {
     struct ProjectionPolicyTools;
 
-    fn definition() -> crate::ToolDefinition {
-        crate::ToolDefinition::raw(
+    fn definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+        lash_vocabulary::tool_contract::ToolDefinition::raw(
             "tool:seedy",
             "tools.seedy",
             "Seed-aware",
-            crate::ToolDefinition::default_input_schema(),
+            lash_vocabulary::tool_contract::ToolDefinition::default_input_schema(),
             json!({ "type": "string" }),
         )
         .expect("valid declared tool schemas")
         .with_execution(std::time::Duration::from_secs(120))
         .with_argument_projection(
-            crate::ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("seed"),
+            lash_vocabulary::tool_contract::ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("seed"),
         )
     }
 
@@ -395,7 +403,7 @@ async fn before_tool_hook_receives_resolved_argument_projection_policy() {
             &self,
             _config: &crate::plugin::OwnerConfigView,
         ) -> std::result::Result<
-            Vec<crate::ToolManifest>,
+            Vec<lash_vocabulary::tool_contract::ToolManifest>,
             lash_execution_contracts::plugin_error::PluginError,
         > {
             Ok(manifests(vec![definition()]))
@@ -405,7 +413,7 @@ async fn before_tool_hook_receives_resolved_argument_projection_policy() {
             &self,
             name: &str,
             _config: &crate::plugin::OwnerConfigView,
-        ) -> Option<Arc<crate::ToolContract>> {
+        ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
             (name == "tools.seedy").then(|| Arc::new(definition().contract()))
         }
 
@@ -452,7 +460,7 @@ async fn before_tool_hook_receives_resolved_argument_projection_policy() {
     );
     assert_eq!(
         captured.lock().expect("the policy witness").clone(),
-        Some(crate::ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("seed"))
+        Some(lash_vocabulary::tool_contract::ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("seed"))
     );
 }
 
@@ -475,8 +483,10 @@ async fn a_deferred_only_granted_cell_call_executes_once_or_parks_for_missing_re
         fn tool_manifests(
             &self,
             _config: &crate::plugin::OwnerConfigView,
-        ) -> Result<Vec<crate::ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
-        {
+        ) -> Result<
+            Vec<lash_vocabulary::tool_contract::ToolManifest>,
+            lash_execution_contracts::plugin_error::PluginError,
+        > {
             Ok(Vec::new())
         }
 
@@ -484,12 +494,12 @@ async fn a_deferred_only_granted_cell_call_executes_once_or_parks_for_missing_re
             &self,
             _name: &str,
             _config: &crate::plugin::OwnerConfigView,
-        ) -> Option<Arc<crate::ToolContract>> {
+        ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
             None
         }
 
-        fn readable_binding_formats(&self) -> &'static [crate::FormatVersion] {
-            &[crate::FormatVersion::ONE]
+        fn readable_binding_formats(&self) -> &'static [lash_vocabulary::providers::FormatVersion] {
+            &[lash_vocabulary::providers::FormatVersion::ONE]
         }
 
         async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
@@ -557,8 +567,8 @@ async fn a_deferred_only_granted_cell_call_executes_once_or_parks_for_missing_re
         Arc::new(lash_durable::NoProbe),
     );
     let provider = Arc::new(DeferredOnly::default());
-    let deferred_key = crate::plugin::ToolProviderHandle::new(
-        crate::plugin::RegistryKind::Session,
+    let deferred_key = lash_vocabulary::providers::ToolProviderHandle::new(
+        lash_vocabulary::claims::RegistryKind::Session,
         "test_tools",
         crate::tool_provider_key!("deferred"),
     );
@@ -572,7 +582,7 @@ async fn a_deferred_only_granted_cell_call_executes_once_or_parks_for_missing_re
     .into_runtime();
     let capabilities = Default::default();
     let owner = crate::ExecutionOwner::SessionFrame {
-        session_id: crate::SessionId::from("test-session"),
+        session_id: lash_vocabulary::identity::SessionId::from("test-session"),
         agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
     };
     let config = crate::plugin::OwnerConfigView::default();
@@ -617,8 +627,8 @@ async fn a_deferred_only_granted_cell_call_executes_once_or_parks_for_missing_re
     };
     let draft = round::call_draft(&opener, &pending, pin).unwrap();
     let ledger_owner = lash_durable::domain::OwnerKey::Turn(
-        crate::SessionId::from("test-session"),
-        crate::TurnId::parse("test-turn").unwrap(),
+        lash_vocabulary::identity::SessionId::from("test-session"),
+        lash_vocabulary::identity::TurnId::parse("test-turn").unwrap(),
     );
     let mut tx = controller.begin().await.unwrap();
     let admitted = round::admit(&mut tx, &ledger_owner, round::RunSeq(1), vec![draft]).unwrap();
@@ -651,8 +661,8 @@ async fn a_deferred_only_granted_cell_call_executes_once_or_parks_for_missing_re
     let mut unreadable = member.clone();
     let CellMember::Tool(call) = &mut unreadable;
     let grant = call.execution_grant.as_mut().unwrap();
-    let payload = crate::ExecutionBinding {
-        format: crate::FormatVersion::new(2).unwrap(),
+    let payload = lash_vocabulary::providers::ExecutionBinding {
+        format: lash_vocabulary::providers::FormatVersion::new(2).unwrap(),
         ..grant.payload().unwrap().clone()
     };
     **grant = (**grant).clone().with_execution_binding(Some(payload));
@@ -695,8 +705,8 @@ async fn a_deferred_only_granted_cell_call_executes_once_or_parks_for_missing_re
     let CellMember::Tool(call) = &mut unserved;
     let grant = call.execution_grant.as_mut().unwrap();
     **grant = crate::ToolExecutionGrant::of_link(&crate::OperationLink {
-        provider: crate::plugin::ToolProviderHandle::new(
-            crate::plugin::RegistryKind::Session,
+        provider: lash_vocabulary::providers::ToolProviderHandle::new(
+            lash_vocabulary::claims::RegistryKind::Session,
             "absent",
             crate::tool_provider_key!("tools"),
         ),

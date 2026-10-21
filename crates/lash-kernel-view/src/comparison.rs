@@ -6,8 +6,11 @@ use lash_kernel_check::{
     ActNode, ActionNode, AtomNode, BindingKind, CalleeNode, ExprNode, Graph, MemberNode, NodeId,
     NodeKind, Reference, StmtNode,
 };
-use lash_kernel_doc::{FunctionDeclarations, FunctionId, Literal, Site};
+use lash_kernel_doc::FunctionDeclarations;
+use lash_kernel_doc::Literal;
 use lash_kernel_package::PackageView;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::sites::Site;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

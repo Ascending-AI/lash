@@ -5,7 +5,7 @@ use lash_core::{
     LiveReplayStoreError, LiveReplaySubscribeOutcome, SessionObservationEventPayload,
     SessionRevision,
 };
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 use std::sync::Arc;
 
 #[expect(
@@ -22,7 +22,7 @@ pub(super) async fn language_identity_is_window_scoped_and_conflicts_retire_cont
         lash_core::testing::session_language_observation(&session, "cell-start", "first");
     let draft = |observation| {
         LiveReplayEventDraft::new(
-            None::<lash_protocol_types::TurnId>,
+            None::<lash_vocabulary::identity::TurnId>,
             SessionObservationEventPayload::LanguageExecution(Box::new(observation)),
         )
     };

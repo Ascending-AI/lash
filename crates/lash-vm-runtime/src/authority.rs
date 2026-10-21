@@ -18,8 +18,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use lash_kernel_doc::{EffectName, FunctionDefinition, FunctionId};
+use lash_kernel_doc::FunctionDefinition;
 use lash_vm_broker::kernel::loader::LoadRefusal;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
 
 /// Where the store's answers about package membership come from: the
 /// operations packages declare internal, and the packages each definition

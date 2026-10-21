@@ -15,14 +15,17 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use lash_core_ids::FormatVersion;
+use lash_vocabulary::providers::FormatVersion;
 use serde::{Deserialize, Serialize};
 
+use crate::ChargeSafetyPolicy;
+use crate::LlmProfileConfig;
+use crate::MaxToolCalls;
 use crate::provider::AttachmentCapabilitySnapshot;
 use crate::run_spec::{CapabilityRef, SlotId};
 use crate::tool_surface::OperationLink;
-use crate::{ChargeSafetyPolicy, LlmProfileConfig, MaxToolCalls, SessionId};
-use lash_kernel_doc::EffectName;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::legacy_names::EffectName;
 
 use crate::process_identity::{ProcessEnvRef, process_env_ref_for_bytes};
 
@@ -136,10 +139,10 @@ impl<T> ProcessConfigKey<T> {
     /// an env links an effect it serves to.
     pub fn tool_provider(
         &self,
-        key: crate::plugin_registrations::ToolProviderKey,
+        key: lash_vocabulary::providers::ToolProviderKey,
     ) -> crate::tool_surface::ProviderKey {
-        crate::plugin_registrations::ToolProviderHandle::new(
-            crate::obligations::RegistryKind::Process,
+        lash_vocabulary::providers::ToolProviderHandle::new(
+            lash_vocabulary::claims::RegistryKind::Process,
             self.component,
             key,
         )
@@ -373,8 +376,8 @@ pub enum ProcessEnvRefusal {
     ContractChanged {
         effect: String,
         tool: String,
-        pinned: lash_kernel_doc::ContractId,
-        live: lash_kernel_doc::ContractId,
+        pinned: lash_vocabulary::operations::ContractId,
+        live: lash_vocabulary::operations::ContractId,
     },
     /// Two linked effect paths collide: one is a namespace of the other.
     #[error("linked effects `{first}` and `{second}` collide")]
@@ -655,7 +658,7 @@ impl ProcessEnvBuilder {
     pub fn link_tool(
         mut self,
         provider: crate::tool_surface::ProviderKey,
-        definition: &crate::ToolDefinition,
+        definition: &lash_vocabulary::tool_contract::ToolDefinition,
     ) -> Self {
         let link = OperationLink::advertised(provider, definition, None);
         self.env
@@ -743,7 +746,7 @@ fn capture_missing(effect: &str, tool: &str) -> String {
 #[path = "process_env_tests.rs"]
 mod tests;
 
-pub use lash_vocabulary::providers::{ProcessComponentId, ProcessComponentIdError};
+use lash_vocabulary::providers::ProcessComponentId;
 
 /// Linked execution environment; implementation belongs to pkg-exec.
 pub mod linked {

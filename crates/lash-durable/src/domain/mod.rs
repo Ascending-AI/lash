@@ -83,7 +83,11 @@ pub use waits::{
 use crate::error::DurableError;
 use crate::ids::ActorKey;
 use lash_core_store::checkpoint_graph::{DecodeLimits, NodeId};
-use lash_protocol_types::{BatchId, ProcessId, SessionId, ToolCallId, TurnId};
+use lash_protocol_types::ToolCallId;
+use lash_vocabulary::identity::BatchId;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 /// One owner-state write inside a fenced [`ActorTx`](crate::ActorTx) commit.
 ///
@@ -308,7 +312,7 @@ pub enum DomainRefusal {
         /// The session.
         session: SessionId,
         /// The history node the append requires.
-        required: lash_protocol_types::NodeId,
+        required: lash_vocabulary::identity::NodeId,
     },
     /// The session store refused a head commit's content: it breaks one of
     /// the store's own rules (a node id the session already holds, a reused

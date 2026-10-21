@@ -168,7 +168,7 @@ impl DurableHost {
                     admission: lash_core_store::store::RunAdmissionRecord::Turn {
                         took: lash_core_store::store::AdmittedTurnRows::Inputs {
                             ids: lash_core_store::store::AdmittedInputIds::one(
-                                lash_core::InputId::from("rlm-cell-law"),
+                                lash_vocabulary::identity::InputId::from("rlm-cell-law"),
                             ),
                         },
                         trace: None,

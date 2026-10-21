@@ -5,7 +5,7 @@
 //! ([`lash_core::DeferredToolProvider`]), which resolves the call paths a
 //! cell writes that the surface does not offer into
 //! [`lash_core::DeferredMatch`]es: a resolved tool with the provider that
-//! executes it and its [`lash_core::ExecutionBinding`], a refusal, or an
+//! executes it and its [`lash_vocabulary::providers::ExecutionBinding`], a refusal, or an
 //! unavailable path. The provider resolves on demand only: it does not
 //! enumerate, advertise or rank tools.
 //!
@@ -48,24 +48,24 @@ pub(crate) fn offer_unavailable_notes(
                 continue;
             }
         };
-        let Ok(operation) = lash_kernel_dialect::operation_text::parse(path) else {
+        let Ok(operation) = lash_vocabulary::operation_text::parse(path) else {
             continue;
         };
-        let signature = lash_kernel_doc::Signature {
-            params: vec![lash_kernel_doc::Param {
-                name: lash_kernel_doc::Name::new("input"),
-                ty: lash_kernel_doc::Type::Any,
+        let signature = lash_vocabulary::types::Signature {
+            params: vec![lash_vocabulary::types::Param {
+                name: lash_vocabulary::legacy_names::Name::new("input"),
+                ty: lash_vocabulary::types::Type::Any,
                 optional: true,
             }],
-            result: lash_kernel_doc::Type::Any,
+            result: lash_vocabulary::types::Type::Any,
         };
         // A note has no runner: its offer states the fixed contract of an
         // operation no runner serves, and a perform of it raises the note.
         let offered = lash_kernel_dialect::Offered {
             visibility: lash_kernel_dialect::Visibility::Public,
-            requirement: lash_kernel_doc::OperationRequirement {
+            requirement: lash_vocabulary::operations::OperationRequirement {
                 signature,
-                contract: lash_kernel_doc::ContractId::new(UNAVAILABLE_CONTRACT),
+                contract: lash_vocabulary::operations::ContractId::new(UNAVAILABLE_CONTRACT),
             },
             controls: BTreeSet::new(),
             read: false,
@@ -126,7 +126,7 @@ pub enum DeferredResolutionError {
     BindingUnreadable {
         path: String,
         #[source]
-        source: lash_core::ExecutionBindingUnreadable,
+        source: lash_vocabulary::providers::ExecutionBindingUnreadable,
     },
     #[error("failed to offer the matched tool for `{path}`: {source}")]
     Offer {
@@ -170,7 +170,7 @@ pub(crate) async fn journal_deferred_matches(
     for path in candidates {
         let segments = path
             .split('.')
-            .map(lash_kernel_dialect::Segment::new)
+            .map(lash_vocabulary::names::Segment::new)
             .collect::<Result<Vec<_>, _>>();
         let classified = segments.as_ref().map_or_else(
             |_| {
@@ -311,7 +311,10 @@ pub(crate) fn offer_deferred_matches(
     boundary: &mut HostBoundary,
     matches: &BTreeMap<String, DeferredMatch>,
     ctx: &lash_core::RuntimeExecutionContext<'_>,
-) -> Result<BTreeMap<lash_core::ToolId, lash_core::ToolExecutionGrant>, DeferredResolutionError> {
+) -> Result<
+    BTreeMap<lash_vocabulary::tool_contract::ToolId, lash_core::ToolExecutionGrant>,
+    DeferredResolutionError,
+> {
     let mut grants = BTreeMap::new();
     for (path, matched) in matches {
         let Some(link) = matched.resolved() else {
@@ -389,7 +392,7 @@ mod tests {
     async fn a_process_provider_handle_is_refused_before_session_provider_lookup() {
         let host = crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
         let handle = lash_core::plugin::ToolProviderHandle::new(
-            lash_core::RegistryKind::Process,
+            lash_vocabulary::claims::RegistryKind::Process,
             "process-tools",
             lash_core::tool_provider_key!("deferred"),
         );
@@ -411,7 +414,7 @@ mod tests {
         .await
         .expect_err("the process address cannot resolve a session");
         assert!(
-            matches!(&error, DeferredResolutionError::ProviderRegistry(lash_execution_contracts::plugin_error::PluginError::ProviderRegistryMismatch { expected: lash_core::RegistryKind::Session, provider }) if provider == &handle)
+            matches!(&error, DeferredResolutionError::ProviderRegistry(lash_execution_contracts::plugin_error::PluginError::ProviderRegistryMismatch { expected: lash_vocabulary::claims::RegistryKind::Session, provider }) if provider == &handle)
         );
         let controller = error.runtime_effect_error();
         assert!(

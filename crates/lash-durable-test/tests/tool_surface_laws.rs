@@ -39,9 +39,9 @@ mod served;
 
 use std::sync::{Arc, Mutex};
 
-use lash_core::ToolId;
 use lash_core::llm::types::{LlmRequest, LlmRole};
 use lash_protocol_types::sync::MutexExt as _;
+use lash_vocabulary::tool_contract::ToolId;
 
 use served::{Tier, WATCHDOG};
 
@@ -81,7 +81,7 @@ impl Spec {
         Self { change, ..self }
     }
 
-    fn definition(&self) -> lash_core::ToolDefinition {
+    fn definition(&self) -> lash_vocabulary::tool_contract::ToolDefinition {
         let input = if self.change == Change::Retyped {
             serde_json::json!({
                 "type": "object",
@@ -89,9 +89,9 @@ impl Spec {
                 "properties": { "x": { "type": "string" } }
             })
         } else {
-            lash_core::ToolDefinition::default_input_schema()
+            lash_vocabulary::tool_contract::ToolDefinition::default_input_schema()
         };
-        lash_core::ToolDefinition::raw(
+        lash_vocabulary::tool_contract::ToolDefinition::raw(
             self.id,
             format!("tools.{}", self.name),
             if self.change == Change::Reworded {
@@ -108,13 +108,13 @@ impl Spec {
             if self.name.ends_with("_held") && self.change != Change::Retried {
                 // A held call stranded by its node's stop runs again on the
                 // next node that serves it.
-                lash_core::ExecutionPolicy::repeatable(
+                lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
                     std::num::NonZeroU32::new(2).expect("two attempts"),
                     1,
                     1,
                 )
             } else {
-                lash_core::ExecutionPolicy::Once
+                lash_vocabulary::tool_contract::ExecutionPolicy::Once
             },
         )
     }
@@ -169,7 +169,7 @@ impl lash_core::ToolProvider for Surface {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok({
@@ -184,7 +184,7 @@ impl lash_core::ToolProvider for Surface {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         self.tool(name)
             .map(|tool| Arc::new(tool.definition().contract()))
     }
@@ -329,8 +329,8 @@ impl Deployment {
     }
 }
 
-fn session_id(name: &str) -> lash::SessionId {
-    lash::SessionId::try_from(name.to_owned()).expect("a session id")
+fn session_id(name: &str) -> lash_vocabulary::identity::SessionId {
+    lash_vocabulary::identity::SessionId::try_from(name.to_owned()).expect("a session id")
 }
 
 async fn create(core: &lash::LashCore, name: &str) -> lash::DurableSession {
@@ -624,8 +624,8 @@ fn held() -> Spec {
 /// The obligation token of the tool provider `owner` declares under
 /// `tools`, as a session requires it (S7).
 fn provider_token(owner: &str) -> String {
-    lash_core::ObligationToken::for_callback(
-        lash_core::RegistryKind::Session,
+    lash_vocabulary::claims::ObligationToken::for_callback(
+        lash_vocabulary::claims::RegistryKind::Session,
         &lash_core::plugin::ToolProviderHandle::new(
             lash_core::plugin::RegistryKind::Session,
             owner,
@@ -790,7 +790,7 @@ async fn strand_held_call(deployment: &Deployment, name: &str) {
         .expect("the session resolves");
     let handle = session
         .send(lash::TurnInput::text(call_input("surface_held")))
-        .id(lash::TurnId::parse(name).expect("a turn id"))
+        .id(lash_vocabulary::identity::TurnId::parse(name).expect("a turn id"))
         .await
         .expect("the send is accepted");
     tokio::time::timeout(WATCHDOG, surface.entered.notified())
@@ -820,7 +820,7 @@ async fn a_recorded_call_runs_on_a_node_serving_the_same_surface(tier: Tier) {
     let output = tokio::time::timeout(
         WATCHDOG,
         session
-            .attach_id(lash::TurnId::parse("same-surface").expect("a turn id"))
+            .attach_id(lash_vocabulary::identity::TurnId::parse("same-surface").expect("a turn id"))
             .output(),
     )
     .await
@@ -866,7 +866,7 @@ async fn a_recorded_call_is_judged_by_its_contract_alone(tier: Tier) {
         let output = tokio::time::timeout(
             WATCHDOG,
             session
-                .attach_id(lash::TurnId::parse(&name).expect("a turn id"))
+                .attach_id(lash_vocabulary::identity::TurnId::parse(&name).expect("a turn id"))
                 .output(),
         )
         .await
@@ -915,8 +915,10 @@ impl lash_core::ToolProvider for CellSurface {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> Result<Vec<lash_core::ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
-    {
+    ) -> Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(self
             .surface
             .tools
@@ -929,7 +931,7 @@ impl lash_core::ToolProvider for CellSurface {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         self.surface
             .tool(name)
             .map(|tool| Arc::new(cell_definition(tool).contract()))
@@ -940,7 +942,7 @@ impl lash_core::ToolProvider for CellSurface {
     }
 }
 
-fn cell_definition(tool: &Spec) -> lash_core::ToolDefinition {
+fn cell_definition(tool: &Spec) -> lash_vocabulary::tool_contract::ToolDefinition {
     tool.definition()
 }
 
@@ -1016,7 +1018,7 @@ async fn cell_starts(deployment: &Deployment, name: &str) -> usize {
         .durable()
         .cell_roots(
             &session_id(name),
-            &lash::TurnId::parse(name).expect("a turn id"),
+            &lash_vocabulary::identity::TurnId::parse(name).expect("a turn id"),
         )
         .await
         .expect("read the cell roots");
@@ -1066,7 +1068,7 @@ async fn recorded_cell_call_under(tier: Tier, change: Change, admitted: bool) {
     let session = create(&core, &name).await;
     let handle = session
         .send(lash::TurnInput::text("call the held tool"))
-        .id(lash::TurnId::parse(&name).expect("a turn id"))
+        .id(lash_vocabulary::identity::TurnId::parse(&name).expect("a turn id"))
         .await
         .expect("the send is accepted");
     tokio::time::timeout(WATCHDOG, async {
@@ -1100,7 +1102,7 @@ async fn recorded_cell_call_under(tier: Tier, change: Change, admitted: bool) {
     let output = tokio::time::timeout(
         WATCHDOG,
         session
-            .attach_id(lash::TurnId::parse(&name).expect("a turn id"))
+            .attach_id(lash_vocabulary::identity::TurnId::parse(&name).expect("a turn id"))
             .output(),
     )
     .await

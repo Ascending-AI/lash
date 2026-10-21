@@ -9,9 +9,10 @@ use super::*;
 // decodes are bounded by the nodes it appends, whatever the session's
 // history depth.
 
-use lash::{SessionId, TurnInput};
+use lash::TurnInput;
 use lash_core::store::StoreTestSupport;
 use lash_facade_tests::history::*;
+use lash_vocabulary::identity::SessionId;
 use std::time::Duration;
 
 /// Each measured send decodes at most one body per window read for each

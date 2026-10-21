@@ -1,5 +1,4 @@
 use super::*;
-use lash_kernel_doc::graph_tokens::{ChildRef, decode_body, encode_body};
 use lash_kernel_doc::heap_values::key_digest;
 use lash_kernel_doc::{Action, Callee, Rhs, Stmt};
 use lash_kernel_state::kernel_internals::census_impl::Census;
@@ -7,6 +6,9 @@ use lash_kernel_state::paged::{
     AllocationCensus, EditEpoch, HeapLifecycle, NameRef, ObjectInit, PageAnswer, PageBody,
     PageSource, SiteRef,
 };
+use lash_vocabulary::tokens::ChildRef;
+use lash_vocabulary::tokens::decode_body;
+use lash_vocabulary::tokens::encode_body;
 use std::cell::RefCell;
 use std::rc::Rc;
 #[derive(Default)]
@@ -408,13 +410,13 @@ fn a_bundle_is_its_functions_closure_and_is_refused_unless_its_members_agree() {
 
     let mut effects = body.clone();
     effects.effects.push((
-        lash_kernel_doc::EffectName::new("echo").expect("an effect name"),
-        lash_kernel_doc::OperationRequirement::new(
-            lash_kernel_doc::Signature {
+        lash_vocabulary::legacy_names::EffectName::new("echo").expect("an effect name"),
+        lash_vocabulary::operations::OperationRequirement::new(
+            lash_vocabulary::types::Signature {
                 params: Vec::new(),
-                result: lash_kernel_doc::Type::Any,
+                result: lash_vocabulary::types::Type::Any,
             },
-            lash_kernel_doc::ContractId::new("1"),
+            lash_vocabulary::operations::ContractId::new("1"),
         ),
     ));
     assert!(matches!(read(effects), Err(BundleRefusal::RequiredEffects)));
@@ -528,15 +530,17 @@ fn a_function_reaching_a_control_through_a_body_is_not_saved() {
 #[test]
 fn installing_refuses_a_second_requirement_of_one_effect() {
     let fetch = EffectName::new("web.fetch").expect("an effect name");
-    let signature = lash_kernel_doc::Signature {
+    let signature = lash_vocabulary::types::Signature {
         params: Vec::new(),
-        result: lash_kernel_doc::Type::Any,
+        result: lash_vocabulary::types::Type::Any,
     };
-    let interim =
-        OperationRequirement::new(signature.clone(), lash_kernel_doc::ContractId::new("1"));
+    let interim = OperationRequirement::new(
+        signature.clone(),
+        lash_vocabulary::operations::ContractId::new("1"),
+    );
     let declared = OperationRequirement {
         signature: signature.clone(),
-        contract: lash_kernel_doc::ContractId::new("3"),
+        contract: lash_vocabulary::operations::ContractId::new("3"),
     };
     let install_requiring = |saved: &OperationRequirement| {
         let mut function = calling("load", &[], &[]);
@@ -558,7 +562,7 @@ fn installing_refuses_a_second_requirement_of_one_effect() {
             &lash_kernel_doc::FunctionRepresentation::Bare,
             &crate::Namespaces::of_effects(
                 &BTreeMap::from([(fetch.clone(), signature.clone())]),
-                &lash_kernel_doc::ContractId::new("1"),
+                &lash_vocabulary::operations::ContractId::new("1"),
                 &BTreeMap::new(),
             )
             .expect("an operation"),
@@ -749,7 +753,7 @@ fn data_holding_a_function_that_performs_a_control_is_not_carried() {
                 value: Rhs::Action(Action::Perform {
                     effect: finish.clone(),
                     args: Vec::new(),
-                    result: lash_kernel_doc::Type::Any,
+                    result: lash_vocabulary::types::Type::Any,
                     then_yield: false,
                 }),
             },
@@ -769,11 +773,11 @@ fn data_holding_a_function_that_performs_a_control_is_not_carried() {
     document.manifest.effects.insert(
         finish.clone(),
         OperationRequirement::new(
-            lash_kernel_doc::Signature {
+            lash_vocabulary::types::Signature {
                 params: Vec::new(),
-                result: lash_kernel_doc::Type::Any,
+                result: lash_vocabulary::types::Type::Any,
             },
-            lash_kernel_doc::ContractId::new("1"),
+            lash_vocabulary::operations::ContractId::new("1"),
         ),
     );
     let (mut heap, _) = fresh();

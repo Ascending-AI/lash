@@ -13,10 +13,17 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use lash_core::{
-    OwnerConfigView, ToolCall, ToolContract, ToolDefinition, ToolId, ToolManifest, ToolOutcome,
-    ToolPrepareCall, ToolPrepareContext, ToolProvider, sansio::PendingToolCall,
-};
+use lash_core::OwnerConfigView;
+use lash_core::ToolCall;
+use lash_core::ToolOutcome;
+use lash_core::ToolPrepareCall;
+use lash_core::ToolPrepareContext;
+use lash_core::ToolProvider;
+use lash_core::sansio::PendingToolCall;
+use lash_vocabulary::tool_contract::ToolContract;
+use lash_vocabulary::tool_contract::ToolDefinition;
+use lash_vocabulary::tool_contract::ToolId;
+use lash_vocabulary::tool_contract::ToolManifest;
 
 use crate::ToolSelection;
 
@@ -26,7 +33,7 @@ use crate::ToolSelection;
 /// [`StaticToolProvider::new`]; this trait supplies only the dynamic behavior.
 /// What a tool may do beyond an inline Done result — defer, declare intents —
 /// is declared on its definition with
-/// [`ToolDefinition::with_declaration`](lash_core::ToolDefinition::with_declaration).
+/// [`ToolDefinition::with_declaration`](lash_vocabulary::tool_contract::ToolDefinition::with_declaration).
 #[async_trait::async_trait]
 pub trait StaticToolExecute: Send + Sync + 'static {
     /// Dispatch on `call.name()` when serving more than one tool.

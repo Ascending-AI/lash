@@ -87,7 +87,7 @@ pub struct ReplayPath {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskPath {
-    pub task: crate::TaskLabel,
+    pub task: crate::sites::TaskLabel,
     pub starts: Vec<u32>,
 }
 
@@ -95,7 +95,7 @@ pub struct TaskPath {
 /// by the kernel's replay reader, rather than by the transporting host.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct ExecutionPath(pub(crate) Vec<(crate::TaskLabel, Vec<u32>)>);
+pub struct ExecutionPath(#[doc(hidden)] pub Vec<(crate::sites::TaskLabel, Vec<u32>)>);
 impl ExecutionPath {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()

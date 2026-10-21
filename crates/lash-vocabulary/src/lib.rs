@@ -1,15 +1,14 @@
 //! Neutral package, operation, identity and encoding vocabulary.
 //! This crate has no first-party dependencies. Runtime executable objects and
-//! registries stay above it. Old import paths are temporary branch re-exports.
+//! registries stay above it.
 pub mod claims;
 pub mod content_ids;
 pub mod data_limits;
 pub mod identity;
 pub mod json_schema;
-pub mod legacy_capabilities;
 pub mod legacy_names;
-pub mod legacy_package_ids;
 pub mod names;
+pub mod observation;
 pub mod operation_keys;
 pub mod operation_text;
 pub mod operations;

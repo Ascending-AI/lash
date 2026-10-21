@@ -1,5 +1,5 @@
-use lash_protocol_types::SessionId;
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+use lash_vocabulary::identity::SessionId;
 use std::{
     collections::HashMap,
     sync::{
@@ -9,17 +9,22 @@ use std::{
     time::Instant,
 };
 
+use lash_core::Resolution;
+use lash_core::ToolAttemptOutcome;
+use lash_core::ToolOutcome;
+use lash_core::ToolProvider;
+use lash_core::facade_support::DirectJsonSchema;
+use lash_core::facade_support::DirectRequest;
 use lash_core::llm::types::{
     LlmContentBlock, LlmOutputPart, LlmOutputSpec, LlmRequest, LlmRequestScope, LlmResponse,
     LlmStreamEvent, LlmUsage,
 };
 use lash_core::testing::TestProvider;
-use lash_core::{
-    Resolution, ToolAttemptOutcome, ToolContract, ToolDefinition, ToolManifest, ToolOutcome,
-    ToolOutputContract, ToolProvider, facade_support::DirectJsonSchema,
-    facade_support::DirectRequest,
-};
 use lash_protocol_types::sync::MutexExt;
+use lash_vocabulary::tool_contract::ToolContract;
+use lash_vocabulary::tool_contract::ToolDefinition;
+use lash_vocabulary::tool_contract::ToolManifest;
+use lash_vocabulary::tool_contract::ToolOutputContract;
 
 use super::scenarios::RuntimePerfScenario;
 

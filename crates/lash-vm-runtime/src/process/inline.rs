@@ -12,9 +12,11 @@
 use std::sync::Arc;
 
 use lash_kernel_check::{Environment, WorkflowDocument};
-use lash_kernel_doc::{
-    FunctionValue, FunctionValueLimits, IdentifiedDocument, KernelDataLimits, WorkflowDocumentEntry,
-};
+use lash_kernel_doc::FunctionValue;
+use lash_kernel_doc::FunctionValueLimits;
+use lash_kernel_doc::IdentifiedDocument;
+use lash_kernel_doc::WorkflowDocumentEntry;
+use lash_vocabulary::data_limits::KernelDataLimits;
 
 use super::{KernelProcessDefinition, KernelProcessEngine, definition_draft, entry_signature};
 

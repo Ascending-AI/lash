@@ -138,7 +138,10 @@ impl ToolProvider for CountedEcho {
     fn tool_manifests(
         &self,
         config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         lash_core::testing::FixtureTools.tool_manifests(config)
     }
 
@@ -146,7 +149,7 @@ impl ToolProvider for CountedEcho {
         &self,
         name: &str,
         config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         lash_core::testing::FixtureTools.resolve_contract(name, config)
     }
 
@@ -190,8 +193,8 @@ fn build_boot(
     .expect("core")
 }
 
-fn session_id(id: &str) -> lash_protocol_types::SessionId {
-    lash_protocol_types::SessionId::try_from(id.to_owned()).expect("session id")
+fn session_id(id: &str) -> lash_vocabulary::identity::SessionId {
+    lash_vocabulary::identity::SessionId::try_from(id.to_owned()).expect("session id")
 }
 
 async fn answered(core: &LashCore, id: &str, text: &str) -> lash::TurnOutput {

@@ -5,8 +5,15 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{Datum, ErrorDatum, Float, Handle, Integer, Name, Timestamp, parse_document};
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::ErrorDatum;
+use lash_kernel_doc::Float;
+use lash_kernel_doc::Handle;
+use lash_kernel_doc::Integer;
+use lash_kernel_doc::Timestamp;
+use lash_kernel_doc::parse_document;
 use lash_kernel_vm::{Bounds, CellStart, End, Host, Machine, Program, RunError, Step, Target};
+use lash_vocabulary::legacy_names::Name;
 
 use super::machine;
 

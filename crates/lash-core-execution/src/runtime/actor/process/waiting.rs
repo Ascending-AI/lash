@@ -6,13 +6,13 @@
 //! cancel ends was cut short, never resumed (FIG-6821).
 use super::driver::{Blocked, Driver};
 use super::effects::append_event as append;
-use crate::ProcessId;
 use crate::runtime::actor::round::{MemberState, RunFold};
 use lash_durable::ActorTx;
 use lash_execution_contracts::process::ProcessRecord;
 use lash_execution_contracts::process::StepRequest;
 use lash_execution_contracts::process::WaitKind;
 use lash_execution_contracts::process::WaitState;
+use lash_vocabulary::identity::ProcessId;
 
 /// Why a transition ends the waits it ends.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,7 +47,7 @@ impl Ending {
 }
 
 /// What the engine itself waits for, beside its steps.
-fn engine_blocker(driver: &Driver) -> Option<(WaitKind, Option<lash_protocol_types::EffectId>)> {
+fn engine_blocker(driver: &Driver) -> Option<(WaitKind, Option<lash_vocabulary::sites::EffectId>)> {
     match driver.blocked.as_ref()? {
         Blocked::External { name, site, .. } => {
             Some((WaitKind::Key { name: name.clone() }, site.clone()))
@@ -75,7 +75,7 @@ pub(super) fn project(
     fold: &RunFold,
     since_ms: i64,
 ) {
-    let mut blockers: Vec<(WaitKind, Option<lash_protocol_types::EffectId>)> = fold
+    let mut blockers: Vec<(WaitKind, Option<lash_vocabulary::sites::EffectId>)> = fold
         .rounds()
         .flat_map(|round| round.members())
         .filter(|member| matches!(member.state(), MemberState::Waiting { .. }))

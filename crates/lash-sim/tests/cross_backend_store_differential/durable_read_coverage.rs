@@ -71,7 +71,7 @@ pub(super) async fn drive(
     // real session has ingress with backend-minted batch identities.
     let absent_session = SessionId::fixture(format!("{session}:absent-reads"));
     let session = &absent_session;
-    let run: lash_protocol_types::TurnId = SURFACE_RUN_ID.into();
+    let run: lash_vocabulary::identity::TurnId = SURFACE_RUN_ID.into();
     let owner = OwnerKey::Turn(session.clone(), run.clone());
     let actor = ActorKey::session(session.as_str()).expect("session actor");
     let exec = ExecKey::Cell(
@@ -80,7 +80,7 @@ pub(super) async fn drive(
         CellId::new("coverage-absent-cell"),
     );
     let scope = ScopeKey::Session(session.clone());
-    let process = lash_core::ProcessId::fixture("coverage-absent-process");
+    let process = lash_vocabulary::identity::ProcessId::fixture("coverage-absent-process");
     let call = PromptCallKey {
         session: session.clone(),
         call: ModelCallId::Turn {

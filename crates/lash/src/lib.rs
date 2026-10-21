@@ -253,7 +253,7 @@ pub mod sync {
     pub use lash_core::sync::*;
 }
 mod send;
-pub use lash_core::RunId;
+pub use lash_vocabulary::identity::RunId;
 mod session;
 mod session_binding;
 mod support;
@@ -303,7 +303,6 @@ pub use lash_core::runtime::durable::session::{
 mod pacing;
 pub use lash_core::AwaitEventKey;
 pub use lash_core::AwaitEventWaitIdentity;
-pub use lash_core::BatchId;
 pub use lash_core::ChargeSafetyPolicy;
 pub use lash_core::ChargeSafetyRefusalEvidence;
 pub use lash_core::CommitBudget;
@@ -311,8 +310,14 @@ pub use lash_core::CommitBudgetLimit;
 pub use lash_core::DrainMode;
 pub use lash_core::DrainModePolicy;
 pub use lash_core::EmptyLlmProfiles;
+/// Lash's own execution bounds (`LashCoreBuilder::execution_budgets`), the
+/// limit one executable stretch runs under, and the registration refusal of
+/// a tool missing a bound its host must set.
+pub use lash_core::ExecutionBudgets;
+pub use lash_core::ExecutionBudgetsConfig;
+pub use lash_core::ExecutionBudgetsError;
+pub use lash_core::ExecutionLimit;
 pub use lash_core::FrameKey;
-pub use lash_core::InputId;
 pub use lash_core::InputItem;
 pub use lash_core::LlmCallRecord;
 pub use lash_core::LlmProfileConfig;
@@ -328,7 +333,6 @@ pub use lash_core::LlmProfiles;
 pub use lash_core::LlmUsage;
 pub use lash_core::MaxToolCalls;
 pub use lash_core::NoProgressBudget;
-pub use lash_core::NodeId;
 pub use lash_core::OutputTokenLimits;
 pub use lash_core::PendingTurnInput;
 pub use lash_core::PendingTurnInputCancelOutcome;
@@ -337,7 +341,7 @@ pub use lash_core::PendingTurnInputCancelTarget;
 pub use lash_core::PendingTurnInputRead;
 pub use lash_core::PendingTurnInputReadStatus;
 pub use lash_core::PendingTurnInputSuffixCancelOutcome;
-pub use lash_core::ProcessId;
+pub use lash_core::ProviderAttemptLimits;
 pub use lash_core::QueuedDrainCandidate;
 pub use lash_core::QueuedDrainFamily;
 pub use lash_core::QueuedDrainPolicy;
@@ -350,10 +354,8 @@ pub use lash_core::RegisteredLlmProfile;
 pub use lash_core::RegistrationError;
 pub use lash_core::Resolution;
 pub use lash_core::ResolveOutcome;
-pub use lash_core::RuntimeOwner;
 pub use lash_core::SessionEntry;
 pub use lash_core::SessionError;
-pub use lash_core::SessionId;
 pub use lash_core::SessionListFilter;
 pub use lash_core::SessionRelationKind;
 pub use lash_core::SessionView;
@@ -367,7 +369,6 @@ pub use lash_core::TurnEvent;
 pub use lash_core::TurnFailureEvidence;
 pub use lash_core::TurnFailurePartialOutput;
 pub use lash_core::TurnFailureSettlement;
-pub use lash_core::TurnId;
 pub use lash_core::TurnInput;
 pub use lash_core::TurnInputApplication;
 pub use lash_core::facade_support::GenerationOverlay;
@@ -407,13 +408,6 @@ pub use lash_core::store::{
     DeliveryError, ObligationId, ObligationKey, ObligationKind, ObligationState, SessionFault,
     SessionFaultOrigin, SessionFaultRecord, StallReason, StalledObligation, UndecodableObligation,
 };
-/// Lash's own execution bounds (`LashCoreBuilder::execution_budgets`), the
-/// limit one executable stretch runs under, and the registration refusal of
-/// a tool missing a bound its host must set.
-pub use lash_core::{
-    ExecutionBudgets, ExecutionBudgetsConfig, ExecutionBudgetsError, ExecutionLimit,
-    ProviderAttemptLimits, RegistrationRefused,
-};
 /// A plugin hook's [`HookKey`](plugins::HookKey) for a string literal,
 /// validated at compile time.
 pub use lash_core::{hook_key, tool_provider_key};
@@ -429,6 +423,14 @@ pub use lash_execution_contracts::session_spec::SessionSpec;
 pub use lash_execution_contracts::session_spec::SpecResolveError;
 pub use lash_execution_contracts::session_types::SessionCreateRequest;
 pub use lash_execution_contracts::session_types::UnstatedSessionConfig;
+pub use lash_vocabulary::identity::BatchId;
+pub use lash_vocabulary::identity::InputId;
+pub use lash_vocabulary::identity::NodeId;
+pub use lash_vocabulary::identity::ProcessId;
+pub use lash_vocabulary::identity::RuntimeOwner;
+pub use lash_vocabulary::identity::SessionId;
+pub use lash_vocabulary::identity::TurnId;
+pub use lash_vocabulary::tool_contract::RegistrationRefused;
 pub use pacing::{
     CommitAdmissionPolicy, CommitAdmissionPolicyError, ObserverPacing, PollPacing, RecoveryPacing,
     RelayPolicy, RelayPolicyError, RuntimePacingPolicy, WorkCadencePolicy,
@@ -477,14 +479,20 @@ pub use lash_core::runtime::obligations::relay::{
 pub use lash_core::store::{IngressTerminal, IngressTerminalCause};
 pub use lash_core_store::session_identity::{OpenAgentFrameOutcome, OpenAgentFrameRequest};
 pub use lash_core_store::turn_input_vocabulary::ResolvedRun;
-pub use lash_protocol_types::{
-    BlankIdentity, ErrorEnvelope, ExecCodeFailure, FrameKeyError, InvalidProcessId, LlmCallError,
-    ReportedFailure, RetryProgress, ToolCallPosition, ToolCallRoot,
-};
+pub use lash_protocol_types::ErrorEnvelope;
+pub use lash_protocol_types::ExecCodeFailure;
+pub use lash_protocol_types::FrameKeyError;
+pub use lash_protocol_types::LlmCallError;
+pub use lash_protocol_types::ReportedFailure;
+pub use lash_protocol_types::RetryProgress;
+pub use lash_protocol_types::ToolCallPosition;
+pub use lash_protocol_types::ToolCallRoot;
 pub use lash_protocol_types::{
     llm::types::AttemptRecord, llm::types::ChargeSafetyDenialReason, llm::types::LlmCallId,
     llm::types::StreamBlockEvent, llm::types::StreamBlockIdentity, llm::types::StreamBlockKind,
 };
+pub use lash_vocabulary::identity::BlankIdentity;
+pub use lash_vocabulary::identity::InvalidProcessId;
 
 /// `use lash::prelude::*;` brings in the daily core/session/turn vocabulary
 /// without the lower-level integration types or domain modules also exposed
@@ -552,7 +560,6 @@ pub mod observe {
 pub mod tools {
     #[cfg(feature = "codemode")]
     pub use lash_llm_tools::{LLM_TOOLS_CONFIG, LlmToolsComponent, LlmToolsPluginFactory};
-    pub use lash_protocol_types::schema_contract::OutputSchemaLimits;
     /// How an execution mode's tools read to a model: the replaceable
     /// presenter a mode holds in its slot, what it is handed and what it
     /// answers, the record a session keeps of it, and a wrapper that
@@ -564,17 +571,34 @@ pub mod tools {
         WrappedToolPresenter, admit_over_standard, default_attachment_omission_text, import_schema,
         inline_schema, inline_shape, listing as presenter_listing, read_config,
     };
+    pub use lash_vocabulary::schema_contract::OutputSchemaLimits;
     /// The shape a presenter reads a tool's JSON Schemas as.
-    pub use lash_tool_shape::{
-        CanonicalIdentity, DefinitionId, ExtraKeys, ImportLimits, ObjectShape, ProcessParamShape,
-        ProcessShape, ReadableNameAllocator, SchemaDefinition, SchemaDocument, SchemaShape,
-        ShapeConstraints, ShapeField, ShapeImportRefusal, ShapeKind, ShapeRow, X_LASH_KEYWORD,
-        XLashParam, XLashSignature, XLashType, is_named_type_reference,
-    };
+    pub use lash_vocabulary::tool_shape::CanonicalIdentity;
+    pub use lash_vocabulary::tool_shape::DefinitionId;
+    pub use lash_vocabulary::tool_shape::ExtraKeys;
+    pub use lash_vocabulary::tool_shape::ImportLimits;
+    pub use lash_vocabulary::tool_shape::ObjectShape;
+    pub use lash_vocabulary::tool_shape::ProcessParamShape;
+    pub use lash_vocabulary::tool_shape::ProcessShape;
+    pub use lash_vocabulary::tool_shape::ReadableNameAllocator;
+    pub use lash_vocabulary::tool_shape::SchemaDefinition;
+    pub use lash_vocabulary::tool_shape::SchemaDocument;
+    pub use lash_vocabulary::tool_shape::SchemaShape;
+    pub use lash_vocabulary::tool_shape::ShapeConstraints;
+    pub use lash_vocabulary::tool_shape::ShapeField;
+    pub use lash_vocabulary::tool_shape::ShapeImportRefusal;
+    pub use lash_vocabulary::tool_shape::ShapeKind;
+    pub use lash_vocabulary::tool_shape::ShapeRow;
+    pub use lash_vocabulary::tool_shape::X_LASH_KEYWORD;
+    pub use lash_vocabulary::tool_shape::XLashParam;
+    pub use lash_vocabulary::tool_shape::XLashSignature;
+    pub use lash_vocabulary::tool_shape::XLashType;
+    pub use lash_vocabulary::tool_shape::is_named_type_reference;
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_execution_contracts::tool_intent::GetDefinitionIntent;
     pub use lash_execution_contracts::tool_intent::PublishDefinitionIntent;
-    pub use lash_protocol_types::{ModelTool, ToolCallStatus};
+    pub use lash_protocol_types::ToolCallStatus;
+    pub use lash_vocabulary::tool_contract::ModelTool;
 
     pub use crate::tool_intent_ingress::{
         ToolIntentIngress, ToolIntentIngressKey, ToolIntentIngressOutcome, ToolIntentIngressRefusal,
@@ -583,17 +607,23 @@ pub mod tools {
     pub use lash_core::AttemptProcessReads;
     pub use lash_core::AttemptSessionReads;
     pub use lash_core::CancelHint;
+    /// The deferred provider and what it records: a [`DeferredMatch`] per
+    /// call path, committed once, with the [`ExecutionBinding`] that routes a
+    /// resolved tool's calls.
+    pub use lash_core::DeferredMatch;
+    pub use lash_core::DeferredOutcome;
+    pub use lash_core::DeferredResolveContext;
+    pub use lash_core::DeferredToolProvider;
+    pub use lash_core::DeferredToolProviderRegistration;
     pub use lash_core::ExecutionOwner;
-    pub use lash_core::IntoOperation;
     pub use lash_core::IsolatedProcessRequest;
     pub use lash_core::IsolatedStart;
+    pub use lash_core::NextRun;
     pub use lash_core::PendingCompletion;
     pub use lash_core::PendingResolver;
     pub use lash_core::PreparedToolCall;
-    pub use lash_core::QualifiedOperation;
     pub use lash_core::ResolveTargetError;
     pub use lash_core::SurfaceTools;
-    pub use lash_core::ToolArgumentProjectionPolicy;
     pub use lash_core::ToolAttachmentClient;
     pub use lash_core::ToolAttemptOutcome;
     pub use lash_core::ToolCall;
@@ -604,25 +634,18 @@ pub mod tools {
     /// [`ToolCallOutput::cancelled`] when a tool stops without completing.
     pub use lash_core::ToolCancellation;
     pub use lash_core::ToolCatalogEntry;
-    pub use lash_core::ToolContract;
-    pub use lash_core::ToolDefinition;
+    pub use lash_core::ToolControl;
     pub use lash_core::ToolDirectCompletionClient;
-    pub use lash_core::ToolDiscovery;
-    pub use lash_core::ToolDraft;
     pub use lash_core::ToolExecutionGrant;
     pub use lash_core::ToolFailure;
     pub use lash_core::ToolFailureCause;
     pub use lash_core::ToolFailureClass;
     pub use lash_core::ToolFailureSource;
-    pub use lash_core::ToolId;
     pub use lash_core::ToolIntentActivityOutcome;
     pub use lash_core::ToolIntentIdentity;
-    pub use lash_core::ToolIntentKind;
     pub use lash_core::ToolIntentRealizedRef;
-    pub use lash_core::ToolManifest;
     pub use lash_core::ToolOutcome;
     pub use lash_core::ToolOutcomeDone;
-    pub use lash_core::ToolOutputContract;
     pub use lash_core::ToolPrepareCall;
     pub use lash_core::ToolPrepareContext;
     pub use lash_core::ToolProvider;
@@ -632,29 +655,11 @@ pub mod tools {
     pub use lash_core::ToolView;
     pub use lash_core::ToolViewBlock;
     pub use lash_core::ToolViewMeta;
+    pub use lash_core::TurnControl;
     pub use lash_core::facade_support::ReconfigureError;
     /// The pending model call passed to a tool's preparation hook.
     pub use lash_core::sansio::PendingToolCall;
-    pub use lash_core::standard_name;
     pub use lash_core::turn_stop_from_tool_control;
-    /// Per-call execution contract carried by [`ToolDefinition::with_execution_policy`].
-    pub use lash_core::{Backoff, BoundedRetry, ExecutionPolicy, LimitCause};
-    /// Where a tool's contract id comes from: a package's declared id, or
-    /// one derived from the tool's semantic facts and its host's tag. The
-    /// id itself is [`crate::workflow::document::ContractId`].
-    pub use lash_core::{ContractSource, HostTag};
-    /// The three capabilities a tool declares with
-    /// [`ToolDefinition::with_declaration`], and what refuses a declaration
-    /// or an outcome it does not admit.
-    pub use lash_core::{DeclarationRefusal, OutcomeShape, ToolDeclaration};
-    /// The deferred provider and what it records: a [`DeferredMatch`] per
-    /// call path, committed once, with the [`ExecutionBinding`] that routes a
-    /// resolved tool's calls.
-    pub use lash_core::{
-        DeferredMatch, DeferredOutcome, DeferredResolutionPolicy, DeferredResolveContext,
-        DeferredToolProvider, DeferredToolProviderRegistration, ExecutionBinding,
-        ExecutionBindingUnreadable,
-    };
     /// A host-named tool granted dispatch through the deferred provider's
     /// registration: its pure transform names the call path the provider
     /// resolves and the arguments the matched tool is called with
@@ -664,11 +669,6 @@ pub mod tools {
     pub use lash_core::{
         DispatchGrant, DispatchGrantRefusal, DispatchRefusal, DispatchTarget, DispatchTransform,
         TransformRefusal,
-    };
-    /// Turn flow control constructed by tool implementors; attach it with
-    /// [`ToolCallOutput::with_control`] or [`ToolOutcome::with_control`].
-    pub use lash_core::{
-        FinishDeclaration, NextRun, ToolControl, TurnControl, TurnControlKind, TurnControls,
     };
     /// A finish tool: its call ends the turn with its whole input as the
     /// turn's value, typed by the schema it is built with.
@@ -685,11 +685,6 @@ pub mod tools {
         OwnerConfigView, ProviderKey, RecordedSurface, SurfaceCollision, SurfaceDuplicateTool,
         SurfaceEntry, SurfaceRefusal, ToolSurfaceDrift, ToolSurfaceDriftKind,
     };
-    /// A tool's host-set bounds: [`ToolDefinition::with_execution`] bounds
-    /// its body, [`ToolDefinition::with_declaration`] the park of a tool that
-    /// may defer. A tool missing one cannot be defined: the refusal names
-    /// the bound.
-    pub use lash_core::{ParkBound, ToolBound, ToolBounds};
     /// Tool-execution request batches, replies, and child-process observation hooks.
     pub use lash_core::{
         PreparedToolBatch, PreparedToolBatchCall, ToolChildExecutionTraceHook,
@@ -740,6 +735,49 @@ pub mod tools {
     /// facade complete as the crate grows; where it overlaps the explicit
     /// `rlm` re-exports above, those name the same items.
     pub use lash_tool_support::*;
+    pub use lash_vocabulary::ToolIntentKind;
+    pub use lash_vocabulary::names::QualifiedOperation;
+    pub use lash_vocabulary::providers::DeferredResolutionPolicy;
+    pub use lash_vocabulary::providers::ExecutionBinding;
+    pub use lash_vocabulary::providers::ExecutionBindingUnreadable;
+    /// Per-call execution contract carried by [`ToolDefinition::with_execution_policy`].
+    pub use lash_vocabulary::tool_contract::Backoff;
+    pub use lash_vocabulary::tool_contract::BoundedRetry;
+    /// Where a tool's contract id comes from: a package's declared id, or
+    /// one derived from the tool's semantic facts and its host's tag. The
+    /// id itself is [`crate::workflow::document::ContractId`].
+    pub use lash_vocabulary::tool_contract::ContractSource;
+    pub use lash_vocabulary::tool_contract::ExecutionPolicy;
+    pub use lash_vocabulary::tool_contract::HostTag;
+    pub use lash_vocabulary::tool_contract::IntoOperation;
+    pub use lash_vocabulary::tool_contract::LimitCause;
+    /// A tool's host-set bounds: [`ToolDefinition::with_execution`] bounds
+    /// its body, [`ToolDefinition::with_declaration`] the park of a tool that
+    /// may defer. A tool missing one cannot be defined: the refusal names
+    /// the bound.
+    pub use lash_vocabulary::tool_contract::ParkBound;
+    pub use lash_vocabulary::tool_contract::ToolArgumentProjectionPolicy;
+    pub use lash_vocabulary::tool_contract::ToolBound;
+    pub use lash_vocabulary::tool_contract::ToolBounds;
+    pub use lash_vocabulary::tool_contract::ToolContract;
+    pub use lash_vocabulary::tool_contract::ToolDefinition;
+    pub use lash_vocabulary::tool_contract::ToolDiscovery;
+    pub use lash_vocabulary::tool_contract::ToolDraft;
+    pub use lash_vocabulary::tool_contract::ToolId;
+    pub use lash_vocabulary::tool_contract::ToolManifest;
+    pub use lash_vocabulary::tool_contract::ToolOutputContract;
+    pub use lash_vocabulary::tool_contract::standard_name;
+    /// The three capabilities a tool declares with
+    /// [`ToolDefinition::with_declaration`], and what refuses a declaration
+    /// or an outcome it does not admit.
+    pub use lash_vocabulary::tool_declaration::DeclarationRefusal;
+    /// Turn flow control constructed by tool implementors; attach it with
+    /// [`ToolCallOutput::with_control`] or [`ToolOutcome::with_control`].
+    pub use lash_vocabulary::tool_declaration::FinishDeclaration;
+    pub use lash_vocabulary::tool_declaration::OutcomeShape;
+    pub use lash_vocabulary::tool_declaration::ToolDeclaration;
+    pub use lash_vocabulary::tool_declaration::TurnControlKind;
+    pub use lash_vocabulary::tool_declaration::TurnControls;
 }
 
 /// Direct protocol transport types.
@@ -1047,7 +1085,7 @@ pub mod testing;
 pub mod schema {
     /// Shipped JSON Schema and TypeScript text for every host contract.
     pub mod host;
-    pub use lash_protocol_types::schema_contract::*;
+    pub use lash_vocabulary::schema_contract::*;
 }
 
 /// SQLite durable store backend. Enable with `features = ["sqlite"]`.

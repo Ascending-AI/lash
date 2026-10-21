@@ -25,7 +25,13 @@ fn derive_commit_node_ids(
     state: &mut RuntimeSessionState,
     graph: &mut GraphAppend,
     operation: &crate::OperationId,
-) -> Result<Vec<(crate::NodeId, crate::NodeId)>, StoreError> {
+) -> Result<
+    Vec<(
+        lash_vocabulary::identity::NodeId,
+        lash_vocabulary::identity::NodeId,
+    )>,
+    StoreError,
+> {
     let session_id = state.session_id.clone();
     let node_id_mapping = graph.derive_node_ids(&session_id, operation)?;
     state

@@ -14,8 +14,14 @@
 
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{Datum, EffectName, ErrorDatum, Name, Param, Signature, Type};
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::ErrorDatum;
 use lash_kernel_vm::{End, Outcome, Request};
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 use serde::Deserialize;
 use serde_json::Value as Json;
 

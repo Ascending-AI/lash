@@ -49,7 +49,7 @@
 #![deny(clippy::future_not_send)]
 
 use lash_core_store::store::FleetFormatStore;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 mod namespace;
 mod observed_sql;
 /// Opt-in physical-write attribution for performance replay.
@@ -320,7 +320,7 @@ fn sqlite_async_error(error: tokio_rusqlite::Error) -> StoreError {
 fn sqlite_pending_turn_input_insert_error(
     err: rusqlite::Error,
     session_id: &SessionId,
-    input_id: &lash_protocol_types::InputId,
+    input_id: &lash_vocabulary::identity::InputId,
 ) -> StoreError {
     if let rusqlite::Error::SqliteFailure(code, message) = &err
         && code.code == rusqlite::ErrorCode::ConstraintViolation
@@ -342,7 +342,7 @@ fn sqlite_graph_node_insert_error(
     err: rusqlite::Error,
     session_id: &SessionId,
     generation: u64,
-    node_id: &lash_protocol_types::NodeId,
+    node_id: &lash_vocabulary::identity::NodeId,
 ) -> StoreError {
     if let rusqlite::Error::SqliteFailure(code, message) = &err
         && code.code == rusqlite::ErrorCode::ConstraintViolation

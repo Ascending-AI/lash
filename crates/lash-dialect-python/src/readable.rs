@@ -17,7 +17,8 @@ use lash_kernel_dialect::{
     Environment, GeneratedSourceLimits, Library, Mode, PrintError, PrintOptions, PrintedSource,
     Printer, SourceFormat, check_document_depth,
 };
-use lash_kernel_doc::{self as k, Name};
+use lash_kernel_doc as k;
+use lash_vocabulary::legacy_names::Name;
 
 use crate::printer::{Regions, print_regions};
 use crate::{Code, Diagnostic, SourceLimits};

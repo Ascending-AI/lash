@@ -7,7 +7,7 @@ use crate::tool_shape::{ExtraKeys, SchemaShape, ShapeKind, ShapeRow};
 /// A document-local definition index; never compare IDs across documents.
 ///
 /// ```
-/// # use lash_tool_shape::DefinitionId;
+/// # use lash_vocabulary::tool_shape::DefinitionId;
 /// let first = DefinitionId(0);
 /// assert_eq!(first.0, 0);
 /// ```
@@ -17,10 +17,10 @@ pub struct DefinitionId(pub usize);
 /// A reserved reference target and its independently owned annotations.
 ///
 /// ```
-/// # use lash_tool_shape::SchemaDocument;
+/// # use lash_vocabulary::tool_shape::SchemaDocument;
 /// let doc = SchemaDocument::from_json_schema(&serde_json::json!({"$ref":"#"}), 8)?;
 /// assert_eq!(doc.definitions[0].pointer, "#");
-/// # Ok::<(), lash_tool_shape::ShapeImportRefusal>(())
+/// # Ok::<(), lash_vocabulary::tool_shape::ShapeImportRefusal>(())
 /// ```
 #[derive(Clone, Debug, PartialEq)]
 pub struct SchemaDefinition {
@@ -38,10 +38,10 @@ pub struct SchemaDefinition {
 /// No graph is stored in durable contract state.
 ///
 /// ```
-/// # use lash_tool_shape::SchemaDocument;
+/// # use lash_vocabulary::tool_shape::SchemaDocument;
 /// let doc = SchemaDocument::from_json_schema(&serde_json::json!(false), 8)?;
-/// assert!(matches!(doc.roots[0].kind, lash_tool_shape::ShapeKind::Never));
-/// # Ok::<(), lash_tool_shape::ShapeImportRefusal>(())
+/// assert!(matches!(doc.roots[0].kind, lash_vocabulary::tool_shape::ShapeKind::Never));
+/// # Ok::<(), lash_vocabulary::tool_shape::ShapeImportRefusal>(())
 /// ```
 #[derive(Clone, Debug, PartialEq)]
 pub struct SchemaDocument {
@@ -54,11 +54,11 @@ pub struct SchemaDocument {
 /// Compare these bytes for deduplication, never a rendered type or title.
 ///
 /// ```
-/// # use lash_tool_shape::SchemaDocument;
+/// # use lash_vocabulary::tool_shape::SchemaDocument;
 /// let doc = SchemaDocument::from_json_schema(&serde_json::json!({}), 8)?;
 /// let identity = doc.canonical_identity(doc.definitions[0].id);
 /// assert!(!identity.as_bytes().is_empty());
-/// # Ok::<(), lash_tool_shape::ShapeImportRefusal>(())
+/// # Ok::<(), lash_vocabulary::tool_shape::ShapeImportRefusal>(())
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CanonicalIdentity(String);
@@ -67,10 +67,10 @@ impl CanonicalIdentity {
     /// The deterministic UTF-8 identity bytes.
     ///
     /// ```
-    /// # use lash_tool_shape::SchemaDocument;
+    /// # use lash_vocabulary::tool_shape::SchemaDocument;
     /// let doc = SchemaDocument::from_json_schema(&serde_json::json!({}), 8)?;
     /// assert!(!doc.canonical_identity(doc.definitions[0].id).as_bytes().is_empty());
-    /// # Ok::<(), lash_tool_shape::ShapeImportRefusal>(())
+    /// # Ok::<(), lash_vocabulary::tool_shape::ShapeImportRefusal>(())
     /// ```
     pub fn as_bytes(&self) -> &[u8] {
         self.0.as_bytes()
@@ -81,10 +81,10 @@ impl SchemaDocument {
     /// Look up a document-local reference. IDs from this document always exist.
     ///
     /// ```
-    /// # use lash_tool_shape::{SchemaDocument, DefinitionId};
+    /// # use lash_vocabulary::tool_shape::{SchemaDocument, DefinitionId};
     /// let doc = SchemaDocument::from_json_schema(&serde_json::json!({}), 8)?;
     /// assert!(doc.definition(DefinitionId(0)).is_some());
-    /// # Ok::<(), lash_tool_shape::ShapeImportRefusal>(())
+    /// # Ok::<(), lash_vocabulary::tool_shape::ShapeImportRefusal>(())
     /// ```
     pub fn definition(&self, id: DefinitionId) -> Option<&SchemaDefinition> {
         self.definitions.get(id.0)
@@ -94,10 +94,10 @@ impl SchemaDocument {
     /// without following their targets. Repeated edges appear once.
     ///
     /// ```
-    /// # use lash_tool_shape::SchemaDocument;
+    /// # use lash_vocabulary::tool_shape::SchemaDocument;
     /// let doc = SchemaDocument::from_json_schema(&serde_json::json!({"$ref":"#"}), 8)?;
     /// assert_eq!(SchemaDocument::references(&doc.roots[0]).len(), 1);
-    /// # Ok::<(), lash_tool_shape::ShapeImportRefusal>(())
+    /// # Ok::<(), lash_vocabulary::tool_shape::ShapeImportRefusal>(())
     /// ```
     pub fn references(shape: &SchemaShape) -> Vec<DefinitionId> {
         let mut ids = Vec::new();
@@ -115,10 +115,10 @@ impl SchemaDocument {
     /// including cycles. Start with any subset of roots to budget a listing.
     ///
     /// ```
-    /// # use lash_tool_shape::SchemaDocument;
+    /// # use lash_vocabulary::tool_shape::SchemaDocument;
     /// let doc = SchemaDocument::from_json_schema(&serde_json::json!({"$ref":"#"}), 8)?;
     /// assert_eq!(doc.reachable_closure(&doc.roots).len(), 1);
-    /// # Ok::<(), lash_tool_shape::ShapeImportRefusal>(())
+    /// # Ok::<(), lash_vocabulary::tool_shape::ShapeImportRefusal>(())
     /// ```
     pub fn reachable_closure(&self, roots: &[SchemaShape]) -> Vec<DefinitionId> {
         let mut ids = Vec::new();
@@ -145,11 +145,11 @@ impl SchemaDocument {
     /// array order, pointer spellings, annotations and constraints are kept.
     ///
     /// ```
-    /// # use lash_tool_shape::SchemaDocument;
+    /// # use lash_vocabulary::tool_shape::SchemaDocument;
     /// let doc = SchemaDocument::from_json_schema(&serde_json::json!({"$ref":"#"}), 8)?;
     /// assert_eq!(doc.canonical_identity(doc.definitions[0].id),
     ///            doc.canonical_identity(doc.definitions[0].id));
-    /// # Ok::<(), lash_tool_shape::ShapeImportRefusal>(())
+    /// # Ok::<(), lash_vocabulary::tool_shape::ShapeImportRefusal>(())
     /// ```
     #[expect(
         clippy::expect_used,
@@ -180,10 +180,10 @@ impl SchemaDocument {
     /// once. Union branches retain separate paths, even with identical fields.
     ///
     /// ```
-    /// # use lash_tool_shape::SchemaDocument;
+    /// # use lash_vocabulary::tool_shape::SchemaDocument;
     /// let doc = SchemaDocument::from_json_schema(&serde_json::json!({"description":"Any"}), 8)?;
     /// assert_eq!(doc.note_rows()[0].path, "$0");
-    /// # Ok::<(), lash_tool_shape::ShapeImportRefusal>(())
+    /// # Ok::<(), lash_vocabulary::tool_shape::ShapeImportRefusal>(())
     /// ```
     pub fn note_rows(&self) -> Vec<ShapeRow> {
         let mut rows = Vec::new();

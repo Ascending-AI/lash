@@ -1,14 +1,14 @@
 #![deny(clippy::future_not_send)]
 
 #[doc(hidden)]
-pub use lash_core::JsonSchema;
-#[doc(hidden)]
 pub use lash_core::facade_support;
 #[doc(hidden)]
 pub use lash_core::facade_support::*;
 #[doc(hidden)]
 pub use lash_core::*;
 pub use lash_core_execution as execution;
+#[doc(hidden)]
+pub use lash_vocabulary::json_schema::JsonSchema;
 
 #[doc(hidden)]
 pub mod runtime {

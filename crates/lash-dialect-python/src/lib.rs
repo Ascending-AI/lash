@@ -124,7 +124,11 @@ fn lower_with_calls(
     beside: &[String],
 ) -> Result<Lowered, Diagnostic> {
     if let Mode::Cell(cell) = mode {
-        lower::check_binding_names(cell.bindings.iter().map(lash_kernel_doc::Name::as_str))?;
+        lower::check_binding_names(
+            cell.bindings
+                .iter()
+                .map(lash_vocabulary::legacy_names::Name::as_str),
+        )?;
     }
     let max_bytes = limits.max_bytes;
     if source.len() > max_bytes {

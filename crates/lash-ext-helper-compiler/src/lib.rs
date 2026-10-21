@@ -116,11 +116,11 @@ pub fn generate_library(library: &Library, dialect: Dialect) -> Result<Generated
     let mut taken = BTreeSet::new();
     // Include closed kernel bodies used by helpers: their natives may decline.
     fn order(
-        function: lash_kernel_doc::FunctionId,
+        function: lash_vocabulary::legacy_names::FunctionId,
         library: &Library,
         analysis: &Analysis,
-        seen: &mut BTreeSet<lash_kernel_doc::FunctionId>,
-        functions: &mut Vec<lash_kernel_doc::FunctionId>,
+        seen: &mut BTreeSet<lash_vocabulary::legacy_names::FunctionId>,
+        functions: &mut Vec<lash_vocabulary::legacy_names::FunctionId>,
     ) {
         if !seen.insert(function) {
             return;

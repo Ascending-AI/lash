@@ -3,8 +3,9 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use lash_kernel_doc::NativeFunction;
 use lash_kernel_doc::plan::HelperPlan;
-use lash_kernel_doc::{FunctionId, NativeFunction};
+use lash_vocabulary::legacy_names::FunctionId;
 
 /// The natives and generated plans an embedding supplies for held code,
 /// each by the identity of the function it implements. Not data: an

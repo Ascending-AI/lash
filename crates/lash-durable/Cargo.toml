@@ -25,13 +25,14 @@ testing = ["dep:chrono", "dep:futures-util", "lash-protocol-types/testing"]
 workspace = true
 
 [dependencies]
+serde = { workspace = true }
+lash-vocabulary = { workspace = true }
 async-trait = { workspace = true }
 blake3 = { workspace = true }
 chrono = { workspace = true, optional = true }
 futures-util = { workspace = true, optional = true }
 lash-core-ids = { workspace = true }
 lash-core-store = { workspace = true }
-lash-kernel-doc = { workspace = true }
 lash-protocol-types = { workspace = true }
 lash-trace = { workspace = true }
 serde_json = { workspace = true }

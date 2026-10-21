@@ -8,7 +8,7 @@ use lash_core::ActorContext;
 use lash_core::facade_support;
 use lash_core_worker::DurableProcessWorkerConfig;
 use lash_execution_contracts::backend::Backend;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 mod drain;
 mod node;
@@ -235,10 +235,14 @@ impl LashCore {
     /// [`clear_session_fault`](Self::clear_session_fault).
     pub async fn session_faults(
         &self,
-        after: Option<&lash_core::SessionId>,
+        after: Option<&lash_vocabulary::identity::SessionId>,
         limit: std::num::NonZeroUsize,
-    ) -> Result<crate::ChangePage<lash_core::store::SessionFault, Option<lash_core::SessionId>>>
-    {
+    ) -> Result<
+        crate::ChangePage<
+            lash_core::store::SessionFault,
+            Option<lash_vocabulary::identity::SessionId>,
+        >,
+    > {
         let changes = self.store_factory.list_session_faults(after, limit).await?;
         let next = changes
             .last()
@@ -256,7 +260,10 @@ impl LashCore {
     /// A fault a scope close recorded also left that run's `ScopeClose`
     /// obligation stalled, which [`rearm_obligation`](Self::rearm_obligation)
     /// makes due again. `false` when the session has no fault.
-    pub async fn clear_session_fault(&self, session_id: &lash_core::SessionId) -> Result<bool> {
+    pub async fn clear_session_fault(
+        &self,
+        session_id: &lash_vocabulary::identity::SessionId,
+    ) -> Result<bool> {
         Ok(self.store_factory.clear_session_fault(session_id).await?)
     }
 
@@ -522,7 +529,7 @@ impl LashCore {
         // fresh process id that no record will carry.
         let (_, catalog) = composition.linked_tools(
             &Arc::new(env.clone()),
-            lash_core::RuntimeOwner::Process(lash_core::mint_process_id()),
+            lash_vocabulary::identity::RuntimeOwner::Process(lash_core::mint_process_id()),
             &components.host().extensions,
             engines.engine_kinds(),
         )?;
@@ -1559,7 +1566,7 @@ impl LashCore {
 pub struct ForkRequest {
     pub session_id: SessionId,
     pub relation: lash_core::SessionRelation,
-    pub observed_processes: Vec<lash_core::ProcessId>,
+    pub observed_processes: Vec<lash_vocabulary::identity::ProcessId>,
 }
 
 #[cfg(all(test, feature = "otel-trace"))]

@@ -1,6 +1,6 @@
 use super::*;
-use lash_protocol_types::SessionId;
-use lash_protocol_types::TurnId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 impl TurnProtocol for UnitTurnProtocol {
     type IntentOutcome = ();
@@ -323,7 +323,8 @@ pub struct ExecutionEnvironmentSync {
     /// controls each declares. A protocol orders a step's control call by
     /// them, and a turn that must end through a control checks one can.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub turn_controls: std::collections::BTreeMap<String, lash_protocol_types::TurnControls>,
+    pub turn_controls:
+        std::collections::BTreeMap<String, lash_vocabulary::tool_declaration::TurnControls>,
     /// The operation each surface tool's Standard-mode name calls, for the
     /// names joining the operation's segments with `__` does not give back:
     /// those truncated with a digest. Every other name calls the operation
@@ -867,7 +868,7 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
     }
 
     /// Whether a tool of the synced surface can end the turn with a value:
-    /// one declares [`TurnControlKind::Finish`](lash_protocol_types::TurnControlKind::Finish).
+    /// one declares [`TurnControlKind::Finish`](lash_vocabulary::tool_declaration::TurnControlKind::Finish).
     pub fn can_finish(&self) -> bool {
         self.finishing_tools().next().is_some()
     }
@@ -878,7 +879,9 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
         self.environment
             .turn_controls
             .iter()
-            .filter(|(_, controls)| controls.contains(lash_protocol_types::TurnControlKind::Finish))
+            .filter(|(_, controls)| {
+                controls.contains(lash_vocabulary::tool_declaration::TurnControlKind::Finish)
+            })
             .map(|(name, _)| name.as_str())
     }
 
@@ -1142,7 +1145,7 @@ impl ModelToolCalls {
         Self {
             admission: lash_protocol_types::ToolCallAdmission::process(
                 "",
-                lash_protocol_types::ProcessId::fixture("model-tool-calls"),
+                lash_vocabulary::identity::ProcessId::fixture("model-tool-calls"),
             ),
             continuation: 0,
         }

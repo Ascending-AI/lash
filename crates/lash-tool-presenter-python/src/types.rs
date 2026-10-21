@@ -1,10 +1,13 @@
 use std::collections::BTreeMap;
 
 use lash_tool_presenter_api::PresentationRefusal;
-use lash_tool_shape::{
-    DefinitionId, ExtraKeys, ObjectShape, ReadableNameAllocator, SchemaShape, ShapeImportRefusal,
-    ShapeKind,
-};
+use lash_vocabulary::tool_shape::DefinitionId;
+use lash_vocabulary::tool_shape::ExtraKeys;
+use lash_vocabulary::tool_shape::ObjectShape;
+use lash_vocabulary::tool_shape::ReadableNameAllocator;
+use lash_vocabulary::tool_shape::SchemaShape;
+use lash_vocabulary::tool_shape::ShapeImportRefusal;
+use lash_vocabulary::tool_shape::ShapeKind;
 use serde_json::Value;
 
 pub(crate) const KEYWORDS: &[&str] = &[

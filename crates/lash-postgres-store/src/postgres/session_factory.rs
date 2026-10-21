@@ -369,7 +369,7 @@ impl lash_core_store::store::SessionCatalogStore for PostgresStore {
         let mut copy_frame_edges = None;
         let mut source_frame_ended = false;
         if let Some(leaf_node_id) = leaf_node_id.as_deref() {
-            let leaf = lash_protocol_types::NodeId::parse(leaf_node_id)?;
+            let leaf = lash_vocabulary::identity::NodeId::parse(leaf_node_id)?;
             // Retirement never tombstones a retained revision's leaf, so a
             // dead one is damage, not a collected point.
             let node_facts = crate::observed_sql::query_as::<_, (String, i64)>(
@@ -475,7 +475,7 @@ impl lash_core_store::store::SessionCatalogStore for PostgresStore {
                     node_id: facts.0.try_into()?,
                     parent_node_id: facts
                         .1
-                        .map(lash_protocol_types::NodeId::parse)
+                        .map(lash_vocabulary::identity::NodeId::parse)
                         .transpose()?,
                     owning_session_id: SessionId::parse(facts.2)?,
                     generation,

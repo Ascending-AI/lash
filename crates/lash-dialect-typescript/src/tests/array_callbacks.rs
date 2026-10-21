@@ -8,14 +8,19 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
 use lash_kernel_dialect::{Environment, Library, NamedLibrary};
-use lash_kernel_doc::{
-    Datum, ErrorDatum, FunctionCatalog, FunctionId, Handle, Integer, Timestamp, parse_document,
-};
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::ErrorDatum;
+use lash_kernel_doc::FunctionCatalog;
+use lash_kernel_doc::Handle;
+use lash_kernel_doc::Integer;
+use lash_kernel_doc::Timestamp;
+use lash_kernel_doc::parse_document;
 use lash_kernel_vm::kernel_internals::conformance::{self, Checkpoint};
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary, Program,
     Request, Step, Target,
 };
+use lash_vocabulary::legacy_names::FunctionId;
 
 const BEFORE: &str = include_str!("array_callbacks_before.kernel");
 
@@ -217,7 +222,7 @@ fn observe(program: Program, relay: bool) -> Observed {
 fn lowered(kernel: &Kernel, source: &str) -> Program {
     let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
         &super::machine::effects(),
-        &lash_kernel_doc::ContractId::new("1"),
+        &lash_vocabulary::operations::ContractId::new("1"),
         super::controls(),
     )
     .expect("the test's effects are operations");

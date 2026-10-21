@@ -2,10 +2,12 @@ use std::sync::Arc;
 
 #[cfg(any(test, feature = "testing"))]
 use crate::ToolContext;
+use crate::ToolExecutionGrant;
+use crate::ToolFailureClass;
+use crate::ToolPrepareCall;
+use crate::ToolPrepareContext;
 use crate::validate_tool_input;
-use crate::{
-    ToolExecutionGrant, ToolFailureClass, ToolManifest, ToolPrepareCall, ToolPrepareContext,
-};
+use lash_vocabulary::tool_contract::ToolManifest;
 
 #[cfg(any(test, feature = "testing"))]
 use super::context::ToolDispatchOutcome;
@@ -147,7 +149,7 @@ pub async fn prepare_granted_tool_call_with_context(
 /// recorded binding's, never the drifted live tool's.
 pub async fn prepare_recorded_tool_call_with_context(
     context: &ToolDispatchContext<'_>,
-    binding: &crate::ToolDefinition,
+    binding: &lash_vocabulary::tool_contract::ToolDefinition,
     mut pending: crate::sansio::PendingToolCall,
 ) -> ToolPreparationOutcome {
     pending.tool_name = binding.manifest.tool();
@@ -181,7 +183,7 @@ enum ProviderPreparation<'grant> {
 async fn prepare_authorized_tool_call_with_context(
     context: &ToolDispatchContext<'_>,
     manifest: ToolManifest,
-    contract: Arc<crate::ToolContract>,
+    contract: Arc<lash_vocabulary::tool_contract::ToolContract>,
     pending: crate::sansio::PendingToolCall,
     preparation: ProviderPreparation<'_>,
 ) -> ToolPreparationOutcome {
@@ -285,7 +287,7 @@ async fn prepare_authorized_tool_call_with_context(
 }
 
 pub(super) fn validate_args(
-    contract: &crate::ToolContract,
+    contract: &lash_vocabulary::tool_contract::ToolContract,
     args: &serde_json::Value,
     code: &'static str,
 ) -> Result<(), crate::ToolOutcome> {
@@ -379,7 +381,7 @@ pub fn resolve_callable_manifest(
 
 pub fn resolve_callable_manifest_by_id(
     context: &ToolDispatchContext<'_>,
-    tool_id: &crate::ToolId,
+    tool_id: &lash_vocabulary::tool_contract::ToolId,
 ) -> Option<ToolManifest> {
     context
         .tool_catalog
@@ -393,7 +395,7 @@ pub fn resolve_callable_manifest_by_id(
 pub fn resolve_tool_argument_projection_policy(
     context: &ToolDispatchContext<'_>,
     tool_name: &str,
-) -> crate::ToolArgumentProjectionPolicy {
+) -> lash_vocabulary::tool_contract::ToolArgumentProjectionPolicy {
     context
         .tool_catalog
         .entries()

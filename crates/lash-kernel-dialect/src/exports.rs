@@ -7,11 +7,14 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::{FunctionName, OperationRequirement, Signature, Type};
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::operations::OperationRequirement;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 use serde::{Deserialize, Serialize};
 
-use crate::PackagePath;
-use crate::names::Segment;
+use lash_vocabulary::names::PackagePath;
+use lash_vocabulary::names::Segment;
 
 /// One export of a package, under one canonical segment.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,8 +110,8 @@ pub struct Member {
 /// The kernel type of a slot holding a value of the package type `ty` of
 /// `package`: a record carrying exactly that brand, any other field open.
 pub fn brand_type(package: &str, ty: &str) -> Type {
-    Type::Record(lash_kernel_doc::RecordType {
-        fields: vec![lash_kernel_doc::RecordTypeField {
+    Type::Record(lash_vocabulary::types::RecordType {
+        fields: vec![lash_vocabulary::types::RecordTypeField {
             name: BRAND_FIELD.to_owned(),
             ty: brand_tuple(package, ty),
             optional: false,
@@ -135,7 +138,7 @@ pub const BUILT_FIELD: &str = "__lash_built";
 /// outside the view belongs to an operation-only provider and is public.
 pub fn operation_visibility(
     view: &dyn ExportView,
-    operation: &crate::QualifiedOperation,
+    operation: &lash_vocabulary::names::QualifiedOperation,
 ) -> Visibility {
     let mut path = operation.package.as_slice().to_vec();
     path.push(operation.name.clone());

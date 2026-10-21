@@ -89,7 +89,7 @@ impl ModelCallPinRow {
 
 /// Decode a reservation's keys without interpreting opaque call ids.
 pub fn pin_row(
-    session: &lash_protocol_types::SessionId,
+    session: &lash_vocabulary::identity::SessionId,
     owner: &str,
     call: String,
     call_id: String,
@@ -105,7 +105,8 @@ pub fn pin_row(
     };
     let address = if let Some(run) = owner.strip_prefix("turn:") {
         super::ModelCallId::Turn {
-            run: lash_protocol_types::TurnId::try_from(run.to_owned()).map_err(|_| invalid())?,
+            run: lash_vocabulary::identity::TurnId::try_from(run.to_owned())
+                .map_err(|_| invalid())?,
             ordinal: call.parse().map_err(|_| invalid())?,
         }
     } else {

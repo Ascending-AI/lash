@@ -33,16 +33,15 @@ use std::sync::{Arc, Mutex};
 
 use lash_core_store::tool_run::CompletionSource;
 use lash_core_store::tool_run::StateResolution;
+use lash_protocol_types::ExecutionLimit;
 use lash_protocol_types::sync::MutexExt as _;
-use lash_protocol_types::{ExecutionLimit, ExecutionPolicy};
+use lash_vocabulary::tool_contract::ExecutionPolicy;
 
 use lash_core_store::tool_run::{MaterialOwner, MaterialRole};
 
 use crate::ActorContext;
-use crate::ProcessId;
 use crate::RuntimeEffectControllerError;
 use crate::ToolCatalog;
-use crate::ToolId;
 use crate::runtime::actor::round::{
     AdmittedExecution, MemberBody, MemberOutcome, RoundTools, completed_call,
 };
@@ -53,6 +52,8 @@ use lash_execution_contracts::plugin_error::PluginError;
 use lash_execution_contracts::process::ProcessRecord;
 use lash_execution_contracts::process::StepRequest;
 use lash_execution_contracts::waits::ParkDeadline;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::tool_contract::ToolId;
 
 /// A step's admission: what its tool's declaration pins before it runs.
 #[derive(Clone, Debug, PartialEq)]
@@ -166,7 +167,9 @@ pub struct ProcessStepTools {
     pub catalog: Arc<ToolCatalog>,
     /// The effects the process's env links: what each step's effect path
     /// runs.
-    pub effects: Arc<std::collections::BTreeMap<lash_kernel_doc::EffectName, crate::OperationLink>>,
+    pub effects: Arc<
+        std::collections::BTreeMap<lash_vocabulary::legacy_names::EffectName, crate::OperationLink>,
+    >,
     /// The inline readers over the same recorded routes and component config.
     pub reads: Arc<dyn lash_execution_contracts::process::EngineEffectReads>,
     /// The round tools over it, owned by the process.
@@ -187,8 +190,8 @@ pub trait ProcessStepContext: Send + Sync {
     /// The prepared runtime cannot answer the binding.
     fn step_link(
         &self,
-        effect: &lash_kernel_doc::EffectName,
-        contract: &lash_kernel_doc::ContractId,
+        effect: &lash_vocabulary::legacy_names::EffectName,
+        contract: &lash_vocabulary::operations::ContractId,
     ) -> Result<crate::plugin::StepLink, PluginError>;
     /// Judge a recorded dispatch match and its execution binding.
     ///
@@ -204,7 +207,7 @@ pub trait ProcessStepContext: Send + Sync {
     /// The prepared runtime has no engine composition.
     fn requirements(
         &self,
-    ) -> Result<std::collections::BTreeSet<crate::ObligationToken>, PluginError>;
+    ) -> Result<std::collections::BTreeSet<lash_vocabulary::claims::ObligationToken>, PluginError>;
     /// Resolve the call the grant linked at `effect` names for `input`
     /// through the prepared deferred provider: a refusal before the
     /// provider is asked is the call's typed [`crate::DispatchRefusal`].
@@ -214,7 +217,7 @@ pub trait ProcessStepContext: Send + Sync {
     /// asked here.
     async fn resolve_dispatch(
         &self,
-        effect: &lash_kernel_doc::EffectName,
+        effect: &lash_vocabulary::legacy_names::EffectName,
         input: &serde_json::Value,
     ) -> Result<Result<crate::DeferredMatch, crate::DispatchRefusal>, PluginError>;
     /// The arguments the call of the tool `matched` resolved runs with: the
@@ -225,7 +228,7 @@ pub trait ProcessStepContext: Send + Sync {
     /// The env grants no dispatch at `effect`.
     fn dispatch_args(
         &self,
-        effect: &lash_kernel_doc::EffectName,
+        effect: &lash_vocabulary::legacy_names::EffectName,
         input: &serde_json::Value,
         matched: &crate::DeferredMatch,
     ) -> Result<Result<serde_json::Value, crate::DispatchRefusal>, PluginError>;
@@ -408,7 +411,7 @@ pub trait ProcessSteps: Send + Sync {
         process: &ProcessRecord,
         steps: &[StepRequest],
     ) -> Result<
-        Option<std::collections::BTreeSet<crate::ObligationToken>>,
+        Option<std::collections::BTreeSet<lash_vocabulary::claims::ObligationToken>>,
         lash_durable::DurableError,
     > {
         let _ = (runtime, process, steps);

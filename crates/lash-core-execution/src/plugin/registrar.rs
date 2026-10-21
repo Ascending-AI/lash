@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use lash_core_store::tool_run::CallbackSlot;
+use lash_vocabulary::providers::CallbackSlot;
 
 use super::*;
 
@@ -115,7 +115,8 @@ pub(crate) struct PluginContributions {
     pub(crate) deferred_provider: Option<RegisteredProvider<Arc<dyn crate::DeferredToolProvider>>>,
     /// The transforms of the tools the deferred provider's registration
     /// grants dispatch, by tool.
-    pub(crate) dispatch_grants: BTreeMap<crate::ToolId, crate::DispatchTransform>,
+    pub(crate) dispatch_grants:
+        BTreeMap<lash_vocabulary::tool_contract::ToolId, crate::DispatchTransform>,
     pub(crate) tool_catalog_contributors: Vec<RegisteredHook<ToolCatalogContributor>>,
     pub(crate) before_turn_hooks: Vec<RegisteredHook<BeforeTurnHook>>,
     pub(crate) tool_args_transforms: Vec<RegisteredHook<ToolArgsTransformHook>>,
@@ -1043,11 +1044,10 @@ impl BoundRegistrar {
                 "plugin operation error type is empty".into(),
             ));
         }
-        crate::JsonSchema::admit(operation.def().error_schema.clone()).map_err(|source| {
-            PluginError::UnusableSchema {
+        lash_vocabulary::json_schema::JsonSchema::admit(operation.def().error_schema.clone())
+            .map_err(|source| PluginError::UnusableSchema {
                 source: Box::new(source),
-            }
-        })?;
+            })?;
         let identity = PluginCallbackIdentity {
             owner: self.owner.clone(),
             key: format!(

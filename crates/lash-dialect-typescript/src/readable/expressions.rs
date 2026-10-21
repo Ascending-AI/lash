@@ -1,7 +1,8 @@
 //! Expressions: operators from the library calls they lower to, waits from
 //! their actions, and the scoped forms of `&&`, `||`, `??` and calls.
 
-use lash_kernel_doc::{self as k, Name};
+use lash_kernel_doc as k;
+use lash_vocabulary::legacy_names::Name;
 
 use super::lift::{Lift, Lifter, refuse};
 use super::source::{self, Expr, Part};

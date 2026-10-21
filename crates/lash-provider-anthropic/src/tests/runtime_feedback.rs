@@ -19,7 +19,7 @@ fn structured_output_uses_native_output_config_format() {
     req.output_spec = Some(LlmOutputSpec::JsonSchema(LlmJsonSchema {
         name: "extract_result".to_string(),
         strict: true,
-        schema: lash_protocol_types::SchemaContract::admit(json!({
+        schema: lash_vocabulary::schema_contract::SchemaContract::admit(json!({
             "type": "object",
             "additionalProperties": false,
             "required": ["answer"],

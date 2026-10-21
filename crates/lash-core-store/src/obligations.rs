@@ -51,4 +51,4 @@ impl RetirementRefusal {
     }
 }
 
-pub use lash_vocabulary::claims::{ObligationToken, RegistryKind};
+use lash_vocabulary::claims::RegistryKind;

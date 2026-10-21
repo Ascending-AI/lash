@@ -2,7 +2,10 @@
 //! per author construct, chosen as its lowering ends, so scaffolding,
 //! hoisted temporaries and predeclarations never own one by accident.
 
-use lash_kernel_doc::{Expr, Name, Node, Stmt};
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Node;
+use lash_kernel_doc::Stmt;
+use lash_vocabulary::legacy_names::Name;
 
 use super::Lowerer;
 use crate::adapter::{self as ast, VarKind};
@@ -88,8 +91,8 @@ impl Lowerer<'_> {
             if let Some(caption) = caption {
                 self.declared_captions
                     .push(lash_kernel_doc::CaptionEntry::site(
-                        lash_kernel_doc::Site::new(
-                            lash_kernel_doc::Unit::Function(entry),
+                        lash_vocabulary::sites::Site::new(
+                            lash_vocabulary::sites::Unit::Function(entry),
                             Vec::new(),
                         ),
                         caption.clone(),

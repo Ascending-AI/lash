@@ -93,9 +93,9 @@ impl Witness {
     }
 }
 
-fn probe_definition(name: &str) -> lash_core::ToolDefinition {
+fn probe_definition(name: &str) -> lash_vocabulary::tool_contract::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
-    let definition = lash_core::ToolDefinition::raw(
+    let definition = lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{name}"),
         format!("tools.{name}"),
         "Records the identity its attempt saw and answers with its label.",
@@ -104,7 +104,7 @@ fn probe_definition(name: &str) -> lash_core::ToolDefinition {
     )
     .expect("the probe's schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
+    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
         1,
         1,
@@ -112,8 +112,8 @@ fn probe_definition(name: &str) -> lash_core::ToolDefinition {
     if name == DEFERRED {
         definition
             .with_declaration(
-                lash_core::ToolDeclaration::deferring(),
-                Some(lash_core::ParkBound::Within(
+                lash_vocabulary::tool_declaration::ToolDeclaration::deferring(),
+                Some(lash_vocabulary::tool_contract::ParkBound::Within(
                     std::time::Duration::from_secs(120),
                 )),
             )
@@ -134,7 +134,7 @@ impl lash_core::ToolProvider for Probes {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok({
@@ -149,7 +149,7 @@ impl lash_core::ToolProvider for Probes {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         let Some(("tools", name)) = name.split_once('.') else {
             return None;
         };
@@ -383,7 +383,7 @@ async fn head(world: &World, session: &str) -> lash_core::store::SessionHeadMeta
     let factory = world.backend.session_store_factory();
     lash_core::SessionCommitStore::load_session_head_meta(
         factory.as_ref(),
-        &lash::SessionId::try_from(session.to_owned()).expect("a session id"),
+        &lash_vocabulary::identity::SessionId::try_from(session.to_owned()).expect("a session id"),
     )
     .await
     .expect("the head reads")
@@ -547,7 +547,8 @@ async fn fork_inherits_history_without_execution_queues_waits_or_journals(tier: 
     served::assert_answered("source", &seeded);
     let revision = head(&world, source_name).await.head_revision;
 
-    let branch_id = lash::SessionId::try_from("fork-branch".to_owned()).expect("a session id");
+    let branch_id = lash_vocabulary::identity::SessionId::try_from("fork-branch".to_owned())
+        .expect("a session id");
     world
         .core
         .fork_at(

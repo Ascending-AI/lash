@@ -293,7 +293,9 @@ fn a_frame_is_cut_before_any_other_event_and_never_spans_blocks_kinds_or_turns()
     delta(&observer, &mut cursor, true, "A", "r1");
     delta(&observer, &mut cursor, true, "A", "r2");
     // The same block on another physical turn is another frame.
-    let other_turn = observer.for_turn(&crate::TurnId::fixture("turn-2".to_string()));
+    let other_turn = observer.for_turn(&lash_vocabulary::identity::TurnId::fixture(
+        "turn-2".to_string(),
+    ));
     delta(&other_turn, &mut cursor, true, "A", "r3");
     observer.publish(RuntimeStreamEvent::Session(SessionStreamEvent::Done));
 

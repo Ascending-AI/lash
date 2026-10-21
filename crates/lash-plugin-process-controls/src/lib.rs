@@ -13,9 +13,13 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
+use lash_core::ToolCall;
+use lash_core::ToolOutcome;
+use lash_core::ToolProvider;
 use lash_core::plugin::{PluginFactory, PluginSpec, StaticPluginFactory};
-use lash_core::{ProcessId, ToolCall, ToolDefinition, ToolOutcome, ToolProvider};
 use lash_tool_support::{StaticToolExecute, StaticToolProvider};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::tool_contract::ToolDefinition;
 
 mod declarations;
 
@@ -144,7 +148,10 @@ pub const SESSION_PROCESS_CONTROLS_PROVIDER: lash_core::plugin::ToolProviderHand
 
 /// The config key of the process-controls component: its config is `()`.
 pub const PROCESS_CONTROLS_CONFIG: lash_core::ProcessConfigKey<()> =
-    lash_core::ProcessConfigKey::new(CONTROLS_OWNER, lash_core::FormatVersion::ONE);
+    lash_core::ProcessConfigKey::new(
+        CONTROLS_OWNER,
+        lash_vocabulary::providers::FormatVersion::ONE,
+    );
 
 /// The process controls as a process component (FIG-6034 §3.2): a process
 /// whose environment names `processes` gets `start_process` and its siblings,
@@ -428,7 +435,7 @@ fn process_await_tool_definition() -> ToolDefinition {
     // runtime pre-derives the completion key its recorded attempt reads.
     // An await has no deadline of its own: it parks until the awaited
     // process ends or the awaiting scope does.
-    .with_declaration(lash_core::ToolDeclaration::deferring(), Some(lash_core::ParkBound::UntilScopeEnd))
+    .with_declaration(lash_vocabulary::tool_declaration::ToolDeclaration::deferring(), Some(lash_vocabulary::tool_contract::ParkBound::UntilScopeEnd))
     .expect("a deferring tool declares its park bound")
 }
 
@@ -470,8 +477,8 @@ fn process_cancel_tool_definition() -> ToolDefinition {
     ).expect("valid declared tool schemas")
     // One store read or write: a short body.
     .with_execution(std::time::Duration::from_secs(30))
-    .with_declaration(lash_core::ToolDeclaration::default()
-            .with_intents([lash_core::ToolIntentKind::CancelProcess]), None)
+    .with_declaration(lash_vocabulary::tool_declaration::ToolDeclaration::default()
+            .with_intents([lash_vocabulary::ToolIntentKind::CancelProcess]), None)
             .expect("a valid tool declaration")
 }
 
@@ -607,7 +614,7 @@ mod tests {
         // real `ProcessHandleView` serialization is what catches the drift the
         // previous hand-written schema had already accumulated.
         let view = lash_execution_contracts::process::ProcessHandleView::new(
-            lash_core::ProcessId::fixture("process-1"),
+            lash_vocabulary::identity::ProcessId::fixture("process-1"),
             {
                 let mut identity = lash_execution_contracts::process::ProcessIdentity::labelled(
                     "lashvm",

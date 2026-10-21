@@ -2,7 +2,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
 use lash_kernel_dialect::{CellEnvironment, Environment, Lowered, Mode, NamedLibrary};
-use lash_kernel_doc::{EffectName, Signature, parse_document, print_document, validate_document};
+use lash_kernel_doc::parse_document;
+use lash_kernel_doc::print_document;
+use lash_kernel_doc::validate_document;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::types::Signature;
 
 use crate::Diagnostic;
 
@@ -112,7 +116,7 @@ fn lower_against(
     let bindings: BTreeSet<_> = bindings.iter().map(|name| (*name).into()).collect();
     let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
         effects,
-        &lash_kernel_doc::ContractId::new("1"),
+        &lash_vocabulary::operations::ContractId::new("1"),
         controls(),
     )
     .expect("the test's effects are operations");
@@ -177,7 +181,7 @@ fn a_host_source_policy_allows_a_larger_typescript_cell() {
     let source = format!("//{}", "x".repeat(crate::MAX_SOURCE_BYTES));
     let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
         &Default::default(),
-        &lash_kernel_doc::ContractId::new("1"),
+        &lash_vocabulary::operations::ContractId::new("1"),
         &Default::default(),
     )
     .expect("the test's effects are operations");

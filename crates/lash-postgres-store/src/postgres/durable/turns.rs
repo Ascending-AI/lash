@@ -21,9 +21,10 @@ use lash_durable::domain::{
     TurnCancelRequest, TurnEnd, TurnNamespace, TurnRow, TurnWrite, UnfinishedPhase,
 };
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch, Woken};
-use lash_protocol_types::{SessionId, TurnId};
 use lash_store_sql::Dialect;
 use lash_store_sql::durable::turns::TurnStatements;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use sqlx::{PgConnection, Row};
 
 use super::steps::{self, Collect, Entry, Shape, Step, Ty, Value};

@@ -7,7 +7,7 @@ struct HostService;
 impl SessionGraphService for HostService {
     async fn append_session_nodes(
         &self,
-        _: &lash::SessionId,
+        _: &lash_vocabulary::identity::SessionId,
         _: AppendSessionNodesRequest,
     ) -> Result<AppendSessionNodesOutcome, PluginError> {
         Err(PluginError::Session(String::new()))

@@ -711,7 +711,7 @@ async fn attach_observer(State(host): State<Host>, Path(process): Path<String>) 
         other => return Err(api_error(format!("the document does not read: {other:?}"))),
     };
     let mut accumulator = WorkflowExecutionOverlayAccumulator::default();
-    accumulator.set_document(lash::workflow::WorkflowOverlayDocument::of(&document));
+    accumulator.set_document(lash::workflow::workflow_overlay_document(&document));
     let mut state = Observed {
         document: document_json(&document).map_err(api_error)?,
         ..Observed::default()

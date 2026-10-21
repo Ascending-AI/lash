@@ -12,15 +12,26 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{
-    Document, DocumentId, FunctionCatalog, FunctionDeclarations, Name, Signature, Unit,
-    WorkflowDocumentEntry, WorkflowDocumentRef,
-};
+use lash_kernel_doc::Document;
+use lash_kernel_doc::FunctionCatalog;
+use lash_kernel_doc::FunctionDeclarations;
+use lash_kernel_doc::WorkflowDocumentEntry;
+use lash_kernel_doc::WorkflowDocumentRef;
+use lash_vocabulary::legacy_names::DocumentId;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Unit;
+use lash_vocabulary::types::Signature;
 
-use crate::{
-    EntryEffectsRefusal, Environment, Graph, Refusal, RefusalReason, Refused, derive, derive_entry,
-    entry_effects, signature_mismatch,
-};
+use crate::EntryEffectsRefusal;
+use crate::Environment;
+use crate::Graph;
+use crate::Refusal;
+use crate::RefusalReason;
+use crate::Refused;
+use crate::derive;
+use crate::derive_entry;
+use crate::entry_effects;
+use lash_vocabulary::schema::signature_mismatch;
 
 /// One checked document entered where its reference says, with everything
 /// derived from it and the declarations of every library function it uses.

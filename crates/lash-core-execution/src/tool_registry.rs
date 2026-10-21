@@ -11,11 +11,19 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use crate::PreparedToolCall;
+use crate::ProviderKey;
+use crate::RecordedSurface;
+use crate::SurfaceEntry;
+use crate::ToolCall;
+use crate::ToolOutcome;
+use crate::ToolPrepareCall;
+use crate::ToolProvider;
 use crate::plugin::OwnerConfigView;
-use crate::{
-    PreparedToolCall, ProviderKey, RecordedSurface, SurfaceEntry, ToolCall, ToolContract,
-    ToolDefinition, ToolId, ToolManifest, ToolOutcome, ToolPrepareCall, ToolProvider,
-};
+use lash_vocabulary::tool_contract::ToolContract;
+use lash_vocabulary::tool_contract::ToolDefinition;
+use lash_vocabulary::tool_contract::ToolId;
+use lash_vocabulary::tool_contract::ToolManifest;
 
 pub use lash_core_store::tool_surface::ReconfigureError;
 
@@ -202,12 +210,13 @@ impl ToolRegistry {
                         source: Box::new(refusal),
                     });
                 }
-                if manifest.execution_policy == crate::ExecutionPolicy::Read
+                if manifest.execution_policy
+                    == lash_vocabulary::tool_contract::ExecutionPolicy::Read
                     && !self.reads.contains_key(key)
                 {
                     return Err(lash_execution_contracts::plugin_error::PluginError::ToolRegistrationRefused {
                         source: Box::new(
-                            lash_protocol_types::RegistrationRefused::ReadWithoutReader {
+                            lash_vocabulary::tool_contract::RegistrationRefused::ReadWithoutReader {
                                 tool: manifest.tool(),
                                 provider: key.to_string(),
                             },
@@ -216,11 +225,13 @@ impl ToolRegistry {
                 }
                 let payload = provider
                     .link_payload(&manifest, config)
-                    .map(|(format, payload)| crate::ExecutionBinding {
-                        codec: key.clone(),
-                        format,
-                        payload,
-                    });
+                    .map(
+                        |(format, payload)| lash_vocabulary::providers::ExecutionBinding {
+                            codec: key.clone(),
+                            format,
+                            payload,
+                        },
+                    );
                 let definition = served_definition(provider.as_ref(), manifest, config)?;
                 entries.push(SurfaceEntry::advertised(key.clone(), definition, payload));
             }
@@ -278,8 +289,8 @@ pub enum ToolSurfaceDriftKind {
     /// call is pinned to. The call's `perform` raises
     /// `operation_contract_changed`, and no body runs.
     ContractChanged {
-        pinned: lash_kernel_doc::ContractId,
-        live: lash_kernel_doc::ContractId,
+        pinned: lash_vocabulary::operations::ContractId,
+        live: lash_vocabulary::operations::ContractId,
     },
 }
 
@@ -364,8 +375,8 @@ impl ToolSurfaceDrift {
 pub fn operation_contract_changed(
     effect: &str,
     tool: &ToolId,
-    pinned: &lash_kernel_doc::ContractId,
-    live: &lash_kernel_doc::ContractId,
+    pinned: &lash_vocabulary::operations::ContractId,
+    live: &lash_vocabulary::operations::ContractId,
 ) -> crate::ToolFailure {
     crate::ToolFailure::runtime(
         crate::ToolFailureClass::InvalidRequest,
@@ -465,7 +476,7 @@ impl SurfaceTools {
     pub fn drift(
         &self,
         tool: &ToolId,
-        pinned: Option<&lash_kernel_doc::ContractId>,
+        pinned: Option<&lash_vocabulary::operations::ContractId>,
         config: &OwnerConfigView,
     ) -> Option<ToolSurfaceDrift> {
         let entry = self.routes.get(tool)?;
@@ -483,7 +494,7 @@ impl SurfaceTools {
     pub fn read_route(
         &self,
         tool: &ToolId,
-        pinned: &lash_kernel_doc::ContractId,
+        pinned: &lash_vocabulary::operations::ContractId,
         config: &OwnerConfigView,
     ) -> Result<crate::ReadRoute, crate::RuntimeEffectControllerError> {
         let refused = |why: String| {
@@ -524,7 +535,7 @@ impl SurfaceTools {
     fn drift_entry(
         &self,
         entry: &SurfaceEntry,
-        pinned: Option<&lash_kernel_doc::ContractId>,
+        pinned: Option<&lash_vocabulary::operations::ContractId>,
         config: &OwnerConfigView,
     ) -> Option<ToolSurfaceDrift> {
         let served = self.registry.served(entry.provider(), entry.tool(), config);
@@ -582,7 +593,7 @@ impl SurfaceTools {
         &'a self,
         tool: &ToolId,
         route: &'a crate::tool_provider::ToolExecutionRoute,
-    ) -> Option<&'a crate::plugin::ToolProviderHandle> {
+    ) -> Option<&'a lash_vocabulary::providers::ToolProviderHandle> {
         match route {
             crate::tool_provider::ToolExecutionRoute::Catalog => {
                 self.routes.get(tool).map(SurfaceEntry::provider)

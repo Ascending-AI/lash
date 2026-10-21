@@ -14,9 +14,13 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lash_core_store::checkpoint_graph::NodeId;
 use lash_execution_contracts::process::StepName;
-use lash_kernel_doc::{Datum, DocumentId, EffectId, FunctionId, Name};
+use lash_kernel_doc::Datum;
 use lash_kernel_state::AdmittedWait;
 use lash_vm_client::wire::OutcomeWire;
+use lash_vocabulary::legacy_names::DocumentId;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::EffectId;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// The engine step that runs the machine from its saved state to its next
@@ -208,8 +212,7 @@ impl Admission {
 
 impl Serialize for Admission {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer
-            .serialize_str(&BASE64.encode(lash_kernel_doc::graph_tokens::encode_body(&self.0)))
+        serializer.serialize_str(&BASE64.encode(lash_vocabulary::tokens::encode_body(&self.0)))
     }
 }
 
@@ -217,7 +220,7 @@ impl<'de> Deserialize<'de> for Admission {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let text = String::deserialize(deserializer)?;
         let bytes = BASE64.decode(text).map_err(serde::de::Error::custom)?;
-        lash_kernel_doc::graph_tokens::decode_body(&bytes)
+        lash_vocabulary::tokens::decode_body(&bytes)
             .map(Self)
             .map_err(serde::de::Error::custom)
     }
@@ -239,7 +242,7 @@ const BASE64: base64::engine::GeneralPurpose = base64::engine::general_purpose::
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Delivery {
-    pub(crate) wait: lash_protocol_types::WaitId,
+    pub(crate) wait: lash_vocabulary::sites::WaitId,
     /// Which wait of the run this is, for the fact its delivery is
     /// observed as.
     pub(crate) identity: EffectId,
@@ -297,14 +300,14 @@ pub(crate) struct KernelEngineState {
     /// The admission of every wait the parked run holds, by the machine's
     /// wait id, until a committed run has been handed its outcome.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub(crate) admissions: BTreeMap<lash_protocol_types::WaitId, HeldAdmission>,
+    pub(crate) admissions: BTreeMap<lash_vocabulary::sites::WaitId, HeldAdmission>,
     /// How many `kernel_run` steps the process has asked for.
     pub(crate) runs: u64,
     /// How many effect steps the process has asked for.
     pub(crate) effects: u64,
     /// The open waits of the saved run, by the machine's wait id.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub(crate) waits: BTreeMap<lash_protocol_types::WaitId, Wait>,
+    pub(crate) waits: BTreeMap<lash_vocabulary::sites::WaitId, Wait>,
     /// Outcomes that settled and no committed run has consumed, in the
     /// order they settled.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -330,7 +333,7 @@ pub(crate) struct KernelRunInput {
     /// The admission of each wait the parked run holds, by the machine's
     /// wait id.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub(crate) admissions: BTreeMap<lash_protocol_types::WaitId, HeldAdmission>,
+    pub(crate) admissions: BTreeMap<lash_vocabulary::sites::WaitId, HeldAdmission>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) deliver: Vec<Delivery>,
 }
@@ -351,17 +354,17 @@ pub(crate) struct HostReads {
     pub(crate) effects: Vec<EffectRead>,
     /// The complete binding, including operations this segment never called.
     #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
-    pub(crate) read_effects: std::collections::BTreeSet<lash_kernel_doc::EffectName>,
+    pub(crate) read_effects: std::collections::BTreeSet<lash_vocabulary::legacy_names::EffectName>,
 }
 
 /// One diagnostic read: replay must ask the same use with the same input.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct EffectRead {
-    pub(crate) effect: lash_kernel_doc::EffectName,
+    pub(crate) effect: lash_vocabulary::legacy_names::EffectName,
     pub(crate) args: Vec<lash_kernel_doc::Datum>,
-    pub(crate) site: lash_kernel_doc::PositionLabel,
-    pub(crate) origin: lash_kernel_doc::Site,
+    pub(crate) site: lash_vocabulary::sites::PositionLabel,
+    pub(crate) origin: lash_vocabulary::sites::Site,
     pub(crate) answer: Result<lash_kernel_doc::Datum, lash_kernel_doc::ErrorDatum>,
 }
 
@@ -385,7 +388,7 @@ pub(crate) struct RecordedStart {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RecordedAdmission {
-    pub(crate) wait: lash_protocol_types::WaitId,
+    pub(crate) wait: lash_vocabulary::sites::WaitId,
     pub(crate) run: u64,
 }
 
@@ -394,7 +397,7 @@ pub(crate) struct RecordedAdmission {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RecordedDelivery {
-    pub(crate) wait: lash_protocol_types::WaitId,
+    pub(crate) wait: lash_vocabulary::sites::WaitId,
     pub(crate) source: DeliverySource,
     pub(crate) digest: String,
 }
@@ -424,7 +427,7 @@ pub(crate) enum StartedFrom {
 pub(crate) struct Observed<'a> {
     /// The segment's statement starts and empty-block entries, by document
     /// site ordinal.
-    pub(crate) ran: &'a lash_kernel_vm::SiteCounts,
+    pub(crate) ran: &'a lash_vocabulary::observation::SiteCounts,
     /// The occurrences whose failed outcome a `catch` recovered from.
     pub(crate) caught: &'a [EffectId],
     pub(crate) reads: Option<&'a HostReads>,
@@ -439,31 +442,31 @@ pub(crate) enum Issued {
     /// A `perform` of an effect the process's env links: its path, which
     /// the link names the tool of (P3), and the tool's input.
     Effect {
-        wait: lash_protocol_types::WaitId,
+        wait: lash_vocabulary::sites::WaitId,
         admission: Admission,
-        effect: lash_kernel_doc::EffectName,
+        effect: lash_vocabulary::legacy_names::EffectName,
         /// The contract the document requires of `effect`.
-        contract: lash_kernel_doc::ContractId,
+        contract: lash_vocabulary::operations::ContractId,
         input: serde_json::Value,
     },
     /// A `perform` the boundary refuses: the error is raised at the
     /// `perform`, which the guest may catch, and nothing is dispatched.
     Refused {
-        wait: lash_protocol_types::WaitId,
+        wait: lash_vocabulary::sites::WaitId,
         admission: Admission,
         kind: String,
         message: String,
     },
     /// A `sleep`.
     Sleep {
-        wait: lash_protocol_types::WaitId,
+        wait: lash_vocabulary::sites::WaitId,
         admission: Admission,
         until_ms: i64,
     },
 }
 
 impl Issued {
-    pub(crate) fn wait(&self) -> lash_protocol_types::WaitId {
+    pub(crate) fn wait(&self) -> lash_vocabulary::sites::WaitId {
         match self {
             Self::Effect { wait, .. } | Self::Refused { wait, .. } | Self::Sleep { wait, .. } => {
                 *wait
@@ -492,11 +495,14 @@ pub(crate) enum KernelRunOutput {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         issued: Vec<Issued>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        withdrawn: Vec<lash_protocol_types::WaitId>,
+        withdrawn: Vec<lash_vocabulary::sites::WaitId>,
         /// The segment's statement starts and empty-block entries, by
         /// document site ordinal, at `observe: counts` (FIG-6370).
-        #[serde(default, skip_serializing_if = "lash_kernel_vm::SiteCounts::is_empty")]
-        ran: lash_kernel_vm::SiteCounts,
+        #[serde(
+            default,
+            skip_serializing_if = "lash_vocabulary::observation::SiteCounts::is_empty"
+        )]
+        ran: lash_vocabulary::observation::SiteCounts,
         /// The occurrences whose failed outcome a `catch` in the segment
         /// recovered from, at `observe: counts` (FIG-6817).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -521,8 +527,11 @@ pub(crate) enum KernelRunOutput {
         outcome: Box<lash_execution_contracts::process::ProcessOutcome>,
         /// The segment's statement starts and empty-block entries, by
         /// document site ordinal, at `observe: counts` (FIG-6370).
-        #[serde(default, skip_serializing_if = "lash_kernel_vm::SiteCounts::is_empty")]
-        ran: lash_kernel_vm::SiteCounts,
+        #[serde(
+            default,
+            skip_serializing_if = "lash_vocabulary::observation::SiteCounts::is_empty"
+        )]
+        ran: lash_vocabulary::observation::SiteCounts,
         /// The occurrences whose failed outcome a `catch` in the segment
         /// recovered from, at `observe: counts` (FIG-6817).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]

@@ -4,10 +4,19 @@
 
 use std::collections::BTreeSet;
 
-use crate::{
-    ActKind, Action, Atom, Callee, EffectName, Expr, FunctionId, Literal, Member, Name, Place, Rhs,
-    Stmt,
-};
+use crate::ActKind;
+use crate::Action;
+use crate::Atom;
+use crate::Callee;
+use crate::Expr;
+use crate::Literal;
+use crate::Member;
+use crate::Place;
+use crate::Rhs;
+use crate::Stmt;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::Name;
 
 /// What a body reads of the world outside it.
 #[derive(Clone, Debug, Default)]

@@ -19,9 +19,10 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 
-use lash_core::{
-    ProcessId, ProcessObservationEvent, ProcessObservationEventPayload, ProcessReplayStoreError,
-};
+use lash_core::ProcessObservationEvent;
+use lash_core::ProcessObservationEventPayload;
+use lash_core::ProcessReplayStoreError;
+use lash_vocabulary::identity::ProcessId;
 use sqlx::{Postgres, Row as _, Transaction};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 

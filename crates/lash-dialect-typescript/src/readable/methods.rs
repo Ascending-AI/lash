@@ -14,7 +14,9 @@
 //! is `x.method(args)`, read from the general arm. Only reading the print
 //! back shows the list's arm is the one the front end gives it.
 
-use lash_kernel_doc::{self as k, Name, Site};
+use lash_kernel_doc as k;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
 
 use super::lift::{Lift, Lifter};
 use super::source::Expr;

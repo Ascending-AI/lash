@@ -226,7 +226,7 @@ fn resolve_conn(
     session_id: &SessionId,
     target: &Target,
 ) -> Result<TargetResolution, StoreError> {
-    let of_run = |run: &lash_protocol_types::TurnId| {
+    let of_run = |run: &lash_vocabulary::identity::TurnId| {
         crate::session_runs::run_terminal_conn(conn, session_id, run)
             .map(|terminal| TargetResolution::of_run(terminal.as_ref()))
     };

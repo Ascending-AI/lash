@@ -16,11 +16,11 @@
 
 mod session_services;
 
-use crate::ProcessId;
-use crate::SessionId;
-use crate::TurnId;
 use crate::session::runtime_ops::RuntimeExecutionContextRuntimeOps as _;
 use lash_protocol_types::sync::MutexExt;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 // Each submodule documents itself in its own file. Adding an outer doc comment
 // here as well would merge two fragments written in different scopes, and a
 // reader or editor following the merged doc comment — including the
@@ -83,8 +83,10 @@ pub fn process_work_wiring_for_registry(
 #[cfg(any(test, feature = "testing"))]
 #[expect(clippy::expect_used, reason = "fixture environment")]
 pub fn process_env_of_size(bytes: usize) -> crate::ProcessEnv {
-    const PAYLOAD: crate::ProcessConfigKey<serde_json::Value> =
-        crate::ProcessConfigKey::new("fixture-payload", crate::FormatVersion::ONE);
+    const PAYLOAD: crate::ProcessConfigKey<serde_json::Value> = crate::ProcessConfigKey::new(
+        "fixture-payload",
+        lash_vocabulary::providers::FormatVersion::ONE,
+    );
     crate::ProcessEnv::builder(crate::MaxToolCalls::new(1024))
         .component(
             PAYLOAD,
@@ -102,10 +104,10 @@ pub fn process_env_of_size(bytes: usize) -> crate::ProcessEnv {
 pub fn step_tool(
     step: &lash_execution_contracts::process::StepRequest,
     engine: &str,
-) -> crate::ToolId {
+) -> lash_vocabulary::tool_contract::ToolId {
     match step {
         lash_execution_contracts::process::StepRequest::Tool { effect, .. } => {
-            crate::ToolId::new(effect.as_str())
+            lash_vocabulary::tool_contract::ToolId::new(effect.as_str())
         }
         lash_execution_contracts::process::StepRequest::Engine { kind, .. } => {
             kind.admitted_tool(engine)
@@ -117,15 +119,17 @@ pub fn step_tool(
 #[cfg(any(test, feature = "testing"))]
 #[expect(clippy::expect_used, reason = "fixture effect names")]
 #[must_use]
-pub fn effect(name: &str) -> crate::EffectName {
-    crate::EffectName::new(name).expect("a fixture effect name")
+pub fn effect(name: &str) -> lash_vocabulary::legacy_names::EffectName {
+    lash_vocabulary::legacy_names::EffectName::new(name).expect("a fixture effect name")
 }
 
 /// The effect `definition`'s operation names (`package.operation`): the
 /// path an env links it under and an engine's step performs.
 #[cfg(any(test, feature = "testing"))]
 #[must_use]
-pub fn effect_of(definition: &crate::ToolDefinition) -> crate::EffectName {
+pub fn effect_of(
+    definition: &lash_vocabulary::tool_contract::ToolDefinition,
+) -> lash_vocabulary::legacy_names::EffectName {
     definition.manifest.operation.effect_name()
 }
 
@@ -135,15 +139,15 @@ pub fn effect_of(definition: &crate::ToolDefinition) -> crate::EffectName {
 #[cfg(any(test, feature = "testing"))]
 #[must_use]
 pub fn performs(
-    tools: &[crate::ToolDefinition],
+    tools: &[lash_vocabulary::tool_contract::ToolDefinition],
 ) -> lash_execution_contracts::process::PerformedEffects {
     tools
         .iter()
         .map(|tool| {
             (
                 effect_of(tool),
-                lash_kernel_doc::OperationRequirement {
-                    signature: lash_protocol_types::tool_signature(
+                lash_vocabulary::operations::OperationRequirement {
+                    signature: lash_vocabulary::json_schema::tool_signature(
                         &tool.contract.input_schema.canonical,
                         &tool.contract.output_schema.canonical,
                     ),
@@ -727,7 +731,7 @@ impl<'run> ToolCallFixture<'run> {
         let call = crate::PreparedToolCall {
             call_id: crate::ToolCallId::fixture("tool-call-fixture"),
             provider_call_id: None,
-            tool_id: crate::ToolId::new("fixture"),
+            tool_id: lash_vocabulary::tool_contract::ToolId::new("fixture"),
             tool_name: "fixture".to_string(),
             args: serde_json::Value::Null,
             replay: None,
@@ -763,7 +767,10 @@ impl<'run> ToolCallFixture<'run> {
     }
 
     /// Sets the execution binding the call runs with.
-    pub fn execution_binding(mut self, binding: Option<crate::ExecutionBinding>) -> Self {
+    pub fn execution_binding(
+        mut self,
+        binding: Option<lash_vocabulary::providers::ExecutionBinding>,
+    ) -> Self {
         self.context.tool_execution_binding = binding;
         self
     }
@@ -857,7 +864,7 @@ pub fn mock_attempt_context() -> crate::AttemptContext<'static> {
 /// Like [`mock_attempt_context`], but with a deferred match's execution
 /// binding populated, for provider tests that assert match-only routing.
 pub fn mock_attempt_context_with_execution_binding(
-    binding: crate::ExecutionBinding,
+    binding: lash_vocabulary::providers::ExecutionBinding,
 ) -> crate::AttemptContext<'static> {
     ToolCallFixture::mock()
         .execution_binding(Some(binding))
@@ -1086,7 +1093,7 @@ impl crate::ToolProvider for EmptyToolProvider {
         &self,
         _config: &crate::plugin::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<crate::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(Vec::new())
@@ -1096,7 +1103,7 @@ impl crate::ToolProvider for EmptyToolProvider {
         &self,
         _name: &str,
         _config: &crate::plugin::OwnerConfigView,
-    ) -> Option<Arc<crate::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         None
     }
 
@@ -1155,7 +1162,7 @@ pub fn code_execution_context<'run>(
 #[cfg(any(test, feature = "testing"))]
 pub fn code_execution_context_for_process<'run>(
     ports: impl Into<TestExecutionPorts>,
-    process_id: crate::ProcessId,
+    process_id: lash_vocabulary::identity::ProcessId,
     registration: &lash_execution_contracts::process::ProcessRegistration,
 ) -> crate::RuntimeExecutionContext<'run> {
     TestExecutionContextBuilder::new(ports.into())
@@ -1241,7 +1248,7 @@ pub fn code_execution_context_with_deferred_provider<'run>(
     tool_catalog: crate::ToolCatalog,
     invocation: crate::RuntimeInvocation,
     (handle, deferred): (
-        crate::plugin::ToolProviderHandle,
+        lash_vocabulary::providers::ToolProviderHandle,
         Arc<dyn crate::DeferredToolProvider>,
     ),
 ) -> crate::RuntimeExecutionContext<'run> {

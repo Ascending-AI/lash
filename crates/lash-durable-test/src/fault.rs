@@ -25,7 +25,8 @@ use lash_durable::{
     NodeLease, NodeSpec, Reaped, StoreFailure, StoreFailureKind,
 };
 use lash_protocol_types::sync::MutexExt as _;
-use lash_protocol_types::{ProcessId, SessionId};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -784,10 +785,10 @@ impl DurableStore for FaultStore {
 
     async fn package_paths(
         &self,
-        functions: &[lash_durable::packages::FunctionId],
+        functions: &[lash_vocabulary::legacy_names::FunctionId],
     ) -> Result<
         std::collections::BTreeMap<
-            lash_durable::packages::FunctionId,
+            lash_vocabulary::legacy_names::FunctionId,
             std::collections::BTreeSet<String>,
         >,
         DurableError,
@@ -797,10 +798,10 @@ impl DurableStore for FaultStore {
 
     async fn internal_operations(
         &self,
-        operations: &[lash_durable::packages::EffectName],
+        operations: &[lash_vocabulary::legacy_names::EffectName],
     ) -> Result<
         std::collections::BTreeMap<
-            lash_durable::packages::EffectName,
+            lash_vocabulary::legacy_names::EffectName,
             std::collections::BTreeSet<String>,
         >,
         DurableError,
@@ -909,7 +910,7 @@ impl DurableStore for FaultStore {
 impl DurableReads for FaultStore {
     async fn model_call_pins(
         &self,
-        session: &lash_protocol_types::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
         self.read(self.inner.model_call_pins(session, owner)).await
@@ -917,7 +918,7 @@ impl DurableReads for FaultStore {
 
     async fn model_calls(
         &self,
-        session: &lash_protocol_types::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
         self.read(self.inner.model_calls(session, owner)).await
@@ -930,7 +931,7 @@ impl DurableReads for FaultStore {
     async fn turn_namespaces(
         &self,
         session: &SessionId,
-        run: &lash_protocol_types::TurnId,
+        run: &lash_vocabulary::identity::TurnId,
     ) -> Result<Vec<lash_durable::domain::TurnNamespace>, DurableError> {
         self.read(self.inner.turn_namespaces(session, run)).await
     }
@@ -938,7 +939,7 @@ impl DurableReads for FaultStore {
     async fn turn_end(
         &self,
         session: &SessionId,
-        run: &lash_protocol_types::TurnId,
+        run: &lash_vocabulary::identity::TurnId,
     ) -> Result<Option<lash_durable::domain::TurnEnd>, DurableError> {
         self.read(self.inner.turn_end(session, run)).await
     }
@@ -971,15 +972,15 @@ impl DurableReads for FaultStore {
 
     async fn cell_roots(
         &self,
-        session: &lash_protocol_types::SessionId,
-        run: &lash_protocol_types::TurnId,
+        session: &lash_vocabulary::identity::SessionId,
+        run: &lash_vocabulary::identity::TurnId,
     ) -> Result<Vec<ExecRootRow>, DurableError> {
         self.read(self.inner.cell_roots(session, run)).await
     }
     async fn cell_roots_within(
         &self,
-        session: &lash_protocol_types::SessionId,
-        run: &lash_protocol_types::TurnId,
+        session: &lash_vocabulary::identity::SessionId,
+        run: &lash_vocabulary::identity::TurnId,
         max_rows: usize,
     ) -> Result<Vec<lash_durable::domain::ExecRootRow>, DurableError> {
         self.read(self.inner.cell_roots_within(session, run, max_rows))
@@ -1039,7 +1040,7 @@ impl DurableReads for FaultStore {
 
     async fn session_mailbox(
         &self,
-        session: &lash_protocol_types::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
     ) -> Result<lash_durable::domain::SessionMailbox, DurableError> {
         self.read(self.inner.session_mailbox(session)).await
     }
@@ -1217,8 +1218,8 @@ mod tests {
         let deployment = Deployment::new().await;
         let (store, life) = deployment.node("a");
         let session = SessionId::try_from("diagnosed".to_owned()).expect("a session id");
-        let run =
-            lash_protocol_types::TurnId::try_from("diagnosed-turn".to_owned()).expect("a turn id");
+        let run = lash_vocabulary::identity::TurnId::try_from("diagnosed-turn".to_owned())
+            .expect("a turn id");
         let owner = OwnerKey::Turn(session.clone(), run.clone());
         let reads: [(&str, StartRead); 3] = [
             (

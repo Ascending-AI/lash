@@ -3,7 +3,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::{Document, EffectName, FunctionDefinition, FunctionId, Name, parse_document};
+use lash_kernel_doc::Document;
+use lash_kernel_doc::FunctionDefinition;
+use lash_kernel_doc::parse_document;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::Name;
 
 use crate::{EntryEffectsRefusal, derive, entry_effects};
 

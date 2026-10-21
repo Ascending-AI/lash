@@ -62,7 +62,7 @@ fn drive(source: &str, expected: &[Vec<Datum>]) -> End {
     let kernel = kernel();
     let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
         &super::machine::effects(),
-        &lash_kernel_doc::ContractId::new("1"),
+        &lash_vocabulary::operations::ContractId::new("1"),
         super::controls(),
     )
     .expect("the test's effects are operations");

@@ -9,12 +9,15 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{Document, Name, parse_document, print_document};
+use lash_kernel_doc::Document;
+use lash_kernel_doc::parse_document;
+use lash_kernel_doc::print_document;
 use lash_kernel_exec::charge::Weight;
 use lash_kernel_vm::kernel_internals::{
     Layout, RegionWork, call_islands, in_charge, loop_regions, prepare_with_layout, transient_hold,
 };
 use lash_kernel_vm::{Charge, Machine, PreparedLibrary, Program};
+use lash_vocabulary::legacy_names::Name;
 
 use crate::machine::{Run, case_program, run_program_in};
 use crate::projection::{Image, Plan, Projector, corpus_agrees, taped_work};

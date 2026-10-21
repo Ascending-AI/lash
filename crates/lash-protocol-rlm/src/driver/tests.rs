@@ -1,7 +1,7 @@
 use lash_core::llm::types::LlmRole;
-use lash_protocol_types::SessionId;
-use lash_protocol_types::TurnId;
 use lash_rlm_types::RlmTurnOptions;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 use super::*;
 use lash_core::CellRecord;

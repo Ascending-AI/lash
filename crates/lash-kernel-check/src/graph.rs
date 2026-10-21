@@ -9,10 +9,17 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::{
-    AssignOrder, EffectName, FunctionId, JoinMode, Literal, Name, Protocol, Signature, Site, Type,
-    Unit,
-};
+use lash_kernel_doc::AssignOrder;
+use lash_kernel_doc::JoinMode;
+use lash_kernel_doc::Literal;
+use lash_kernel_doc::Protocol;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 macro_rules! dense_id {
     ($(#[$meta:meta])* $name:ident) => {

@@ -12,8 +12,9 @@ use std::collections::BTreeSet;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
-use lash_kernel_doc::{FunctionId, PackageSetDigest};
+use lash_kernel_doc::PackageSetDigest;
 use lash_kernel_package::{HeldPackages, Package, PackageSources, testing};
+use lash_vocabulary::legacy_names::FunctionId;
 
 use super::{CellTools, SESSION, TURN, finish_of, open_host};
 use crate::CellDialect;
@@ -315,9 +316,7 @@ async fn store_code(backend: &lash_execution_contracts::backend::Backend, held: 
             .map(|(function, definition)| {
                 (
                     *function,
-                    Arc::from(lash_kernel_doc::graph_tokens::encode_body(
-                        definition.as_ref(),
-                    )),
+                    Arc::from(lash_vocabulary::tokens::encode_body(definition.as_ref())),
                 )
             })
             .collect();
@@ -398,7 +397,7 @@ impl Session {
 
     /// The library functions the saved function `name` lists.
     fn listed(&self, name: &str) -> BTreeSet<FunctionId> {
-        self.state.lowering_functions()[&lash_kernel_doc::Name::new(name)]
+        self.state.lowering_functions()[&lash_vocabulary::legacy_names::Name::new(name)]
             .document
             .manifest
             .functions
@@ -518,12 +517,12 @@ async fn a_saved_function_the_cell_set_does_not_serve_is_dropped_naming_it_and_t
         session.on(&later).await;
         ok(&session.cell_under(second[0], "const other = 1;").await);
         let not_carried = session.state.not_carried();
-        let why = not_carried[&lash_kernel_doc::Name::new("w")].clone();
+        let why = not_carried[&lash_vocabulary::legacy_names::Name::new("w")].clone();
         assert!(
             why.contains("`w`") && why.contains("dataframe.width"),
             "{why}"
         );
-        let why = not_carried[&lash_kernel_doc::Name::new("plan")].clone();
+        let why = not_carried[&lash_vocabulary::legacy_names::Name::new("plan")].clone();
         assert!(
             why.contains("`plan.map`") && why.contains("dataframe.width"),
             "{why}"
@@ -540,7 +539,7 @@ async fn a_saved_function_the_cell_set_does_not_serve_is_dropped_naming_it_and_t
             !session
                 .state
                 .lowering_functions()
-                .contains_key(&lash_kernel_doc::Name::new("w"))
+                .contains_key(&lash_vocabulary::legacy_names::Name::new("w"))
         );
         let message = failed(
             &session
@@ -787,8 +786,8 @@ struct Runs {
     received: Mutex<Vec<serde_json::Value>>,
 }
 
-fn run_tool() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn run_tool() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:dataframe_run",
         "dataframe.run",
         "Run a dataframe plan",
@@ -810,7 +809,9 @@ fn run_tool() -> lash_core::ToolDefinition {
         serde_json::json!({ "type": "array" }),
     )
     .expect("valid declared tool schemas")
-    .declared_contract(lash_core::ContractId::new("dataframe.run/1"))
+    .declared_contract(lash_vocabulary::operations::ContractId::new(
+        "dataframe.run/1",
+    ))
     .with_execution(std::time::Duration::from_secs(120))
 }
 
@@ -819,8 +820,10 @@ impl lash_core::ToolProvider for Runs {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> Result<Vec<lash_core::ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
-    {
+    ) -> Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(vec![run_tool().manifest()])
     }
 
@@ -828,7 +831,7 @@ impl lash_core::ToolProvider for Runs {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         let tool = run_tool();
         (name == tool.manifest.tool() || name == tool.id().as_str())
             .then(|| Arc::new(tool.contract()))
@@ -1029,7 +1032,7 @@ async fn a_node_writes_cells_under_a_stored_surface_it_does_not_hold() {
     };
     let document = lash_kernel_doc::IdentifiedDocument::decode(
         &document,
-        lash_kernel_doc::KernelDataLimits::standard(),
+        lash_vocabulary::data_limits::KernelDataLimits::standard(),
     )
     .expect("a document");
     let listed: BTreeSet<FunctionId> = document.manifest.functions.keys().copied().collect();
@@ -1058,9 +1061,7 @@ async fn a_node_runs_a_member_no_document_reached_from_the_code_its_install_stor
         .map(|(function, definition)| {
             (
                 *function,
-                Arc::from(lash_kernel_doc::graph_tokens::encode_body(
-                    definition.as_ref(),
-                )),
+                Arc::from(lash_vocabulary::tokens::encode_body(definition.as_ref())),
             )
         })
         .collect();

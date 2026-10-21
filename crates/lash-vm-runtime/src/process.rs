@@ -38,7 +38,10 @@ use std::sync::Arc;
 use lash_execution_contracts::process::EngineStepAnswer;
 use lash_execution_contracts::process::EngineStepKind;
 use lash_execution_contracts::process::EngineStepRun;
-use lash_kernel_doc::{Document, DocumentId, Name, Signature};
+use lash_kernel_doc::Document;
+use lash_vocabulary::legacy_names::DocumentId;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::types::Signature;
 use tokio_util::sync::CancellationToken;
 
 pub(crate) use documents::ProcessPreparations;
@@ -47,16 +50,20 @@ pub use documents::{
     Unretained,
 };
 pub use helpers::{AdoptedRun, HelperAdoptionRefusal, plan_adoption};
+pub use lash_vocabulary::observation::ReplayPath;
+pub use lash_vocabulary::observation::TaskPath;
 pub use migrate::{
     KernelMigrationRefusal, KernelMigrationSurvey, KernelMigrationSurveyError,
     KernelStateMigration, PlannedMigration, RefusedKernelCell, RefusedKernelProcess,
     UnmigratedKernelSession, migrate_function_value, migrate_saved_function, migration_refusal,
     plan_migration, survey_kernel_processes,
 };
-pub use replay::{
-    ProcessReplayRequest, ReplayFault, ReplayPath, ReplaySegments, SegmentAnswer, SegmentReplay,
-    TaskPath, Unreplayable,
-};
+pub use replay::ProcessReplayRequest;
+pub use replay::ReplayFault;
+pub use replay::ReplaySegments;
+pub use replay::SegmentAnswer;
+pub use replay::SegmentReplay;
+pub use replay::Unreplayable;
 pub use state::{KERNEL_RUN_STEP, KernelProcessDefinition, KernelProcessInput};
 pub use workflow::{
     AdmittedWorkflow, WorkflowAdmissionOutcome, WorkflowAdmissionRefusal, WorkflowAdmissionRequest,
@@ -183,7 +190,7 @@ pub struct KernelRecordedSettings {
         with = "observe_level",
         skip_serializing_if = "observe_level::is_off"
     )]
-    pub observe: lash_kernel_vm::ObservationMode,
+    pub observe: lash_vocabulary::observation::RunObservation,
 }
 
 /// Engine settings that cannot decode as kernel recorded settings.
@@ -209,13 +216,13 @@ impl KernelRecordedSettings {
             live_tasks: bounds.live_tasks,
             requests_per_park: bounds.requests_per_park,
             join_members: bounds.join_members,
-            observe: lash_kernel_vm::ObservationMode::Off,
+            observe: lash_vocabulary::observation::RunObservation::Off,
         }
     }
 
     /// These settings observed at `observe`.
     #[must_use]
-    pub fn observing(mut self, observe: lash_kernel_vm::ObservationMode) -> Self {
+    pub fn observing(mut self, observe: lash_vocabulary::observation::RunObservation) -> Self {
         self.observe = observe;
         self
     }
@@ -243,18 +250,19 @@ impl KernelRecordedSettings {
     #[must_use]
     pub fn observed(
         settings: Option<&lash_execution_contracts::process::EngineSettings>,
-    ) -> lash_kernel_vm::ObservationMode {
+    ) -> lash_vocabulary::observation::RunObservation {
         settings
             .and_then(|settings| serde_json::from_value::<Self>(settings.value().clone()).ok())
-            .map_or(lash_kernel_vm::ObservationMode::Off, |settings| {
-                settings.observe
-            })
+            .map_or(
+                lash_vocabulary::observation::RunObservation::Off,
+                |settings| settings.observe,
+            )
     }
 }
 
 /// The recorded spelling of an observation level: `"off"` or `"counts"`.
 mod observe_level {
-    use lash_kernel_vm::ObservationMode;
+    use lash_vocabulary::observation::RunObservation;
     use serde::{Deserialize, Deserializer, Serializer};
 
     #[expect(
@@ -1001,8 +1009,8 @@ impl lash_execution_contracts::process::EngineSteps for KernelEngineSteps {
         self.engine.policy.execution
     }
 
-    fn retry(&self, _kind: &EngineStepKind) -> lash_core::ExecutionPolicy {
-        lash_core::ExecutionPolicy::repeatable(
+    fn retry(&self, _kind: &EngineStepKind) -> lash_vocabulary::tool_contract::ExecutionPolicy {
+        lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
             self.engine.policy.attempts,
             self.engine.policy.retry_initial_ms,
             self.engine.policy.retry_max_ms,

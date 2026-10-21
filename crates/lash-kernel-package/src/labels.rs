@@ -3,8 +3,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_helper_labels::{LabelError, read_json};
-use lash_kernel_dialect::{Export, MemberPath, Segment};
-use lash_kernel_doc::FunctionName;
+use lash_kernel_dialect::Export;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::names::MemberPath;
+use lash_vocabulary::names::Segment;
 
 use crate::{PackageDisplay, Root};
 

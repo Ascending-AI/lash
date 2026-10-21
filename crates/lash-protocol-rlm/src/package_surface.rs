@@ -6,8 +6,9 @@
 use std::fmt::Write as _;
 
 use lash_kernel_dialect::{BRAND_FIELD, Export, SpellKind, Spelling, TypeMember};
-use lash_kernel_doc::{Signature, Type};
 use lash_kernel_package::{Origin, PackageView};
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 /// The code exports of `view`'s host packages, each package under a
 /// heading of its path and release; empty when the set holds none.
@@ -129,12 +130,12 @@ fn type_text(ty: &Type, spelling: Spelling) -> String {
             .collect::<Vec<_>>()
             .join(" | "),
         Type::Function(signature) => format!("Fn{}", call(signature, 0, spelling)),
-        other => lash_kernel_doc::print_type(other),
+        other => lash_vocabulary::print_type(other),
     }
 }
 
 /// The `(package, type)` a package value's record type names.
-fn branded(record: &lash_kernel_doc::RecordType) -> Option<(&str, &str)> {
+fn branded(record: &lash_vocabulary::types::RecordType) -> Option<(&str, &str)> {
     let field = record
         .fields
         .iter()
@@ -152,7 +153,7 @@ fn branded(record: &lash_kernel_doc::RecordType) -> Option<(&str, &str)> {
 }
 
 fn spelled(spelling: Spelling, kind: SpellKind, text: &str) -> String {
-    lash_kernel_dialect::Segment::new(text).map_or_else(
+    lash_vocabulary::names::Segment::new(text).map_or_else(
         |_| text.to_owned(),
         |segment| spelling.spell(kind, &segment),
     )

@@ -190,7 +190,7 @@ pub(crate) async fn lock_referrer_tx(
 pub(crate) async fn acquire_process_env_tx(
     tx: &mut crate::guarded_tx::GuardedTx<'_>,
     env: &lash_core_store::process_identity::ProcessEnvRef,
-    process: &lash_protocol_types::ProcessId,
+    process: &lash_vocabulary::identity::ProcessId,
 ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
     let referrer = ArtifactReferrer::ProcessRecord(process.clone());
     lock_referrer_tx(tx, &referrer).await.map_err(backend)?;

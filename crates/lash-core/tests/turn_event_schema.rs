@@ -12,19 +12,26 @@
 //! representative sample for the new variant is added to [`sample_events`], so
 //! the new shape actually gets pinned rather than silently skipped.
 
-use lash_core::TurnId;
 use lash_core::llm::types::{LlmTerminalReason, ProviderFailureKind};
 use lash_protocol_types::{
     ErrorEnvelope, FailureCode, ReportedFailure, RetryProgress, SessionStreamEvent, TurnFailureKind,
 };
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+use lash_vocabulary::identity::TurnId;
 use std::collections::BTreeSet;
 
-use lash_core::{
-    CheckpointKind, LlmCallId, PluginRuntimeEvent, ToolCallOutput, ToolFailure, ToolFailureClass,
-    ToolIntentActivityOutcome, ToolIntentKind, TurnActivity, TurnActivityId, TurnEvent,
-    TurnInputApplication,
-};
+use lash_core::CheckpointKind;
+use lash_core::LlmCallId;
+use lash_core::PluginRuntimeEvent;
+use lash_core::ToolCallOutput;
+use lash_core::ToolFailure;
+use lash_core::ToolFailureClass;
+use lash_core::ToolIntentActivityOutcome;
+use lash_core::TurnActivity;
+use lash_core::TurnActivityId;
+use lash_core::TurnEvent;
+use lash_core::TurnInputApplication;
+use lash_vocabulary::ToolIntentKind;
 use serde_json::json;
 
 macro_rules! turn_event_tags {
@@ -78,7 +85,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
         (
             "turn_started",
             TurnEvent::TurnStarted {
-                run_id: lash_core::RunId::fixture("run-1"),
+                run_id: lash_vocabulary::identity::RunId::fixture("run-1"),
                 turn_id: TurnId::from("turn-1"),
             },
             json!({
@@ -443,7 +450,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 applications: vec![TurnInputApplication {
                     input_id: "input-1".into(),
                     source_key: Some("host:source-1".to_string()),
-                    turn_id: lash_core::TurnId::from("turn-1"),
+                    turn_id: lash_vocabulary::identity::TurnId::from("turn-1"),
                     committed_message_id: "message-1".to_string(),
                     checkpoint: Some(CheckpointKind::AfterWork),
                 }],

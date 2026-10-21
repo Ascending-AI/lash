@@ -23,9 +23,9 @@ use lash_core::llm::types::{
 };
 use lash_core::provider::ProviderOptions;
 use lash_core::testing::TestProvider;
-use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt;
 use lash_transport_failure::LlmTransportError;
+use lash_vocabulary::identity::SessionId;
 
 use super::loop_spans::CallStamp;
 use lash_core_ids::perf_witness::latency::Stamp;

@@ -76,7 +76,7 @@ impl PluginMetadata for CountedFactory {
 impl PluginFactory for CountedFactory {
     fn initialize_state(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         config: &crate::plugins::PluginConfig,
     ) -> Result<std::collections::BTreeMap<String, serde_json::Value>, crate::plugins::PluginError>
     {
@@ -150,7 +150,7 @@ pub struct PluginHarness {
     counts: CallbackCounts,
     core: Option<crate::LashCore>,
     worker: Option<Worker>,
-    session: crate::SessionId,
+    session: lash_vocabulary::identity::SessionId,
 }
 impl PluginHarness {
     /// Construct an isolated database and boot the real runtime.
@@ -183,7 +183,7 @@ impl PluginHarness {
             counts: CallbackCounts::default(),
             core: None,
             worker: None,
-            session: crate::SessionId::parse("plugin-certification")
+            session: lash_vocabulary::identity::SessionId::parse("plugin-certification")
                 .map_err(|error| PluginHarnessError::Worker(error.to_string()))?,
         };
         harness
@@ -217,7 +217,7 @@ impl PluginHarness {
         self.supporting_protocol = Some(factory);
         self.reopen().await
     }
-    pub fn session_id(&self) -> &crate::SessionId {
+    pub fn session_id(&self) -> &lash_vocabulary::identity::SessionId {
         &self.session
     }
     pub fn requests(&self) -> Vec<crate::provider::LlmRequest> {

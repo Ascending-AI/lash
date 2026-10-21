@@ -1,7 +1,7 @@
 use super::*;
-use lash_protocol_types::SessionId;
-use lash_protocol_types::TurnId;
 use lash_protocol_types::sync::MutexExt;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 pub(super) async fn append_contract_execution_boundaries(
     events: &mut Vec<crate::scheduler::DeliveredBoundary>,
@@ -394,7 +394,7 @@ impl lash_core::ToolProvider for ContractAppTools {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![contract_app_lookup_definition().manifest()])
@@ -404,7 +404,7 @@ impl lash_core::ToolProvider for ContractAppTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.app_lookup").then(|| Arc::new(contract_app_lookup_definition().contract()))
     }
 
@@ -422,8 +422,8 @@ impl lash_core::ToolProvider for ContractAppTools {
     clippy::expect_used,
     reason = "this module declares the tool or payload schema and admission checks its invariant"
 )]
-fn contract_app_lookup_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn contract_app_lookup_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:app_lookup",
         "tools.app_lookup",
         "Lookup deterministic app state.",
@@ -488,7 +488,7 @@ impl lash_core::ToolProvider for ContractDurableInputTools {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![contract_durable_input_definition().manifest()])
@@ -498,7 +498,7 @@ impl lash_core::ToolProvider for ContractDurableInputTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.mock_input_request")
             .then(|| Arc::new(contract_durable_input_definition().contract()))
     }
@@ -528,8 +528,8 @@ impl lash_core::ToolProvider for ContractDurableInputTools {
     clippy::expect_used,
     reason = "this module declares the tool or payload schema and admission checks its invariant"
 )]
-fn contract_durable_input_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn contract_durable_input_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:mock_input_request",
         "tools.mock_input_request",
         "Open a durable input request and wait for the answer.",
@@ -554,8 +554,8 @@ fn contract_durable_input_definition() -> lash_core::ToolDefinition {
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
     .with_declaration(
-        lash_core::ToolDeclaration::deferring(),
-        Some(lash_core::ParkBound::Within(
+        lash_vocabulary::tool_declaration::ToolDeclaration::deferring(),
+        Some(lash_vocabulary::tool_contract::ParkBound::Within(
             std::time::Duration::from_secs(120),
         )),
     )

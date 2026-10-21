@@ -18,10 +18,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash_core::sync::MutexExt as _;
-use lash_core_execution::ProcessId;
 use lash_durable::ActorState;
 use lash_durable::runner::Stopped;
 use lash_durable_test::{Cut, SimNodes};
+use lash_vocabulary::identity::ProcessId;
 use serde_json::Value;
 
 use super::process::{pinned_key, resolve};

@@ -27,14 +27,18 @@ use lash_core_store::execution_state::{
     ExecutionGraphCapture, ExecutionGraphPurpose, HydratedExecutionGraph,
 };
 use lash_durable::domain::pages::RootLease;
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::KERNEL_VERSION;
+use lash_kernel_doc::NumberPolicy;
 use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
-use lash_kernel_doc::{Datum, FunctionId, KERNEL_VERSION, Name, NumberPolicy};
 use lash_kernel_state::paged::session::{Note, SessionNotes, edit_notes, read_notes};
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource, SessionRoot};
 use lash_kernel_vm::{SessionEditor, SessionValue};
 use lash_vm_broker::kernel::closure::Closure;
 use lash_vm_broker::kernel::pages::{ParentSeal, SharedSpool, SpoolRoot, answer_page};
 use lash_vm_client::service::LowerFunction;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::Name;
 
 use super::pages::{PageAccessError, SessionPageAccess};
 use super::snapshot::SessionOpenError;
@@ -543,9 +547,11 @@ impl CodeModeExecutionState {
     /// A saved function's description as a cell is lowered against it,
     /// carried to this build's kernel version.
     fn lower_function(&self, name: &Name, meta: &[u8]) -> Result<LowerFunction, String> {
-        let function =
-            LowerFunction::from_description(meta, lash_kernel_doc::KernelDataLimits::standard())
-                .map_err(|error| format!("the saved function `{name}` does not decode: {error}"))?;
+        let function = LowerFunction::from_description(
+            meta,
+            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+        )
+        .map_err(|error| format!("the saved function `{name}` does not decode: {error}"))?;
         match self.kernel.saved_function(&function.clone().into_saved()) {
             Ok(None) => Ok(function),
             Ok(Some(carried)) => Ok(LowerFunction {

@@ -1,6 +1,6 @@
-use crate::ProcessId;
-use crate::SessionId;
 use lash_protocol_types::sync::MutexExt;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 use std::sync::Arc;
 
 mod held_response;
@@ -221,8 +221,12 @@ pub struct RuntimeExecutionContext<'run> {
 
 /// The grants a cell's committed deferred matches recorded, keyed by the
 /// effect path each matched tool's binding names.
-pub(crate) type RecordedGrants =
-    Arc<std::collections::BTreeMap<crate::EffectName, crate::ToolExecutionGrant>>;
+pub(crate) type RecordedGrants = Arc<
+    std::collections::BTreeMap<
+        lash_vocabulary::legacy_names::EffectName,
+        crate::ToolExecutionGrant,
+    >,
+>;
 
 #[derive(Clone)]
 pub(crate) struct RuntimeProcessExecution {
@@ -536,7 +540,12 @@ impl<'run> RuntimeExecutionContext<'run> {
     #[must_use]
     pub fn with_recorded_grants(
         mut self,
-        grants: Arc<std::collections::BTreeMap<crate::EffectName, crate::ToolExecutionGrant>>,
+        grants: Arc<
+            std::collections::BTreeMap<
+                lash_vocabulary::legacy_names::EffectName,
+                crate::ToolExecutionGrant,
+            >,
+        >,
     ) -> Self {
         self.recorded_grants = grants;
         self
@@ -562,7 +571,12 @@ impl<'run> RuntimeExecutionContext<'run> {
     #[must_use]
     pub fn recorded_grants(
         &self,
-    ) -> Arc<std::collections::BTreeMap<crate::EffectName, crate::ToolExecutionGrant>> {
+    ) -> Arc<
+        std::collections::BTreeMap<
+            lash_vocabulary::legacy_names::EffectName,
+            crate::ToolExecutionGrant,
+        >,
+    > {
         Arc::clone(&self.recorded_grants)
     }
 
@@ -601,7 +615,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// process name and no incarnation. The admitted scope the controller was
     /// built with carries the exact pair, and this is where an execution that
     /// must name its opener (ADR 0099 §1) reads it back.
-    pub fn admitted_process(&self) -> Option<crate::ProcessId> {
+    pub fn admitted_process(&self) -> Option<lash_vocabulary::identity::ProcessId> {
         self.dispatch.effect_controller.admitted_process().cloned()
     }
 
@@ -1003,7 +1017,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             .map(|exec| exec.provenance.clone())
     }
 
-    fn child_process_observers(&self) -> Vec<crate::SessionId> {
+    fn child_process_observers(&self) -> Vec<lash_vocabulary::identity::SessionId> {
         match self.process_execution.as_ref() {
             Some(exec) => match &exec.provenance.originator {
                 lash_execution_contracts::process::ProcessOriginator::Host { .. } => Vec::new(),
@@ -1120,7 +1134,10 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
-    pub fn callable_tool_manifest_by_id(&self, id: &crate::ToolId) -> Option<crate::ToolManifest> {
+    pub fn callable_tool_manifest_by_id(
+        &self,
+        id: &lash_vocabulary::tool_contract::ToolId,
+    ) -> Option<lash_vocabulary::tool_contract::ToolManifest> {
         crate::tool_dispatch::resolve_callable_manifest_by_id(&self.dispatch, id)
     }
 
@@ -1233,8 +1250,8 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// contract is routed, and raises `operation_contract_changed`.
     pub fn read_route(
         &self,
-        tool: &crate::ToolId,
-        pinned: &lash_kernel_doc::ContractId,
+        tool: &lash_vocabulary::tool_contract::ToolId,
+        pinned: &lash_vocabulary::operations::ContractId,
     ) -> Result<crate::ReadRoute, crate::RuntimeEffectControllerError> {
         self.dispatch
             .routes
@@ -1244,7 +1261,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// The hooks through which the session's plugins see tool calls'
     /// arguments or results. A read runs no hook, so where one would see it
     /// the call stays recorded.
-    pub fn tool_call_hooks(&self) -> Vec<crate::plugin::PluginCallbackIdentity> {
+    pub fn tool_call_hooks(&self) -> Vec<lash_vocabulary::providers::PluginCallbackIdentity> {
         self.dispatch.composition.tool_call_hooks()
     }
 

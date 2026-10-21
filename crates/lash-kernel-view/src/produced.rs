@@ -16,8 +16,10 @@ use lash_kernel_check::{
     ActNode, ActionNode, AtomNode, BindingId, BindingKind, CalleeNode, ExprNode, Graph, NodeId,
     NodeKind, Reference, StmtNode,
 };
-use lash_kernel_doc::{FunctionDeclarations, FunctionId, Site};
+use lash_kernel_doc::FunctionDeclarations;
 use lash_kernel_package::PackageView;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::sites::Site;
 
 use crate::ActionView;
 

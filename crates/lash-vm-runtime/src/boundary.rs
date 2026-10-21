@@ -3,13 +3,20 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-pub use lash_kernel_check::{
-    MAX_PROJECTED_TYPE_NODES, MAX_RESOLVED_REFERENCES, SchemaConflict, SchemaProjectionRefusal,
-    type_of_schema,
-};
-use lash_kernel_dialect::{EffectControl, Offered, OfferedSource, Operations, QualifiedOperation};
-use lash_kernel_doc::{EffectName, OperationRequirement, Type};
-use lash_protocol_types::ToolId;
+use lash_kernel_dialect::EffectControl;
+use lash_kernel_dialect::Offered;
+use lash_kernel_dialect::OfferedSource;
+use lash_kernel_dialect::Operations;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::names::QualifiedOperation;
+use lash_vocabulary::operations::OperationRequirement;
+pub use lash_vocabulary::schema::MAX_PROJECTED_TYPE_NODES;
+pub use lash_vocabulary::schema::MAX_RESOLVED_REFERENCES;
+pub use lash_vocabulary::schema::SchemaConflict;
+pub use lash_vocabulary::schema::SchemaProjectionRefusal;
+pub use lash_vocabulary::schema::type_of_schema;
+use lash_vocabulary::tool_contract::ToolId;
+use lash_vocabulary::types::Type;
 
 /// Why a boundary could not be stated.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -30,12 +37,14 @@ pub struct HostBoundary {
 /// The turn-ending controls `controls` names, as a front end lowers against
 /// them.
 #[must_use]
-pub fn effect_controls(controls: &lash_protocol_types::TurnControls) -> BTreeSet<EffectControl> {
+pub fn effect_controls(
+    controls: &lash_vocabulary::tool_declaration::TurnControls,
+) -> BTreeSet<EffectControl> {
     controls
         .iter()
         .map(|kind| match kind {
-            lash_protocol_types::TurnControlKind::Finish => EffectControl::Finish,
-            lash_protocol_types::TurnControlKind::SwitchAgentFrame => {
+            lash_vocabulary::tool_declaration::TurnControlKind::Finish => EffectControl::Finish,
+            lash_vocabulary::tool_declaration::TurnControlKind::SwitchAgentFrame => {
                 EffectControl::SwitchAgentFrame
             }
         })
@@ -67,21 +76,21 @@ pub fn owned_operation(
 /// contract the tool serves.
 #[must_use]
 pub fn offered_tool(
-    manifest: &lash_protocol_types::ToolManifest,
-    contract: &lash_protocol_types::ToolContract,
+    manifest: &lash_vocabulary::tool_contract::ToolManifest,
+    contract: &lash_vocabulary::tool_contract::ToolContract,
     source: OfferedSource,
 ) -> Offered {
     Offered {
         visibility: lash_kernel_dialect::Visibility::Public,
         requirement: OperationRequirement {
-            signature: lash_protocol_types::tool_signature(
+            signature: lash_vocabulary::json_schema::tool_signature(
                 &contract.input_schema.canonical,
                 &contract.output_schema.canonical,
             ),
             contract: manifest.contract_id(contract),
         },
         controls: effect_controls(&manifest.declaration().controls),
-        read: manifest.execution_policy == lash_protocol_types::ExecutionPolicy::Read,
+        read: manifest.execution_policy == lash_vocabulary::tool_contract::ExecutionPolicy::Read,
         source,
     }
 }
@@ -280,7 +289,7 @@ pub(crate) fn json_serves(ty: &Type, value: &serde_json::Value) -> Result<(), St
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_kernel_doc::Signature;
+    use lash_vocabulary::types::Signature;
 
     /// OPEN-RESULT-FITS (law 18, D4): a tool's result projects to an open
     /// record, so a tool whose result adds a field serves a document checked
@@ -309,12 +318,14 @@ mod tests {
             "took_ms": { "type": "integer" },
         }));
         let admit = |schema: &serde_json::Value| {
-            lash_protocol_types::JsonSchema::admit(schema.clone()).expect("an admissible schema")
+            lash_vocabulary::json_schema::JsonSchema::admit(schema.clone())
+                .expect("an admissible schema")
         };
-        let expected = lash_protocol_types::tool_signature(&admit(&input), &admit(&earlier));
-        let provided = lash_protocol_types::tool_signature(&admit(&input), &admit(&later));
+        let expected =
+            lash_vocabulary::json_schema::tool_signature(&admit(&input), &admit(&earlier));
+        let provided = lash_vocabulary::json_schema::tool_signature(&admit(&input), &admit(&later));
         assert!(
-            lash_kernel_check::signature_serves(&provided, &expected),
+            lash_vocabulary::schema::signature_serves(&provided, &expected),
             "the added field fits the projected result"
         );
         let closed = Signature {
@@ -322,7 +333,7 @@ mod tests {
             ..expected.clone()
         };
         assert!(
-            !lash_kernel_check::signature_serves(&provided, &closed),
+            !lash_vocabulary::schema::signature_serves(&provided, &closed),
             "a closed result refuses the open one"
         );
         assert_eq!(
@@ -362,7 +373,7 @@ mod tests {
         assert_eq!(owner.package, "dataframe");
         assert_eq!(
             owner.requirement.contract,
-            lash_kernel_doc::ContractId::new("dataframe.run/1")
+            lash_vocabulary::operations::ContractId::new("dataframe.run/1")
         );
         let plan = serde_json::json!({
             "type": "array",
@@ -379,7 +390,7 @@ mod tests {
             }
         });
         let runner_of = |input: serde_json::Value, contract: Option<&str>| {
-            let draft = lash_core::ToolDefinition::raw(
+            let draft = lash_vocabulary::tool_contract::ToolDefinition::raw(
                 "tool:dataframe_runner",
                 "dataframe.run",
                 "Runs a plan.",
@@ -388,13 +399,15 @@ mod tests {
             )
             .expect("valid declared tool schemas");
             match contract {
-                Some(id) => draft.declared_contract(lash_kernel_doc::ContractId::new(id)),
+                Some(id) => {
+                    draft.declared_contract(lash_vocabulary::operations::ContractId::new(id))
+                }
                 None => draft,
             }
             .with_execution(std::time::Duration::from_secs(30))
         };
         let runner = |contract: Option<&str>| runner_of(plan.clone(), contract);
-        let check = |runner: lash_core::ToolDefinition| {
+        let check = |runner: lash_vocabulary::tool_contract::ToolDefinition| {
             lash_execution_contracts::process::check_runner(
                 &effect,
                 &owner,
@@ -434,7 +447,7 @@ mod tests {
     /// the boundary does not offer, and admission refuses it.
     #[test]
     fn a_process_boundary_offers_no_turn_ending_tool() {
-        let ordinary = lash_core::ToolDefinition::raw(
+        let ordinary = lash_vocabulary::tool_contract::ToolDefinition::raw(
             "tool:lookup",
             "tools.lookup",
             "Looks a value up.",
@@ -443,12 +456,14 @@ mod tests {
         )
         .expect("valid declared tool schemas")
         .with_execution(std::time::Duration::from_secs(30));
-        let finish = lash_core::ToolDefinition::control(
+        let finish = lash_vocabulary::tool_contract::ToolDefinition::control(
             "tool:finish",
             "control.finish",
             "Ends the turn.",
             serde_json::json!({}),
-            lash_core::TurnControls::finish(lash_core::JsonSchema::any()),
+            lash_vocabulary::tool_declaration::TurnControls::finish(
+                lash_vocabulary::json_schema::JsonSchema::any(),
+            ),
         )
         .expect("valid declared tool schema")
         .with_execution(std::time::Duration::from_secs(30));

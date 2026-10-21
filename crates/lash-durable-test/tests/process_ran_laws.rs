@@ -134,7 +134,7 @@ struct Counted {
     backend: Mutex<Option<lash::Backend>>,
     clock: Mutex<Option<Arc<SimClock>>>,
     core: Mutex<Option<lash::LashCore>>,
-    process: Mutex<Option<lash_core::ProcessId>>,
+    process: Mutex<Option<lash_vocabulary::identity::ProcessId>>,
     tripwire: Arc<lash_durable_test::Tripwire>,
 }
 
@@ -171,7 +171,7 @@ impl Counted {
             .expect("the database is built first")
     }
 
-    fn process(&self) -> Option<lash_core::ProcessId> {
+    fn process(&self) -> Option<lash_vocabulary::identity::ProcessId> {
         self.process.lock_recover().clone()
     }
 
@@ -249,7 +249,7 @@ impl Counted {
     }
 
     /// The host's start of `counted()`, observed as the plan says.
-    async fn start_process(&self) -> Result<lash_core::ProcessId, String> {
+    async fn start_process(&self) -> Result<lash_vocabulary::identity::ProcessId, String> {
         let core = self.core();
         let payload = self.payload().await;
         let env_ref = self.publish_env(2).await;
@@ -259,8 +259,8 @@ impl Counted {
             .kernel_engine_defaults()
             .map_err(|error| format!("the kernel's settings: {error}"))?;
         let observe = match self.plan {
-            Plan::Unobserved => lash::process::ObservationMode::Off,
-            Plan::Counted | Plan::Carried => lash::process::ObservationMode::Counts,
+            Plan::Unobserved => lash_vocabulary::observation::RunObservation::Off,
+            Plan::Counted | Plan::Carried => lash_vocabulary::observation::RunObservation::Counts,
         };
         let settings = recorded.observing(observe).into_engine_settings();
         core.processes()
@@ -280,7 +280,7 @@ impl Counted {
     }
 
     /// Step `nodes` until the process waits on its first sleep.
-    async fn first_park(&self, nodes: &SimNodes, process: &lash_core::ProcessId) {
+    async fn first_park(&self, nodes: &SimNodes, process: &lash_vocabulary::identity::ProcessId) {
         let actor = ActorKey::process(process.as_str()).unwrap();
         nodes.quiesce().await;
         loop {
@@ -300,7 +300,10 @@ impl Counted {
     }
 
     /// Every `process.ran` record the process committed, in order.
-    async fn ran_records(&self, process: &lash_core::ProcessId) -> Vec<Vec<(u32, u64)>> {
+    async fn ran_records(
+        &self,
+        process: &lash_vocabulary::identity::ProcessId,
+    ) -> Vec<Vec<(u32, u64)>> {
         self.facts(process)
             .await
             .into_iter()
@@ -314,7 +317,7 @@ impl Counted {
     /// Every fact the process committed, in order.
     async fn facts(
         &self,
-        process: &lash_core::ProcessId,
+        process: &lash_vocabulary::identity::ProcessId,
     ) -> Vec<lash_execution_contracts::process::ProcessLifecycleFact> {
         let read = self
             .core()
@@ -341,7 +344,7 @@ impl Counted {
 
     async fn replay(
         &self,
-        process: &lash_core::ProcessId,
+        process: &lash_vocabulary::identity::ProcessId,
         segments: ReplaySegments,
     ) -> Vec<SegmentReplay> {
         self.core()
@@ -353,7 +356,7 @@ impl Counted {
 
     async fn overlay(
         &self,
-        process: &lash_core::ProcessId,
+        process: &lash_vocabulary::identity::ProcessId,
     ) -> Option<lash_core::ProcessWorkflowOverlay> {
         let observation = self
             .core()
@@ -369,7 +372,7 @@ impl Counted {
     }
 
     /// The laws every run of a counted plan keeps, cut or not.
-    async fn counted_laws(&self, process: &lash_core::ProcessId) -> Vec<String> {
+    async fn counted_laws(&self, process: &lash_vocabulary::identity::ProcessId) -> Vec<String> {
         let mut violations = Vec::new();
         let records = self.ran_records(process).await;
         let committed = histogram(records.iter().flatten().copied());
@@ -462,7 +465,7 @@ impl Counted {
         let overlay = self.overlay(process).await;
         match overlay {
             Some(overlay) => {
-                if overlay.observation != lash_core::ProcessWorkflowObservation::Counts {
+                if overlay.observation != lash_vocabulary::observation::RunObservation::Counts {
                     violations.push(format!("the overlay says {:?}", overlay.observation));
                 }
                 let folded: BTreeMap<u32, u64> = overlay
@@ -491,7 +494,7 @@ impl Counted {
 
     /// Replays of requests the journal's records were taken from, each
     /// changed as a store that lost or never had them would hold them.
-    async fn tampered_laws(&self, process: &lash_core::ProcessId) -> Vec<String> {
+    async fn tampered_laws(&self, process: &lash_vocabulary::identity::ProcessId) -> Vec<String> {
         let mut violations = Vec::new();
         let core = self.core();
         let steps = lash_core::facade_support::read_process_steps(&core.effect_host(), process)
@@ -641,7 +644,7 @@ impl Counted {
 fn retaped(
     steps: &[RecordedProcessStep],
     at: usize,
-    process: &lash_core::ProcessId,
+    process: &lash_vocabulary::identity::ProcessId,
     edit: impl FnOnce(&mut serde_json::Value),
 ) -> Vec<RecordedProcessStep> {
     let mut steps = steps.to_vec();
@@ -789,7 +792,7 @@ impl Scenario for Counted {
 impl Counted {
     /// (e) A pruned process answers each segment asked of it `Pruned`, and
     /// no segment when asked for all: it retains none.
-    async fn pruned_laws(&self, process: &lash_core::ProcessId) -> Vec<String> {
+    async fn pruned_laws(&self, process: &lash_vocabulary::identity::ProcessId) -> Vec<String> {
         let cutoff = SimClock::timestamp_ms_at(self.clock().logical_ms()) + 3_600_000;
         let report = self
             .core()
@@ -835,7 +838,7 @@ impl Counted {
 
     /// (f) An unobserved process replays nothing and its overlay says it
     /// is unobserved, never zero.
-    async fn unobserved_laws(&self, process: &lash_core::ProcessId) -> Vec<String> {
+    async fn unobserved_laws(&self, process: &lash_vocabulary::identity::ProcessId) -> Vec<String> {
         let mut violations = Vec::new();
         if !self.ran_records(process).await.is_empty() {
             violations.push("an unobserved process committed counts".to_owned());
@@ -849,7 +852,7 @@ impl Counted {
         }
         match self.overlay(process).await {
             Some(overlay) => {
-                if overlay.observation != lash_core::ProcessWorkflowObservation::Off
+                if overlay.observation != lash_vocabulary::observation::RunObservation::Off
                     || !overlay.ran.is_empty()
                 {
                     violations.push(format!(

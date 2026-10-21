@@ -23,6 +23,7 @@ default = []
 workspace = true
 
 [dependencies]
+lash-vocabulary = { workspace = true }
 lash-execution-contracts = { workspace = true }
 lash-core = { workspace = true }
 lash-protocol-types = { workspace = true }

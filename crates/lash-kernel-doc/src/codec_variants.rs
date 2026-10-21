@@ -8,11 +8,11 @@
 //! without it keeps its bytes. The binary codecs read these tables; nothing
 //! derives a number from declaration order again.
 
-use crate::graph_tokens::CodecVariant;
 use crate::{
     ActKind, Action, AssignOrder, Atom, Callee, Datum, Expr, Formula, Identity, Implementation,
     JoinMode, Literal, Measure, Member, NumberPolicy, Operand, Place, Rhs, Stmt,
 };
+use lash_vocabulary::tokens::CodecVariant;
 
 #[doc(hidden)]
 impl CodecVariant for crate::heap::PageValue {

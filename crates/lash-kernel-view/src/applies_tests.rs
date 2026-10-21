@@ -1,13 +1,14 @@
 //! FIG-6940: closure provenance survives the dialect's value conventions.
 use lash_kernel_check::{ExprNode, NodeKind, StmtNode, WorkflowDocument};
 use lash_kernel_dialect::{CellEnvironment, Environment, Mode};
-use lash_kernel_doc::{Name, WorkflowDocumentEntry};
+use lash_kernel_doc::WorkflowDocumentEntry;
+use lash_vocabulary::legacy_names::Name;
 
 fn lowered_holder(source: &str, typescript: bool, cell: bool) -> WorkflowDocument {
     let embedding = lash_vm_worker::built_embedding(&Default::default()).unwrap();
     let namespaces = lash_kernel_dialect::Namespaces::of_effects(
         &Default::default(),
-        &lash_kernel_doc::ContractId::new("1"),
+        &lash_vocabulary::operations::ContractId::new("1"),
         &Default::default(),
     )
     .expect("no effects are operations");
@@ -195,7 +196,7 @@ fn kernel_view(text: &str) -> crate::WorkflowView {
     crate::derive(&holder, &crate::test_packages()).unwrap()
 }
 
-fn action_sites(view: &crate::WorkflowView, statement: u32) -> Vec<lash_kernel_doc::Site> {
+fn action_sites(view: &crate::WorkflowView, statement: u32) -> Vec<lash_vocabulary::sites::Site> {
     view.dataflow
         .actions
         .iter()
@@ -286,7 +287,7 @@ main { finish null }
     .unwrap();
     let view = crate::derive_callable(
         &holder,
-        &lash_kernel_doc::Unit::Function(Name::new("helper")),
+        &lash_vocabulary::sites::Unit::Function(Name::new("helper")),
         &crate::test_packages(),
     )
     .unwrap();
@@ -361,8 +362,11 @@ main {{ finish null }}
     assert_eq!(action_sites(&view, 6), [right]);
 }
 
-fn site(entry: &str, path: &[u32]) -> lash_kernel_doc::Site {
-    lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Function(Name::new(entry)), path)
+fn site(entry: &str, path: &[u32]) -> lash_vocabulary::sites::Site {
+    lash_vocabulary::sites::Site::new(
+        lash_vocabulary::sites::Unit::Function(Name::new(entry)),
+        path,
+    )
 }
 
 /// Aggregates await tasks, while each nested start runs the closure. These
@@ -432,8 +436,8 @@ main {
     let view = crate::derive(&holder, &crate::test_packages()).unwrap();
     assert_eq!(
         view.dataflow.actions[0].applies,
-        [lash_kernel_doc::Site::new(
-            lash_kernel_doc::Unit::Main,
+        [lash_vocabulary::sites::Site::new(
+            lash_vocabulary::sites::Unit::Main,
             [0, 0]
         )]
     );

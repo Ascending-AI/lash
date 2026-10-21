@@ -155,7 +155,7 @@ fn smith_64_fixed_inputs_and_python_lowered_documents_reconstruct_without_helper
     let library = lash_kernel_dialect::NamedLibrary::from_registry(&registry).unwrap();
     let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
         &Default::default(),
-        &lash_kernel_doc::ContractId::new("1"),
+        &lash_vocabulary::operations::ContractId::new("1"),
         &Default::default(),
     )
     .expect("the test's effects are operations");
@@ -1483,7 +1483,7 @@ fn non_any_effect_results_keep_nested_optional_types_and_the_manifest_stays_unpr
 fn authored_import_of_printed_source_needs_its_base() {
     let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
         &Default::default(),
-        &lash_kernel_doc::ContractId::new("1"),
+        &lash_vocabulary::operations::ContractId::new("1"),
         &Default::default(),
     )
     .expect("the test's effects are operations");

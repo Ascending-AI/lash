@@ -602,7 +602,7 @@ impl GoogleOAuthProvider {
     }
 
     fn project_schema(
-        schema: &lash_core::SchemaContract,
+        schema: &lash_vocabulary::schema_contract::SchemaContract,
         purpose: SchemaPurpose,
     ) -> Result<Value, LlmTransportError> {
         let capabilities = ProviderSchemaCapabilities::google();

@@ -28,7 +28,6 @@ use lash_durable::{
 use super::activation::{Live, Pass, ProcessActivation, corrupt};
 use super::driver::Driver;
 use super::effects::append_event;
-use crate::ProcessId;
 use crate::runtime::actor::round::RunFold;
 use crate::runtime::process::carry_refusal;
 use crate::runtime::process::relinked_step;
@@ -41,6 +40,7 @@ use lash_execution_contracts::process::ProcessSuccessorRefusal;
 use lash_execution_contracts::process::ProcessSuccessorRequest;
 use lash_execution_contracts::process::SUCCESSOR_MAIL;
 use lash_execution_contracts::process::SuccessorCarry;
+use lash_vocabulary::identity::ProcessId;
 
 /// What a successor step did with the pass's transaction.
 pub(super) enum Succession {

@@ -8,8 +8,11 @@
 use std::sync::{Arc, OnceLock};
 
 use arbitrary::{Arbitrary, Unstructured};
-use lash_kernel_doc::{Document, FunctionRegistry, Name, parse_document};
+use lash_kernel_doc::Document;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::parse_document;
 use lash_kernel_vm::{Bounds, PreparedLibrary};
+use lash_vocabulary::legacy_names::Name;
 
 mod runner;
 #[cfg(test)]

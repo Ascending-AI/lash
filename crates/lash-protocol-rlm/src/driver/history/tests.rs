@@ -582,7 +582,7 @@ fn fig1123_cell_history_marks_only_real_turn_inputs_as_segment_boundaries() {
             role: MessageRole::User,
             parts: vec![Part::text("real.p0".to_string(), "real".to_string(), None)].into(),
             origin: Some(MessageOrigin::TurnInput {
-                turn_id: lash_core::TurnId::from("turn"),
+                turn_id: lash_vocabulary::identity::TurnId::from("turn"),
                 input_id: None,
             }),
             reply_marker: None,

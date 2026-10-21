@@ -100,10 +100,10 @@ fn formula(case: &Case) {
 
 fn session(rule: &str, case: &Case) {
     use crate::pages::Session;
-    use lash_kernel_doc::Name;
     use lash_kernel_doc::heap::PageValue;
     use lash_kernel_state::kernel_internals::tree::Tree;
     use lash_kernel_state::paged::{BindingRecord, BoundRecord};
+    use lash_vocabulary::legacy_names::Name;
     let library = registry();
     let mut session = Session::default();
     let mut machine = start(
@@ -251,8 +251,10 @@ fn sites(rule: &str, case: &Case) {
                 assert_eq!(*outer.statement.resolve(heap.pages()).unwrap(), main(&[0]));
                 assert_eq!(
                     *inner.statement.resolve(heap.pages()).unwrap(),
-                    lash_kernel_doc::Site {
-                        unit: lash_kernel_doc::Unit::Function(lash_kernel_doc::Name::new("f")),
+                    lash_vocabulary::sites::Site {
+                        unit: lash_vocabulary::sites::Unit::Function(
+                            lash_vocabulary::legacy_names::Name::new("f")
+                        ),
                         path: vec![0, 1, 0]
                     }
                 );

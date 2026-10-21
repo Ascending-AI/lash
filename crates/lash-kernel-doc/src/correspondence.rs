@@ -1,7 +1,8 @@
 //! Which node of a document became which node of the document edited from
 //! it.
 
-use crate::{DocumentId, Site};
+use lash_vocabulary::legacy_names::DocumentId;
+use lash_vocabulary::sites::Site;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

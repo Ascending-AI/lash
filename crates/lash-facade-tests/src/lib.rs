@@ -22,9 +22,9 @@ use lash::{EmbedError, LashCore, Result, async_trait};
 use lash_core::facade_support::ProviderHandle;
 use lash_core::facade_support::{PluginFactory, TurnActivitySink};
 use lash_core::{ToolProvider, TurnActivity};
-use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt;
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+use lash_vocabulary::identity::SessionId;
 use std::sync::Arc;
 
 use lash_core::llm::types::{LlmContentBlock, LlmRequest, LlmResponse, LlmRole, LlmStreamEvent};
@@ -300,7 +300,7 @@ pub async fn durable_history(
 /// The agent frames `history` records, oldest first.
 pub fn history_frames(
     history: Vec<lash_core::store::HistoryNode>,
-    session_id: &lash_core::SessionId,
+    session_id: &lash_vocabulary::identity::SessionId,
 ) -> Vec<lash_core::AgentFrameRecord> {
     use lash_core::facade_support::SessionGraphFacadeOps as _;
     let records = history
@@ -322,7 +322,10 @@ impl ToolProvider for AppTools {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![app_tool_definition().manifest()])
     }
 
@@ -330,7 +333,7 @@ impl ToolProvider for AppTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.app_lookup").then(|| Arc::new(app_tool_definition().contract()))
     }
 
@@ -339,8 +342,8 @@ impl ToolProvider for AppTools {
     }
 }
 
-pub fn app_tool_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+pub fn app_tool_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:app_lookup",
         "tools.app_lookup",
         "Look up app state.",
@@ -354,8 +357,8 @@ pub fn app_tool_definition() -> lash_core::ToolDefinition {
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
     .with_declaration(
-        lash_core::ToolDeclaration::deferring(),
-        Some(lash_core::ParkBound::Within(
+        lash_vocabulary::tool_declaration::ToolDeclaration::deferring(),
+        Some(lash_vocabulary::tool_contract::ParkBound::Within(
             std::time::Duration::from_secs(120),
         )),
     )
@@ -413,14 +416,17 @@ pub fn runtime_lease_owner() -> lash_core::LeaseOwnerIdentity {
 }
 
 /// Create with the host's default config, then return the public open builder.
-pub async fn created_session(core: &LashCore, id: lash::SessionId) -> lash::SessionBuilder {
+pub async fn created_session(
+    core: &LashCore,
+    id: lash_vocabulary::identity::SessionId,
+) -> lash::SessionBuilder {
     created_session_with(core, id, mock_session_spec()).await
 }
 
 /// Match the original fixture's create-or-open behavior through the public API.
 pub async fn created_session_with(
     core: &LashCore,
-    id: lash::SessionId,
+    id: lash_vocabulary::identity::SessionId,
     spec: lash::SessionSpec,
 ) -> lash::SessionBuilder {
     match core

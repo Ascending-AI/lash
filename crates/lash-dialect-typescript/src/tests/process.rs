@@ -2,7 +2,12 @@
 
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{EffectName, Name, Param, Signature, Type, print_document};
+use lash_kernel_doc::print_document;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 use super::machine;
 

@@ -98,7 +98,7 @@ impl NodeSpec {
     pub fn served(&self) -> Vec<String> {
         let mut served: std::collections::BTreeSet<String> = self.serves.iter().cloned().collect();
         served.extend(
-            lash_core_store::obligations::ObligationToken::for_capabilities(&self.capabilities)
+            lash_vocabulary::claims::ObligationToken::for_capabilities(&self.capabilities)
                 .map(String::from),
         );
         served.into_iter().collect()
@@ -189,7 +189,7 @@ impl ClaimPurpose {
     pub fn of(node: &NodeLease, formats: &str, requires: &[String]) -> Self {
         if node.decodes.iter().any(|set| set.as_str() == formats)
             && requires.iter().all(|required| {
-                lash_core_store::obligations::ObligationToken::is_served(required, &node.serves)
+                lash_vocabulary::claims::ObligationToken::is_served(required, &node.serves)
             })
         {
             Self::Run
@@ -488,9 +488,12 @@ pub trait DurableStore: DurableReads {
     /// defines is absent.
     async fn package_paths(
         &self,
-        functions: &[lash_kernel_doc::FunctionId],
+        functions: &[lash_vocabulary::names::FunctionId],
     ) -> Result<
-        std::collections::BTreeMap<lash_kernel_doc::FunctionId, std::collections::BTreeSet<String>>,
+        std::collections::BTreeMap<
+            lash_vocabulary::names::FunctionId,
+            std::collections::BTreeSet<String>,
+        >,
         DurableError,
     >;
 
@@ -508,9 +511,9 @@ pub trait DurableStore: DurableReads {
     /// internal is absent.
     async fn internal_operations(
         &self,
-        operations: &[lash_kernel_doc::EffectName],
+        operations: &[lash_vocabulary::EffectName],
     ) -> Result<
-        std::collections::BTreeMap<lash_kernel_doc::EffectName, std::collections::BTreeSet<String>>,
+        std::collections::BTreeMap<lash_vocabulary::EffectName, std::collections::BTreeSet<String>>,
         DurableError,
     >;
 

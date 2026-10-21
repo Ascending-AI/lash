@@ -146,7 +146,7 @@ fn a_missing_helper_is_named() {
     let bindings = std::collections::BTreeSet::new();
     let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
         &effects,
-        &lash_kernel_doc::ContractId::new("1"),
+        &lash_vocabulary::operations::ContractId::new("1"),
         &Default::default(),
     )
     .expect("the test's effects are operations");
@@ -465,7 +465,7 @@ fn a_host_source_policy_allows_a_larger_python_cell() {
     let source = format!("#{}", "x".repeat(crate::MAX_SOURCE_BYTES));
     let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
         &Default::default(),
-        &lash_kernel_doc::ContractId::new("1"),
+        &lash_vocabulary::operations::ContractId::new("1"),
         &Default::default(),
     )
     .expect("the test's effects are operations");

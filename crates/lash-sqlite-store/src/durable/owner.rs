@@ -25,7 +25,7 @@ pub(super) fn apply_owner(
     let (turn_cancel, open_roots) = match write.actor().kind() {
         lash_durable::ActorKind::Session => {
             let Ok(session) =
-                lash_protocol_types::SessionId::try_from(write.actor().id().to_owned())
+                lash_vocabulary::identity::SessionId::try_from(write.actor().id().to_owned())
             else {
                 return refuse(corrupt("session id", write.actor().id()));
             };

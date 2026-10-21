@@ -24,7 +24,8 @@ use std::time::{Duration, Instant};
 use lash_durable::domain::WaitPurpose;
 use lash_durable::runner::{Runner, RunnerConfig, Stopped};
 use lash_durable::{ActorKey, ActorState, DurableError, NoProbe, NodeId, NodeSpec};
-use lash_protocol_types::{ExecutionLimit, ExecutionPolicy};
+use lash_protocol_types::ExecutionLimit;
+use lash_vocabulary::tool_contract::ExecutionPolicy;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
@@ -32,7 +33,6 @@ use super::process::ProcessActivation;
 use super::wait_laws::{LawBroken, LawOutcome};
 use crate::CancelOrigin;
 use crate::DurableSettings;
-use crate::ProcessId;
 use crate::ScopeId;
 use crate::ToolCallId;
 use crate::ToolCallOutput;
@@ -46,6 +46,7 @@ use lash_core_store::tool_run::{
 };
 use lash_execution_contracts::waits::ParkDeadline;
 use lash_execution_contracts::waits::WaitDeadline;
+use lash_vocabulary::identity::ProcessId;
 
 macro_rules! ensure {
     ($condition:expr, $($message:tt)+) => {
@@ -288,11 +289,10 @@ fn await_action(script: &Value) -> Result<EngineAction, ProcessInfraError> {
         .ok_or_else(|| infra("an await names no process"))?;
     Ok(EngineAction::AwaitProcess {
         process: ProcessId::parse(target).map_err(infra)?,
-        bound: script["deadline_ms"]
-            .as_u64()
-            .map_or(crate::ParkBound::UntilScopeEnd, |ms| {
-                crate::ParkBound::Within(Duration::from_millis(ms))
-            }),
+        bound: script["deadline_ms"].as_u64().map_or(
+            lash_vocabulary::tool_contract::ParkBound::UntilScopeEnd,
+            |ms| lash_vocabulary::tool_contract::ParkBound::Within(Duration::from_millis(ms)),
+        ),
         site: None,
     })
 }
@@ -310,8 +310,8 @@ const LAW_PARK: &str = "law_park";
     clippy::expect_used,
     reason = "every law tool name is a fixed valid effect name"
 )]
-fn law_effect(tool: &str) -> crate::EffectName {
-    crate::EffectName::new(tool).expect("a law effect name")
+fn law_effect(tool: &str) -> lash_vocabulary::legacy_names::EffectName {
+    lash_vocabulary::legacy_names::EffectName::new(tool).expect("a law effect name")
 }
 
 fn law_step(step: &str, tool: &str) -> EngineAction {
@@ -319,7 +319,7 @@ fn law_step(step: &str, tool: &str) -> EngineAction {
         steps: vec![StepRequest::Tool {
             step: StepName(step.to_owned()),
             effect: law_effect(tool),
-            contract: lash_kernel_doc::ContractId::new("law"),
+            contract: lash_vocabulary::operations::ContractId::new("law"),
             input: json!({}),
             site: None,
             matched: None,
@@ -341,7 +341,7 @@ fn tool_step(step: &str, tool: &str) -> StepRequest {
     StepRequest::Tool {
         step: StepName(step.to_owned()),
         effect: law_effect(tool),
-        contract: lash_kernel_doc::ContractId::new("law"),
+        contract: lash_vocabulary::operations::ContractId::new("law"),
         input: json!({}),
         site: None,
         matched: None,
@@ -372,7 +372,7 @@ const SLEEP_NODE: &str = "sleep-node";
 
 /// The first occurrence of `node`, as the law engine's document
 /// would name it.
-fn law_site(node: &str) -> lash_protocol_types::EffectId {
+fn law_site(node: &str) -> lash_vocabulary::sites::EffectId {
     lash_protocol_types::effect_identity_fixture(node, 1)
 }
 
@@ -493,7 +493,7 @@ impl ProcessEngine for LawEngine {
                     steps: vec![StepRequest::Tool {
                         step: StepName("stuck".to_owned()),
                         effect: law_effect("law_stuck"),
-                        contract: lash_kernel_doc::ContractId::new("law"),
+                        contract: lash_vocabulary::operations::ContractId::new("law"),
                         input: json!({}),
                         site: None,
                         matched: None,
@@ -503,7 +503,7 @@ impl ProcessEngine for LawEngine {
                 "await" => await_action(&script)?,
                 "await_key" | "key" => EngineAction::PinKey {
                     name: KeyName(PEER_KEY.to_owned()),
-                    bound: crate::ParkBound::UntilScopeEnd,
+                    bound: lash_vocabulary::tool_contract::ParkBound::UntilScopeEnd,
                 },
                 "complete" => ended(json!({"real_terminal": true})),
                 "retry" => law_step("flaky", LAW_FLAKY),
@@ -514,7 +514,7 @@ impl ProcessEngine for LawEngine {
                         .map(|step| StepRequest::Tool {
                             step: StepName((*step).to_owned()),
                             effect: law_effect(LAW_PARK),
-                            contract: lash_kernel_doc::ContractId::new("law"),
+                            contract: lash_vocabulary::operations::ContractId::new("law"),
                             input: json!({}),
                             site: Some(Box::new(law_site(step))),
                             matched: None,
@@ -722,7 +722,7 @@ impl ProcessSteps for LawSteps {
         };
         let limit = ExecutionLimit::starting_at(now_ms, LONG, LONG);
         Ok(StepAdmission::new(
-            lash_protocol_types::ToolId::new(step_tool(step)),
+            lash_vocabulary::tool_contract::ToolId::new(step_tool(step)),
             policy,
             limit,
             (step_tool(step) == LAW_PARK).then(|| {

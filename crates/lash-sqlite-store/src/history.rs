@@ -91,7 +91,7 @@ fn missing_anchor(
     let tombstoned = visible_header(conn, session, node)?.is_some_and(|row| row.tombstoned);
     Ok(StoreError::HistoryAnchorUnavailable {
         session_id: session.clone(),
-        node_id: lash_protocol_types::NodeId::parse(node)?,
+        node_id: lash_vocabulary::identity::NodeId::parse(node)?,
         reason: if tombstoned {
             AnchorUnavailable::Tombstoned
         } else {
@@ -256,7 +256,7 @@ fn lineage(conn: &Connection, session: &SessionId) -> Result<LineageStamp, Store
 pub(crate) fn admitted_head_row(
     conn: &Connection,
     session: &SessionId,
-    run: Option<&lash_protocol_types::TurnId>,
+    run: Option<&lash_vocabulary::identity::TurnId>,
     fleet: lash_core_store::store::FleetFormat,
     refuse_deleted: bool,
 ) -> Result<Option<crate::codec::SessionHeadRow>, StoreError> {
@@ -378,7 +378,7 @@ fn window_graph(
     decoded: &AtomicU64,
     windows: &WindowCacheRead,
 ) -> Result<lash_core_store::session_graph::SessionGraph, StoreError> {
-    let leaf: lash_protocol_types::NodeId = last.id.clone().try_into()?;
+    let leaf: lash_vocabulary::identity::NodeId = last.id.clone().try_into()?;
     let leaf_generation = nonnegative("SessionGraph", "generation", last.generation)?;
     let read_under = WindowFrame {
         frame_node_id: &frame.id,
@@ -605,7 +605,7 @@ impl SessionHistoryStore for SqliteStore {
     async fn contains_active_ancestor(
         &self,
         session_id: &SessionId,
-        node_id: &lash_protocol_types::NodeId,
+        node_id: &lash_vocabulary::identity::NodeId,
     ) -> Result<bool, StoreError> {
         let session = session_id.clone();
         let node = node_id.clone();

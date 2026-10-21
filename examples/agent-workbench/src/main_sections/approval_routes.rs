@@ -1,5 +1,5 @@
 use super::*;
-use lash::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 // The host-owned approval routes. A pending approval is a parked call of the
 // approval tool, and `Completions::parked` is where its key comes from; its

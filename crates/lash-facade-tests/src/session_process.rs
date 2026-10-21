@@ -35,7 +35,9 @@ pub fn started(model: &str, keyed: bool) -> lash_execution_contracts::process::P
         },
         lash_core::PluginOptions::default(),
     )
-    .with_session_id(lash::SessionId::fixture(CHILD.to_string()));
+    .with_session_id(lash_vocabulary::identity::SessionId::fixture(
+        CHILD.to_string(),
+    ));
     if keyed {
         create_request.model = Some(lash::LlmProfileKey::new(model));
     }
@@ -72,8 +74,11 @@ pub async fn deploy(
     let provider = lash_core::testing::TestProvider::builder()
         .kind("session-turn-child")
         .complete(move |request| {
-            let on_child = (request.session_id().map(lash_core::SessionId::as_str) == Some(CHILD))
-                .then(|| child.clone());
+            let on_child = (request
+                .session_id()
+                .map(lash_vocabulary::identity::SessionId::as_str)
+                == Some(CHILD))
+            .then(|| child.clone());
             async move {
                 match on_child {
                     None => {}
@@ -95,9 +100,11 @@ pub async fn deploy(
     }
     let core = builder.build(runtime_lease_owner())?;
     if first {
-        core.session(lash::SessionId::parse(PARENT).expect("nonblank host identity"))
-            .create(lash::SessionCreation::root(mock_session_spec()))
-            .await?;
+        core.session(
+            lash_vocabulary::identity::SessionId::parse(PARENT).expect("nonblank host identity"),
+        )
+        .create(lash::SessionCreation::root(mock_session_spec()))
+        .await?;
     }
     Ok(core)
 }
@@ -133,7 +140,7 @@ pub async fn observed_child_session_matches_execution(named: bool) -> Result<()>
     else {
         panic!("the fixture starts a child session turn");
     };
-    let stated_id = named.then(|| lash::SessionId::fixture(CHILD.to_owned()));
+    let stated_id = named.then(|| lash_vocabulary::identity::SessionId::fixture(CHILD.to_owned()));
     create_request.session_id = stated_id.clone();
     let started = core.processes().start(request, core.effect_host()).await?;
     let output = tokio::time::timeout(

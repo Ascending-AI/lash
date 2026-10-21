@@ -6,8 +6,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::{Expr, FunctionId, Node, Stmt};
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Node;
+use lash_kernel_doc::Stmt;
 use lash_kernel_package::PackageView;
+use lash_vocabulary::legacy_names::FunctionId;
 
 use crate::HarnessError;
 

@@ -1115,7 +1115,7 @@ impl RuntimeTurnDriver<'_> {
 
     /// Retain the first start of the cell of effect `id` in `language`, now,
     /// unless the turn retains one for it already.
-    pub(super) fn begin_cell(&mut self, id: crate::EffectId, language: &str) {
+    pub(super) fn begin_cell(&mut self, id: lash_vocabulary::sites::EffectId, language: &str) {
         if self
             .cell_start
             .as_ref()
@@ -1137,7 +1137,10 @@ impl RuntimeTurnDriver<'_> {
     pub(super) fn discarded_cell(
         &mut self,
         machine: &TurnMachine,
-    ) -> Option<(crate::EffectId, crate::runtime::durable::session::CellClose)> {
+    ) -> Option<(
+        lash_vocabulary::sites::EffectId,
+        crate::runtime::durable::session::CellClose,
+    )> {
         let start = self.cell_start.take()?;
         let effect = start.effect;
         if !self.trace.is_observed() {
@@ -1226,7 +1229,7 @@ pub(super) fn foreground_exec_graph_key(invocation: &RuntimeInvocation) -> Optio
 /// live feed publishes once (FIG-3753, FIG-6274).
 pub(in crate::runtime) fn model_call_activity(
     controller: &ActorContext,
-    turn: &crate::TurnId,
+    turn: &lash_vocabulary::identity::TurnId,
     call_id: &crate::LlmCallId,
 ) -> crate::TurnActivity {
     let lane = crate::runtime::turn_loop::turn_observation_cursor(
@@ -1293,7 +1296,7 @@ mod tests {
         let process = RuntimeInvocation {
             attribution: RuntimeAttribution::for_turn("session-1", "turn-1", 2, 3),
             subject: lash_core_store::effect_identity::RuntimeSubject::Process {
-                process_id: crate::ProcessId::fixture("process-1"),
+                process_id: lash_vocabulary::identity::ProcessId::fixture("process-1"),
             },
             caused_by: None,
             replay: None,

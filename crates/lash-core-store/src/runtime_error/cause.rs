@@ -1,7 +1,7 @@
 //! The typed causes a runtime error carries beside its code.
 
 use super::{IngressReservedSourceKeyRefusal, RuntimeEffectControllerError, RuntimeErrorCode};
-use crate::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 /// Typed cause retained when a controller-owned runtime effect must abort
 /// through the generic runtime error boundary.
@@ -78,7 +78,7 @@ pub enum RuntimeErrorCause {
     },
     /// A typed worker failure retained through protocol and host errors.
     VmWorker {
-        outcome: Box<lash_vm_protocol::InfrastructureOutcome>,
+        outcome: Box<lash_protocol_types::engine_fault::InfrastructureOutcome>,
     },
     /// The VM state a stopped code cell resumes from is refused by this
     /// build's worker: another build wrote it. Nothing of the cell is
@@ -86,7 +86,7 @@ pub enum RuntimeErrorCause {
     /// the cell's snapshot, and a build that reads the state resumes it
     /// (FIG-5613).
     CellSnapshotUndecodable {
-        refusal: Box<lash_vm_protocol::RunRefusal>,
+        refusal: Box<lash_protocol_types::engine_fault::RunRefusal>,
     },
     RecordedCallbackUnavailable {
         refusal: Box<crate::store::plugin_writers::RecordedCallbackUnavailable>,
@@ -119,14 +119,14 @@ pub enum RuntimeErrorCause {
         refusal: Box<lash_protocol_types::module_artifact_refusal::ModuleArtifactRefusal>,
     },
     SchemaRefused {
-        source: Box<lash_protocol_types::SchemaAdmissionError>,
+        source: Box<lash_vocabulary::json_schema::SchemaAdmissionError>,
     },
     ToolSchemaRefused {
-        source: Box<lash_protocol_types::ToolCatalogBuildError>,
+        source: Box<lash_vocabulary::ToolCatalogBuildError>,
     },
     ValueMismatch {
         context: Box<str>,
-        source: Box<lash_protocol_types::ValueMismatch>,
+        source: Box<lash_vocabulary::json_schema::ValueMismatch>,
     },
     IngressReservedSourceKey {
         #[serde(flatten)]
@@ -136,7 +136,7 @@ pub enum RuntimeErrorCause {
     /// before lash saw an input under it, and no input is ever admitted
     /// under it ([`RuntimeErrorCode::TurnInputForsaken`]).
     TurnInputForsaken {
-        input_id: crate::InputId,
+        input_id: lash_vocabulary::identity::InputId,
     },
     StoreRefusal {
         refusal: Box<crate::store::StoreRefusal>,

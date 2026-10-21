@@ -9,7 +9,7 @@
 
 use super::*;
 use crate::ProcessEventLogTestSupport as _;
-use lash_protocol_types::ProcessId;
+use lash_vocabulary::identity::ProcessId;
 use pretty_assertions::assert_eq;
 
 fn batch_registration() -> ProcessRegistration {

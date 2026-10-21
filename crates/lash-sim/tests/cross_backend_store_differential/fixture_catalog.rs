@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use lash_core::RuntimeStore;
-use lash_core::SessionId;
 use lash_core::SessionStoreCreateRequest;
 use lash_core::StoreError;
 use lash_execution_contracts::deployment::DeploymentStore;
+use lash_vocabulary::identity::SessionId;
 
 pub(super) async fn admit_test_session(
     factory: Arc<dyn DeploymentStore>,

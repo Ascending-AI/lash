@@ -1,7 +1,9 @@
 //! Observes the served node's transactions over the same store as its catalog.
 use super::RuntimePerfStoreMetrics;
 use lash_durable::{domain::*, *};
-use lash_protocol_types::{ProcessId, SessionId, TurnId};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -93,10 +95,10 @@ impl DurableStore for RuntimePerfDurableStore {
 
     async fn package_paths(
         &self,
-        functions: &[lash_durable::packages::FunctionId],
+        functions: &[lash_vocabulary::legacy_names::FunctionId],
     ) -> Result<
         std::collections::BTreeMap<
-            lash_durable::packages::FunctionId,
+            lash_vocabulary::legacy_names::FunctionId,
             std::collections::BTreeSet<String>,
         >,
         DurableError,
@@ -106,10 +108,10 @@ impl DurableStore for RuntimePerfDurableStore {
 
     async fn internal_operations(
         &self,
-        operations: &[lash_durable::packages::EffectName],
+        operations: &[lash_vocabulary::legacy_names::EffectName],
     ) -> Result<
         std::collections::BTreeMap<
-            lash_durable::packages::EffectName,
+            lash_vocabulary::legacy_names::EffectName,
             std::collections::BTreeSet<String>,
         >,
         DurableError,
@@ -234,7 +236,7 @@ impl DurableStore for RuntimePerfDurableStore {
 impl DurableReads for RuntimePerfDurableStore {
     async fn model_call_pins(
         &self,
-        session: &lash_protocol_types::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
         self.inner.model_call_pins(session, owner).await
@@ -242,7 +244,7 @@ impl DurableReads for RuntimePerfDurableStore {
 
     async fn model_calls(
         &self,
-        session: &lash_protocol_types::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
         self.inner.model_calls(session, owner).await
@@ -297,15 +299,15 @@ impl DurableReads for RuntimePerfDurableStore {
 
     async fn cell_roots(
         &self,
-        session: &lash_protocol_types::SessionId,
-        run: &lash_protocol_types::TurnId,
+        session: &lash_vocabulary::identity::SessionId,
+        run: &lash_vocabulary::identity::TurnId,
     ) -> Result<Vec<ExecRootRow>, DurableError> {
         self.inner.cell_roots(session, run).await
     }
     async fn cell_roots_within(
         &self,
-        session: &lash_protocol_types::SessionId,
-        run: &lash_protocol_types::TurnId,
+        session: &lash_vocabulary::identity::SessionId,
+        run: &lash_vocabulary::identity::TurnId,
         max_rows: usize,
     ) -> Result<Vec<lash_durable::domain::ExecRootRow>, DurableError> {
         self.inner.cell_roots_within(session, run, max_rows).await

@@ -52,8 +52,8 @@ fn turn_scope(runtime: &TraceRuntime) -> lash_trace::DurableTraceScope {
     );
     lash_trace::DurableTraceScope::admit(
         lash_trace::TraceScopeId::admission(lash_trace::TraceScopeOwner::Turn {
-            session_id: crate::SessionId::from("extension-test"),
-            turn_id: crate::TurnId::from("extension-test-turn"),
+            session_id: lash_vocabulary::identity::SessionId::from("extension-test"),
+            turn_id: lash_vocabulary::identity::TurnId::from("extension-test-turn"),
         }),
         producer.parent().as_ref(),
         lash_trace::TraceLinks::new(),

@@ -3,7 +3,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
-use lash_kernel_doc::{FunctionDefinition, FunctionId, Name, Node};
+use lash_kernel_doc::FunctionDefinition;
+use lash_kernel_doc::Node;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::Name;
 
 use super::{Emitter, Plan, Unsupported, Var};
 use crate::library::Library;

@@ -7,12 +7,13 @@ use std::collections::BTreeSet;
 use super::{LawBroken, LawOutcome};
 use crate::domain::CANCEL_MAIL;
 use crate::packages::{ArtifactInstall, PackageArtifact, SetInstall};
-use crate::packages::{EffectName, FunctionId};
 use crate::{
     ActorKey, ArtifactDigest, ClaimPurpose, CommitLabel, DurableError, DurableStore,
     ExecutionRequirements, FormatSet, MailKind, MailTx, NodeCapabilities, NodeId, NodeLease,
     NodeSpec, PackageSetDigest, Release,
 };
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
 
 fn artifact(path: &str, byte: u8) -> PackageArtifact {
     PackageArtifact {
@@ -286,7 +287,7 @@ pub async fn a_store_keeps_artifacts_and_sets_by_digest(store: &dyn DurableStore
 pub async fn a_node_claims_only_actors_whose_hard_requirements_it_meets(
     store: &dyn DurableStore,
 ) -> LawOutcome {
-    use lash_core_store::obligations::ObligationToken;
+    use lash_vocabulary::claims::ObligationToken;
     let reached = function(41);
     let record = ExecutionRequirements {
         natives: [reached].into_iter().collect(),
@@ -433,7 +434,7 @@ pub async fn a_hard_record_lands_with_its_owner_commit_or_not_at_all(
     use crate::domain::graph::ExecRootWrite;
     use crate::domain::snapshots::SnapshotRev;
     use crate::domain::{DomainRefusal, DomainWrite, ExecKey};
-    use lash_core_store::obligations::ObligationToken;
+    use lash_vocabulary::claims::ObligationToken;
     let tokens = |record: &ExecutionRequirements| -> Vec<String> {
         let mut tokens: Vec<String> = ObligationToken::for_requirements(record)
             .map(String::from)
@@ -482,7 +483,8 @@ pub async fn a_hard_record_lands_with_its_owner_commit_or_not_at_all(
         "the kernel-only record was claimed as {claimed:?}"
     );
     let exec = ExecKey::Process(
-        lash_protocol_types::ProcessId::parse(id).map_err(|error| LawBroken(error.to_string()))?,
+        lash_vocabulary::identity::ProcessId::parse(id)
+            .map_err(|error| LawBroken(error.to_string()))?,
     );
     let (root, staged) = super::tagged_node(&exec.stored());
     let (stale, _) = super::tagged_node("never-put");

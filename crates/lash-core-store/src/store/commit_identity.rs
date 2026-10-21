@@ -21,8 +21,8 @@ const LASH_INTENT_DOMAIN_VERSION: &str = "lash-intent/v2";
 const LASH_HISTORY_NODE_DOMAIN_VERSION: &str = "lash-history-node/v3";
 
 use super::*;
-use crate::SessionId;
-use crate::TurnId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 /// Stable caller-selected identity for one durable commit operation.
 ///
@@ -674,18 +674,21 @@ struct RuntimeCommitIntent<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     outcome: Option<&'a super::TurnCommitOutcome>,
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    command_outcomes: &'a std::collections::BTreeMap<crate::BatchId, crate::SessionCommandOutcome>,
+    command_outcomes: &'a std::collections::BTreeMap<
+        lash_vocabulary::identity::BatchId,
+        crate::SessionCommandOutcome,
+    >,
     completed_queue_batches: Vec<CompletedQueueIntent<'a>>,
     completed_turn_inputs: Vec<CompletedTurnInputIntent<'a>>,
     /// Admitted input a commit hands back or drops (FIG-3531, FIG-3927):
     /// the rows of [`IngressSettlement::released`](super::IngressSettlement)
     /// and `dropped`. Absent from every other commit's identity.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    undelivered_turn_inputs: Vec<&'a crate::InputId>,
+    undelivered_turn_inputs: Vec<&'a lash_vocabulary::identity::InputId>,
     /// Admitted wakes a commit hands back (FIG-3543, FIG-3927). Absent from
     /// every other commit's identity.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    undelivered_queue_batches: Vec<&'a crate::BatchId>,
+    undelivered_queue_batches: Vec<&'a lash_vocabulary::identity::BatchId>,
     committed_attachment_ids: &'a [crate::AttachmentId],
 }
 
@@ -830,7 +833,7 @@ fn undelivered_rows(commit: &RuntimeCommit) -> impl Iterator<Item = &super::Ingr
 #[derive(serde::Serialize)]
 struct CompletedQueueIntent<'a> {
     session_id: &'a SessionId,
-    batch_ids: &'a [crate::BatchId],
+    batch_ids: &'a [lash_vocabulary::identity::BatchId],
 }
 
 impl<'a> From<&'a crate::QueuedWorkCompletion> for CompletedQueueIntent<'a> {
@@ -845,7 +848,7 @@ impl<'a> From<&'a crate::QueuedWorkCompletion> for CompletedQueueIntent<'a> {
 #[derive(serde::Serialize)]
 struct CompletedTurnInputIntent<'a> {
     session_id: &'a SessionId,
-    input_ids: &'a [crate::InputId],
+    input_ids: &'a [lash_vocabulary::identity::InputId],
     applications: &'a [crate::TurnInputApplication],
 }
 
@@ -888,9 +891,9 @@ pub fn derive_history_node_id(
     session_id: &SessionId,
     operation: &OperationId,
     ordinal: u64,
-) -> Result<crate::NodeId, StoreError> {
+) -> Result<lash_vocabulary::identity::NodeId, StoreError> {
     let preimage = history_node_preimage(session_id, operation, ordinal)?;
-    Ok(crate::NodeId::prefixed(
+    Ok(lash_vocabulary::identity::NodeId::prefixed(
         "n_",
         crate::stable_hash::blake3_hex(LASH_HISTORY_NODE_DOMAIN_VERSION, &preimage),
     ))

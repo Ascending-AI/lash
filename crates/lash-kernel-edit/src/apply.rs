@@ -9,10 +9,21 @@ use lash_kernel_doc::{Correspondence, Survivor};
 use std::collections::BTreeMap;
 
 use lash_kernel_check::{Admitted, Environment, admit, requirements};
-use lash_kernel_doc::{
-    Action, Atom, Block, Document, DocumentId, Expr, Member, Name, Node, NodeMut, Place, Rhs, Site,
-    Stmt, Unit,
-};
+use lash_kernel_doc::Action;
+use lash_kernel_doc::Atom;
+use lash_kernel_doc::Block;
+use lash_kernel_doc::Document;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Member;
+use lash_kernel_doc::Node;
+use lash_kernel_doc::NodeMut;
+use lash_kernel_doc::Place;
+use lash_kernel_doc::Rhs;
+use lash_kernel_doc::Stmt;
+use lash_vocabulary::legacy_names::DocumentId;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 use crate::edit::{Edit, Position};
 use crate::refusal::{EditDiagnosticKind, EditRefusal, Location, invalid_correspondence, refused};

@@ -3,17 +3,37 @@ use crate::apply::Working;
 use crate::authoring::{Branch, DataValue, Operation, ValueTarget, Wrapper};
 use crate::{Draft, EditDiagnosticKind as Cause, EditRefusal, Position, Transaction};
 use lash_kernel_check::{Environment, RefusalReason};
+use lash_kernel_doc::ActExpr;
+use lash_kernel_doc::ActKind;
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::Document;
+use lash_kernel_doc::ErrorDatum;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::Handle;
+use lash_kernel_doc::Integer;
+use lash_kernel_doc::InvalidReason;
+use lash_kernel_doc::Literal;
+use lash_kernel_doc::Node;
+use lash_kernel_doc::NodeMut;
+use lash_kernel_doc::Stmt;
+use lash_kernel_doc::Timestamp;
 use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
-use lash_kernel_doc::{
-    ActExpr, ActKind, Datum, Document, DocumentId, EffectName, ErrorDatum, Expr, FunctionRegistry,
-    Handle, Integer, InvalidReason, Literal, Name, Node, NodeMut, Param, Signature, Site, Stmt,
-    Timestamp, Type, Unit, parse_document, print_document,
-};
+use lash_kernel_doc::parse_document;
+use lash_kernel_doc::print_document;
 use lash_kernel_package::{HeldPackages, Package};
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, KernelMachine, Machine, Outcome, Program, Request, Step, Target,
 };
+use lash_vocabulary::legacy_names::DocumentId;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -42,7 +62,7 @@ fn env(registry: &FunctionRegistry) -> Environment<'_> {
     let mut env = Environment::new(registry);
     env.effects.insert(
         EffectName::new("send").unwrap(),
-        lash_kernel_doc::OperationRequirement::new(
+        lash_vocabulary::operations::OperationRequirement::new(
             Signature {
                 params: vec![Param {
                     name: Name::new("value"),
@@ -51,7 +71,7 @@ fn env(registry: &FunctionRegistry) -> Environment<'_> {
                 }],
                 result: Type::Any,
             },
-            lash_kernel_doc::ContractId::new("1"),
+            lash_vocabulary::operations::ContractId::new("1"),
         ),
     );
     env
@@ -100,7 +120,7 @@ fn package(
     definitions: &dyn Fn(&mut FunctionRegistry) -> Vec<lash_kernel_doc::FunctionDefinition>,
 ) -> Package {
     Package::lash(
-        lash_kernel_package::PackagePath::parse(path).unwrap(),
+        lash_vocabulary::names::PackagePath::parse(path).unwrap(),
         release,
         [lash_kernel_package::Root::new(root)],
         &[],
@@ -137,7 +157,10 @@ fn hold(releases: Vec<Vec<Package>>) -> Releases {
     Releases { held, catalog }
 }
 
-fn register(registry: &mut FunctionRegistry, text: &str) -> lash_kernel_doc::FunctionId {
+fn register(
+    registry: &mut FunctionRegistry,
+    text: &str,
+) -> lash_vocabulary::legacy_names::FunctionId {
     registry
         .register(lash_kernel_doc::parse_definition(text).unwrap(), None)
         .unwrap()
@@ -171,7 +194,7 @@ fn relink_package_at(path: &str, release: &str, value: &str) -> Package {
     })
 }
 
-fn relink_document(held: &Releases, f: lash_kernel_doc::FunctionId) -> Document {
+fn relink_document(held: &Releases, f: lash_vocabulary::legacy_names::FunctionId) -> Document {
     let mut document = parse_document(&format!(
         "kernel 1\nnumbers float\nuse helper.f = @{f}\nentry run() -> Any\nfn run() {{ let y = invoke helper.f() return y }}\nmain {{}}"
     )).unwrap();
@@ -1557,7 +1580,7 @@ fn canvas_refusal_wire() {
     )
     .unwrap()
     .identity();
-    let name = lash_kernel_doc::FunctionName::new("sample.fn").unwrap();
+    let name = lash_vocabulary::legacy_names::FunctionName::new("sample.fn").unwrap();
     let effect = EffectName::new("send").unwrap();
     let checker_causes = vec![
         RefusalReason::Invalid(InvalidReason::InvalidType {
@@ -1570,8 +1593,8 @@ fn canvas_refusal_wire() {
             effect: effect.clone(),
             expected: signature.clone(),
             provided: signature,
-            mismatch: Box::new(lash_kernel_check::SignatureMismatch {
-                side: lash_kernel_check::SignatureSide::Output,
+            mismatch: Box::new(lash_vocabulary::types::SignatureMismatch {
+                side: lash_vocabulary::types::SignatureSide::Output,
                 path: "/output".into(),
                 expected: Type::Text,
                 provided: Type::Int,

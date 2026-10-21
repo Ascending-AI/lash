@@ -74,7 +74,7 @@ impl lash_core::ToolProvider for ControlRaceTools {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok({
@@ -88,7 +88,7 @@ impl lash_core::ToolProvider for ControlRaceTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         let tool = name.split_once('.').filter(|(root, _)| *root == "tools")?.1;
         ["slow", "fast", "release"]
             .contains(&tool)
@@ -281,17 +281,17 @@ async fn a_session_whose_host_names_no_staging_refuses_to_stage() {
 
 async fn open_host() -> DurableHost {
     DurableHost::open(lash_core::AdmittedScope::turn(
-        lash_core::SessionId::from(SESSION),
-        lash_core::TurnId::from(TURN),
+        lash_vocabulary::identity::SessionId::from(SESSION),
+        lash_vocabulary::identity::TurnId::from(TURN),
     ))
     .await
 }
 
-fn definition(id: &str, operation: &str) -> lash_core::ToolDefinition {
+fn definition(id: &str, operation: &str) -> lash_vocabulary::tool_contract::ToolDefinition {
     typed_definition(
         id,
         operation,
-        lash_core::ToolDefinition::default_input_schema(),
+        lash_vocabulary::tool_contract::ToolDefinition::default_input_schema(),
     )
 }
 
@@ -299,8 +299,8 @@ fn typed_definition(
     id: &str,
     operation: &str,
     input: serde_json::Value,
-) -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+) -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         id,
         operation,
         "Echo the text back",
@@ -313,7 +313,7 @@ fn typed_definition(
 
 /// `echo.say`: it echoes its `text`, and takes a function in `add`, the one
 /// slot of its input that admits one.
-fn echo_say() -> lash_core::ToolDefinition {
+fn echo_say() -> lash_vocabulary::tool_contract::ToolDefinition {
     typed_definition(
         "tool:echo",
         "echo.say",
@@ -356,7 +356,7 @@ impl lash_core::ToolProvider for CellTools {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok({
@@ -369,9 +369,9 @@ impl lash_core::ToolProvider for CellTools {
 
     fn resolve_manifest_by_id(
         &self,
-        id: &lash_core::ToolId,
+        id: &lash_vocabulary::tool_contract::ToolId,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<lash_core::ToolManifest> {
+    ) -> Option<lash_vocabulary::tool_contract::ToolManifest> {
         match id.as_str() {
             "tool:echo" => Some(echo_say().manifest()),
             "tool:echo_await" => Some(definition("tool:echo_await", "echo.await").manifest()),
@@ -384,7 +384,7 @@ impl lash_core::ToolProvider for CellTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         match name {
             "echo.say" | "tool:echo" => Some(Arc::new(echo_say().contract())),
             "echo.await" | "tool:echo_await" => Some(Arc::new(
@@ -492,7 +492,7 @@ macro_rules! resolves_only {
                 &self,
                 _config: &lash_core::OwnerConfigView,
             ) -> std::result::Result<
-                Vec<lash_core::ToolManifest>,
+                Vec<lash_vocabulary::tool_contract::ToolManifest>,
                 lash_execution_contracts::plugin_error::PluginError,
             > {
                 Ok({ Vec::new() })
@@ -502,7 +502,7 @@ macro_rules! resolves_only {
                 &self,
                 _name: &str,
                 _config: &lash_core::OwnerConfigView,
-            ) -> Option<Arc<lash_core::ToolContract>> {
+            ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
                 None
             }
 
@@ -1379,7 +1379,7 @@ async fn an_unrelated_error_keeps_its_cause_after_a_binding_is_dropped() {
 
     // K-SES-003 requires both the unbound-variable kind and exact data.
     let dropped = std::collections::BTreeMap::from([(
-        lash_kernel_doc::Name::new("format"),
+        lash_vocabulary::legacy_names::Name::new("format"),
         lash_kernel_dialect::NotSaved::Task.to_string(),
     )]);
     for (kind, binding, expected) in [
@@ -1508,15 +1508,17 @@ async fn local_methods_stay_in_the_language(dialect: CellDialect, code: &str) {
         fn tool_manifests(
             &self,
             _config: &lash_core::OwnerConfigView,
-        ) -> Result<Vec<lash_core::ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
-        {
+        ) -> Result<
+            Vec<lash_vocabulary::tool_contract::ToolManifest>,
+            lash_execution_contracts::plugin_error::PluginError,
+        > {
             Ok(vec![definition("tool:tools_sort", "tools.sort").manifest()])
         }
         fn resolve_contract(
             &self,
             name: &str,
             _config: &lash_core::OwnerConfigView,
-        ) -> Option<Arc<lash_core::ToolContract>> {
+        ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
             match name {
                 "tools.sort" => Some(Arc::new(
                     definition("tool:tools_sort", "tools.sort").contract(),
@@ -1576,8 +1578,8 @@ async fn python_local_sort_and_print_never_resolve_tools() {
 /// admits an internal operation from authored cell code.
 #[tokio::test(flavor = "multi_thread")]
 async fn internal_operations_are_refused_in_static_and_deferred_cells() {
-    fn private_definition() -> lash_core::ToolDefinition {
-        lash_core::ToolDefinition::raw(
+    fn private_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+        lash_vocabulary::tool_contract::ToolDefinition::raw(
             "dataframe",
             "dataframe.run",
             "private",
@@ -1585,7 +1587,7 @@ async fn internal_operations_are_refused_in_static_and_deferred_cells() {
             serde_json::json!({"type":"string"}),
         )
         .unwrap()
-        .declared_contract(lash_kernel_doc::ContractId::new("run/1"))
+        .declared_contract(lash_vocabulary::operations::ContractId::new("run/1"))
         .with_execution(std::time::Duration::from_secs(30))
     }
     struct Dataframe;
@@ -1594,15 +1596,17 @@ async fn internal_operations_are_refused_in_static_and_deferred_cells() {
         fn tool_manifests(
             &self,
             _: &lash_core::OwnerConfigView,
-        ) -> Result<Vec<lash_core::ToolManifest>, lash_execution_contracts::plugin_error::PluginError>
-        {
+        ) -> Result<
+            Vec<lash_vocabulary::tool_contract::ToolManifest>,
+            lash_execution_contracts::plugin_error::PluginError,
+        > {
             Ok(vec![private_definition().manifest])
         }
         fn resolve_contract(
             &self,
             _: &str,
             _: &lash_core::OwnerConfigView,
-        ) -> Option<Arc<lash_core::ToolContract>> {
+        ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
             Some(Arc::new(private_definition().contract))
         }
         async fn execute(&self, _: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -1686,7 +1690,7 @@ async fn internal_operations_are_refused_in_static_and_deferred_cells() {
             let restored: lash_core::CellFailure =
                 serde_json::from_value(serde_json::to_value(error).unwrap()).unwrap();
             assert!(
-                matches!(restored.defect, Some(lash_core::CellDefect::InternalOperation { operation, unit: lash_kernel_doc::Unit::Main }) if operation.as_str() == "dataframe.run")
+                matches!(restored.defect, Some(lash_core::CellDefect::InternalOperation { operation, unit: lash_vocabulary::sites::Unit::Main }) if operation.as_str() == "dataframe.run")
             );
         }
     }

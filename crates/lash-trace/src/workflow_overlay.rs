@@ -20,12 +20,19 @@ use sha2::{Digest, Sha256};
 #[cfg(test)]
 use crate::TraceLanguageExecutionIdentity as LanguageIdentity;
 
-use crate::{
-    TRACE_SCHEMA_VERSION, TraceBranchSelection, TraceEvent, TraceLanguageChildExecution,
-    TraceLanguageExecutionFailure, TraceLanguageExecutionGeneration, TraceLanguageExecutionPayload,
-    TraceLanguageExecutionStatus as LanguageExecutionStatus, TraceNodeFact, TraceRecord,
-    TraceRuntimeScope, TraceRuntimeSubject, WorkflowDocumentRef,
-};
+use crate::TRACE_SCHEMA_VERSION;
+use crate::TraceBranchSelection;
+use crate::TraceEvent;
+use crate::TraceLanguageChildExecution;
+use crate::TraceLanguageExecutionFailure;
+use crate::TraceLanguageExecutionGeneration;
+use crate::TraceLanguageExecutionPayload;
+use crate::TraceLanguageExecutionStatus as LanguageExecutionStatus;
+use crate::TraceNodeFact;
+use crate::TraceRecord;
+use crate::TraceRuntimeScope;
+use crate::TraceRuntimeSubject;
+use lash_vocabulary::names::LinkedStart;
 
 mod accumulator;
 mod model;
@@ -170,7 +177,7 @@ impl Incoming {
 #[derive(Clone, Debug, Default)]
 struct DocumentState {
     mismatch_limit: Option<usize>,
-    loaded: Option<WorkflowDocumentRef>,
+    loaded: Option<LinkedStart>,
     mismatches: BTreeSet<WorkflowOverlayMismatch>,
     truncated: bool,
 }
@@ -201,7 +208,7 @@ impl DocumentState {
 
     /// Hold the start's claim to `document`. A start that names another
     /// document is reported and kept: the execution did start.
-    fn claim(&mut self, document: &WorkflowOverlayDocument, claimed: &WorkflowDocumentRef) {
+    fn claim(&mut self, document: &WorkflowOverlayDocument, claimed: &LinkedStart) {
         if claimed != document.reference() {
             self.report(WorkflowOverlayMismatch::Document {
                 claimed: claimed.clone(),

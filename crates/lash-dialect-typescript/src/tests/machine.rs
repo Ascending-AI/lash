@@ -8,14 +8,31 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
 use lash_kernel_dialect::Environment;
-use lash_kernel_doc::{
-    Datum, EffectName, ErrorDatum, FunctionRegistry, Handle, Integer, Name, Param, Signature,
-    Timestamp, Type,
-};
-use lash_kernel_vm::{
-    Bounds, CellStart, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary, Program,
-    Request, RunError, Step, Target, WaitId,
-};
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::ErrorDatum;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::Handle;
+use lash_kernel_doc::Integer;
+use lash_kernel_doc::Timestamp;
+use lash_kernel_vm::Bounds;
+use lash_kernel_vm::CellStart;
+use lash_kernel_vm::End;
+use lash_kernel_vm::Host;
+use lash_kernel_vm::KernelMachine;
+use lash_kernel_vm::Machine;
+use lash_kernel_vm::Outcome;
+use lash_kernel_vm::PreparedLibrary;
+use lash_kernel_vm::Program;
+use lash_kernel_vm::Request;
+use lash_kernel_vm::RunError;
+use lash_kernel_vm::Step;
+use lash_kernel_vm::Target;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::WaitId;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 use serde::Deserialize;
 
 /// The real kernel registry, with every dialect helper defined against it.
@@ -255,7 +272,7 @@ fn start_with_bindings(source: &str, values: super::pages::Session) -> (KernelMa
     let bindings = values.names();
     let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
         &effects,
-        &lash_kernel_doc::ContractId::new("1"),
+        &lash_vocabulary::operations::ContractId::new("1"),
         super::controls(),
     )
     .expect("the test's effects are operations");
@@ -698,7 +715,7 @@ fn a_function_crossing_to_a_tool_uses_its_source_entry_convention() {
         let effects = effects();
         let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
             &effects,
-            &lash_kernel_doc::ContractId::new("1"),
+            &lash_vocabulary::operations::ContractId::new("1"),
             super::controls(),
         )
         .expect("the test's effects are operations");

@@ -22,7 +22,12 @@ use lash_kernel_check::{
     ActNode, ActionNode, AtomNode, BindingId, CalleeNode, ExprNode, Graph, MemberNode, NodeId,
     NodeKind, PlaceNode, Reference, StmtNode,
 };
-use lash_kernel_doc::{FunctionDeclarations, FunctionId, Literal, Name, Site, Unit};
+use lash_kernel_doc::FunctionDeclarations;
+use lash_kernel_doc::Literal;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 use crate::Derived;
 

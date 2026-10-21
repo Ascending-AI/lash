@@ -1,12 +1,17 @@
 //! Host-readable process facts. Internal record serde retains ToolValue's trust envelope.
 
 use super::events::{AbandonEvidence, ProcessEventKind, ProcessLifecycleFact, ProcessTerminal};
-use super::model::{
-    ProcessEnvRef, ProcessExternalRef, ProcessId, ProcessIdentity, ProcessInput,
-    ProcessLifecycleState, ProcessOriginator, ProcessWaits, SessionId,
-};
+use super::model::ProcessEnvRef;
+use super::model::ProcessExternalRef;
+use super::model::ProcessIdentity;
+use super::model::ProcessInput;
+use super::model::ProcessLifecycleState;
+use super::model::ProcessOriginator;
+use super::model::ProcessWaits;
 use super::observation::{ObservedProcess, ObservedProcessEvent, ProcessParkState};
 use lash_protocol_types::CancelRequest;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 use serde::{Deserialize, Serialize};
 
 /// A process outcome for a host to store or display. Each value, failure or

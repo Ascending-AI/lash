@@ -10,7 +10,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use lash_core_store::checkpoint_graph::{
     EncodeBudget, EncodedNode, ExplicitLimit, GraphCommitBudget, GraphRefusal, GraphStaging, NodeId,
 };
-use lash_protocol_types::{SessionId, TurnId};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 use crate::domain::RootOwner;
 use crate::domain::namespace_value::NamespaceValue;
@@ -100,7 +101,7 @@ pub struct ActorTx {
     graph: BTreeMap<NodeId, EncodedNode>,
     reads: BTreeSet<NodeId>,
     budget: Option<GraphCommitBudget>,
-    owed: BTreeMap<NodeId, Vec<lash_core_store::store::plugin_writers::PluginCallbackIdentity>>,
+    owed: BTreeMap<NodeId, Vec<lash_vocabulary::providers::PluginCallbackIdentity>>,
 }
 
 /// What a fenced read saw of one owned actor.
@@ -309,7 +310,7 @@ impl ActorTx {
     pub fn owe(
         &mut self,
         root: NodeId,
-        owed: Vec<lash_core_store::store::plugin_writers::PluginCallbackIdentity>,
+        owed: Vec<lash_vocabulary::providers::PluginCallbackIdentity>,
     ) -> &mut Self {
         self.owed.insert(root, owed);
         self
@@ -320,7 +321,7 @@ impl ActorTx {
     pub fn owed(
         &self,
         root: &NodeId,
-    ) -> Option<&[lash_core_store::store::plugin_writers::PluginCallbackIdentity]> {
+    ) -> Option<&[lash_vocabulary::providers::PluginCallbackIdentity]> {
         self.owed.get(root).map(Vec::as_slice)
     }
 

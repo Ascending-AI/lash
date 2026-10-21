@@ -7,7 +7,7 @@ pub struct ProcessEngineRegistration {
     /// The host's retry policies for engine step kinds, over the engine's.
     engine_step_retries: BTreeMap<
         lash_execution_contracts::process::EngineStepKind,
-        lash_protocol_types::ExecutionPolicy,
+        lash_vocabulary::tool_contract::ExecutionPolicy,
     >,
 }
 
@@ -156,7 +156,7 @@ impl ProcessEngineRegistration {
     pub fn with_engine_step_retry(
         mut self,
         kind: lash_execution_contracts::process::EngineStepKind,
-        policy: lash_protocol_types::ExecutionPolicy,
+        policy: lash_vocabulary::tool_contract::ExecutionPolicy,
     ) -> Self {
         self.engine_step_retries.insert(kind, policy);
         self
@@ -198,7 +198,7 @@ struct RetriedEngineSteps {
     steps: Arc<dyn lash_execution_contracts::process::EngineSteps>,
     retries: BTreeMap<
         lash_execution_contracts::process::EngineStepKind,
-        lash_protocol_types::ExecutionPolicy,
+        lash_vocabulary::tool_contract::ExecutionPolicy,
     >,
 }
 
@@ -218,7 +218,7 @@ impl lash_execution_contracts::process::EngineSteps for RetriedEngineSteps {
     fn retry(
         &self,
         kind: &lash_execution_contracts::process::EngineStepKind,
-    ) -> lash_protocol_types::ExecutionPolicy {
+    ) -> lash_vocabulary::tool_contract::ExecutionPolicy {
         self.retries
             .get(kind)
             .copied()
@@ -531,7 +531,7 @@ impl ProcessEngineRegistry {
         env: &Arc<crate::ProcessEnv>,
         performed: &PerformedEffects,
         fits: &std::collections::BTreeMap<
-            lash_kernel_doc::EffectName,
+            lash_vocabulary::legacy_names::EffectName,
             lash_execution_contracts::process::FitPolicy,
         >,
     ) -> Result<(), crate::ProcessEnvRefusal> {

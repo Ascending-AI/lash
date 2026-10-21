@@ -4,10 +4,10 @@
 
 use std::collections::BTreeSet;
 
-use super::*;
 use lash::tracing::{
     LashTracerProvider, OtelOptions, OtelTelemetry, TraceDetail, TraceDetailPolicy, TraceSpanKind,
 };
+use lash_vocabulary::schema_contract::*;
 use opentelemetry_sdk::trace::{InMemorySpanExporter, SdkTracerProvider, SpanData};
 
 /// `nodes(name)`: performs `tools.echo` at the one site of `work`, from a

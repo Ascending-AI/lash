@@ -5,7 +5,10 @@
 
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{Caption, RecordType, RecordTypeField, Type};
+use lash_kernel_doc::Caption;
+use lash_vocabulary::types::RecordType;
+use lash_vocabulary::types::RecordTypeField;
+use lash_vocabulary::types::Type;
 use ruff_python_ast::{self as ast, Expr as PyExpr, Stmt as PyStmt};
 use ruff_text_size::{Ranged, TextSize};
 
@@ -175,7 +178,7 @@ fn members(subscript: &ast::ExprSubscript) -> Vec<&PyExpr> {
 }
 
 fn map(key: Type, value: Type) -> Type {
-    Type::Map(Box::new(lash_kernel_doc::MapType { key, value }))
+    Type::Map(Box::new(lash_vocabulary::types::MapType { key, value }))
 }
 
 /// One type of `members`: none nested, none twice, and any value if one

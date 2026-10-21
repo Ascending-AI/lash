@@ -71,9 +71,9 @@ impl Gate {
     }
 }
 
-fn definition(name: &str) -> lash_core::ToolDefinition {
+fn definition(name: &str) -> lash_vocabulary::tool_contract::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
-    let definition = lash_core::ToolDefinition::raw(
+    let definition = lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{name}"),
         format!("tools.{name}"),
         "Answers its label once the activity law's gate opens.",
@@ -85,8 +85,8 @@ fn definition(name: &str) -> lash_core::ToolDefinition {
     if name == DEFERRED {
         definition
             .with_declaration(
-                lash_core::ToolDeclaration::deferring(),
-                Some(lash_core::ParkBound::Within(
+                lash_vocabulary::tool_declaration::ToolDeclaration::deferring(),
+                Some(lash_vocabulary::tool_contract::ParkBound::Within(
                     std::time::Duration::from_secs(120),
                 )),
             )
@@ -94,8 +94,8 @@ fn definition(name: &str) -> lash_core::ToolDefinition {
     } else {
         definition
             .with_declaration(
-                lash_core::ToolDeclaration::default()
-                    .with_intents([lash_core::ToolIntentKind::StartProcess]),
+                lash_vocabulary::tool_declaration::ToolDeclaration::default()
+                    .with_intents([lash_vocabulary::ToolIntentKind::StartProcess]),
                 None,
             )
             .expect("a valid tool declaration")
@@ -136,7 +136,7 @@ impl ActivityTools {
             lash_execution_contracts::process::Lifetime::Detached,
         );
         Ok(lash_execution_contracts::tool_intent::StartProcessIntent {
-            owner: lash_core::RuntimeOwner::Session(session_id),
+            owner: lash_vocabulary::identity::RuntimeOwner::Session(session_id),
             declaration,
         })
     }
@@ -148,7 +148,7 @@ impl lash_core::ToolProvider for ActivityTools {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok({
@@ -163,7 +163,7 @@ impl lash_core::ToolProvider for ActivityTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         let Some(("tools", name)) = name.split_once('.') else {
             return None;
         };
@@ -670,7 +670,8 @@ async fn a_durable_turn_streams_provider_deltas_before_its_committed_rows(tier: 
                 lash::persistence::LeaseIncarnationId::new("provider-activity-boot"),
             ))
             .expect("the core builds");
-        let session_id = lash::SessionId::try_from("provider-activity".to_owned()).unwrap();
+        let session_id =
+            lash_vocabulary::identity::SessionId::try_from("provider-activity".to_owned()).unwrap();
         let session = core
             .session(session_id.clone())
             .create(lash::SessionCreation::root(served::spec(8)))
@@ -687,7 +688,7 @@ async fn a_durable_turn_streams_provider_deltas_before_its_committed_rows(tier: 
             .await
             .expect("the snapshot reads the durable head");
         let mut updates = observed.observe().subscribe_and_recover(snapshot.cursor);
-        let run = lash::TurnId::from("provider-activity-run");
+        let run = lash_vocabulary::identity::TurnId::from("provider-activity-run");
         let sink = Recorded::default();
         let (outcome, ()) = tokio::time::timeout(WATCHDOG, async {
             tokio::join!(
@@ -880,7 +881,10 @@ async fn a_turn_s_activity_is_settled_by_one_terminal_replacement_of_its_rows(ti
     let session = world.session(SESSION, served::spec(8)).await;
     let observed = world
         .core
-        .session(lash::SessionId::try_from(SESSION.to_owned()).expect("a session id"))
+        .session(
+            lash_vocabulary::identity::SessionId::try_from(SESSION.to_owned())
+                .expect("a session id"),
+        )
         .open()
         .await
         .expect("the session opens for observation");
@@ -1017,7 +1021,8 @@ async fn a_commit_on_one_node_reaches_a_subscriber_attached_through_another(tier
             lash::persistence::LeaseIncarnationId::new("activity-attached-boot"),
         ))
         .expect("the attached core builds");
-    let session_id = lash::SessionId::try_from(SESSION.to_owned()).expect("a session id");
+    let session_id =
+        lash_vocabulary::identity::SessionId::try_from(SESSION.to_owned()).expect("a session id");
     let session = attached
         .session(session_id.clone())
         .create(lash::SessionCreation::root(served::spec(8)))

@@ -7,12 +7,18 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, OnceLock};
 
 use lash_helper_labels::MemberDisplay;
-use lash_kernel_dialect::{
-    Export, ExportView, MemberPath, OperationExport, PackagePath, QualifiedOperation, Segment,
-};
-use lash_kernel_doc::{
-    FunctionId, FunctionName, FunctionRegistry, NativeFunction, PackageSetDigest,
-};
+use lash_kernel_dialect::Export;
+use lash_kernel_dialect::ExportView;
+use lash_kernel_dialect::OperationExport;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::NativeFunction;
+use lash_kernel_doc::PackageSetDigest;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::names::MemberPath;
+use lash_vocabulary::names::PackagePath;
+use lash_vocabulary::names::QualifiedOperation;
+use lash_vocabulary::names::Segment;
 
 use crate::{
     ArtifactKey, Origin, Package, PackageRefusal, PackageSet, Root, SnapshotPackage,

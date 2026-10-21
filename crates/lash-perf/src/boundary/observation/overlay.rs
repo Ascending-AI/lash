@@ -71,7 +71,7 @@ async fn fold(args: &Args, meter: &Meter) -> Result<Receipt> {
         ensure!(gaps == 0, "the overlay's feed gapped {gaps} times");
 
         let mut overlay = WorkflowExecutionOverlayAccumulator::default();
-        overlay.set_document(lash::workflow::WorkflowOverlayDocument::of(&document));
+        overlay.set_document(lash::workflow::workflow_overlay_document(&document));
         let window = Instant::now();
         let (mut folded, mut snapshots) = (0, 0);
         for event in &observations {

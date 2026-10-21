@@ -12,12 +12,19 @@ use std::any::Any;
 use std::fmt;
 use std::sync::{Arc, OnceLock};
 
+use super::AttemptOutcome;
+use super::AvailableEvidence;
+use super::CompletionSource;
+use super::KnownFailure;
+use super::KnownFailureReason;
+use super::MaterialDigest;
+use super::MaterialLocation;
+use super::MaterialOwner;
+use super::MaterialRef;
+use super::MaterialRefusal;
+use super::MaterialRole;
 use super::material::{text_reference, value_reference};
-use super::{
-    AttemptOutcome, AvailableEvidence, CompletionSource, KnownFailure, KnownFailureReason,
-    LimitCause, MaterialDigest, MaterialLocation, MaterialOwner, MaterialRef, MaterialRefusal,
-    MaterialRole,
-};
+use lash_vocabulary::tool_contract::LimitCause;
 use serde::{Deserialize, Serialize};
 
 /// What names one material: the reference whose payload rides beside it.

@@ -1,9 +1,9 @@
-/// Statement observation requested by a kernel-engine start.
-#[cfg(feature = "codemode")]
-pub use lash_vm_runtime::ObservationMode;
 /// Typed settings for a kernel-engine start.
 #[cfg(feature = "codemode")]
 pub use lash_vm_runtime::{KernelBounds, KernelRecordedSettings, KernelSettingsError};
+/// Statement observation requested by a kernel-engine start.
+#[cfg(feature = "codemode")]
+pub use lash_vocabulary::observation::RunObservation;
 // The vocabulary this module's signatures name (the facade-completeness rule).
 pub use lash_core_store::effect_opener::EffectOpenerError;
 pub use lash_execution_contracts::process::ConsumerHold;
@@ -40,8 +40,6 @@ pub use lash_core::EnclosingProcess;
 pub use lash_core::HoldEnvError;
 pub use lash_core::ProcessComponentConfig;
 pub use lash_core::ProcessComponentEntry;
-pub use lash_core::ProcessComponentId;
-pub use lash_core::ProcessComponentIdError;
 pub use lash_core::ProcessConfigKey;
 pub use lash_core::ProcessEnv;
 pub use lash_core::ProcessEnvBuilder;
@@ -72,6 +70,8 @@ pub use lash_execution_contracts::process::PerformedEffects;
 /// What the package that owns an operation's path declares of it, as a
 /// runner on that path must serve it (PKG-RUNNER).
 pub use lash_execution_contracts::process::{OwnedOperation, OwnedOperations};
+pub use lash_vocabulary::providers::ProcessComponentId;
+pub use lash_vocabulary::providers::ProcessComponentIdError;
 /// Explicit environment choices for a start policy. None is a default:
 /// a host states which it uses.
 pub mod env {

@@ -8,7 +8,8 @@ use lash::durable::*;
 use lash::persistence::{
     DeploymentStore, DeploymentStoreDecorator, RuntimeStoreDecorator, SessionLookup, StoreError,
 };
-use lash::{ProcessId, SessionId};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::watch;
 

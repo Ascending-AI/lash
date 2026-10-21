@@ -7,7 +7,13 @@ use std::collections::BTreeMap;
 
 use lash_kernel_dialect::workflow::ModuleRefusal;
 use lash_kernel_dialect::{Environment, Lowered, Mode};
-use lash_kernel_doc::{EffectName, Name, Param, RecordType, RecordTypeField, Signature, Type};
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::RecordType;
+use lash_vocabulary::types::RecordTypeField;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 use crate::DiagnosticCode;
 
@@ -15,7 +21,7 @@ fn module(source: &str) -> Result<Lowered, crate::Diagnostic> {
     let effects = super::machine::effects();
     let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
         &effects,
-        &lash_kernel_doc::ContractId::new("1"),
+        &lash_vocabulary::operations::ContractId::new("1"),
         super::controls(),
     )
     .expect("the test's effects are operations");
@@ -52,7 +58,7 @@ fn filtering_records_then_mapping_the_result_admits() {
         .result = Type::List(Box::new(Type::Any));
     let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
         &effects,
-        &lash_kernel_doc::ContractId::new("1"),
+        &lash_vocabulary::operations::ContractId::new("1"),
         super::controls(),
     )
     .expect("the test's effects are operations");
@@ -274,7 +280,7 @@ fn entry_conventions_bind_source_arguments_and_normalize_absent() {
         ),
     ] {
         let document = module(source).unwrap().document.into_document();
-        let entry = &document.entries[&lash_kernel_doc::Name::new("run")];
+        let entry = &document.entries[&lash_vocabulary::legacy_names::Name::new("run")];
         assert_eq!(
             matches!(
                 entry.convention,
@@ -287,7 +293,7 @@ fn entry_conventions_bind_source_arguments_and_normalize_absent() {
             lash_kernel_doc::StartConvention::TsDirect { .. }
         ) {
             assert_eq!(
-                document.functions[&lash_kernel_doc::Name::new("run")].params,
+                document.functions[&lash_vocabulary::legacy_names::Name::new("run")].params,
                 entry
                     .signature
                     .params

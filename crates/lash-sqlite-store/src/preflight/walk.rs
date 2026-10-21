@@ -42,7 +42,7 @@
 //! reported as [`ScanCoverage::NotScanned`] rather than an error, so a caller
 //! reads "nobody looked" instead of mistaking silence for "nothing here".
 
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 use lash_core_store::store::DurableItem;
 use lash_core_store::store::DurablePayload;

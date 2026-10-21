@@ -489,7 +489,7 @@ async fn run_high_traffic_operation(
                 .send(TurnInput::text(format!(
                     "load-kind:{kind} operation:{ordinal}"
                 )))
-                .id(lash_core::TurnId::fixture(format!(
+                .id(lash_vocabulary::identity::TurnId::fixture(format!(
                     "runtime-perf-load-{ordinal}"
                 )))
                 .await?;
@@ -537,7 +537,7 @@ async fn run_high_traffic_direct_turn(
             ordinal,
             &session.session_id(),
         )))
-        .id(lash_core::TurnId::fixture(format!(
+        .id(lash_vocabulary::identity::TurnId::fixture(format!(
             "runtime-perf-load-turn-{ordinal}"
         )))
         .await?
@@ -556,7 +556,7 @@ async fn run_high_traffic_direct_turn(
     }
     let calls = session
         .durable()
-        .read_turn_model_calls(&lash_core::TurnId::parse(run.as_str())?)
+        .read_turn_model_calls(&lash_vocabulary::identity::TurnId::parse(run.as_str())?)
         .await?;
     calls
         .iter()

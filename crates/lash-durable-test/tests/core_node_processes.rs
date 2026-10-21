@@ -24,7 +24,7 @@ use lash_core::llm::types::{
     LlmRequest, LlmResponse, LlmStreamEvent, LlmUsage, StreamBlockIdentity,
 };
 use lash_execution_contracts::backend::StoreSet;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 const MODEL: &str = "core-node-model";
 
@@ -804,7 +804,7 @@ impl lash::tools::StaticToolExecute for WriteAttachment {
 
 /// The host tool `write_attachment`.
 fn write_attachment_tool() -> Arc<dyn lash_core::ToolProvider> {
-    let definition = lash_core::ToolDefinition::raw(
+    let definition = lash_vocabulary::tool_contract::ToolDefinition::raw(
         "write_attachment",
         "tools.write_attachment",
         "Writes a small image attachment.",
@@ -1119,16 +1119,16 @@ struct ScriptEngine {
     kind: &'static str,
     advance: Advance,
     /// The tools whose effects its runs perform (P3).
-    performs: fn() -> Vec<lash_core::ToolDefinition>,
+    performs: fn() -> Vec<lash_vocabulary::tool_contract::ToolDefinition>,
 }
 
 /// An engine that performs no tool's effect.
-fn no_tools() -> Vec<lash_core::ToolDefinition> {
+fn no_tools() -> Vec<lash_vocabulary::tool_contract::ToolDefinition> {
     Vec::new()
 }
 
 /// An engine that performs the write tool's effect.
-fn writes() -> Vec<lash_core::ToolDefinition> {
+fn writes() -> Vec<lash_vocabulary::tool_contract::ToolDefinition> {
     vec![write_definition()]
 }
 
@@ -1362,12 +1362,14 @@ impl lash::tools::StaticToolExecute for Write {
 }
 
 /// The component a process names to call the write tool.
-const WRITE_COMPONENT: lash_core::ProcessConfigKey<()> =
-    lash_core::ProcessConfigKey::new("core-node-write", lash_core::FormatVersion::ONE);
+const WRITE_COMPONENT: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
+    "core-node-write",
+    lash_vocabulary::providers::FormatVersion::ONE,
+);
 
 /// The `Once` write tool's definition.
-fn write_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn write_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         WRITE_TOOL,
         WRITE_TOOL_OPERATION,
         "Writes x to the outside world, once.",
@@ -1381,7 +1383,7 @@ fn write_definition() -> lash_core::ToolDefinition {
     )
     .expect("the write tool's schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_execution_policy(lash_core::ExecutionPolicy::Once)
+    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::Once)
 }
 
 /// The `Once` host tool that writes to `world`.
@@ -1416,7 +1418,10 @@ fn environment() -> lash::process::ProcessEnv {
 /// An environment naming `components` and linking each of `tools` to the
 /// `tools` provider of the component paired with it.
 fn environment_of(
-    tools: Vec<(lash_core::ProcessConfigKey<()>, lash_core::ToolDefinition)>,
+    tools: Vec<(
+        lash_core::ProcessConfigKey<()>,
+        lash_vocabulary::tool_contract::ToolDefinition,
+    )>,
     components: &[lash_core::ProcessConfigKey<()>],
 ) -> lash::process::ProcessEnv {
     let builder = components.iter().fold(
@@ -1602,7 +1607,7 @@ async fn start(
     core: &lash::LashCore,
     kind: &str,
     payload: serde_json::Value,
-) -> lash_core::ProcessId {
+) -> lash_vocabulary::identity::ProcessId {
     start_as(core, kind, payload, |request| request).await
 }
 
@@ -1614,7 +1619,7 @@ async fn start_as(
     shape: impl FnOnce(
         lash_execution_contracts::process::ProcessStartRequest,
     ) -> lash_execution_contracts::process::ProcessStartRequest,
-) -> lash_core::ProcessId {
+) -> lash_vocabulary::identity::ProcessId {
     start_under(core, &environment(), kind, payload, shape).await
 }
 
@@ -1627,7 +1632,7 @@ async fn start_under(
     shape: impl FnOnce(
         lash_execution_contracts::process::ProcessStartRequest,
     ) -> lash_execution_contracts::process::ProcessStartRequest,
-) -> lash_core::ProcessId {
+) -> lash_vocabulary::identity::ProcessId {
     let env_ref = core
         .host_artifacts()
         .publish_process_env(&lash_core::HostArtifactPin::mint(), env)
@@ -1653,7 +1658,10 @@ async fn start_under(
 
 /// The answer `process` ended with, waited for through the core's process
 /// API.
-async fn ended(core: &lash::LashCore, process: &lash_core::ProcessId) -> lash_core::ToolCallOutput {
+async fn ended(
+    core: &lash::LashCore,
+    process: &lash_vocabulary::identity::ProcessId,
+) -> lash_core::ToolCallOutput {
     let output = tokio::time::timeout(
         Duration::from_secs(60),
         core.processes().await_output(process),
@@ -1955,8 +1963,8 @@ struct IsolatedTools {
     executions: AtomicUsize,
 }
 
-fn isolated_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn isolated_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:iso_run",
         ISOLATED_TOOL,
         "Runs in an isolated process.",
@@ -1980,7 +1988,7 @@ impl lash_core::ToolProvider for IsolatedTools {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![isolated_definition().manifest()])
@@ -1990,7 +1998,7 @@ impl lash_core::ToolProvider for IsolatedTools {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == ISOLATED_TOOL).then(|| Arc::new(isolated_definition().contract()))
     }
 

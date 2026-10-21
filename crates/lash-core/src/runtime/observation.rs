@@ -1,14 +1,18 @@
 use crate::ActorContext;
-use crate::SessionId;
-use crate::TurnId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 mod process_lifecycle;
 mod process_replay;
 mod process_workflow;
-pub use process_workflow::{
-    ProcessWorkflowFoldError, ProcessWorkflowLiveCoverage, ProcessWorkflowObservation,
-    ProcessWorkflowOverlay, ProcessWorkflowOverlayAccumulator, ProcessWorkflowRan,
-    ProcessWorkflowSite, ProcessWorkflowSiteState, ProcessWorkflowWaitKind,
-};
+pub use lash_vocabulary::observation::RunObservation;
+pub use process_workflow::ProcessWorkflowFoldError;
+pub use process_workflow::ProcessWorkflowLiveCoverage;
+pub use process_workflow::ProcessWorkflowOverlay;
+pub use process_workflow::ProcessWorkflowOverlayAccumulator;
+pub use process_workflow::ProcessWorkflowRan;
+pub use process_workflow::ProcessWorkflowSite;
+pub use process_workflow::ProcessWorkflowSiteState;
+pub use process_workflow::ProcessWorkflowWaitKind;
 pub(crate) mod replay;
 
 use arc_swap::ArcSwap;

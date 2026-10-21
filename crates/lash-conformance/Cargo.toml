@@ -24,6 +24,7 @@ workspace = true
 lash-vm = []
 
 [dependencies]
+lash-vocabulary = { workspace = true }
 lash-execution-contracts = { workspace = true }
 lash-core-store = { workspace = true }
 lash-core = { workspace = true, features = ["testing"] }

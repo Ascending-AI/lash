@@ -388,7 +388,12 @@ const TOOLS: &str = "tools";
 const TOOLS_2: &str = "tools-2";
 
 /// A run's options selecting exactly `tools` of each owner's provider.
-fn selecting(per_owner: [(&'static str, Vec<lash_core::ToolDefinition>); 2]) -> lash::RunOverrides {
+fn selecting(
+    per_owner: [(
+        &'static str,
+        Vec<lash_vocabulary::tool_contract::ToolDefinition>,
+    ); 2],
+) -> lash::RunOverrides {
     let mut owners = lash::OwnerRunOptions::default();
     for (owner, tools) in per_owner {
         owners
@@ -1002,8 +1007,8 @@ impl StaticToolExecute for Probe {
     }
 }
 
-fn switch_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::control(
+fn switch_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::control(
         SWITCH_TOOL,
         SWITCH_TOOL_OPERATION,
         "Switches the agent frame, under this run's spec or another.",
@@ -1012,14 +1017,14 @@ fn switch_definition() -> lash_core::ToolDefinition {
             "additionalProperties": false,
             "properties": { "other": { "type": "boolean" } }
         }),
-        lash_core::TurnControls::switch_agent_frame(),
+        lash_vocabulary::tool_declaration::TurnControls::switch_agent_frame(),
     )
     .expect("switch_frame's schemas")
     .with_execution(std::time::Duration::from_secs(120))
 }
 
-fn probe_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn probe_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         PROBE_TOOL,
         PROBE_TOOL_OPERATION,
         "Reads the run's spec.",
@@ -1283,9 +1288,9 @@ const CHANGING_TOOL: &str = "changing_tool";
 
 /// A tool the surface laws offer: `revision` 2 of `changing_tool` takes
 /// another input and says so.
-fn surface_tool(name: &str, revision: u8) -> lash_core::ToolDefinition {
+fn surface_tool(name: &str, revision: u8) -> lash_vocabulary::tool_contract::ToolDefinition {
     let input = if revision == 1 { "number" } else { "string" };
-    lash_core::ToolDefinition::raw(
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         name,
         format!("tools.{name}"),
         format!("{name} revision {revision}"),
@@ -1694,7 +1699,7 @@ async fn two_sends_store_the_same_request_config_once_on_sqlite_memory() {
         surface
             .into_iter()
             .map(|tool| {
-                lash_core::ToolDefinition::raw(
+                lash_vocabulary::tool_contract::ToolDefinition::raw(
                     tool.name.as_str(),
                     format!("tools.{}", tool.name),
                     tool.description,

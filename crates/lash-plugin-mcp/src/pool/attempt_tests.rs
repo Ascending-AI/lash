@@ -3,10 +3,10 @@ use lash_core::ToolCallOutcome;
 
 async fn prepare(
     provider: &impl lash_core::ToolProvider,
-    manifest: &lash_core::ToolManifest,
+    manifest: &lash_vocabulary::tool_contract::ToolManifest,
 ) -> lash_core::PreparedToolCall {
     let context = lash_core::ToolPrepareContext::for_testing(
-        lash_core::RuntimeOwner::Session("mcp-admitted-payload".into()),
+        lash_vocabulary::identity::RuntimeOwner::Session("mcp-admitted-payload".into()),
         Arc::new(lash_core::testing::MockSessionManager::default()),
         None,
     );
@@ -93,7 +93,7 @@ async fn mcp_redelivers_an_admitted_call_to_a_redeployed_server_that_kept_the_co
     let lash_core::ToolAttemptOutcome::Done { result, .. } = provider
         .execute(lash_core::ToolCall::new(
             &original,
-            &lash_core::ToolContract::default(),
+            &lash_vocabulary::tool_contract::ToolContract::default(),
             &json!({}),
             &context,
         ))
@@ -185,7 +185,7 @@ async fn mcp_refuses_a_missing_or_corrupt_link_payload_before_send() {
         let lash_core::ToolAttemptOutcome::Done { result, .. } = provider
             .execute(lash_core::ToolCall::new(
                 &original,
-                &lash_core::ToolContract::default(),
+                &lash_vocabulary::tool_contract::ToolContract::default(),
                 &json!({}),
                 &context,
             ))
@@ -236,8 +236,8 @@ async fn l07_l08_mcp_inline_transports_refuse_defer_and_isolation_before_send() 
             "deferred" => {
                 manifest = manifest
                     .declared(
-                        lash_core::ToolDeclaration::deferring(),
-                        Some(lash_core::ParkBound::UntilScopeEnd),
+                        lash_vocabulary::tool_declaration::ToolDeclaration::deferring(),
+                        Some(lash_vocabulary::tool_contract::ParkBound::UntilScopeEnd),
                         None,
                     )
                     .expect("a deferring manifest with its park bound");
@@ -245,9 +245,9 @@ async fn l07_l08_mcp_inline_transports_refuse_defer_and_isolation_before_send() 
             "isolated" => {
                 manifest = manifest
                     .declared(
-                        lash_core::ToolDeclaration {
+                        lash_vocabulary::tool_declaration::ToolDeclaration {
                             isolated: true,
-                            ..lash_core::ToolDeclaration::default()
+                            ..lash_vocabulary::tool_declaration::ToolDeclaration::default()
                         },
                         None,
                         Some("sandbox".to_owned()),
@@ -259,7 +259,7 @@ async fn l07_l08_mcp_inline_transports_refuse_defer_and_isolation_before_send() 
         let attempt = provider
             .execute(lash_core::ToolCall::new(
                 &manifest,
-                &lash_core::ToolContract::default(),
+                &lash_vocabulary::tool_contract::ToolContract::default(),
                 &json!({}),
                 &context,
             ))
@@ -279,7 +279,7 @@ async fn l07_l08_mcp_inline_transports_refuse_defer_and_isolation_before_send() 
     let attempt = grant
         .execute(lash_core::ToolCall::new(
             &original,
-            &lash_core::ToolContract::default(),
+            &lash_vocabulary::tool_contract::ToolContract::default(),
             &json!({}),
             &wrong_server,
         ))
@@ -354,7 +354,7 @@ async fn l22_mcp_transport_timeout_is_an_inline_body_failure() {
     let fixture = linked(&prepared, payload);
     let context = fixture.attempt("mcp-body-timeout-law");
     let args = json!({});
-    let contract = lash_core::ToolContract::default();
+    let contract = lash_vocabulary::tool_contract::ToolContract::default();
     let request = provider.execute(lash_core::ToolCall::new(
         &manifest, &contract, &args, &context,
     ));

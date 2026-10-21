@@ -1,8 +1,14 @@
 //! Bounded final-text writing and optional Site collection for generated codecs.
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{Caption, CaptionTarget, Captions, Document, Node, Site, Unit};
+use lash_kernel_doc::Caption;
+use lash_kernel_doc::CaptionTarget;
+use lash_kernel_doc::Captions;
+use lash_kernel_doc::Document;
+use lash_kernel_doc::Node;
 use lash_kernel_doc::{SourceLanguage, SourceMap, SourceSite, Span};
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 /// Generated source is a separate, disposable format from stored documents.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -222,15 +228,18 @@ fn check_action_leaves(action: &lash_kernel_doc::Action, limit: usize) -> Result
     }
     Ok(())
 }
-fn check_signature(signature: &lash_kernel_doc::Signature, limit: usize) -> Result<(), PrintError> {
+fn check_signature(
+    signature: &lash_vocabulary::types::Signature,
+    limit: usize,
+) -> Result<(), PrintError> {
     check_type(&signature.result, limit)?;
     for param in &signature.params {
         check_type(&param.ty, limit)?;
     }
     Ok(())
 }
-fn check_type(ty: &lash_kernel_doc::Type, limit: usize) -> Result<(), PrintError> {
-    use lash_kernel_doc::Type;
+fn check_type(ty: &lash_vocabulary::types::Type, limit: usize) -> Result<(), PrintError> {
+    use lash_vocabulary::types::Type;
     let mut stack = vec![(ty, 1usize)];
     while let Some((ty, depth)) = stack.pop() {
         if depth > limit {

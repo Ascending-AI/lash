@@ -2,8 +2,8 @@
 //! function value (`K-EFF-002`, `K-CLO-004`; FIG-6381), and its document
 //! runs on its own.
 
-use super::*;
 use lash::workflow::document::{FunctionValue, FunctionValueLimits};
+use lash_vocabulary::schema_contract::*;
 
 /// This tool's one callable slot is nested.fact; every other slot is data.
 const CAPTURE_TOOLS: lash::process::ProcessConfigKey<()> =
@@ -148,7 +148,7 @@ async fn a_function_a_process_ships_runs_from_its_own_document_as_it_was() {
         &shipped,
         functions.as_ref(),
         FunctionValueLimits::standard(),
-        lash::persistence::KernelDataLimits::standard(),
+        lash_vocabulary::data_limits::KernelDataLimits::standard(),
     )
     .unwrap_or_else(|refusal| panic!("a function value: {refusal}\n{shipped}"));
 

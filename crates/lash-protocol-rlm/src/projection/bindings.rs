@@ -225,9 +225,9 @@ mod tests {
     /// name and refuses oversized metadata before any session starts.
     #[test]
     fn projected_host_metadata_is_bounded_at_configuration() {
-        use lash_kernel_doc::Name;
-        use lash_kernel_doc::graph_tokens::encode_body;
         use lash_kernel_state::paged::CheckpointRoot;
+        use lash_vocabulary::legacy_names::Name;
+        use lash_vocabulary::tokens::encode_body;
 
         let limit = CheckpointRoot::HOST_METADATA_LIMIT;
         let history = crate::projection::HISTORY_PROJECTION;

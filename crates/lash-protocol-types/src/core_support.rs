@@ -14,14 +14,27 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
+use crate::AttachmentId;
+use crate::AttachmentTypeMetadata;
+use crate::ConversationRecord;
+use crate::LlmProfileEffortValidationCategory;
+use crate::MediaType;
+use crate::Message;
+use crate::ModelToolReturn;
+use crate::ModelToolReturnPart;
+use crate::ProtocolEvent;
+use crate::SessionAppendNode;
+use crate::ToolCancellation;
+use crate::ToolCatalog;
+use crate::ToolFailure;
+use crate::ToolFailureClass;
+use crate::ToolValue;
 use crate::blake3_domains::BLAKE3_DOMAINS;
 use crate::llm::types::LlmToolSpec;
-use crate::{
-    AttachmentId, AttachmentTypeMetadata, ConversationRecord, LlmProfileEffortValidationCategory,
-    MediaType, Message, ModelToolReturn, ModelToolReturnPart, ProtocolEvent, SessionAppendNode,
-    ToolCancellation, ToolCatalog, ToolContract, ToolDefinition, ToolFailure, ToolFailureClass,
-    ToolId, ToolManifest, ToolValue,
-};
+use lash_vocabulary::tool_contract::ToolContract;
+use lash_vocabulary::tool_contract::ToolDefinition;
+use lash_vocabulary::tool_contract::ToolId;
+use lash_vocabulary::tool_contract::ToolManifest;
 
 /// BLAKE3 hasher initialized with Lash's mandatory length-prefixed domain tag.
 ///
@@ -151,12 +164,12 @@ impl ModelEffortValidationCategoryCoreSupport for LlmProfileEffortValidationCate
 /// Mints a turn's reply marker. Only the runtime's commit names a turn's
 /// reply, so the constructor stays behind this seam.
 pub trait TurnReplyCoreSupport {
-    fn mint(turn_id: crate::TurnId, part_id: String) -> Self;
+    fn mint(turn_id: lash_vocabulary::identity::TurnId, part_id: String) -> Self;
 }
 
 #[doc(hidden)]
 impl TurnReplyCoreSupport for crate::TurnReply {
-    fn mint(turn_id: crate::TurnId, part_id: String) -> Self {
+    fn mint(turn_id: lash_vocabulary::identity::TurnId, part_id: String) -> Self {
         crate::TurnReply::mint(turn_id, part_id)
     }
 }
@@ -195,7 +208,7 @@ pub trait ToolCatalogCoreSupport: Sized {
     fn from_tools(
         tools: Vec<ToolManifest>,
         contracts: BTreeMap<ToolId, Arc<ToolContract>>,
-    ) -> Result<Self, crate::ToolCatalogBuildError>;
+    ) -> Result<Self, lash_vocabulary::ToolCatalogBuildError>;
     fn tool_names(&self) -> Arc<Vec<String>>;
     fn model_tool_specs(&self) -> Arc<Vec<LlmToolSpec>>;
 }
@@ -209,7 +222,7 @@ impl ToolCatalogCoreSupport for ToolCatalog {
     fn from_tools(
         tools: Vec<ToolManifest>,
         contracts: BTreeMap<ToolId, Arc<ToolContract>>,
-    ) -> Result<Self, crate::ToolCatalogBuildError> {
+    ) -> Result<Self, lash_vocabulary::ToolCatalogBuildError> {
         ToolCatalog::from_tools(tools, contracts)
     }
 
@@ -411,6 +424,3 @@ mod encoded_length_laws {
         assert_eq!(counter.len(), usize::MAX);
     }
 }
-
-/// Bridge logical identities to the store's retained turn-key vocabulary internally.
-pub use lash_vocabulary::identity::RunIdCoreSupport;

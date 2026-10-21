@@ -7,7 +7,8 @@ use super::*;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_second_create_of_a_session_id_is_refused_already_exists() -> Result<()> {
     let core = standard_core_over(sqlite_memory_store_backend().await);
-    let id = lash::SessionId::parse("created-once").expect("nonblank host identity");
+    let id = lash_vocabulary::identity::SessionId::parse("created-once")
+        .expect("nonblank host identity");
     core.session(id.clone())
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;

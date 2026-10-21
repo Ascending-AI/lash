@@ -15,7 +15,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash_core_execution::DurableSettings;
-use lash_core_execution::ProcessId;
 use lash_core_execution::StartKey;
 use lash_core_execution::ToolCallOutput;
 use lash_core_execution::ToolCancellation;
@@ -46,8 +45,10 @@ use lash_execution_contracts::process::ProjectionWatermark;
 use lash_execution_contracts::process::StepName;
 use lash_execution_contracts::process::StepRequest;
 use lash_execution_contracts::projection::NoProjectionProviders;
+use lash_protocol_types::ExecutionLimit;
 use lash_protocol_types::sync::MutexExt as _;
-use lash_protocol_types::{ExecutionLimit, ExecutionPolicy};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::tool_contract::ExecutionPolicy;
 use serde_json::{Value, json};
 
 const KIND: &str = "l9d-law";
@@ -211,7 +212,7 @@ impl ProcessEngine for LawEngine {
             ("await", EngineEvent::Started { .. }) => EngineAction::AwaitProcess {
                 process: ProcessId::parse(script["await"].as_str().unwrap_or_default())
                     .map_err(infra)?,
-                bound: lash_core::ParkBound::Within(
+                bound: lash_vocabulary::tool_contract::ParkBound::Within(
                     script["deadline_ms"]
                         .as_u64()
                         .map_or(LONG, Duration::from_millis),
@@ -228,7 +229,7 @@ impl ProcessEngine for LawEngine {
                 steps: vec![StepRequest::Tool {
                     step: StepName("refused".to_owned()),
                     effect: lash_core_execution::testing::effect(REFUSED_TOOL),
-                    contract: lash_core::ContractId::new("fixture"),
+                    contract: lash_vocabulary::operations::ContractId::new("fixture"),
                     input: json!({}),
                     site: None,
                     matched: None,

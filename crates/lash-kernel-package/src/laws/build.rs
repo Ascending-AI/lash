@@ -1,14 +1,22 @@
 //! What a package build and an install refuse, and what an artifact's
 //! identity is.
 
-use lash_kernel_doc::{Datum, Type};
+use lash_kernel_doc::Datum;
+use lash_vocabulary::types::Type;
 
 use super::{SHOUT, finished, functions, kernel, kernel_with, run, runtime};
+use crate::Declared;
+use crate::Export;
+use crate::HeldPackages;
+use crate::NameRole;
+use crate::Package;
+use crate::PackageRefusal;
+use crate::PackageSet;
+use crate::PackageSources;
+use crate::SetHolds;
+use crate::TypeMember;
 use crate::testing::{DATAFRAME, RELEASE, dataframe};
-use crate::{
-    Declared, Export, HeldPackages, NameRole, Package, PackageRefusal, PackageSet, PackageSources,
-    Segment, SetHolds, TypeMember,
-};
+use lash_vocabulary::names::Segment;
 
 fn segment(text: &str) -> Segment {
     Segment::new(text).unwrap()
@@ -338,10 +346,10 @@ fn pkg_ops_a_body_performs_only_what_its_package_exports() {
                 .unwrap(),
         )
         .unwrap();
-    let run = lash_kernel_doc::EffectName::new("dataframe.run").unwrap();
+    let run = lash_vocabulary::legacy_names::EffectName::new("dataframe.run").unwrap();
     assert_eq!(
         collect.body().unwrap().effects[&run].contract,
-        lash_kernel_doc::ContractId::new("dataframe.run/1"),
+        lash_vocabulary::operations::ContractId::new("dataframe.run/1"),
         "a header's operation reaches the body that performs it"
     );
     assert!(

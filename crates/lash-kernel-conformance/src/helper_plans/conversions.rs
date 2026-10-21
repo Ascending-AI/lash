@@ -2,7 +2,11 @@
 //! completion charge, tape and bound stop, including every value kind.
 
 use super::*;
-use lash_kernel_doc::{Float, Name, PreparedNative, Value, parse_document};
+use lash_kernel_doc::Float;
+use lash_kernel_doc::PreparedNative;
+use lash_kernel_doc::Value;
+use lash_kernel_doc::parse_document;
+use lash_vocabulary::legacy_names::Name;
 use std::sync::Arc;
 
 fn observe<const L: u64>(program: &Program, charge_limit: u64) -> Observed {

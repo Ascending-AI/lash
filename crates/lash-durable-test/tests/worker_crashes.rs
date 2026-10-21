@@ -44,8 +44,10 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use lash::tools::{StaticToolExecute, StaticToolProvider};
+use lash_core::ToolCall;
+use lash_core::ToolOutcome;
 use lash_core::llm::types::LlmRequest;
-use lash_core::{ExecutionPolicy, ToolCall, ToolOutcome};
+use lash_vocabulary::tool_contract::ExecutionPolicy;
 use served::{Tier, World};
 
 const TOOL: &str = "count_call";
@@ -74,7 +76,7 @@ fn count(runs: &Arc<AtomicUsize>) -> Arc<dyn lash_core::ToolProvider> {
 
 /// `count_call`, run by `body`.
 fn count_call(body: impl StaticToolExecute + 'static) -> Arc<dyn lash_core::ToolProvider> {
-    let definition = lash_core::ToolDefinition::raw(
+    let definition = lash_vocabulary::tool_contract::ToolDefinition::raw(
         TOOL,
         TOOL_OPERATION,
         "Counts its calls.",
@@ -883,7 +885,8 @@ async fn a_worker_lost_mid_cell_and_rerun_keeps_live_replay_continuity(tier: Tie
     };
     let input = "worker-lost-mid-cell-replay";
     let session = world.session(input, served::spec(8)).await;
-    let session_id = lash::SessionId::try_from(input.to_owned()).expect("a session id");
+    let session_id =
+        lash_vocabulary::identity::SessionId::try_from(input.to_owned()).expect("a session id");
     let observed = world
         .core
         .session(session_id.clone())
@@ -1006,7 +1009,7 @@ impl StaticToolExecute for RetirePages {
 /// second lease.
 async fn a_page_an_earlier_park_committed_stays_stored_while_its_activation_names_it(tier: Tier) {
     let stores = Arc::new(std::sync::OnceLock::new());
-    let definition = lash_core::ToolDefinition::raw(
+    let definition = lash_vocabulary::tool_contract::ToolDefinition::raw(
         RETIRE_TOOL,
         RETIRE_TOOL_OPERATION,
         "Retires every page no root holds.",

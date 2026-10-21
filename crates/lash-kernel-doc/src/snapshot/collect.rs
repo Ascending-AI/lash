@@ -9,11 +9,22 @@ use std::ops::ControlFlow;
 
 use serde::{Deserialize, Serialize};
 
+use crate::AssignOrder;
+use crate::Closure;
+use crate::Document;
+use crate::Expr;
+use crate::Literal;
+use crate::Node;
+use crate::Place;
+use crate::Rhs;
+use crate::Stmt;
+use crate::ValueKind;
 use crate::heap::{Chunk, Element, EntityId, HeapFault, Identity, PageReader, PageValue, TupleRef};
-use crate::{
-    AssignOrder, Closure, Document, EffectName, Expr, FunctionId, Literal, Name, Node, Place, Rhs,
-    Site, Stmt, Unit, ValueKind,
-};
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 use super::reads::CodeReads;
 
@@ -640,7 +651,11 @@ impl<'a, H: SnapshotHeap> Gatherer<'a, '_, H> {
 // The capture refusal's codec, which a kind-30 bundle's refused members
 // carry (FIG-5887 §2 numbers).
 
-use crate::graph_tokens::{CodecVariant, TokenCodec, TokenError, TokenReader, TokenWriter};
+use lash_vocabulary::tokens::CodecVariant;
+use lash_vocabulary::tokens::TokenCodec;
+use lash_vocabulary::tokens::TokenError;
+use lash_vocabulary::tokens::TokenReader;
+use lash_vocabulary::tokens::TokenWriter;
 
 #[doc(hidden)]
 impl CodecVariant for CaptureRefusal {

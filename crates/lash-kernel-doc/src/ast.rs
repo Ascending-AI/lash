@@ -11,10 +11,12 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::function_value::StartAdapter;
-use crate::name::{EffectName, FunctionId, Name};
 use crate::number::{Float, Integer};
-use crate::types::Type;
 use crate::value::Bytes;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::types::Type;
 
 /// A sequence of statements, run in order.
 pub type Block = Vec<Stmt>;
@@ -956,5 +958,3 @@ impl From<Action> for Expr {
 fn is_zero(units: &u64) -> bool {
     *units == 0
 }
-
-pub use lash_vocabulary::sites::{Site, Unit};

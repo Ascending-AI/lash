@@ -9,9 +9,9 @@ use std::sync::Arc;
 use lash_core::{ToolCall, ToolOutcome};
 
 /// The deferred tool a cell reaches as `web.fetch`, granted on first use.
-pub fn fetch_definition() -> lash_core::ToolDefinition {
+pub fn fetch_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
-    lash_core::ToolDefinition::raw(
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:web_fetch",
         "web.fetch",
         "Fetches a url.",
@@ -32,7 +32,7 @@ impl lash_core::ToolProvider for Fetch {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(Vec::new())
@@ -40,9 +40,9 @@ impl lash_core::ToolProvider for Fetch {
 
     fn resolve_manifest_by_id(
         &self,
-        id: &lash_core::ToolId,
+        id: &lash_vocabulary::tool_contract::ToolId,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<lash_core::ToolManifest> {
+    ) -> Option<lash_vocabulary::tool_contract::ToolManifest> {
         let definition = fetch_definition();
         (definition.id() == id).then(|| definition.manifest())
     }
@@ -51,7 +51,7 @@ impl lash_core::ToolProvider for Fetch {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "web.fetch").then(|| Arc::new(fetch_definition().contract()))
     }
 
@@ -70,7 +70,7 @@ impl lash_core::ToolProvider for GrantFetch {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(Vec::new())
@@ -80,7 +80,7 @@ impl lash_core::ToolProvider for GrantFetch {
         &self,
         _name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         None
     }
 
@@ -102,7 +102,7 @@ impl lash::tools::DeferredToolProvider for GrantFetch {
                 let outcome = if *path == "web.fetch" {
                     lash::tools::DeferredOutcome::resolved(
                         lash::plugins::ToolProviderHandle::new(
-                            lash::plugins::RegistryKind::Session,
+                            lash_vocabulary::claims::RegistryKind::Session,
                             "tools",
                             lash::tool_provider_key!("tools"),
                         ),

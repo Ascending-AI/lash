@@ -1,6 +1,6 @@
 //! The attachment referrer and external-byte write contract.
 use super::StoreError;
-use crate::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 /// Identity of one attempt to write an attachment's bytes, minted by
 /// [`AttachmentReferrers::begin_attachment_write`].
@@ -566,7 +566,7 @@ macro_rules! impl_noop_attachment_referrers {
             }
             async fn session_referrer_state(
                 &self,
-                _: &$crate::SessionId,
+                _: &lash_vocabulary::identity::SessionId,
             ) -> Result<$crate::store::SessionReferrerState, $crate::store::StoreError> {
                 Ok($crate::store::SessionReferrerState::Live)
             }

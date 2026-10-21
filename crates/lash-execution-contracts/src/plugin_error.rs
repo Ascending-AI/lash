@@ -1,5 +1,5 @@
-use crate::ProcessId;
-use crate::SessionId;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 
 /// One refusal for a durable identity re-presented with different content.
 ///
@@ -130,6 +130,15 @@ impl ToolIntentRuntimeFailure {
 define_plugin_errors! {
     derive(Debug, thiserror::Error, Clone, serde::Serialize, serde::Deserialize);
     derive(Debug, thiserror::Error, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema);
+    /// A package port refusal or infrastructure failure retains its typed cause.
+    #[error("{0}")]
+    Package (Box<crate::process::linking::EnginePortError>)
+        => PluginError::Package(source)
+        => (Box<crate::process::linking::EnginePortError>)
+        => Self::Package(source.clone())
+        => Self::Package(source)
+        => "package"
+        => source.failure_class();
     /// A provider refusal retains the host's classification and namespaced code.
     #[error("{message}")]
     ProviderFailure {
@@ -299,25 +308,25 @@ define_plugin_errors! {
         => "tool_presentation_refused"
         => crate::ToolFailureClass::InvalidRequest;
     #[error("{source}")]
-    UnusableSchema { source: Box<crate::SchemaAdmissionError> }
+    UnusableSchema { source: Box<lash_vocabulary::json_schema::SchemaAdmissionError> }
         => PluginError::UnusableSchema { source }
-        => { source: Box<crate::SchemaAdmissionError> }
+        => { source: Box<lash_vocabulary::json_schema::SchemaAdmissionError> }
         => Self::UnusableSchema { source: source.clone() }
         => Self::UnusableSchema { .. }
         => "unusable_schema"
         => crate::ToolFailureClass::InvalidRequest;
     #[error("unusable tool schema: {source}")]
-    UnusableToolSchema { source: Box<crate::ToolCatalogBuildError> }
+    UnusableToolSchema { source: Box<lash_vocabulary::ToolCatalogBuildError> }
         => PluginError::UnusableToolSchema { source }
-        => { source: Box<crate::ToolCatalogBuildError> }
+        => { source: Box<lash_vocabulary::ToolCatalogBuildError> }
         => Self::UnusableToolSchema { source: source.clone() }
         => Self::UnusableToolSchema { .. }
         => "unusable_tool_schema"
         => crate::ToolFailureClass::InvalidRequest;
     #[error("invalid {context}: {source}")]
-    ValueMismatch { context: String, source: Box<crate::ValueMismatch> }
+    ValueMismatch { context: String, source: Box<lash_vocabulary::json_schema::ValueMismatch> }
         => PluginError::ValueMismatch { context, source }
-        => { context: String, source: Box<crate::ValueMismatch> }
+        => { context: String, source: Box<lash_vocabulary::json_schema::ValueMismatch> }
         => Self::ValueMismatch { context: context.clone(), source: source.clone() }
         => Self::ValueMismatch { .. }
         => "value_mismatch"
@@ -325,12 +334,12 @@ define_plugin_errors! {
 /// An effective resident catalog member could not supply its immutable definition.
     #[error("resident tool `{operation}` ({tool_id}) has no contract")]
     ResidentToolContractUnavailable {
-        tool_id: crate::ToolId,
+        tool_id: lash_vocabulary::tool_contract::ToolId,
         operation: String,
     }
         => PluginError::ResidentToolContractUnavailable { tool_id, operation }
         => {
-        tool_id: crate::ToolId,
+        tool_id: lash_vocabulary::tool_contract::ToolId,
         operation: String,
     }
         => Self::ResidentToolContractUnavailable { tool_id: tool_id.clone(), operation: operation.clone() }
@@ -338,25 +347,25 @@ define_plugin_errors! {
         => "resident_tool_contract_unavailable"
         => crate::ToolFailureClass::Internal;
 #[error("resident catalog repeats tool id `{tool_id}`")]
-    ResidentToolDuplicateId { tool_id: crate::ToolId }
+    ResidentToolDuplicateId { tool_id: lash_vocabulary::tool_contract::ToolId }
         => PluginError::ResidentToolDuplicateId { tool_id }
-        => { tool_id: crate::ToolId }
+        => { tool_id: lash_vocabulary::tool_contract::ToolId }
         => Self::ResidentToolDuplicateId { tool_id: tool_id.clone() }
         => Self::ResidentToolDuplicateId { .. }
         => "resident_tool_duplicate_id"
         => crate::ToolFailureClass::Internal;
 #[error("resident tool `{tool_id}` names no operation: {message}")]
-    ResidentToolInvalidOperation { tool_id: crate::ToolId, message: String }
+    ResidentToolInvalidOperation { tool_id: lash_vocabulary::tool_contract::ToolId, message: String }
         => PluginError::ResidentToolInvalidOperation { tool_id, message }
-        => { tool_id: crate::ToolId, message: String }
+        => { tool_id: lash_vocabulary::tool_contract::ToolId, message: String }
         => Self::ResidentToolInvalidOperation { tool_id: tool_id.clone(), message: message.clone() }
         => Self::ResidentToolInvalidOperation { .. }
         => "resident_tool_invalid_operation"
         => crate::ToolFailureClass::Internal;
 #[error("resident tools `{first_tool}` and `{second_tool}` are both the operation `{operation}`")]
-    ResidentToolDuplicateOperation { operation: String, first_tool: crate::ToolId, second_tool: crate::ToolId }
+    ResidentToolDuplicateOperation { operation: String, first_tool: lash_vocabulary::tool_contract::ToolId, second_tool: lash_vocabulary::tool_contract::ToolId }
         => PluginError::ResidentToolDuplicateOperation { operation, first_tool, second_tool }
-        => { operation: String, first_tool: crate::ToolId, second_tool: crate::ToolId }
+        => { operation: String, first_tool: lash_vocabulary::tool_contract::ToolId, second_tool: lash_vocabulary::tool_contract::ToolId }
         => Self::ResidentToolDuplicateOperation { operation: operation.clone(), first_tool: first_tool.clone(), second_tool: second_tool.clone() }
         => Self::ResidentToolDuplicateOperation { .. }
         => "resident_tool_duplicate_operation"
@@ -364,9 +373,9 @@ define_plugin_errors! {
 /// A catalog member's declared execution is refused against the runtime's
     /// execution budgets: an inline-only tool declared above the ceiling.
     #[error("{source}")]
-    ToolRegistrationRefused { source: Box<crate::RegistrationRefused> }
+    ToolRegistrationRefused { source: Box<lash_vocabulary::tool_contract::RegistrationRefused> }
         => PluginError::ToolRegistrationRefused { source }
-        => { source: Box<crate::RegistrationRefused> }
+        => { source: Box<lash_vocabulary::tool_contract::RegistrationRefused> }
         => Self::ToolRegistrationRefused { source: source.clone() }
         => Self::ToolRegistrationRefused { .. }
         => "tool_registration_refused"
@@ -387,9 +396,9 @@ define_plugin_errors! {
     /// recorded identity is a process run's `SessionTurn` initialisation,
     /// not a create.
     #[error("session `{session_id}` already exists")]
-    SessionAlreadyExists { session_id: crate::SessionId }
+    SessionAlreadyExists { session_id: lash_vocabulary::identity::SessionId }
         => PluginError::SessionAlreadyExists { session_id }
-        => { session_id: crate::SessionId }
+        => { session_id: lash_vocabulary::identity::SessionId }
         => Self::SessionAlreadyExists { session_id: session_id.clone() }
         => Self::SessionAlreadyExists { .. }
         => "session_already_exists"
@@ -440,7 +449,7 @@ define_plugin_errors! {
 #[error("provider `{provider}` belongs to another registry; expected {expected:?}")]
     ProviderRegistryMismatch { expected: super::RegistryKind, provider: super::ToolProviderHandle }
         => PluginError::ProviderRegistryMismatch { expected, provider }
-        => { expected: lash_core_store::obligations::RegistryKind, provider: lash_core_store::plugin_registrations::ToolProviderHandle }
+        => { expected: lash_vocabulary::claims::RegistryKind, provider: lash_vocabulary::providers::ToolProviderHandle }
         => Self::ProviderRegistryMismatch { expected: *expected, provider: provider.clone() }
         => Self::ProviderRegistryMismatch { .. }
         => "provider_registry_mismatch"
@@ -867,8 +876,8 @@ impl From<crate::AttachmentStoreError> for PluginError {
 }
 
 /// Blank text offered as an identity is the store's refusal of it.
-impl From<lash_protocol_types::BlankIdentity> for PluginError {
-    fn from(error: lash_protocol_types::BlankIdentity) -> Self {
+impl From<lash_vocabulary::identity::BlankIdentity> for PluginError {
+    fn from(error: lash_vocabulary::identity::BlankIdentity) -> Self {
         crate::StoreError::from(error).into()
     }
 }
@@ -1319,9 +1328,9 @@ impl From<crate::config_error::ConfigRegistrationError> for PluginError {
 mod classification_tests {
     #[test]
     fn schema_causes_retain_typed_fields_through_recorded_intent_and_runtime() {
-        let admission = crate::JsonSchema::admit(serde_json::Value::Null)
+        let admission = lash_vocabulary::json_schema::JsonSchema::admit(serde_json::Value::Null)
             .expect_err("null cannot be admitted as a schema");
-        let catalog = crate::ToolDefinition::raw(
+        let catalog = lash_vocabulary::tool_contract::ToolDefinition::raw(
             "bad",
             "tools.bad",
             "bad",
@@ -1329,7 +1338,7 @@ mod classification_tests {
             serde_json::json!({}),
         )
         .expect_err("a tool cannot publish an unusable schema");
-        let mismatch = crate::ValueMismatch {
+        let mismatch = lash_vocabulary::json_schema::ValueMismatch {
             instance_path: "/count".into(),
             message: "integer required".into(),
         };
@@ -1397,8 +1406,8 @@ mod classification_tests {
         let refusal = lash_core_store::plugin_state::FormatRefusal {
             plugin: "unreadable-plugin".into(),
             namespace: crate::FormatNamespace::Config,
-            stored: crate::FormatVersion::new(7).expect("nonzero format"),
-            readable: crate::FormatVersion::ONE,
+            stored: lash_vocabulary::providers::FormatVersion::new(7).expect("nonzero format"),
+            readable: lash_vocabulary::providers::FormatVersion::ONE,
         };
         let expected = serde_json::json!({
             "plugin": "unreadable-plugin", "namespace": "config", "stored": 7, "readable": 1,
@@ -1436,7 +1445,7 @@ mod classification_tests {
         let session_id = SessionId::from("busy-session");
         for owner in [
             crate::store::SessionHeadOwner::Run {
-                run: crate::TurnId::from("bound-run"),
+                run: lash_vocabulary::identity::TurnId::from("bound-run"),
             },
             crate::store::SessionHeadOwner::CommandLane { enqueue_seq: 7 },
         ] {
@@ -1553,3 +1562,9 @@ pub fn registry_error(error: lash_durable::DurableError) -> crate::PluginError {
 
 #[cfg(test)]
 mod error_class_tests;
+
+impl From<crate::process::linking::EnginePortError> for PluginError {
+    fn from(source: crate::process::linking::EnginePortError) -> Self {
+        Self::Package(Box::new(source))
+    }
+}

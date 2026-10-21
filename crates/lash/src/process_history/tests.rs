@@ -359,7 +359,7 @@ async fn effect_omissions_survive_zero_and_tiny_acquisition_budgets() {
         fixture
             .registry
             .add_observer(
-                &lash_protocol_types::SessionId::fixture(format!("late-observer-{n}")),
+                &lash_vocabulary::identity::SessionId::fixture(format!("late-observer-{n}")),
                 &fixture.process_id,
                 lash_execution_contracts::process::ProcessObserverBy::host(format!(
                     "late-observer-{n}"

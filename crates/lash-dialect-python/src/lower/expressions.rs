@@ -1,8 +1,16 @@
 //! Expressions.
 
-use lash_kernel_doc::{
-    AssignOrder, Expr, Float, Integer, Literal, MapEntry, Member, Name, Place, Rhs, Stmt,
-};
+use lash_kernel_doc::AssignOrder;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Float;
+use lash_kernel_doc::Integer;
+use lash_kernel_doc::Literal;
+use lash_kernel_doc::MapEntry;
+use lash_kernel_doc::Member;
+use lash_kernel_doc::Place;
+use lash_kernel_doc::Rhs;
+use lash_kernel_doc::Stmt;
+use lash_vocabulary::legacy_names::Name;
 use ruff_python_ast::{self as ast, Expr as PyExpr};
 use ruff_text_size::{Ranged, TextRange};
 

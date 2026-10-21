@@ -1,5 +1,8 @@
 fn corpus_tool_signatures() -> anyhow::Result<
-    std::collections::BTreeMap<lash_kernel_doc::EffectName, lash_kernel_doc::Signature>,
+    std::collections::BTreeMap<
+        lash_vocabulary::legacy_names::EffectName,
+        lash_vocabulary::types::Signature,
+    >,
 > {
     let mut boundary = lash::vm::HostBoundary::new();
     for tool in workflow_corpus::tools()? {
@@ -246,25 +249,25 @@ fn every_python_corpus_case_has_one_body_per_source_loop_and_no_statement_inflat
     let mut effects = corpus_tool_signatures().expect("the shared corpus tool signatures");
     {
         effects.insert(
-            lash_kernel_doc::EffectName::new("control.finish").unwrap(),
-            lash_kernel_doc::Signature {
-                params: vec![lash_kernel_doc::Param {
-                    name: lash_kernel_doc::Name::new("input"),
-                    ty: lash_kernel_doc::Type::Any,
+            lash_vocabulary::legacy_names::EffectName::new("control.finish").unwrap(),
+            lash_vocabulary::types::Signature {
+                params: vec![lash_vocabulary::types::Param {
+                    name: lash_vocabulary::legacy_names::Name::new("input"),
+                    ty: lash_vocabulary::types::Type::Any,
                     optional: true,
                 }],
-                result: lash_kernel_doc::Type::Any,
+                result: lash_vocabulary::types::Type::Any,
             },
         );
     }
     let controls = std::collections::BTreeMap::from([(
-        lash_kernel_doc::EffectName::new("control.finish").unwrap(),
+        lash_vocabulary::legacy_names::EffectName::new("control.finish").unwrap(),
         std::collections::BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
     )]);
     let embedding = lash_vm_worker::built_embedding(&Default::default()).unwrap();
     let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
         &effects,
-        &lash_kernel_doc::ContractId::new("1"),
+        &lash_vocabulary::operations::ContractId::new("1"),
         &controls,
     )
     .expect("the test's effects are operations");
@@ -408,26 +411,26 @@ fn every_typescript_corpus_case_has_source_shaped_statements_and_one_body_per_lo
     .into_iter()
     .map(|name| {
         (
-            lash_kernel_doc::EffectName::new(name).unwrap(),
-            lash_kernel_doc::Signature {
-                params: vec![lash_kernel_doc::Param {
+            lash_vocabulary::legacy_names::EffectName::new(name).unwrap(),
+            lash_vocabulary::types::Signature {
+                params: vec![lash_vocabulary::types::Param {
                     name: "input".into(),
-                    ty: lash_kernel_doc::Type::Any,
+                    ty: lash_vocabulary::types::Type::Any,
                     optional: false,
                 }],
-                result: lash_kernel_doc::Type::Any,
+                result: lash_vocabulary::types::Type::Any,
             },
         )
     })
     .chain(corpus_tool_signatures().expect("the shared corpus tool signatures"))
     .collect();
     let controls = std::collections::BTreeMap::from([(
-        lash_kernel_doc::EffectName::new("control.finish").unwrap(),
+        lash_vocabulary::legacy_names::EffectName::new("control.finish").unwrap(),
         std::collections::BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
     )]);
     let env_namespaces = lash_kernel_dialect::Namespaces::of_effects(
         &effects,
-        &lash_kernel_doc::ContractId::new("1"),
+        &lash_vocabulary::operations::ContractId::new("1"),
         &controls,
     )
     .expect("the test's effects are operations");

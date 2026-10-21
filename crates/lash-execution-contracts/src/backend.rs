@@ -126,42 +126,6 @@ struct BackendInner {
     /// under, when it serves, takes its hints from here, so a mailbox commit
     /// made on this node reaches its actors without waiting for a poll.
     hints: Hints,
-    /// The package code a node of this build runs, which it installs and
-    /// advertises before it starts ([`Backend::register_packages`]). Like
-    /// the hints, it is the node's: every backend derived from this one
-    /// shares the slot, so an activation built before the registration
-    /// reads it.
-    packages: Arc<std::sync::OnceLock<Arc<dyn NodePackages>>>,
-}
-
-/// The package code a node of this build runs (FIG-6918, FIG-6991,
-/// FIG-6993). Before the node starts it installs its artifacts and sets in
-/// the store, each set with its surface and every definition, and answers
-/// what the node offers running code: the natives it binds, the kernel
-/// versions it interprets and its own package set, whose stored surface is
-/// the node's candidate for new cells. A node claims an actor to run it
-/// only when its capabilities meet the actor's hard requirements, and a
-/// surface is promoted to new cells only once every live serving node
-/// meets its requirements.
-#[async_trait::async_trait]
-pub trait NodePackages: Send + Sync {
-    /// The declared surface for a new Standard catalog.
-    fn surface_view(&self) -> Arc<dyn lash_kernel_dialect::ExportView + Send + Sync>;
-    /// The package code the node registers: every definition it binds,
-    /// over which it reads a stored surface it was not built with.
-    fn packages(&self) -> &Arc<lash_kernel_package::HeldPackages>;
-
-    /// Installs the node's artifacts and sets, each set with its surface
-    /// and definitions, in `backend`'s store, and answers what the node
-    /// offers running code.
-    ///
-    /// # Errors
-    ///
-    /// The store's refusal of the install.
-    async fn install(
-        &self,
-        backend: &Backend,
-    ) -> Result<lash_durable::NodeCapabilities, lash_durable::DurableError>;
 }
 
 impl Backend {
@@ -211,7 +175,6 @@ impl Backend {
                 formats,
                 surfaces: parts.formats,
                 hints: Hints::default(),
-                packages: Arc::default(),
             }),
         })
     }
@@ -253,7 +216,6 @@ impl Backend {
                 formats: self.inner.formats.clone(),
                 surfaces: self.inner.surfaces.clone(),
                 hints: self.inner.hints.clone(),
-                packages: self.inner.packages.clone(),
             }),
         }
     }
@@ -288,7 +250,6 @@ impl Backend {
                 providers: Arc::clone(&self.inner.providers),
                 surfaces: self.inner.surfaces.clone(),
                 hints: self.inner.hints.clone(),
-                packages: self.inner.packages.clone(),
             }),
         }
     }
@@ -355,7 +316,6 @@ impl Backend {
                 providers: Arc::clone(&self.inner.providers),
                 surfaces: self.inner.surfaces.clone(),
                 hints: self.inner.hints.clone(),
-                packages: self.inner.packages.clone(),
             }),
         }
     }
@@ -385,7 +345,6 @@ impl Backend {
                 providers: Arc::clone(&self.inner.providers),
                 surfaces: self.inner.surfaces.clone(),
                 hints: self.inner.hints.clone(),
-                packages: self.inner.packages.clone(),
             }),
         }
     }
@@ -393,19 +352,6 @@ impl Backend {
     /// The formats this build's actors hold beside the core's own.
     pub fn surfaces(&self) -> &[lash_durable::FormatSurface] {
         &self.inner.surfaces
-    }
-
-    /// The package code a node of this build runs, when the host
-    /// registered any.
-    pub fn packages(&self) -> Option<&Arc<dyn NodePackages>> {
-        self.inner.packages.get()
-    }
-
-    /// Register `packages` as the code this backend's node runs, which it
-    /// installs and advertises before it starts. A node has one
-    /// registration: a later one is refused, answering `false`.
-    pub fn register_packages(&self, packages: Arc<dyn NodePackages>) -> bool {
-        self.inner.packages.set(packages).is_ok()
     }
 
     /// This backend recording the status each of `projections` projects
@@ -433,7 +379,6 @@ impl Backend {
                 providers: Arc::clone(&self.inner.providers),
                 surfaces: self.inner.surfaces.clone(),
                 hints: self.inner.hints.clone(),
-                packages: self.inner.packages.clone(),
             }),
         }
     }
@@ -502,7 +447,10 @@ impl Backend {
     /// # Errors
     ///
     /// The store's refusal.
-    pub async fn wake_session(&self, session: &crate::SessionId) -> Result<(), DurableError> {
+    pub async fn wake_session(
+        &self,
+        session: &lash_vocabulary::identity::SessionId,
+    ) -> Result<(), DurableError> {
         let actor = lash_durable::ActorKey::session(session.as_str()).map_err(|error| {
             DurableError::Store(lash_durable::StoreFailure {
                 kind: lash_durable::StoreFailureKind::Corrupt,
@@ -523,7 +471,10 @@ impl Backend {
     /// # Errors
     ///
     /// The store's refusal.
-    pub async fn wake_process(&self, process: &crate::ProcessId) -> Result<(), DurableError> {
+    pub async fn wake_process(
+        &self,
+        process: &lash_vocabulary::identity::ProcessId,
+    ) -> Result<(), DurableError> {
         let actor = lash_durable::ActorKey::process(process.as_str()).map_err(corrupt_key)?;
         let mut tx = lash_durable::MailTx::new();
         tx.wake(actor);
@@ -542,7 +493,7 @@ impl Backend {
     /// The store's refusal.
     pub async fn redrive_process(
         &self,
-        process: &crate::ProcessId,
+        process: &lash_vocabulary::identity::ProcessId,
         requester: &str,
     ) -> Result<bool, DurableError> {
         let actor = lash_durable::ActorKey::process(process.as_str()).map_err(corrupt_key)?;
@@ -560,7 +511,7 @@ impl Backend {
     /// The store's refusal.
     pub async fn redrive_session(
         &self,
-        session: &crate::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         requester: &str,
     ) -> Result<bool, DurableError> {
         let actor = lash_durable::ActorKey::session(session.as_str()).map_err(corrupt_key)?;
@@ -774,6 +725,6 @@ pub trait ProcessAuthorityReads: Send + Sync {
 
     async fn process_authority(
         &self,
-        process: &crate::ProcessId,
+        process: &lash_vocabulary::identity::ProcessId,
     ) -> Result<Option<(crate::ProcessRecord, Option<Vec<u8>>)>, crate::StoreError>;
 }

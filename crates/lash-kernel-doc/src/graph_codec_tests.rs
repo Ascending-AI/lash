@@ -4,9 +4,13 @@
 use num_bigint::BigInt;
 
 use super::*;
-use crate::graph_tokens::{CanonicalFault, DecodeDimension, decode_body, encode_body};
 use crate::parse_document;
 use crate::tests::{catalog, every_form_corpus};
+use lash_vocabulary::tokens::CanonicalFault;
+use lash_vocabulary::tokens::DecodeDimension;
+use lash_vocabulary::tokens::MAX_DECODE_DEPTH;
+use lash_vocabulary::tokens::decode_body;
+use lash_vocabulary::tokens::encode_body;
 
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
@@ -197,9 +201,9 @@ fn nesting_past_the_decode_bound_is_refused() {
 fn a_host_kernel_data_policy_controls_recursive_decoding() {
     let value = Datum::Tuple(vec![Datum::Tuple(vec![Datum::Null])]);
     let bytes = encode_body(&value);
-    let limits = crate::KernelDataLimits::new(1, 1, 1, 1, 1).unwrap();
+    let limits = lash_vocabulary::data_limits::KernelDataLimits::new(1, 1, 1, 1, 1).unwrap();
     assert!(matches!(
-        crate::graph_tokens::decode_body_with_limits::<Datum>(&bytes, limits),
+        lash_vocabulary::tokens::decode_body_with_limits::<Datum>(&bytes, limits),
         Err(TokenError::Limit {
             dimension: DecodeDimension::Depth,
             limit: 1,
@@ -225,7 +229,7 @@ fn a_host_kernel_data_policy_controls_recursive_decoding() {
 #[test]
 fn independent_decoders_do_not_share_guest_depth() {
     let bytes = encode_body(&TaskIdentity::Main);
-    let limits = crate::KernelDataLimits::new(64, 352, 1, 512, 128).unwrap();
+    let limits = lash_vocabulary::data_limits::KernelDataLimits::new(64, 352, 1, 512, 128).unwrap();
     let mut outer = TokenReader::new(&[]).with_data_limits(limits);
     let result = outer.nested(|_| {
         let mut inner = TokenReader::new(&bytes).with_data_limits(limits);
@@ -256,9 +260,9 @@ fn a_function_value_at_its_bound_round_trips_and_one_past_it_is_refused() {
         document.entries.insert(
             run.clone(),
             crate::Entry {
-                signature: crate::Signature {
+                signature: lash_vocabulary::types::Signature {
                     params: Vec::new(),
-                    result: crate::Type::Any,
+                    result: lash_vocabulary::types::Type::Any,
                 },
                 convention: crate::StartConvention::Direct,
             },
@@ -275,7 +279,7 @@ fn a_function_value_at_its_bound_round_trips_and_one_past_it_is_refused() {
     let at = value(length);
     assert_eq!(at.counted_bytes().expect("the value's bytes"), ceiling);
     let limits = crate::FunctionValueLimits::standard();
-    let data = crate::KernelDataLimits::standard();
+    let data = lash_vocabulary::data_limits::KernelDataLimits::standard();
     at.check(&catalog, limits, data)
         .expect("a value at the bound checks");
     round_trip(&Datum::FunctionValue(Box::new(at)));

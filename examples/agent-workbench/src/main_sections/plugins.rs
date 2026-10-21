@@ -1,5 +1,5 @@
 use super::*;
-use lash::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 pub(crate) struct WorkbenchPluginFactory {
     pub(crate) mail_world: mail::MailWorld,

@@ -29,11 +29,17 @@ use lash_execution_contracts::module_artifacts::ModuleArtifactBody;
 use lash_execution_contracts::module_artifacts::ModuleArtifactHold;
 use lash_execution_contracts::module_artifacts::ModuleArtifactStore;
 use lash_kernel_check::{WorkflowDocument, WorkflowDocumentError};
-use lash_kernel_doc::{
-    CheckedDeclarations, Correspondence, Document, DocumentId, FunctionDeclarations,
-    FunctionDefinition, FunctionId, IdentifiedDocument, SourceMap, SourceMapId,
-    WorkflowDocumentRef,
-};
+use lash_kernel_doc::CheckedDeclarations;
+use lash_kernel_doc::Correspondence;
+use lash_kernel_doc::Document;
+use lash_kernel_doc::FunctionDeclarations;
+use lash_kernel_doc::FunctionDefinition;
+use lash_kernel_doc::IdentifiedDocument;
+use lash_kernel_doc::SourceMap;
+use lash_kernel_doc::WorkflowDocumentRef;
+use lash_vocabulary::legacy_names::DocumentId;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::SourceMapId;
 
 /// The module artifact a document is stored under.
 pub(crate) fn document_artifact(document: &DocumentId) -> ArtifactName {
@@ -218,7 +224,7 @@ pub(super) struct EffectPreparations {
 
 struct PreparedEffects {
     document: DocumentId,
-    entry: lash_kernel_doc::Name,
+    entry: lash_vocabulary::legacy_names::Name,
     functions: Arc<lash_kernel_doc::FunctionRegistry>,
     result:
         Result<lash_execution_contracts::process::PerformedEffects, lash_core::ProcessEnvRefusal>,
@@ -233,7 +239,7 @@ impl EffectPreparations {
         identity: DocumentId,
         document: &Document,
         functions: &Arc<lash_kernel_doc::FunctionRegistry>,
-        entry: &lash_kernel_doc::Name,
+        entry: &lash_vocabulary::legacy_names::Name,
     ) -> Result<lash_execution_contracts::process::PerformedEffects, lash_core::ProcessEnvRefusal>
     {
         if let Some(index) = self.entries.iter().position(|prepared| {
@@ -382,8 +388,7 @@ impl KernelDocuments {
         // at park and capture and empty between cells, so its publication
         // costs only the document (DOC-COST).
         let requirements = requirements_artifact(&identity);
-        let record =
-            lash_kernel_doc::graph_tokens::encode_body(&declarations.requirements(document));
+        let record = lash_vocabulary::tokens::encode_body(&declarations.requirements(document));
         let requirements_hold = ModuleArtifactHold::Acquire {
             module_ref: &requirements.artifact_ref,
             body: ModuleArtifactBody::Bytes(&record),
@@ -524,10 +529,12 @@ impl KernelDocuments {
             }
         };
         Ok(
-            match lash_kernel_doc::graph_tokens::decode_body_with_limits::<
+            match lash_vocabulary::tokens::decode_body_with_limits::<
                 lash_kernel_doc::ExecutionRequirements,
-            >(&bytes, lash_kernel_doc::KernelDataLimits::standard())
-            {
+            >(
+                &bytes,
+                lash_vocabulary::data_limits::KernelDataLimits::standard(),
+            ) {
                 Ok(record) if record == derived => Ok(record),
                 Ok(_) => Err(Unretained::Corrupt {
                     artifact,
@@ -588,7 +595,7 @@ impl KernelDocuments {
             .decode(
                 *function,
                 &bytes,
-                lash_kernel_doc::KernelDataLimits::standard(),
+                lash_vocabulary::data_limits::KernelDataLimits::standard(),
             )
             .map_err(|refusal| Unretained::Corrupt {
                 artifact,
@@ -888,7 +895,7 @@ impl KernelDocuments {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_kernel_doc::graph_tokens::decode_body;
+    use lash_vocabulary::tokens::decode_body;
 
     struct Stored(Mutex<Option<Vec<u8>>>);
 
@@ -1054,7 +1061,7 @@ mod tests {
         assert_eq!(name, &document.id().to_string());
         assert_eq!(bytes.as_slice(), document.body());
         assert_eq!(
-            &lash_kernel_doc::graph_tokens::logical_digest(bytes),
+            &lash_vocabulary::tokens::logical_digest(bytes),
             document.id().as_bytes(),
             "the stored bytes are the body the graph keys by the document's id"
         );
@@ -1174,7 +1181,7 @@ mod tests {
             declared_packages: held.surface().selection(),
             document: identity,
             functions: [helper].into_iter().collect(),
-            entry: lash_kernel_doc::Name::new("work"),
+            entry: lash_vocabulary::legacy_names::Name::new("work"),
             args: serde_json::Map::new(),
         })
         .expect("process payload");
@@ -1293,7 +1300,7 @@ mod tests {
         assert_eq!(record.natives, [leaf].into());
         assert_eq!(record.kernels, [1].into());
 
-        let forged = lash_kernel_doc::graph_tokens::encode_body(
+        let forged = lash_vocabulary::tokens::encode_body(
             &lash_kernel_doc::ExecutionRequirements::default(),
         );
         store

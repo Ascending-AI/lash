@@ -39,8 +39,8 @@ use lash_core_store::store::RuntimeCommitPlanner;
 use lash_core_store::store::RuntimeCommitReceipt;
 use lash_core_store::store::StoreError;
 use lash_durable::{ActorKey, DurableInstant};
-use lash_protocol_types::NodeId;
 use lash_store_sql::Dialect;
+use lash_vocabulary::identity::NodeId;
 use sqlx::Row as _;
 
 use super::steps::{Collect, Entry, Shape, Step, Ty, Value};
@@ -287,10 +287,10 @@ pub(super) enum Refusal {
     LeafRetired(NodeId),
     Occupied,
     Collision,
-    Command(lash_protocol_types::BatchId),
+    Command(lash_vocabulary::identity::BatchId),
     /// An ingress settlement always names the run that planned it.
     Ingress {
-        run: lash_protocol_types::TurnId,
+        run: lash_vocabulary::identity::TurnId,
         row: lash_core_store::store::IngressRowId,
     },
     SessionEnded,
@@ -1017,7 +1017,7 @@ fn settle_ingress(
         return Ok(());
     };
     let run = ingress.run.as_str();
-    let settle_input = |input: &lash_protocol_types::InputId, state: &str| {
+    let settle_input = |input: &lash_vocabulary::identity::InputId, state: &str| {
         Step::one(
             &SETTLE_INPUT,
             vec![
@@ -1029,7 +1029,7 @@ fn settle_ingress(
             ],
         )
     };
-    let settle_batch = |batch: &lash_protocol_types::BatchId, cause: IngressTerminalCause| {
+    let settle_batch = |batch: &lash_vocabulary::identity::BatchId, cause: IngressTerminalCause| {
         Step::one(
             &SETTLE_BATCH,
             vec![
@@ -1352,7 +1352,7 @@ struct StoredHead {
 /// identity ([`crate::support::validate_config_root_tx`]).
 async fn held_head(
     tx: &mut crate::guarded_tx::GuardedTx<'_>,
-    session_id: &lash_protocol_types::SessionId,
+    session_id: &lash_vocabulary::identity::SessionId,
     fleet: lash_core_store::store::FleetFormat,
     configs: &lash_core_store::store_backend_support::ConfigCache,
 ) -> Result<Option<StoredHead>, StoreError> {

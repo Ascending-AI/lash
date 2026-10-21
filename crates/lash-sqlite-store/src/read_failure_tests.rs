@@ -819,7 +819,7 @@ async fn malformed_durable_rows_surface_typed_corruption() {
         store
             .load_session_window(
                 &session_id,
-                WindowSelector::Terminal(lash_protocol_types::TurnId::from(
+                WindowSelector::Terminal(lash_vocabulary::identity::TurnId::from(
                     "missing-config-window",
                 )),
             )

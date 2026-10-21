@@ -8,10 +8,22 @@ use crate::{Edit, EditDiagnosticKind as Cause};
 use lash_kernel_check::{
     ActNode, ActionNode, AtomNode, CalleeNode, ExprNode, NodeKind, PlaceNode, Reference, StmtNode,
 };
-use lash_kernel_doc::{
-    ActExpr, ActKind, Action, Callee, Catch, Expr, FunctionCatalog, FunctionId, Literal, Node,
-    NodeMut, Place, Rhs, Site, Stmt, TryStmt,
-};
+use lash_kernel_doc::ActExpr;
+use lash_kernel_doc::ActKind;
+use lash_kernel_doc::Action;
+use lash_kernel_doc::Callee;
+use lash_kernel_doc::Catch;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::FunctionCatalog;
+use lash_kernel_doc::Literal;
+use lash_kernel_doc::Node;
+use lash_kernel_doc::NodeMut;
+use lash_kernel_doc::Place;
+use lash_kernel_doc::Rhs;
+use lash_kernel_doc::Stmt;
+use lash_kernel_doc::TryStmt;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::sites::Site;
 
 fn has_action(node: Node<'_>) -> bool {
     matches!(node, Node::Action(_) | Node::Expr(Expr::Act(_)))

@@ -53,6 +53,10 @@ pub enum XLashType {
     Process { signature: XLashSignature },
     /// A process the host can only describe as callable.
     ProcessUnknown,
+    /// Decimal nanoseconds on the JSON boundary.
+    Timestamp,
+    /// Lowercase hexadecimal bytes on the JSON boundary.
+    Bytes,
 }
 
 impl XLashType {
@@ -69,7 +73,7 @@ impl XLashType {
         match self {
             Self::Function { signature } => signature.as_ref(),
             Self::Process { signature } => Some(signature),
-            Self::ProcessUnknown => None,
+            Self::ProcessUnknown | Self::Timestamp | Self::Bytes => None,
         }
     }
 }
@@ -97,7 +101,7 @@ pub struct XLashParam {
 /// resolve.
 ///
 /// ```
-/// # use lash_tool_shape::is_named_type_reference;
+/// # use lash_vocabulary::tool_shape::is_named_type_reference;
 /// assert!(is_named_type_reference("lash.ProcessRecord"));
 /// assert!(!is_named_type_reference("https://example.com/schema.json"));
 /// ```
@@ -120,7 +124,7 @@ pub fn is_named_type_reference(reference: &str) -> bool {
 /// reference, which no reader resolves.
 ///
 /// ```
-/// # use lash_tool_shape::local_reference_pointer;
+/// # use lash_vocabulary::tool_shape::local_reference_pointer;
 /// assert_eq!(local_reference_pointer("#/$defs/Node"), Some("/$defs/Node"));
 /// assert_eq!(local_reference_pointer("#"), Some(""));
 /// assert_eq!(local_reference_pointer("other.json#/a"), None);
@@ -138,7 +142,7 @@ pub fn local_reference_pointer(reference: &str) -> Option<&str> {
 /// the tool's validation rather than bind one to the wrong root.
 ///
 /// ```
-/// # use lash_tool_shape::has_scoped_references;
+/// # use lash_vocabulary::tool_shape::has_scoped_references;
 /// assert!(has_scoped_references(&serde_json::json!({"$defs": {"a": {"$id": "a"}}})));
 /// assert!(!has_scoped_references(&serde_json::json!({"$id": "root"})));
 /// ```
@@ -379,7 +383,7 @@ impl ShapeConstraints {
     /// Structural assertion intersections must be admitted by the importer.
     ///
     /// ```
-    /// # use lash_tool_shape::ShapeConstraints;
+    /// # use lash_vocabulary::tool_shape::ShapeConstraints;
     /// let notes = ShapeConstraints::default().overlay(ShapeConstraints::default());
     /// assert!(notes.is_empty());
     /// ```

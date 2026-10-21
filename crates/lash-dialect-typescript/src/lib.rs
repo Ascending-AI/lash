@@ -104,7 +104,11 @@ pub fn lower_with_limits(
 ) -> Result<Lowered, Diagnostic> {
     match mode {
         Mode::Cell(cell) => {
-            lower::check_binding_names(cell.bindings.iter().map(lash_kernel_doc::Name::as_str))?;
+            lower::check_binding_names(
+                cell.bindings
+                    .iter()
+                    .map(lash_vocabulary::legacy_names::Name::as_str),
+            )?;
             let program = adapter::parse_with_limits(source, limits)?;
             lower::lower(&program, source, environment, mode)
         }
@@ -158,7 +162,11 @@ impl Parser {
         environment: &Environment<'_>,
         cell: lash_kernel_dialect::CellEnvironment<'_>,
     ) -> Result<std::collections::BTreeSet<String>, Diagnostic> {
-        lower::check_binding_names(cell.bindings.iter().map(lash_kernel_doc::Name::as_str))?;
+        lower::check_binding_names(
+            cell.bindings
+                .iter()
+                .map(lash_vocabulary::legacy_names::Name::as_str),
+        )?;
         let program = self.parser.parse(source)?;
         lower::tool_calls(&program, cell.bindings)
             .into_iter()
@@ -177,7 +185,11 @@ impl Parser {
         let Mode::Cell(cell) = mode else {
             return lower_with_limits(source, environment, mode, self.parser.limits());
         };
-        lower::check_binding_names(cell.bindings.iter().map(lash_kernel_doc::Name::as_str))?;
+        lower::check_binding_names(
+            cell.bindings
+                .iter()
+                .map(lash_vocabulary::legacy_names::Name::as_str),
+        )?;
         let program = self.parser.parse(source)?;
         lower::lower(&program, source, environment, mode)
     }
@@ -234,7 +246,9 @@ impl FrontEnd for TypeScript {
 /// operation. A path that spells an operation in another dialect's spelling
 /// is refused with the spelling a cell writes.
 fn candidate(path: &str, environment: &Environment<'_>) -> Result<Option<String>, Diagnostic> {
-    use lash_kernel_dialect::{Segment, SpellKind, Spelling};
+    use lash_kernel_dialect::SpellKind;
+    use lash_kernel_dialect::Spelling;
+    use lash_vocabulary::names::Segment;
     let segments = path.split('.').collect::<Vec<_>>();
     let Some((name, package)) = segments.split_last() else {
         return Ok(None);

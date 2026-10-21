@@ -18,7 +18,8 @@ const LASH_FRAME_NODE_DOMAIN_VERSION: &str = "lash-frame-node/v3";
 
 pub use lash_core_ids::clock::{NodeTimestamp, NodeTimestampError};
 
-use crate::{NodeId, SessionId};
+use lash_vocabulary::identity::NodeId;
+use lash_vocabulary::identity::SessionId;
 use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::sync::{Arc, OnceLock};

@@ -285,18 +285,34 @@ name_schema!(
 );
 
 use crate::{LinkId, Signature};
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(transparent)]
 /// A stable document-local Import coordinate. Names are diagnostic, never dispatch keys.
 pub struct ImportSlot(pub u32);
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 /// A document Export, optionally a member of its TypeDef. Type members are not start selectors.
 pub struct ExportName {
     pub name: Name,
     pub member: Option<Segment>,
 }
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 /// An Import name parsed by segment, optionally addressing a type member.
 pub struct QualifiedName {
@@ -304,7 +320,9 @@ pub struct QualifiedName {
     pub member: Segment,
     pub type_member: Option<Segment>,
 }
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 /// Nominal type or error identity: its defining package and canonical name, independent of representation.
 pub struct Brand {
@@ -312,7 +330,7 @@ pub struct Brand {
     pub name: Segment,
 }
 pub type ErrorKind = Brand;
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(
     tag = "kind",
     content = "value",
@@ -326,14 +344,14 @@ pub enum Convention {
     TsArgsList,
     PyDirect,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// A named requirement on external code, an operation, a type, or an error.
 pub struct Import {
     pub name: QualifiedName,
     pub kind: ImportKind,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(
     tag = "kind",
     content = "value",
@@ -356,21 +374,47 @@ pub enum ImportKind {
         kind: ErrorKind,
     },
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 /// One operation Import in one immutable Link. All dispatch, modes and pins use this identity.
 pub struct OperationUse {
     pub link: LinkId,
     pub slot: ImportSlot,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 /// A stored function under its defining Link. Calls and escaped captures retain this Link.
 pub struct CallableId {
     pub link: LinkId,
     pub function: FunctionId,
 }
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(
     tag = "kind",
     content = "value",
@@ -382,7 +426,9 @@ pub enum StartSelector {
     Main,
     Export(Name),
 }
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 /// The immutable Link and selected start that determine process definition identity.
 pub struct LinkedStart {
@@ -402,5 +448,11 @@ impl std::fmt::Display for QualifiedName {
             write!(f, ".{member}")?;
         }
         Ok(())
+    }
+}
+
+impl std::fmt::Display for OperationUse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.link, self.slot.0)
     }
 }

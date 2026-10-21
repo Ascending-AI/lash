@@ -24,7 +24,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lash_core_execution::PendingTurnInputDraft;
-use lash_core_execution::ProcessId;
 use lash_core_execution::ScopeId;
 use lash_core_execution::TurnInput;
 use lash_core_execution::TurnInputIngress;
@@ -37,7 +36,9 @@ use lash_execution_contracts::process::ProcessInput;
 use lash_execution_contracts::process::ProcessProvenance;
 use lash_execution_contracts::process::ProcessRegistration;
 use lash_execution_contracts::process::ScopeGrant;
-use lash_protocol_types::{SessionId, TurnId};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use serde_json::Value;
 
 use super::engine::KIND;

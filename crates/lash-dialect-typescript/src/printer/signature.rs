@@ -3,9 +3,13 @@
 //! and an inline object type for each parameter and result whose fields
 //! carry captions, written from the entry's signature.
 
-use lash_kernel_doc::{
-    self as k, CaptionTarget, FieldPath, FieldRoot, FieldTarget, ParamTarget, Type,
-};
+use lash_kernel_doc as k;
+use lash_kernel_doc::CaptionTarget;
+use lash_kernel_doc::FieldPath;
+use lash_kernel_doc::FieldRoot;
+use lash_kernel_doc::FieldTarget;
+use lash_kernel_doc::ParamTarget;
+use lash_vocabulary::types::Type;
 
 use super::{Renderer, property_identifier};
 

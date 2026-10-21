@@ -1,7 +1,9 @@
 //! Typed refusals and bounds of the canonical checkpoint codec.
 
 use crate::NodeId;
-use lash_kernel_doc::graph_tokens::{CanonicalFault, DecodeDimension, TokenError};
+use lash_vocabulary::tokens::CanonicalFault;
+use lash_vocabulary::tokens::DecodeDimension;
+use lash_vocabulary::tokens::TokenError;
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum GraphRefusal {
@@ -94,7 +96,7 @@ impl GraphRefusal {
 /// no default, and none may exceed the format's own bounds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DecodeLimits {
-    pub kernel_data: lash_kernel_doc::KernelDataLimits,
+    pub kernel_data: lash_vocabulary::data_limits::KernelDataLimits,
     /// The largest envelope read, at most [`MAX_NODE_BYTES`](super::MAX_NODE_BYTES).
     pub node_bytes: u64,
     /// Envelope bytes read in total.
@@ -113,7 +115,7 @@ impl DecodeLimits {
     #[must_use]
     pub const fn within_total(total: u64) -> Self {
         Self {
-            kernel_data: lash_kernel_doc::KernelDataLimits::standard(),
+            kernel_data: lash_vocabulary::data_limits::KernelDataLimits::standard(),
             node_bytes: super::MAX_NODE_BYTES,
             total_bytes: total,
             nodes: total,

@@ -4,7 +4,17 @@ use std::fmt;
 type ProviderKey = ToolProviderHandle;
 /// A plugin's declared, nonzero state and config format version.
 #[derive(
-    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
 )]
 #[serde(transparent)]
 pub struct FormatVersion(std::num::NonZeroU32);
@@ -289,7 +299,9 @@ pub mod declared_tool_provider {
 
 /// The id a process component registers under. A `:` is refused: the fleet
 /// writer record keys a component's config format as `component:<id>`.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(try_from = "String", into = "String")]
 pub struct ProcessComponentId(String);
 
@@ -353,7 +365,7 @@ impl fmt::Display for ProcessComponentId {
 /// first resolution. Resolution and the matched tool have independent
 /// bounds. As with ordinary tool bounds,
 /// there is no runtime-selected ceiling; enclosing deadlines still clip it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DeferredResolutionPolicy {
     pub execution: std::time::Duration,
@@ -501,6 +513,10 @@ callback_slots! {
     /// A tool provider's reader: what answers its `Read` tools' calls in a
     /// code cell, owed while a cell's read plan names the provider.
     ToolReads => "tool_reads", DecisionOnly, Untraced;
+    /// Trusted package advertisement, keyed by provider local key.
+    PackageProvider => "package_provider", DecisionOnly, Untraced;
+    /// Repeatable deferred discovery, keyed by provider local key.
+    DeferredPackageProvider => "deferred_package_provider", DecisionOnly, Untraced;
     ToolCatalog => "tool_catalog", DecisionOnly, Untraced;
     BeforeTurn => "before_turn", Commands, Turn;
     /// Argument transforms, chained before provider preparation.

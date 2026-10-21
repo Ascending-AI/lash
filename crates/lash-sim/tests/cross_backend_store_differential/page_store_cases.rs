@@ -8,13 +8,18 @@
 //! its own: PostgreSQL on an isolated database beside the shared one, and
 //! the pages' digests and the steps' counts compare as they are.
 
+use lash_core_store::checkpoint_graph::CommitId;
+use lash_core_store::checkpoint_graph::EncodeBudget;
+use lash_core_store::checkpoint_graph::EncodedNode;
+use lash_core_store::checkpoint_graph::ExplicitLimit;
+use lash_core_store::checkpoint_graph::GraphRefusal;
+use lash_core_store::checkpoint_graph::GraphStaging;
+use lash_core_store::checkpoint_graph::NodeId;
+use lash_core_store::checkpoint_graph::NodeKind;
+use lash_core_store::checkpoint_graph::TypedBody;
 use lash_core_store::checkpoint_graph::stage::{
     CandidateManifest, EdgeLog, ManifestEntry, ManifestSummary, MemoryEdgeLog, StageFault,
     node_range,
-};
-use lash_core_store::checkpoint_graph::{
-    CommitId, EncodeBudget, EncodedNode, ExplicitLimit, GraphRefusal, GraphStaging, NodeId,
-    NodeKind, TokenWriter, TypedBody,
 };
 use lash_durable::domain::graph::{ExecRootWrite, RootOwner};
 use lash_durable::domain::pages::{
@@ -22,6 +27,7 @@ use lash_durable::domain::pages::{
 };
 use lash_durable::domain::{CellId, DomainWrite, ExecKey, SnapshotRev};
 use lash_durable::{ActorKey, DurableError, Epoch, FormatSet, MailTx, NodeSpec};
+use lash_vocabulary::tokens::TokenWriter;
 
 use super::*;
 
@@ -230,7 +236,7 @@ async fn page_transcript(store: &dyn PageStore) -> Transcript {
         .expect("the actor was claimed");
     let exec = ExecKey::Cell(
         SessionId::try_from("fig-6191-pages".to_owned()).expect("a session id"),
-        lash_protocol_types::TurnId::try_from("pages-turn".to_owned()).expect("a turn id"),
+        lash_vocabulary::identity::TurnId::try_from("pages-turn".to_owned()).expect("a turn id"),
         CellId::new("pages-cell"),
     );
 

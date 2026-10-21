@@ -38,7 +38,8 @@ use lash::workflow::{
     WorkflowDocument, WorkflowDocumentRead, WorkflowDocumentRef,
     WorkflowExecutionOverlayAccumulator, WorkflowOverlaySettlement, WorkflowOverlayTerminal,
 };
-use lash::{ProcessId, SessionId};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 
 use crate::AppState;
 use crate::execution_view::ExecutionGraph;
@@ -233,7 +234,7 @@ impl Cache {
                 Some(document) => {
                     graph
                         .accumulator
-                        .set_document(lash::workflow::WorkflowOverlayDocument::of(document));
+                        .set_document(lash::workflow::workflow_overlay_document(document));
                     graph.document = Some(Arc::clone(document));
                 }
                 None => missing = Some(wants.clone()),

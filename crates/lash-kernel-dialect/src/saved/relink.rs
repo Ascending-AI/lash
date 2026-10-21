@@ -10,13 +10,19 @@
 
 use std::collections::BTreeMap;
 
+use lash_kernel_doc::FunctionCatalog;
+use lash_kernel_doc::performed_through;
 use lash_kernel_doc::snapshot::CodeReads;
-use lash_kernel_doc::{
-    EffectName, FunctionCatalog, FunctionId, FunctionName, OperationRequirement, performed_through,
-};
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::operations::OperationRequirement;
 
 use super::{SavedFunction, Unusable};
-use crate::{Export, ExportView, Library, QualifiedOperation};
+use crate::Export;
+use crate::ExportView;
+use crate::Library;
+use lash_vocabulary::names::QualifiedOperation;
 
 /// What the cell's package set lacks of a saved function's callee.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]

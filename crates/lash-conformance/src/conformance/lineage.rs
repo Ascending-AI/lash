@@ -1,4 +1,4 @@
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 
@@ -78,7 +78,7 @@ async fn assert_readability_equals_edge_reachability(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn window_node_ids(store: &SessionStore) -> Vec<lash_core::NodeId> {
+async fn window_node_ids(store: &SessionStore) -> Vec<lash_vocabulary::identity::NodeId> {
     store
         .load_session_window(WindowSelector::Current)
         .await
@@ -115,7 +115,7 @@ async fn seed(
     factory: &Arc<dyn DeploymentStore>,
     session_id: &SessionId,
     plugins: usize,
-) -> (SessionStore, Vec<lash_core::NodeId>) {
+) -> (SessionStore, Vec<lash_vocabulary::identity::NodeId>) {
     let store = factory
         .admit_view(&request(session_id))
         .await
@@ -183,7 +183,7 @@ async fn fork(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn append(store: &SessionStore, count: usize) -> Vec<lash_core::NodeId> {
+async fn append(store: &SessionStore, count: usize) -> Vec<lash_vocabulary::identity::NodeId> {
     let mut state = crate::store::load_session_window_state(store, WindowSelector::Current)
         .await
         .map(|loaded| loaded.map(|loaded| loaded.state))

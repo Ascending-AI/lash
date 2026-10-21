@@ -68,8 +68,8 @@ async fn replay_callbacks(
     let transforms = live
         .transform_assistant_response(
             &lash_core::plugin::ModelCallAddress {
-                session_id: lash_core::SessionId::from("recorded-response-plan"),
-                turn_id: lash_core::TurnId::from("hook-turn"),
+                session_id: lash_vocabulary::identity::SessionId::from("recorded-response-plan"),
+                turn_id: lash_vocabulary::identity::TurnId::from("hook-turn"),
                 call_id: lash_core::LlmCallId("hook-call".into()),
                 attempt: Some(1),
             },
@@ -192,8 +192,8 @@ async fn stream_state_pairs_multiple_callbacks_of_one_plugin_on_cold_replay() {
     let states = recorded
         .finish_assistant_stream(
             &lash_core::plugin::ModelCallAddress {
-                session_id: lash_core::SessionId::from("recorded-response-plan"),
-                turn_id: lash_core::TurnId::from("hook-turn"),
+                session_id: lash_vocabulary::identity::SessionId::from("recorded-response-plan"),
+                turn_id: lash_vocabulary::identity::TurnId::from("hook-turn"),
                 call_id: lash_core::LlmCallId("hook-call".into()),
                 attempt: Some(1),
             },
@@ -263,8 +263,8 @@ async fn stream_state_format_refuses_and_readable_older_state_runs() {
     let states = recorded
         .finish_assistant_stream(
             &lash_core::plugin::ModelCallAddress {
-                session_id: lash_core::SessionId::from("recorded-response-plan"),
-                turn_id: lash_core::TurnId::from("hook-turn"),
+                session_id: lash_vocabulary::identity::SessionId::from("recorded-response-plan"),
+                turn_id: lash_vocabulary::identity::TurnId::from("hook-turn"),
                 call_id: lash_core::LlmCallId("hook-call".into()),
                 attempt: Some(1),
             },

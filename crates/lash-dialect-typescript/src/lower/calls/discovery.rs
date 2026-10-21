@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeSet, HashSet};
 
-use lash_kernel_doc::Name;
+use lash_vocabulary::legacy_names::Name;
 
 use crate::adapter as ast;
 use crate::lower::walk;

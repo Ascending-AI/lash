@@ -1,11 +1,11 @@
 #[cfg(test)]
-use crate::SessionId;
-#[cfg(test)]
 use crate::store::{
     AttachmentReferrers, AttachmentWrite, AttachmentWriteFence, AttachmentWritePermit,
 };
 #[cfg(test)]
 use lash_protocol_types::sync::MutexExt;
+#[cfg(test)]
+use lash_vocabulary::identity::SessionId;
 #[cfg(test)]
 use std::sync::Mutex;
 mod root_enumeration;

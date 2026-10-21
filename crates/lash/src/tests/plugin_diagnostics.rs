@@ -27,7 +27,7 @@ async fn recorded_attribution_survives_removal() {
         .unwrap();
     // A real isolated owner registry publishes the frozen inventory, and its
     // lifetime ends with the materialization rather than the observer.
-    let observed = crate::SessionId::from("materialized-observer");
+    let observed = lash_vocabulary::identity::SessionId::from("materialized-observer");
     let runtime = created_session(&core, observed.clone())
         .await
         .open_runtime()
@@ -35,7 +35,7 @@ async fn recorded_attribution_survives_removal() {
         .unwrap();
     let plugins = runtime.assembled_plugin_session().clone();
     plugins.materialize().unwrap();
-    let scope = InventoryScope::Owner(crate::RuntimeOwner::Session(observed));
+    let scope = InventoryScope::Owner(lash_vocabulary::identity::RuntimeOwner::Session(observed));
     assert!(
         matches!(core.plugin_diagnostics().installed(&scope), InstalledObservation::Present(inventory) if inventory.scope == scope)
     );
@@ -94,7 +94,7 @@ async fn recorded_attribution_survives_removal() {
             call: call.clone(),
             tool: "removed-tool".into(),
             request,
-            policy: lash_core::ExecutionPolicy::Once,
+            policy: lash_vocabulary::tool_contract::ExecutionPolicy::Once,
             limit_expires_at_ms: 60000,
             limit_max_slice_ms: 1000,
             wait_id: None,
@@ -121,8 +121,8 @@ async fn recorded_attribution_survives_removal() {
         binding
             .callbacks()
             .map(|callback| {
-                crate::plugins::ObligationToken::for_callback(
-                    crate::plugins::RegistryKind::Session,
+                lash_vocabulary::claims::ObligationToken::for_callback(
+                    lash_vocabulary::claims::RegistryKind::Session,
                     callback,
                 )
                 .to_string()

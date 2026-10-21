@@ -14,9 +14,13 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::graph_tokens::{
-    CanonicalFault, DecodeDimension, RefForm, TokenCodec, TokenEvent, TokenReader, TokenWriter,
-};
+use lash_vocabulary::tokens::CanonicalFault;
+use lash_vocabulary::tokens::DecodeDimension;
+use lash_vocabulary::tokens::RefForm;
+use lash_vocabulary::tokens::TokenCodec;
+use lash_vocabulary::tokens::TokenEvent;
+use lash_vocabulary::tokens::TokenReader;
+use lash_vocabulary::tokens::TokenWriter;
 
 use super::commit::{EncodeBudget, ExplicitLimit};
 use super::encode::{GraphStaging, TypedBody, to_physical, token_len};

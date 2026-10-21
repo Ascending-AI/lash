@@ -14,7 +14,7 @@ pub use lash_core_store::transcript::TranscriptDecoderPlugin;
 /// consuming the cell's saved root. The references contain no copied body.
 pub use crate::runtime::actor::round::graph::ReportView as CellCallReferences;
 
-use crate::SessionId;
+use lash_vocabulary::identity::SessionId;
 use std::sync::Arc;
 
 use crate::runtime::RuntimeSessionState;
@@ -546,22 +546,14 @@ pub trait ProtocolDriverPlugin: Send + Sync {
     fn build_preamble(&self, input: crate::ProtocolBuildInput) -> crate::TurnDriverPreamble;
 
     /// The catalog this protocol admits model calls from, under the selected view.
-    fn model_catalog(
-        &self,
-        catalog: &crate::ToolCatalog,
-        _packages: &dyn lash_kernel_dialect::ExportView,
-    ) -> crate::ToolCatalog {
+    fn model_catalog(&self, catalog: &crate::ToolCatalog) -> crate::ToolCatalog {
         catalog.clone()
     }
 
     /// The call's offered tools over its pinned catalog, using this protocol's
     /// discovery policy for native declarations and code-callable bindings alike.
-    fn prompt_tools(
-        &self,
-        catalog: Arc<crate::ToolCatalog>,
-        packages: &dyn lash_kernel_dialect::ExportView,
-    ) -> super::prompt::OfferedTools {
-        super::prompt::OfferedTools::new(Arc::new(catalog.public_operations(packages)), false)
+    fn prompt_tools(&self, catalog: Arc<crate::ToolCatalog>) -> super::prompt::OfferedTools {
+        super::prompt::OfferedTools::new(catalog, false)
     }
 
     /// The render a run's results present with, resolved from `namespace`,

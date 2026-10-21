@@ -209,7 +209,7 @@ fn projection_catalog(
 
 #[cfg(all(test, feature = "sqlite"))]
 mod tests {
-    use super::*;
+    use lash_vocabulary::schema_contract::*;
     use std::time::Duration;
 
     /// D-DEFAULTS2: the facade's non-default SQLite coordination reaches its reader.

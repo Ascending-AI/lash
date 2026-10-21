@@ -471,7 +471,9 @@ impl LashRuntime {
         let store = &self.host.core.durability.attachment_store;
         if !matches!(
             store.holder(),
-            crate::attachments::AttachmentHolder::Runtime(crate::RuntimeOwner::Session(_))
+            crate::attachments::AttachmentHolder::Runtime(
+                lash_vocabulary::identity::RuntimeOwner::Session(_)
+            )
         ) {
             return Ok(None);
         }
@@ -492,7 +494,7 @@ impl LashRuntime {
 fn opening_user_message(
     user_id: String,
     run: &TurnId,
-    input_id: Option<crate::InputId>,
+    input_id: Option<lash_vocabulary::identity::InputId>,
     normalized: Vec<NormalizedItem>,
 ) -> Message {
     let mut parts = Vec::new();

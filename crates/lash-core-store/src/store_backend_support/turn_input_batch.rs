@@ -16,7 +16,9 @@ use crate::store::StoreError;
 pub enum TurnInputDraftAdmission {
     /// A stored row is this very submission, filed earlier: the draft answers
     /// it, wherever it sits and whatever became of it.
-    Existing { input_id: crate::InputId },
+    Existing {
+        input_id: lash_vocabulary::identity::InputId,
+    },
     /// Nothing holds the draft's names: it is enqueued.
     New,
 }
@@ -46,7 +48,7 @@ pub fn decide_turn_input_draft_admission(
     if let (Some(source_key), Some((input_id, existing_digest))) =
         (draft.source_key.as_deref(), by_source_key)
     {
-        let input_id = crate::InputId::parse(input_id)?;
+        let input_id = lash_vocabulary::identity::InputId::parse(input_id)?;
         if existing_digest != submission_digest {
             return Err(StoreError::PendingTurnInputSourceKeyConflict {
                 session_id: draft.session_id.clone(),
@@ -82,7 +84,10 @@ pub fn decide_turn_input_draft_admission(
 /// The input id a forsaken source key's tombstone carries: the id a send
 /// under the key would have been filed under, so a probe by that id finds
 /// it.
-pub fn forsaken_input_id(session_id: &crate::SessionId, source_key: &str) -> crate::InputId {
+pub fn forsaken_input_id(
+    session_id: &lash_vocabulary::identity::SessionId,
+    source_key: &str,
+) -> lash_vocabulary::identity::InputId {
     PendingTurnInputDraft::keyed_input_id(session_id, source_key)
 }
 

@@ -1,6 +1,6 @@
-use crate::NodeId;
 use lash_protocol_types::core_support::*;
 use lash_protocol_types::{AppendVec, same_history_record};
+use lash_vocabulary::identity::NodeId;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -277,7 +277,7 @@ impl TurnGraphEditor {
     #[cfg(test)]
     pub(super) fn mark_node_ids_persisted<I>(&mut self, node_ids: I)
     where
-        I: IntoIterator<Item = crate::NodeId>,
+        I: IntoIterator<Item = lash_vocabulary::identity::NodeId>,
     {
         let node_ids = node_ids.into_iter().collect::<HashSet<_>>();
         self.durable_appended = self
@@ -581,8 +581,8 @@ mod tests {
 
     fn active_path_walk_is_bounded_scenario() {
         let plugin_node = |node_id: &str, parent_node_id: &str| SessionNodeRecord {
-            node_id: crate::NodeId::fixture(node_id),
-            parent_node_id: Some(crate::NodeId::fixture(parent_node_id)),
+            node_id: lash_vocabulary::identity::NodeId::fixture(node_id),
+            parent_node_id: Some(lash_vocabulary::identity::NodeId::fixture(parent_node_id)),
             timestamp: "2026-07-31T00:00:00.000000000Z"
                 .parse()
                 .unwrap_or_else(|error| panic!("invalid fixture timestamp: {error}")),

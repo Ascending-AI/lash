@@ -15,8 +15,11 @@
 //! names. Parked page rewriting and validation follow this document plan;
 //! only the fenced owner transaction publishes the carried run.
 
-use lash_kernel_doc::{Document, DocumentId, FunctionRegistry, validate_document};
+use lash_kernel_doc::Document;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::validate_document;
 use lash_kernel_migrate::{DocumentRefusal, ParkedRefusal, Relink, Rewritten};
+use lash_vocabulary::legacy_names::DocumentId;
 
 /// Why a document or a run is not adopted onto other library functions:
 /// a successor release's, or those of the document a successor pair names.
@@ -62,7 +65,9 @@ pub enum HelperAdoptionRefusal {
     /// The successor's payload starts another entry, or with other
     /// arguments: it is no successor of this run.
     #[error("the successor enters `{entry}` with other arguments than the run it would carry")]
-    OtherEntry { entry: lash_kernel_doc::Name },
+    OtherEntry {
+        entry: lash_vocabulary::legacy_names::Name,
+    },
 }
 
 /// A document adopted onto a successor release.

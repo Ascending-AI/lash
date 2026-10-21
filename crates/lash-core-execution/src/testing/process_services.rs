@@ -5,7 +5,7 @@ use super::*;
 impl crate::ProcessService for EffectBackedProcessService {
     async fn list_visible_for_attempt(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         mode: lash_execution_contracts::process::ProcessListMode,
     ) -> Result<
         Vec<lash_execution_contracts::process::ObservedProcess>,
@@ -65,7 +65,7 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn stage_recorded_start(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         request: lash_execution_contracts::process::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::StagedProcessStart, lash_execution_contracts::plugin_error::PluginError>
@@ -147,7 +147,7 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn validate_visible(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         process_ids: &[ProcessId],
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
@@ -178,7 +178,7 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn cancel(
         &self,
-        _owner: &crate::RuntimeOwner,
+        _owner: &lash_vocabulary::identity::RuntimeOwner,
         process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<
@@ -200,7 +200,7 @@ impl crate::ProcessService for EffectBackedProcessService {
 
     async fn cancel_recorded_intent(
         &self,
-        _owner: &crate::RuntimeOwner,
+        _owner: &lash_vocabulary::identity::RuntimeOwner,
         process_id: &ProcessId,
         identity: crate::ToolIntentIdentity,
         scope: crate::ProcessOpScope<'_>,
@@ -252,7 +252,7 @@ impl crate::ProcessService for EffectBackedProcessService {
     }
     async fn cancel_bound(
         &self,
-        _process_id: &crate::ProcessId,
+        _process_id: &lash_vocabulary::identity::ProcessId,
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         Err(
@@ -263,7 +263,7 @@ impl crate::ProcessService for EffectBackedProcessService {
     }
     async fn release_consumer_hold(
         &self,
-        _process_id: &crate::ProcessId,
+        _process_id: &lash_vocabulary::identity::ProcessId,
         _key: &str,
     ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         Err(
@@ -276,7 +276,10 @@ impl crate::ProcessService for EffectBackedProcessService {
         &self,
         _key: &str,
         _owner: &crate::ScopeId,
-    ) -> Result<Vec<crate::ProcessId>, lash_execution_contracts::plugin_error::PluginError> {
+    ) -> Result<
+        Vec<lash_vocabulary::identity::ProcessId>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Err(
             lash_execution_contracts::plugin_error::PluginError::Session(
                 "operation is absent from this fixture".into(),
@@ -289,7 +292,7 @@ impl crate::ProcessService for EffectBackedProcessService {
 impl crate::ProcessService for MockSessionManager {
     async fn stage_recorded_start(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         request: lash_execution_contracts::process::ProcessStartRequest,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::StagedProcessStart, PluginError> {
@@ -397,7 +400,7 @@ impl crate::ProcessService for MockSessionManager {
 
     async fn validate_visible(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         handle_ids: &[ProcessId],
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), PluginError> {
@@ -423,7 +426,7 @@ impl crate::ProcessService for MockSessionManager {
 
     async fn cancel(
         &self,
-        _owner: &crate::RuntimeOwner,
+        _owner: &lash_vocabulary::identity::RuntimeOwner,
         process_id: &ProcessId,
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<lash_execution_contracts::process::ObservedProcess, PluginError> {
@@ -447,7 +450,7 @@ impl crate::ProcessService for MockSessionManager {
 
     async fn cancel_recorded_intent(
         &self,
-        _owner: &crate::RuntimeOwner,
+        _owner: &lash_vocabulary::identity::RuntimeOwner,
         process_id: &ProcessId,
         identity: crate::ToolIntentIdentity,
         _scope: crate::ProcessOpScope<'_>,
@@ -489,7 +492,7 @@ impl crate::ProcessService for MockSessionManager {
 
     async fn list_visible_for_attempt(
         &self,
-        _owner: &crate::RuntimeOwner,
+        _owner: &lash_vocabulary::identity::RuntimeOwner,
         _mode: lash_execution_contracts::process::ProcessListMode,
     ) -> Result<
         Vec<lash_execution_contracts::process::ObservedProcess>,
@@ -503,7 +506,7 @@ impl crate::ProcessService for MockSessionManager {
     }
     async fn start_from_request(
         &self,
-        _session_id: &crate::SessionId,
+        _session_id: &lash_vocabulary::identity::SessionId,
         _request: lash_execution_contracts::process::ProcessStartRequest,
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<
@@ -530,7 +533,7 @@ impl crate::ProcessService for MockSessionManager {
     }
     async fn cancel_bound(
         &self,
-        _process_id: &crate::ProcessId,
+        _process_id: &lash_vocabulary::identity::ProcessId,
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         Err(
@@ -541,7 +544,7 @@ impl crate::ProcessService for MockSessionManager {
     }
     async fn release_consumer_hold(
         &self,
-        _process_id: &crate::ProcessId,
+        _process_id: &lash_vocabulary::identity::ProcessId,
         _key: &str,
     ) -> Result<(), lash_execution_contracts::plugin_error::PluginError> {
         Err(
@@ -554,7 +557,10 @@ impl crate::ProcessService for MockSessionManager {
         &self,
         _key: &str,
         _owner: &crate::ScopeId,
-    ) -> Result<Vec<crate::ProcessId>, lash_execution_contracts::plugin_error::PluginError> {
+    ) -> Result<
+        Vec<lash_vocabulary::identity::ProcessId>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Err(
             lash_execution_contracts::plugin_error::PluginError::Session(
                 "operation is absent from this fixture".into(),

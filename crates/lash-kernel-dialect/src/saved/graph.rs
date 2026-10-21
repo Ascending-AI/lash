@@ -15,13 +15,22 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::graph_tokens::{
-    ChildRef, CodecVariant, TokenCodec, TokenError, TokenReader, TokenWriter, check_ascending,
-    encode_body,
-};
+use lash_kernel_doc::Document;
 use lash_kernel_doc::heap::PageRef;
-use lash_kernel_doc::{Document, EffectName, FunctionId, Name, OperationRequirement, Signature};
 use lash_kernel_state::paged::FrozenRef;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::operations::OperationRequirement;
+use lash_vocabulary::tokens::ChildRef;
+use lash_vocabulary::tokens::CodecVariant;
+use lash_vocabulary::tokens::TokenCodec;
+use lash_vocabulary::tokens::TokenError;
+use lash_vocabulary::tokens::TokenReader;
+use lash_vocabulary::tokens::TokenWriter;
+use lash_vocabulary::tokens::check_ascending;
+use lash_vocabulary::tokens::encode_body;
+use lash_vocabulary::types::Signature;
 
 use super::{CaptureRefusal, HeldAt, NotSaved, SavedFunction, Token};
 use crate::Written;

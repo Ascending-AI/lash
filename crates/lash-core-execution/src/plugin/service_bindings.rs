@@ -1,10 +1,7 @@
 //! Optional callable host ports, shared by preflight and invocation.
 use super::*;
-use crate::ProcessId;
 use crate::ProcessOpScope;
-use crate::SessionId;
 use crate::StagedProcessStart;
-use crate::TurnId;
 use lash_execution_contracts::process::ProcessAwaitOutput;
 use lash_execution_contracts::process::ProcessHandleView;
 use lash_execution_contracts::process::ProcessListMode;
@@ -13,6 +10,9 @@ use lash_execution_contracts::process::ProcessStartRegistration;
 use lash_execution_contracts::process::ProcessStartRequest;
 use lash_execution_contracts::session_types::SessionCreateRequest;
 use lash_execution_contracts::session_types::SessionHandle;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use std::sync::Arc;
 
 #[async_trait::async_trait]
@@ -85,7 +85,7 @@ pub trait ProcessListPort: Send + Sync {
 pub trait ProcessListForAttemptPort: Send + Sync {
     async fn list_visible_for_attempt(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         mode: ProcessListMode,
     ) -> Result<Vec<lash_execution_contracts::process::ObservedProcess>, PluginError>;
 }
@@ -104,7 +104,7 @@ pub trait ProcessStartFromRequestPort: Send + Sync {
 pub trait ProcessRecordedStartPort: Send + Sync {
     async fn stage_recorded_start(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         request: ProcessStartRequest,
         scope: ProcessOpScope<'_>,
     ) -> Result<StagedProcessStart, PluginError>;
@@ -170,7 +170,7 @@ pub trait ProcessAbandonHoldPort: Send + Sync {
 pub trait ProcessValidateVisiblePort: Send + Sync {
     async fn validate_visible(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         process_ids: &[ProcessId],
         scope: ProcessOpScope<'_>,
     ) -> Result<(), PluginError>;
@@ -180,7 +180,7 @@ pub trait ProcessValidateVisiblePort: Send + Sync {
 pub trait ProcessCancelPort: Send + Sync {
     async fn cancel(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         process_id: &ProcessId,
         scope: ProcessOpScope<'_>,
     ) -> Result<lash_execution_contracts::process::ObservedProcess, PluginError>;
@@ -190,7 +190,7 @@ pub trait ProcessCancelPort: Send + Sync {
 pub trait ProcessRecordedCancelPort: Send + Sync {
     async fn cancel_recorded_intent(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         process_id: &ProcessId,
         identity: crate::ToolIntentIdentity,
         scope: ProcessOpScope<'_>,
@@ -341,7 +341,7 @@ impl ServiceBindings {
     }
     pub async fn list_visible_for_attempt(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         mode: ProcessListMode,
     ) -> Result<Vec<lash_execution_contracts::process::ObservedProcess>, PluginError> {
         let service = self.list_visible_for_attempt.as_ref().ok_or_else(|| {
@@ -368,7 +368,7 @@ impl ServiceBindings {
     }
     pub async fn stage_recorded_start(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         request: ProcessStartRequest,
         scope: ProcessOpScope<'_>,
     ) -> Result<StagedProcessStart, PluginError> {
@@ -464,7 +464,7 @@ impl ServiceBindings {
     }
     pub async fn validate_visible(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         process_ids: &[ProcessId],
         scope: ProcessOpScope<'_>,
     ) -> Result<(), PluginError> {
@@ -478,7 +478,7 @@ impl ServiceBindings {
     }
     pub async fn cancel(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         process_id: &ProcessId,
         scope: ProcessOpScope<'_>,
     ) -> Result<lash_execution_contracts::process::ObservedProcess, PluginError> {
@@ -492,7 +492,7 @@ impl ServiceBindings {
     }
     pub async fn cancel_recorded_intent(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         process_id: &ProcessId,
         identity: crate::ToolIntentIdentity,
         scope: ProcessOpScope<'_>,
@@ -902,7 +902,7 @@ struct ProcessServiceBindings(Arc<dyn crate::ProcessService>);
 impl ProcessListForAttemptPort for ProcessServiceBindings {
     async fn list_visible_for_attempt(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         mode: ProcessListMode,
     ) -> Result<Vec<lash_execution_contracts::process::ObservedProcess>, PluginError> {
         self.0.list_visible_for_attempt(owner, mode).await
@@ -923,7 +923,7 @@ impl ProcessStartFromRequestPort for ProcessServiceBindings {
 impl ProcessRecordedStartPort for ProcessServiceBindings {
     async fn stage_recorded_start(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         request: ProcessStartRequest,
         scope: ProcessOpScope<'_>,
     ) -> Result<StagedProcessStart, PluginError> {
@@ -1007,7 +1007,7 @@ impl ProcessListPort for ProcessServiceBindings {
 impl ProcessValidateVisiblePort for ProcessServiceBindings {
     async fn validate_visible(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         process_ids: &[ProcessId],
         scope: ProcessOpScope<'_>,
     ) -> Result<(), PluginError> {
@@ -1018,7 +1018,7 @@ impl ProcessValidateVisiblePort for ProcessServiceBindings {
 impl ProcessCancelPort for ProcessServiceBindings {
     async fn cancel(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         process_id: &ProcessId,
         scope: ProcessOpScope<'_>,
     ) -> Result<lash_execution_contracts::process::ObservedProcess, PluginError> {
@@ -1029,7 +1029,7 @@ impl ProcessCancelPort for ProcessServiceBindings {
 impl ProcessRecordedCancelPort for ProcessServiceBindings {
     async fn cancel_recorded_intent(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         process_id: &ProcessId,
         identity: crate::ToolIntentIdentity,
         scope: ProcessOpScope<'_>,
@@ -1057,7 +1057,7 @@ impl ProcessTransferPort for ProcessServiceBindings {
 impl crate::ProcessService for ServiceBindings {
     async fn list_visible_for_attempt(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         mode: ProcessListMode,
     ) -> Result<Vec<lash_execution_contracts::process::ObservedProcess>, PluginError> {
         let service = self.list_visible_for_attempt.as_ref().ok_or_else(|| {
@@ -1084,7 +1084,7 @@ impl crate::ProcessService for ServiceBindings {
     }
     async fn stage_recorded_start(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         request: ProcessStartRequest,
         scope: ProcessOpScope<'_>,
     ) -> Result<StagedProcessStart, PluginError> {
@@ -1194,7 +1194,7 @@ impl crate::ProcessService for ServiceBindings {
     }
     async fn validate_visible(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         process_ids: &[ProcessId],
         scope: ProcessOpScope<'_>,
     ) -> Result<(), PluginError> {
@@ -1208,7 +1208,7 @@ impl crate::ProcessService for ServiceBindings {
     }
     async fn cancel(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         process_id: &ProcessId,
         scope: ProcessOpScope<'_>,
     ) -> Result<lash_execution_contracts::process::ObservedProcess, PluginError> {
@@ -1222,7 +1222,7 @@ impl crate::ProcessService for ServiceBindings {
     }
     async fn cancel_recorded_intent(
         &self,
-        owner: &crate::RuntimeOwner,
+        owner: &lash_vocabulary::identity::RuntimeOwner,
         process_id: &ProcessId,
         identity: crate::ToolIntentIdentity,
         scope: ProcessOpScope<'_>,

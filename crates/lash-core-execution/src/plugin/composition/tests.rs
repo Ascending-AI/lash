@@ -759,12 +759,12 @@ struct Keyed {
 }
 
 impl Keyed {
-    fn definition() -> crate::ToolDefinition {
-        crate::ToolDefinition::raw(
+    fn definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+        lash_vocabulary::tool_contract::ToolDefinition::raw(
             KEYED_TOOL,
             "tools.keyed",
             "keyed probe",
-            crate::ToolDefinition::default_input_schema(),
+            lash_vocabulary::tool_contract::ToolDefinition::default_input_schema(),
             serde_json::json!({ "type": "string" }),
         )
         .expect("valid declared tool schemas")
@@ -778,7 +778,7 @@ impl crate::ToolProvider for Keyed {
         &self,
         _config: &crate::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<crate::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok({
@@ -792,9 +792,9 @@ impl crate::ToolProvider for Keyed {
 
     fn resolve_manifest_by_id(
         &self,
-        id: &crate::ToolId,
+        id: &lash_vocabulary::tool_contract::ToolId,
         _config: &crate::OwnerConfigView,
-    ) -> Option<crate::ToolManifest> {
+    ) -> Option<lash_vocabulary::tool_contract::ToolManifest> {
         (id.as_str() == KEYED_TOOL).then(|| Self::definition().manifest())
     }
 
@@ -802,7 +802,7 @@ impl crate::ToolProvider for Keyed {
         &self,
         name: &str,
         _config: &crate::OwnerConfigView,
-    ) -> Option<Arc<crate::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.keyed").then(|| Arc::new(Self::definition().contract()))
     }
 
@@ -847,7 +847,7 @@ async fn bound_and_executed(
         .advertise(&config)
         .expect("the providers advertise");
     let tools = crate::SurfaceTools::of_entries(entries, registry);
-    let tool = crate::ToolId::from(KEYED_TOOL);
+    let tool = lash_vocabulary::tool_contract::ToolId::from(KEYED_TOOL);
     let provider = &tools
         .entry(&tool)
         .expect("the surface offers the tool")
@@ -930,7 +930,10 @@ async fn reordering_provider_registrations_changes_nothing_recorded_or_executed(
         assert_eq!(executed, serde_json::json!("served"));
     }
 
-    let key = crate::ProcessConfigKey::<()>::new("keyed-component", crate::FormatVersion::ONE);
+    let key = crate::ProcessConfigKey::<()>::new(
+        "keyed-component",
+        lash_vocabulary::providers::FormatVersion::ONE,
+    );
     for served_first in [true, false] {
         let mut components = ProcessComponentRegistry::new();
         components
@@ -1024,8 +1027,8 @@ fn a_process_admits_exactly_the_callback_slots_it_runs() {
 const LOOKUP_TOOL: &str = "tool:lookup";
 
 /// The `Read` tool `lookup`: what a knowledge base says about a topic.
-fn lookup_definition() -> crate::ToolDefinition {
-    crate::ToolDefinition::raw(
+fn lookup_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         LOOKUP_TOOL,
         "tools.lookup",
         "Looks a topic up.",
@@ -1034,7 +1037,7 @@ fn lookup_definition() -> crate::ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(30))
-    .with_execution_policy(crate::ExecutionPolicy::Read)
+    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::Read)
 }
 
 /// What the knowledge base says about the topic `args` names.
@@ -1053,7 +1056,7 @@ impl crate::ToolProvider for Knowledge {
         &self,
         _config: &crate::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<crate::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![lookup_definition().manifest()])
@@ -1061,9 +1064,9 @@ impl crate::ToolProvider for Knowledge {
 
     fn resolve_manifest_by_id(
         &self,
-        id: &crate::ToolId,
+        id: &lash_vocabulary::tool_contract::ToolId,
         _config: &crate::OwnerConfigView,
-    ) -> Option<crate::ToolManifest> {
+    ) -> Option<lash_vocabulary::tool_contract::ToolManifest> {
         (id.as_str() == LOOKUP_TOOL).then(|| lookup_definition().manifest())
     }
 
@@ -1071,7 +1074,7 @@ impl crate::ToolProvider for Knowledge {
         &self,
         name: &str,
         _config: &crate::OwnerConfigView,
-    ) -> Option<Arc<crate::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.lookup").then(|| Arc::new(lookup_definition().contract()))
     }
 
@@ -1213,13 +1216,15 @@ async fn a_process_components_read_tool_reads_through_its_reader() {
         let (tools, _) = composition
             .linked_tools(
                 &env,
-                crate::RuntimeOwner::Process(crate::ProcessId::fixture("reader")),
+                lash_vocabulary::identity::RuntimeOwner::Process(
+                    lash_vocabulary::identity::ProcessId::fixture("reader"),
+                ),
                 &PluginExtensions::default(),
                 BTreeSet::new(),
             )
             .expect("the linked tools build");
         let config = crate::OwnerConfigView::components(Arc::clone(&env));
-        let lookup = crate::ToolId::from(LOOKUP_TOOL);
+        let lookup = lash_vocabulary::tool_contract::ToolId::from(LOOKUP_TOOL);
         let pinned = tools
             .entry(&lookup)
             .expect("the lookup tool is linked")

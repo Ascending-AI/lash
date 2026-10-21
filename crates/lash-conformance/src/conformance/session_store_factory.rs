@@ -9,8 +9,8 @@ use super::session_store_factory_vacuum::{
 };
 use super::*;
 use crate::ActorContext;
-use lash_protocol_types::SessionId;
-use lash_protocol_types::TurnId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use pretty_assertions::assert_eq;
 
 mod admission;

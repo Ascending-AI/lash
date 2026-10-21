@@ -17,11 +17,17 @@ use std::sync::Arc;
 
 use lash_dialect_typescript::DiagnosticCode;
 use lash_kernel_dialect::{Environment, Lowered, NamedLibrary};
-use lash_kernel_doc::{Datum, ErrorDatum, FunctionRegistry, Handle, Integer, Name, Timestamp};
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::ErrorDatum;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::Handle;
+use lash_kernel_doc::Integer;
+use lash_kernel_doc::Timestamp;
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, KernelMachine, Machine, PreparedLibrary, Program, RunError, Step,
     Target,
 };
+use lash_vocabulary::legacy_names::Name;
 
 #[expect(
     dead_code,
@@ -241,25 +247,31 @@ impl<M: Machine> Executor for OnMachine<M> {
 
 /// The test host's turn-ending tool: a program ends with
 /// `await host.finish(value)`, as a model's cell ends with `control.finish`.
-fn finish_effect() -> BTreeMap<lash_kernel_doc::EffectName, lash_kernel_doc::Signature> {
+fn finish_effect()
+-> BTreeMap<lash_vocabulary::legacy_names::EffectName, lash_vocabulary::types::Signature> {
     BTreeMap::from([(
-        lash_kernel_doc::EffectName::new("host.finish").expect("a tool's name"),
-        lash_kernel_doc::Signature {
-            params: vec![lash_kernel_doc::Param {
+        lash_vocabulary::legacy_names::EffectName::new("host.finish").expect("a tool's name"),
+        lash_vocabulary::types::Signature {
+            params: vec![lash_vocabulary::types::Param {
                 name: Name::new("value"),
-                ty: lash_kernel_doc::Type::Any,
+                ty: lash_vocabulary::types::Type::Any,
                 optional: false,
             }],
-            result: lash_kernel_doc::Type::Any,
+            result: lash_vocabulary::types::Type::Any,
         },
     )])
 }
 
 /// [`finish_effect`]'s control: its call ends the program.
-fn finish_control()
--> &'static BTreeMap<lash_kernel_doc::EffectName, BTreeSet<lash_kernel_dialect::EffectControl>> {
+fn finish_control() -> &'static BTreeMap<
+    lash_vocabulary::legacy_names::EffectName,
+    BTreeSet<lash_kernel_dialect::EffectControl>,
+> {
     static CONTROLS: std::sync::OnceLock<
-        BTreeMap<lash_kernel_doc::EffectName, BTreeSet<lash_kernel_dialect::EffectControl>>,
+        BTreeMap<
+            lash_vocabulary::legacy_names::EffectName,
+            BTreeSet<lash_kernel_dialect::EffectControl>,
+        >,
     > = std::sync::OnceLock::new();
     CONTROLS.get_or_init(|| {
         finish_effect()
@@ -361,7 +373,7 @@ fn lower(source: &str) -> Result<Lowered, lash_dialect_typescript::Diagnostic> {
     let bindings = BTreeSet::new();
     let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
         &effects,
-        &lash_kernel_doc::ContractId::new("1"),
+        &lash_vocabulary::operations::ContractId::new("1"),
         finish_control(),
     )
     .expect("the test's effects are operations");
@@ -561,7 +573,7 @@ pub(crate) fn printing_relowers(relative: &str) -> bool {
     .collect();
     let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
         &effects,
-        &lash_kernel_doc::ContractId::new("1"),
+        &lash_vocabulary::operations::ContractId::new("1"),
         finish_control(),
     )
     .expect("the test's effects are operations");

@@ -6,10 +6,18 @@ use lash_kernel_doc::{Correspondence, Survivor};
 use std::collections::BTreeMap;
 use std::convert::Infallible;
 
-use lash_kernel_doc::{
-    Block, Document, FunctionBody, FunctionCatalog, FunctionDefinition, FunctionId, FunctionName,
-    Implementation, Node, NodeMut, Site, Unit,
-};
+use lash_kernel_doc::Block;
+use lash_kernel_doc::Document;
+use lash_kernel_doc::FunctionBody;
+use lash_kernel_doc::FunctionCatalog;
+use lash_kernel_doc::FunctionDefinition;
+use lash_kernel_doc::Implementation;
+use lash_kernel_doc::Node;
+use lash_kernel_doc::NodeMut;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 use crate::migration::DocumentRefusal;
 
@@ -257,7 +265,8 @@ pub(crate) fn library_sites(
 mod tests {
     use std::collections::BTreeMap;
 
-    use lash_kernel_doc::{FunctionId, parse_document};
+    use lash_kernel_doc::parse_document;
+    use lash_vocabulary::legacy_names::FunctionId;
 
     /// K-DOC-002 (FIG-6865): replacing a library function rewrites every
     /// slot that holds it, so no slot keeps the old identity: an `await` in

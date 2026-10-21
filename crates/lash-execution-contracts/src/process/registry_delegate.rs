@@ -99,17 +99,17 @@ pub use delegate_process_query;
 /// A registration carries no id until the registrar mints one, so a decorator
 /// that keys a side effect by process reads it off the forwarded result.
 pub trait RegisteredProcess {
-    fn registered_process_id(&self) -> &crate::ProcessId;
+    fn registered_process_id(&self) -> &lash_vocabulary::identity::ProcessId;
 }
 
 impl RegisteredProcess for crate::ProcessRecord {
-    fn registered_process_id(&self) -> &crate::ProcessId {
+    fn registered_process_id(&self) -> &lash_vocabulary::identity::ProcessId {
         &self.id
     }
 }
 
 impl RegisteredProcess for crate::ProcessRegistrationReceipt {
-    fn registered_process_id(&self) -> &crate::ProcessId {
+    fn registered_process_id(&self) -> &lash_vocabulary::identity::ProcessId {
         &self.record.id
     }
 }
@@ -140,7 +140,7 @@ macro_rules! delegate_process_registrar {
             async fn register_process_with_observers(
                 &self,
                 registration: $crate::ProcessRegistration,
-                observers: &[$crate::SessionId],
+                observers: &[lash_vocabulary::identity::SessionId],
             ) -> Result<$crate::ProcessRecord, $crate::PluginError> {
                 let $registration_self = self;
                 let $registration_call = self
@@ -152,7 +152,7 @@ macro_rules! delegate_process_registrar {
             async fn register_process_reporting_outcome(
                 &self,
                 registration: $crate::ProcessRegistration,
-                observers: &[$crate::SessionId],
+                observers: &[lash_vocabulary::identity::SessionId],
             ) -> Result<$crate::ProcessRegistrationReceipt, $crate::PluginError> {
                 let $registration_self = self;
                 let $registration_call = self
@@ -164,7 +164,7 @@ macro_rules! delegate_process_registrar {
             async fn prepare_process_registration(
                 &self,
                 registration: $crate::ProcessRegistration,
-                observers: &[$crate::SessionId],
+                observers: &[lash_vocabulary::identity::SessionId],
             ) -> Result<$crate::PreparedProcessRegistration, $crate::PluginError> {
                 self.$inner
                     .prepare_process_registration(registration, observers)
@@ -181,7 +181,7 @@ macro_rules! delegate_process_registrar {
 
             async fn set_external_ref(
                 &self,
-                process_id: &$crate::ProcessId,
+                process_id: &lash_vocabulary::identity::ProcessId,
                 external_ref: $crate::ProcessExternalRef,
             ) -> Result<$crate::ProcessRecord, $crate::PluginError> {
                 let $event_process_id = process_id;
@@ -203,7 +203,7 @@ macro_rules! delegate_process_event_log {
         impl $crate::process::registry_concerns::ProcessEventLog for $wrapper {
             async fn event_by_replay_key(
                 &self,
-                process_id: &$crate::ProcessId,
+                process_id: &lash_vocabulary::identity::ProcessId,
                 replay_key: &str,
                 through_sequence: u64,
             ) -> Result<
@@ -217,7 +217,7 @@ macro_rules! delegate_process_event_log {
 
             async fn event_page_after(
                 &self,
-                process_id: &$crate::ProcessId,
+                process_id: &lash_vocabulary::identity::ProcessId,
                 after_sequence: u64,
                 limit: std::num::NonZeroUsize,
                 mode: $crate::ProcessEventQueryMode,
@@ -232,7 +232,7 @@ macro_rules! delegate_process_event_log {
 
             async fn recent_events(
                 &self,
-                process_id: &$crate::ProcessId,
+                process_id: &lash_vocabulary::identity::ProcessId,
                 limit: usize,
             ) -> Result<Vec<$crate::ProcessEvent>, $crate::PluginError> {
                 self.$inner.recent_events(process_id, limit).await
@@ -256,7 +256,7 @@ macro_rules! delegate_process_lifecycle {
         impl $crate::process::registry_concerns::ProcessLifecycle for $wrapper {
             async fn complete_process(
                 &self,
-                process_id: &$crate::ProcessId,
+                process_id: &lash_vocabulary::identity::ProcessId,
                 await_output: $crate::ProcessAwaitOutput,
                 authority: $crate::ProcessCompletionAuthority,
             ) -> Result<$crate::ProcessCompletionOutcome, $crate::PluginError> {
@@ -270,7 +270,7 @@ macro_rules! delegate_process_lifecycle {
 
             async fn complete_process_with_prelude(
                 &self,
-                process_id: &$crate::ProcessId,
+                process_id: &lash_vocabulary::identity::ProcessId,
                 await_output: $crate::ProcessAwaitOutput,
                 prelude: Vec<$crate::ProcessEventAppendRequest>,
                 authority: $crate::ProcessCompletionAuthority,
@@ -295,7 +295,7 @@ macro_rules! delegate_process_lifecycle {
 
             async fn request_process_cancel(
                 &self,
-                process_id: &$crate::ProcessId,
+                process_id: &lash_vocabulary::identity::ProcessId,
                 origin: lash_protocol_types::CancelOrigin,
                 requester: String,
                 attribution: Option<lash_core_store::effect_identity::RuntimeReplayAttribution>,
@@ -310,7 +310,7 @@ macro_rules! delegate_process_lifecycle {
 
             async fn request_process_cancel_reporting_realization(
                 &self,
-                process_id: &$crate::ProcessId,
+                process_id: &lash_vocabulary::identity::ProcessId,
                 origin: lash_protocol_types::CancelOrigin,
                 requester: String,
                 attribution: Option<lash_core_store::effect_identity::RuntimeReplayAttribution>,
@@ -394,7 +394,7 @@ macro_rules! delegate_process_observer_registry {
             async fn observers_for_process(
                 &self,
                 process_id: &ProcessId,
-            ) -> Result<Vec<$crate::SessionId>, $crate::PluginError> {
+            ) -> Result<Vec<lash_vocabulary::identity::SessionId>, $crate::PluginError> {
                 self.$inner.observers_for_process(process_id).await
             }
 
@@ -461,7 +461,7 @@ macro_rules! delegate_process_retention {
 
             async fn release_process_events(
                 &self,
-                process_id: &$crate::ProcessId,
+                process_id: &lash_vocabulary::identity::ProcessId,
                 through: u64,
             ) -> Result<$crate::ProcessEventRelease, $crate::PluginError> {
                 self.$inner
@@ -493,7 +493,7 @@ macro_rules! delegate_process_retention {
 
             async fn release_consumer_hold(
                 &self,
-                process_id: &$crate::ProcessId,
+                process_id: &lash_vocabulary::identity::ProcessId,
                 key: &str,
             ) -> Result<(), $crate::PluginError> {
                 self.$inner.release_consumer_hold(process_id, key).await
@@ -503,7 +503,7 @@ macro_rules! delegate_process_retention {
                 &self,
                 key: &str,
                 owner: &lash_core_store::scope_identity::ScopeId,
-            ) -> Result<Vec<$crate::ProcessId>, $crate::PluginError> {
+            ) -> Result<Vec<lash_vocabulary::identity::ProcessId>, $crate::PluginError> {
                 self.$inner.abandon_consumer_hold(key, owner).await
             }
         }

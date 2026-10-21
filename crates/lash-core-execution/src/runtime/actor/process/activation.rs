@@ -72,7 +72,6 @@ use super::{CascadeProgress, end_scope};
 use crate::ActorContext;
 use crate::AdmittedScope;
 use crate::CancelOrigin;
-use crate::ProcessId;
 use crate::runtime::actor::activation_loop;
 use crate::runtime::actor::round::lifecycle::{Act, Idle, Lifecycle};
 use crate::runtime::actor::round::{self, MemberBodies, PolicyView, RoundError, RunFold};
@@ -88,6 +87,7 @@ use lash_execution_contracts::process::EngineState;
 use lash_execution_contracts::process::ProcessEngine;
 use lash_execution_contracts::process::ProcessInput;
 use lash_execution_contracts::process::StepRequest;
+use lash_vocabulary::identity::ProcessId;
 
 /// The activation of claimed process actors: one per node, routed by
 /// [`lash_durable::ActorDispatch`].

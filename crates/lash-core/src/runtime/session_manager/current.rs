@@ -1,6 +1,6 @@
 use super::*;
-use crate::TurnId;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
+use lash_vocabulary::identity::TurnId;
 
 impl CurrentOwnerCapability {
     /// Resolve the resident durable-state projection for `session_id`. Only

@@ -7,7 +7,8 @@ use lash_core_store::plugin_state::{NamespaceBody, NamespaceEntry, PluginNamespa
 use lash_core_store::store::{
     AdmittedTurnRows, ControlIntentId, RunAdmissionRecord, RunTerminalCause,
 };
-use lash_protocol_types::{SessionId, TurnId};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 /// A namespace at `generation` holding `value` under `key`: its entry and
 /// its values body.
@@ -75,7 +76,7 @@ pub async fn a_runs_namespace_write_modes_keep_only_current_values_and_end_with_
         admission: RunAdmissionRecord::Turn {
             took: AdmittedTurnRows::Inputs {
                 ids: lash_core_store::store::AdmittedInputIds::one(
-                    lash_protocol_types::InputId::from("namespace-batch"),
+                    lash_vocabulary::identity::InputId::from("namespace-batch"),
                 ),
             },
             trace: None,

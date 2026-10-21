@@ -32,7 +32,7 @@ mod tool_intent_ingress_observability;
 async fn created_session(
     core: &lash::LashCore,
     model: &str,
-    session_id: impl Into<lash::SessionId>,
+    session_id: impl Into<lash_vocabulary::identity::SessionId>,
 ) -> lash::SessionBuilder {
     let session_id = session_id.into();
     match core

@@ -1,5 +1,5 @@
-use crate::SessionId;
 use crate::session_identity::SessionRelation;
+use lash_vocabulary::identity::SessionId;
 
 /// Coarse durable relation carried by a host-facing session view.
 ///

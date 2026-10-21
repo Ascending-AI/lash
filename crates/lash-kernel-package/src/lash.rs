@@ -4,8 +4,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use lash_kernel_dialect::PackagePath;
-use lash_kernel_doc::{ArtifactDigest, FunctionDefinition, FunctionId, FunctionRegistry};
+use lash_kernel_doc::ArtifactDigest;
+use lash_kernel_doc::FunctionDefinition;
+use lash_kernel_doc::FunctionRegistry;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::names::PackagePath;
 
 use crate::package::{Code, PackageDisplay, digest_of};
 use crate::{Origin, Package, PackageRefusal, Root};
@@ -79,9 +82,10 @@ impl Package {
             if !self.roots.iter().any(|root| root.holds(name)) {
                 return Err(PackageRefusal::OutsideRoots {
                     package: self.path.clone(),
-                    definition: lash_kernel_doc::FunctionName::new(name).unwrap_or_else(|_| {
-                        unreachable!("a registered definition's name is a function name")
-                    }),
+                    definition: lash_vocabulary::legacy_names::FunctionName::new(name)
+                        .unwrap_or_else(|_| {
+                            unreachable!("a registered definition's name is a function name")
+                        }),
                 });
             }
         }

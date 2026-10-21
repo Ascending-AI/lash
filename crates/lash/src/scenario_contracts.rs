@@ -80,7 +80,7 @@ pub const AGENT_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
 mod tests {
     use std::collections::BTreeSet;
 
-    use super::*;
+    use lash_vocabulary::schema_contract::*;
 
     #[test]
     fn agent_scenario_contract_metadata_is_unique_and_complete() {

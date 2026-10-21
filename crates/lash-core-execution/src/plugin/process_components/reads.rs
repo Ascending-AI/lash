@@ -4,7 +4,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use lash_execution_contracts::process::{EngineEffectReads, EngineReadError};
-use lash_kernel_doc::{ContractId, EffectName};
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::operations::ContractId;
 use tokio_util::sync::CancellationToken;
 
 use super::{OwnerConfigView, PluginError, ProcessComposition, ProcessEnv};
@@ -41,7 +42,8 @@ impl EngineEffectReads for ProcessReads {
                 "the recorded environment has no route".to_owned(),
             ));
         };
-        if link.policy != crate::ExecutionPolicy::Read || link.dispatches() {
+        if link.policy != lash_vocabulary::tool_contract::ExecutionPolicy::Read || link.dispatches()
+        {
             return Err(unavailable("the recorded route is not a read".to_owned()));
         }
         if !self.composition.registers(&link.provider) {

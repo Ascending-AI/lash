@@ -32,7 +32,7 @@
 //! walks.
 
 use crate::Value;
-use crate::name::FunctionId;
+use lash_vocabulary::legacy_names::FunctionId;
 
 /// A body compiled to Rust: the definition it was generated from, by
 /// identity, and the code. Generated code builds these as constants with

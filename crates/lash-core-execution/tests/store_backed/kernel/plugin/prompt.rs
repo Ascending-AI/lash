@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use lash_durable::domain::{ModelCallId, PromptCallKey};
 use lash_durable::{ActorKey, CommitLabel, FormatSet, MailTx, NodeId, NodeSpec};
 
+use crate::PromptRegistration;
 use crate::plugin::prompt::{
     OfferedTools, ProjectedHistoryStats, PromptCall, PromptCatalog, PromptInput, PromptModel,
     PromptPlacement, PromptPlan, PromptPurpose, PromptRenderError, PromptSectionId,
@@ -18,7 +19,7 @@ use crate::plugin::prompt::{
     PromptWrapTarget, SectionText, admission_record, load_admitted_call, load_prompt_snapshot,
 };
 use crate::testing::prompt::{ComposedPrompt, PromptCut, PromptCutParts, compose, namespace};
-use crate::{PromptRegistration, SessionId};
+use lash_vocabulary::identity::SessionId;
 
 const SESSION: &str = "prompt-snapshot";
 
@@ -126,7 +127,7 @@ fn call_key(call: u32) -> PromptCallKey {
     PromptCallKey {
         session: SessionId::from(SESSION),
         call: ModelCallId::Turn {
-            run: lash_protocol_types::TurnId::from("prompt-turn"),
+            run: lash_vocabulary::identity::TurnId::from("prompt-turn"),
             ordinal: call,
         },
     }
@@ -155,10 +156,12 @@ fn response(call: u32) -> lash_protocol_types::llm::types::ResponseContext {
             output_spec: Some(LlmOutputSpec::JsonObject),
             tools: vec![ToolCallContract {
                 name: "lookup".to_owned(),
-                input_schema: crate::SchemaContract::admit(serde_json::json!({
-                    "type": "object",
-                    "properties": { "query": { "type": "string" } },
-                }))
+                input_schema: lash_vocabulary::schema_contract::SchemaContract::admit(
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": { "query": { "type": "string" } },
+                    }),
+                )
                 .expect("a valid tool input schema"),
             }],
         }),
@@ -373,7 +376,7 @@ async fn an_admitted_calls_snapshot_reads_back_byte_for_byte_without_any_rendere
     tx.write(lash_durable::DomainWrite::Prompt(
         lash_durable::domain::PromptWrite::Settle {
             session: SessionId::from(SESSION),
-            run: lash_protocol_types::TurnId::from("prompt-turn"),
+            run: lash_vocabulary::identity::TurnId::from("prompt-turn"),
             open: None,
         },
     ));

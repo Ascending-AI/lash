@@ -5,11 +5,11 @@
 
 use std::sync::Arc;
 
-use lash_protocol_types::{ToolCallId, ToolIntentKind};
+use lash_protocol_types::ToolCallId;
+use lash_vocabulary::ToolIntentKind;
 use serde::{Deserialize, Serialize};
 
 use crate::EffectOpener;
-use crate::ProcessId;
 use crate::RuntimeEffectControllerError;
 use crate::StartKey;
 use crate::runtime::effect::{AttemptStream, AttemptStreamRecorder};
@@ -19,6 +19,7 @@ use crate::tool_run::{
     CallDecision, DeclarationRefusal, ExternalCancelPolicy, HookCause, ToolDeclaration,
 };
 use lash_execution_contracts::process::ProcessStartRegistration;
+use lash_vocabulary::identity::ProcessId;
 
 /// One tool call to run in its owning Run.
 #[derive(Clone, Debug, PartialEq, Eq)]

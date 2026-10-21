@@ -6,13 +6,16 @@
 //! a child of a stated kind, checked by [`ExecRoot::check_children`] and
 //! [`ProcessState::check_children`].
 
-use lash_kernel_doc::graph_tokens::{TokenCodec, TokenError, TokenReader, TokenWriter};
+use lash_vocabulary::tokens::TokenCodec;
+use lash_vocabulary::tokens::TokenError;
+use lash_vocabulary::tokens::TokenReader;
+use lash_vocabulary::tokens::TokenWriter;
 
 use super::decode::GraphDecoder;
 use super::node::NodeId;
 use super::refusal::GraphRefusal;
 use super::registry::NodeKind;
-use crate::store::plugin_writers::PluginCallbackIdentity;
+use lash_vocabulary::providers::PluginCallbackIdentity;
 
 fn unsupported(variant: u32) -> TokenError {
     TokenError::UnsupportedVariant { variant }
@@ -263,7 +266,7 @@ pub struct ExecRoot {
     /// natives and kernel versions its code reaches and the providers and
     /// codecs of its static operation links, written with every root. An
     /// ended root requires nothing.
-    pub requirements: lash_kernel_doc::ExecutionRequirements,
+    pub requirements: lash_vocabulary::claims::ClaimRequirements,
 }
 
 impl TokenCodec for ExecRoot {
@@ -295,7 +298,7 @@ impl TokenCodec for ExecRoot {
             host: Option::decode(input)?,
             envelope: Option::decode(input)?,
             owed: Vec::decode(input)?,
-            requirements: lash_kernel_doc::ExecutionRequirements::decode(input)?,
+            requirements: lash_vocabulary::claims::ClaimRequirements::decode(input)?,
         })
     }
 }

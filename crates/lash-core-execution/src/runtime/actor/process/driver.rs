@@ -8,10 +8,11 @@ use std::collections::BTreeMap;
 use lash_durable::domain::WaitId;
 use serde::{Deserialize, Serialize};
 
-use crate::{ProcessId, ToolCallId};
+use crate::ToolCallId;
 use lash_execution_contracts::process::KeyName;
 use lash_execution_contracts::process::StepName;
 use lash_execution_contracts::process::StepRequest;
+use lash_vocabulary::identity::ProcessId;
 
 /// The driver's state of one process.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -81,7 +82,7 @@ pub(super) struct InFlight {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub(super) resolves: bool,
     /// The policy its admission pinned.
-    pub(super) policy: lash_protocol_types::ExecutionPolicy,
+    pub(super) policy: lash_vocabulary::tool_contract::ExecutionPolicy,
     /// Its limit's expiry, as admitted: never refreshed.
     pub(super) limit_expires_at: u64,
     /// Its limit's longest slice in milliseconds, as admitted.
@@ -120,7 +121,7 @@ pub(super) enum Blocked {
         wait: StoredWaitId,
         /// The node that waits, when the engine named one.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<lash_protocol_types::EffectId>,
+        site: Option<lash_vocabulary::sites::EffectId>,
     },
     /// Another process's terminal.
     Process {
@@ -130,7 +131,7 @@ pub(super) enum Blocked {
         wait: StoredWaitId,
         /// The node that waits, when the engine named one.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<lash_protocol_types::EffectId>,
+        site: Option<lash_vocabulary::sites::EffectId>,
     },
     /// A durable instant.
     Sleep {
@@ -138,7 +139,7 @@ pub(super) enum Blocked {
         until: i64,
         /// The node that sleeps, when the engine named one.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<lash_protocol_types::EffectId>,
+        site: Option<lash_vocabulary::sites::EffectId>,
     },
     /// Nothing but its mailbox.
     Idle,
@@ -193,7 +194,7 @@ impl<'de> Deserialize<'de> for StoredWaitId {
 /// The decode error of a driver that does not decode.
 pub(crate) fn in_flight_effects(
     stored: Option<&str>,
-) -> Result<Vec<lash_kernel_doc::EffectName>, serde_json::Error> {
+) -> Result<Vec<lash_vocabulary::legacy_names::EffectName>, serde_json::Error> {
     Ok(Driver::decode(stored)?.in_flight_effects())
 }
 
@@ -234,7 +235,7 @@ pub async fn engine_status(
 impl Driver {
     /// The effects of the tool steps it holds admitted and unsettled: what
     /// a successor env must link as their admissions matched them.
-    pub(super) fn in_flight_effects(&self) -> Vec<lash_kernel_doc::EffectName> {
+    pub(super) fn in_flight_effects(&self) -> Vec<lash_vocabulary::legacy_names::EffectName> {
         self.steps
             .values()
             .filter_map(|step| match &step.request {

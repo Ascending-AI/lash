@@ -101,7 +101,7 @@ pub(crate) async fn import(
             .effects
             .iter()
             .filter(|(effect, _)| {
-                lash_kernel_dialect::QualifiedOperation::from_effect(effect)
+                lash_vocabulary::names::QualifiedOperation::from_effect(effect)
                     .is_ok_and(|operation| view.permits_operation(&operation))
             })
             .map(|(effect, requirement)| (effect.clone(), requirement.clone()))

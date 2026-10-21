@@ -19,6 +19,8 @@ pub(crate) use crate::{
     ProcessRegistration, ProcessRegistry, ProcessStatus, ProcessStatusFilter, SessionScope,
     WaitState,
 };
-pub(crate) use lash_protocol_types::{
-    AttachmentCreateMeta, AttachmentTypeMetadata, EffectAddress, MediaType, SessionId,
-};
+pub(crate) use lash_protocol_types::AttachmentCreateMeta;
+pub(crate) use lash_protocol_types::AttachmentTypeMetadata;
+pub(crate) use lash_protocol_types::EffectAddress;
+pub(crate) use lash_protocol_types::MediaType;
+pub(crate) use lash_vocabulary::identity::SessionId;

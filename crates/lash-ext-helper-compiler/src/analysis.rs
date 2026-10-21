@@ -8,10 +8,17 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::{
-    ActKind, Action, Callee, Expr, Formula, FunctionDefinition, FunctionId, Node, Operand, Place,
-    Stmt,
-};
+use lash_kernel_doc::ActKind;
+use lash_kernel_doc::Action;
+use lash_kernel_doc::Callee;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Formula;
+use lash_kernel_doc::FunctionDefinition;
+use lash_kernel_doc::Node;
+use lash_kernel_doc::Operand;
+use lash_kernel_doc::Place;
+use lash_kernel_doc::Stmt;
+use lash_vocabulary::legacy_names::FunctionId;
 
 use crate::library::Library;
 

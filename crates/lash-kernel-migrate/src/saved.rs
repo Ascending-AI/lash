@@ -7,7 +7,12 @@
 //! carried the same way.
 
 use lash_kernel_dialect::SavedFunction;
-use lash_kernel_doc::{Document, FunctionCatalog, FunctionValue, Name, Site, Unit};
+use lash_kernel_doc::Document;
+use lash_kernel_doc::FunctionCatalog;
+use lash_kernel_doc::FunctionValue;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 use crate::migration::{DocumentRefusal, Migration};
 

@@ -1,6 +1,6 @@
 //! Host projections over frozen registrations and retained records.
 use crate::plugins::{ContributionKey, PluginHost};
-use lash_core::RuntimeOwner;
+use lash_vocabulary::identity::RuntimeOwner;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 mod attribution;
@@ -50,7 +50,7 @@ impl PluginDiagnostics {
     pub fn installed(&self, scope: &InventoryScope) -> InstalledObservation {
         let host = self.core.env.plugin_host.as_ref();
         match scope {
-            InventoryScope::Deployment(crate::plugins::RegistryKind::Session) => host
+            InventoryScope::Deployment(lash_vocabulary::claims::RegistryKind::Session) => host
                 .and_then(|host| host.installed_inventory().ok())
                 .map_or(
                     InstalledObservation::Unavailable {
@@ -58,7 +58,7 @@ impl PluginDiagnostics {
                     },
                     InstalledObservation::Present,
                 ),
-            InventoryScope::Deployment(crate::plugins::RegistryKind::Process) => {
+            InventoryScope::Deployment(lash_vocabulary::claims::RegistryKind::Process) => {
                 InstalledObservation::Present(
                     self.core
                         .env
@@ -114,7 +114,7 @@ impl PluginDiagnostics {
     pub async fn explain_claimability(
         &self,
         node: Option<&NodeServingSnapshot>,
-        session: &crate::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
     ) -> Result<ClaimExplanation, DiagnosticError> {
         self.explain_actor_claimability(node, &ActorKey::session(session.as_str())?)
             .await
@@ -137,7 +137,7 @@ impl PluginDiagnostics {
     /// Retained plan; no session activation or writer access.
     pub async fn prompt_plan(
         &self,
-        session: &crate::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
     ) -> Result<Option<crate::prompt::PromptPlan>, DiagnosticError> {
         let store = lash_core::store::SessionStore::new(
             Arc::clone(&self.core.store_factory) as Arc<dyn lash_core::store::RuntimeStore>,
@@ -155,7 +155,7 @@ impl PluginDiagnostics {
     /// A changed actor revision invalidates the projection, without retrying.
     pub async fn obligation_evidence(
         &self,
-        session: &crate::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         expected_revision: StateRevision,
         after: usize,
         limit: std::num::NonZeroUsize,

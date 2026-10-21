@@ -32,7 +32,9 @@
 use std::collections::BTreeMap;
 
 use lash_kernel_check::library_performs;
-use lash_kernel_package::{MemberPath, PackagePath, PackageView};
+use lash_kernel_package::PackageView;
+use lash_vocabulary::names::MemberPath;
+use lash_vocabulary::names::PackagePath;
 mod activity;
 mod applies;
 pub use activity::{ActionActivity, ActionObservation, ActionState, ActivityRefusal};
@@ -56,17 +58,35 @@ pub use coverage::{
     NodeCoverage, PathSite, PathStep, ScopeCoverage, StatementCoverage, WorkflowCoverage, coverage,
     path,
 };
-pub use lash_kernel_doc::{RanCounts, ReplayPath, RunObservation, TaskPath};
+pub use lash_vocabulary::observation::RanCounts;
+pub use lash_vocabulary::observation::ReplayPath;
+pub use lash_vocabulary::observation::RunObservation;
+pub use lash_vocabulary::observation::TaskPath;
 
 use lash_kernel_check::{
     ActNode, ActionNode, AtomNode, BindingId, CalleeNode, ExprNode, Graph, GraphNode, NodeId,
     NodeKind, Reference, StmtNode, WorkflowDocument,
 };
-use lash_kernel_doc::{
-    ActExpr, ActKind, Action, AssignOrder, Atom, Callee, Document, EffectName, Expr,
-    FunctionDeclarations, FunctionId, FunctionName, Name, Node, Param, Place, Site, Stmt, Type,
-    Unit,
-};
+use lash_kernel_doc::ActExpr;
+use lash_kernel_doc::ActKind;
+use lash_kernel_doc::Action;
+use lash_kernel_doc::AssignOrder;
+use lash_kernel_doc::Atom;
+use lash_kernel_doc::Callee;
+use lash_kernel_doc::Document;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::FunctionDeclarations;
+use lash_kernel_doc::Node;
+use lash_kernel_doc::Place;
+use lash_kernel_doc::Stmt;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::Type;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -100,7 +120,7 @@ pub const JSON_SCHEMA: &str = include_str!("../kernel-workflow-view-v1.schema.js
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkflowView {
-    pub document: lash_kernel_doc::DocumentId,
+    pub document: lash_vocabulary::legacy_names::DocumentId,
     /// The callable the view opens: its declared signature and what a call
     /// of it can end with.
     pub entry: EntryView,

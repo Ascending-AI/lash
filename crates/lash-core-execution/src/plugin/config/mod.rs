@@ -172,7 +172,7 @@ impl ConfigRegistrar {
         )
         .enumerate()
         .map(|(index, (kind, key))| super::ContributionDescriptor {
-            registry: lash_core_store::obligations::RegistryKind::Session,
+            registry: lash_vocabulary::claims::RegistryKind::Session,
             kind,
             key: super::ContributionKey::Named {
                 owner: self.owner_id.clone(),

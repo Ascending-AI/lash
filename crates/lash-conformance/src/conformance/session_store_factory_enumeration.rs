@@ -1,6 +1,6 @@
 use super::session_store_factory::session_store_request;
 use super::*;
-use lash_protocol_types::TurnId;
+use lash_vocabulary::identity::TurnId;
 use pretty_assertions::assert_eq;
 
 #[expect(

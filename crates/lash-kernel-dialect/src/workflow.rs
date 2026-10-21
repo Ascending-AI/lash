@@ -26,7 +26,11 @@
 
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{Document, Function, Name, Signature, Span};
+use lash_kernel_doc::Document;
+use lash_kernel_doc::Function;
+use lash_kernel_doc::Span;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::types::Signature;
 
 use crate::{Diagnostic, DiagnosticKind, Note};
 

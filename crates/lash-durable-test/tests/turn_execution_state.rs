@@ -384,12 +384,12 @@ async fn a_committed_frame_switch_clears_the_execution_state(tier: Tier) {
             }
         }
     });
-    let definition = lash_core::ToolDefinition::control(
+    let definition = lash_vocabulary::tool_contract::ToolDefinition::control(
         "switch_frame",
         "tools.switch_frame",
         "Switches the agent frame and hands the new frame a task.",
         serde_json::json!({ "type": "object", "additionalProperties": false, "properties": {} }),
-        lash_core::TurnControls::switch_agent_frame(),
+        lash_vocabulary::tool_declaration::TurnControls::switch_agent_frame(),
     )
     .unwrap()
     .with_execution(std::time::Duration::from_secs(120));
@@ -430,25 +430,27 @@ struct RotatingTools {
     rotated: AtomicBool,
 }
 
-fn rotating_definition(name: &str) -> lash_core::ToolDefinition {
-    let input = lash_core::ToolDefinition::default_input_schema();
+fn rotating_definition(name: &str) -> lash_vocabulary::tool_contract::ToolDefinition {
+    let input = lash_vocabulary::tool_contract::ToolDefinition::default_input_schema();
     let description = "Exercises tool discovery across an agent frame rotation.";
     let draft = match name {
-        "rotate_surface" => lash_core::ToolDefinition::control(
+        "rotate_surface" => lash_vocabulary::tool_contract::ToolDefinition::control(
             format!("tool:{name}"),
             format!("tools.{name}"),
             description,
             input,
-            lash_core::TurnControls::switch_agent_frame(),
+            lash_vocabulary::tool_declaration::TurnControls::switch_agent_frame(),
         ),
-        "new_after_rotation" => lash_core::ToolDefinition::control(
+        "new_after_rotation" => lash_vocabulary::tool_contract::ToolDefinition::control(
             format!("tool:{name}"),
             format!("tools.{name}"),
             description,
             input,
-            lash_core::TurnControls::finish(lash_core::JsonSchema::any()),
+            lash_vocabulary::tool_declaration::TurnControls::finish(
+                lash_vocabulary::json_schema::JsonSchema::any(),
+            ),
         ),
-        _ => lash_core::ToolDefinition::raw(
+        _ => lash_vocabulary::tool_contract::ToolDefinition::raw(
             format!("tool:{name}"),
             format!("tools.{name}"),
             description,
@@ -467,7 +469,7 @@ impl lash_core::ToolProvider for RotatingTools {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok({
@@ -486,7 +488,7 @@ impl lash_core::ToolProvider for RotatingTools {
         &self,
         name: &str,
         config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         self.tool_manifests(config)
             .ok()?
             .into_iter()
@@ -567,8 +569,8 @@ async fn a_rotations_follow_on_is_offered_the_newly_advertised_tools(tier: Tier)
             lash::config::ConfigWrite::new("select-tools", config.revision().await.unwrap()),
             lash::config::ConfigTransaction::of(lash::tools::SetToolSelection {
                 tools: lash::tools::ToolSelection::AllExcept(vec![
-                    lash_core::ToolId::from("tool:hidden_after_rotation"),
-                    lash_core::ToolId::from("tool:curated_before_rotation"),
+                    lash_vocabulary::tool_contract::ToolId::from("tool:hidden_after_rotation"),
+                    lash_vocabulary::tool_contract::ToolId::from("tool:curated_before_rotation"),
                 ]),
             }),
         )

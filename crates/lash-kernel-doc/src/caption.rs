@@ -12,7 +12,14 @@ use std::collections::BTreeSet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{Correspondence, Document, DocumentId, IdentifiedDocument, Node, Site, Stmt, Unit};
+use crate::Correspondence;
+use crate::Document;
+use crate::IdentifiedDocument;
+use crate::Node;
+use crate::Stmt;
+use lash_vocabulary::legacy_names::DocumentId;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 mod target;
 
@@ -295,15 +302,16 @@ impl CaptionKind {
             .map(|(site, kind)| (CaptionTarget::Site(site), kind))
             .collect();
         for (function, declared) in &document.functions {
-            let params: Vec<&crate::Name> = match document.entries.get(function) {
-                Some(entry) => entry
-                    .signature
-                    .params
-                    .iter()
-                    .map(|param| &param.name)
-                    .collect(),
-                None => declared.params.iter().collect(),
-            };
+            let params: Vec<&lash_vocabulary::legacy_names::Name> =
+                match document.entries.get(function) {
+                    Some(entry) => entry
+                        .signature
+                        .params
+                        .iter()
+                        .map(|param| &param.name)
+                        .collect(),
+                    None => declared.params.iter().collect(),
+                };
             out.extend(params.into_iter().map(|param| {
                 (
                     CaptionTarget::Param(ParamTarget {
@@ -681,34 +689,34 @@ impl<'de> Deserialize<'de> for Captions {
     }
 }
 
-impl crate::graph_tokens::TokenCodec for Caption {
-    fn encode(&self, out: &mut crate::graph_tokens::TokenWriter) {
+impl lash_vocabulary::tokens::TokenCodec for Caption {
+    fn encode(&self, out: &mut lash_vocabulary::tokens::TokenWriter) {
         out.seq(2);
         out.text(&self.title);
         self.description.encode(out);
     }
 
     fn decode(
-        input: &mut crate::graph_tokens::TokenReader<'_>,
-    ) -> Result<Self, crate::graph_tokens::TokenError> {
+        input: &mut lash_vocabulary::tokens::TokenReader<'_>,
+    ) -> Result<Self, lash_vocabulary::tokens::TokenError> {
         input.expect_struct(2)?;
         let title = String::decode(input)?;
         let description = Option::decode(input)?;
         Self::new(title, description)
-            .map_err(|error| crate::graph_tokens::TokenError::Invalid(error.to_string()))
+            .map_err(|error| lash_vocabulary::tokens::TokenError::Invalid(error.to_string()))
     }
 }
 
-impl crate::graph_tokens::TokenCodec for Captions {
-    fn encode(&self, out: &mut crate::graph_tokens::TokenWriter) {
+impl lash_vocabulary::tokens::TokenCodec for Captions {
+    fn encode(&self, out: &mut lash_vocabulary::tokens::TokenWriter) {
         out.seq(2);
         self.document.encode(out);
         self.entries.encode(out);
     }
 
     fn decode(
-        input: &mut crate::graph_tokens::TokenReader<'_>,
-    ) -> Result<Self, crate::graph_tokens::TokenError> {
+        input: &mut lash_vocabulary::tokens::TokenReader<'_>,
+    ) -> Result<Self, lash_vocabulary::tokens::TokenError> {
         input.expect_struct(2)?;
         let captions = Self {
             document: DocumentId::decode(input)?,
@@ -716,7 +724,7 @@ impl crate::graph_tokens::TokenCodec for Captions {
         };
         captions
             .check_order()
-            .map_err(|error| crate::graph_tokens::TokenError::Invalid(error.to_string()))?;
+            .map_err(|error| lash_vocabulary::tokens::TokenError::Invalid(error.to_string()))?;
         Ok(captions)
     }
 }

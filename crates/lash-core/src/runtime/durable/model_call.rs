@@ -45,11 +45,18 @@ use std::time::Duration;
 use lash_durable::{DueSource, DurableInstant};
 
 use super::session::{ModelPin, TurnDrive, TurnError};
-use crate::{
-    ActorContext, EffectId, ExecutionBudgets, ExecutionLimit, FailureCode, HostTurnProtocol,
-    LlmCallError, LlmRequest, LlmTerminalReason, ProviderFailureKind, TurnFailureCode,
-};
+use crate::ActorContext;
+use crate::ExecutionBudgets;
+use crate::ExecutionLimit;
+use crate::FailureCode;
+use crate::HostTurnProtocol;
+use crate::LlmCallError;
+use crate::LlmRequest;
+use crate::LlmTerminalReason;
+use crate::ProviderFailureKind;
+use crate::TurnFailureCode;
 use lash_sansio::TurnCheckpoint;
+use lash_vocabulary::sites::EffectId;
 
 /// version_surface = "coexist"
 /// version_guard(items(MODEL_REQUEST_PIN_DOMAIN, request_ref))

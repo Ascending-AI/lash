@@ -15,16 +15,18 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
+use lash_vocabulary::identity::SessionId;
 
 const SESSION_MODEL: &str = "own-env-session-model";
 const RUN_MODEL: &str = "own-env-run-model";
 const CHANGED_MODEL: &str = "own-env-changed-model";
 const SESSION: &str = "own-env-session";
 
-const PROBE: lash_core::ProcessConfigKey<()> =
-    lash_core::ProcessConfigKey::new(SESSION_TOOLS, lash_core::FormatVersion::ONE);
+const PROBE: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
+    SESSION_TOOLS,
+    lash_vocabulary::providers::FormatVersion::ONE,
+);
 /// Holds the process's first step on the first worker.
 const WAIT: &str = "probe_wait";
 /// Records what the step reads.
@@ -72,19 +74,26 @@ fn granted() -> BTreeMap<lash::SlotId, lash::CapabilityRef> {
     BTreeMap::from([(slot(), capability())])
 }
 
-fn probe_definition(name: &str) -> lash_core::ToolDefinition {
+fn probe_definition(name: &str) -> lash_vocabulary::tool_contract::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
     let output = serde_json::json!({ "type": "string" });
-    let definition =
-        lash_core::ToolDefinition::raw(name, format!("tools.{name}"), "The probe.", object, output)
-            .expect("the probe's schemas")
-            .with_execution(Duration::from_secs(120));
+    let definition = lash_vocabulary::tool_contract::ToolDefinition::raw(
+        name,
+        format!("tools.{name}"),
+        "The probe.",
+        object,
+        output,
+    )
+    .expect("the probe's schemas")
+    .with_execution(Duration::from_secs(120));
     if name == WAIT {
-        definition.with_execution_policy(lash_core::ExecutionPolicy::repeatable(
-            std::num::NonZeroU32::new(4).unwrap(),
-            1,
-            1,
-        ))
+        definition.with_execution_policy(
+            lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+                std::num::NonZeroU32::new(4).unwrap(),
+                1,
+                1,
+            ),
+        )
     } else {
         definition
     }
@@ -119,9 +128,9 @@ struct Seen {
 /// The recorded caller facts the host handler sees, before and after restart.
 #[derive(Clone, Debug)]
 struct CallContext {
-    process: lash_core::ProcessId,
+    process: lash_vocabulary::identity::ProcessId,
     provenance: lash::process::ProcessProvenance,
-    run: Option<lash_core::TurnId>,
+    run: Option<lash_vocabulary::identity::TurnId>,
 }
 
 fn assert_provenance(
@@ -525,14 +534,14 @@ async fn a_process_runs_under_its_own_recorded_environment_after_its_session_is_
         Duration::from_secs(60),
         session
             .send(lash::TurnInput::text("start the process"))
-            .id(lash::TurnId::try_from("own-env-start".to_owned()).unwrap())
+            .id(lash_vocabulary::identity::TurnId::try_from("own-env-start".to_owned()).unwrap())
             .run(run)
             .model(RUN_MODEL)
             .options(
                 lash::RunOptionsKey::<lash::tools::ToolSelectionConfig>::new(SESSION_TOOLS),
                 lash::tools::ToolSelectionConfig {
                     tools: Some(lash::tools::ToolSelection::AllExcept(vec![
-                        lash_core::ToolId::from(EXTRA),
+                        lash_vocabulary::tool_contract::ToolId::from(EXTRA),
                     ])),
                 },
             )
@@ -567,7 +576,9 @@ async fn a_process_runs_under_its_own_recorded_environment_after_its_session_is_
         .apply(
             lash::config::ConfigWrite::new("own-env:narrow", revision),
             lash::config::ConfigTransaction::of(lash::tools::SetToolSelection {
-                tools: lash::tools::ToolSelection::AllExcept(vec![lash_core::ToolId::from(LATER)]),
+                tools: lash::tools::ToolSelection::AllExcept(vec![
+                    lash_vocabulary::tool_contract::ToolId::from(LATER),
+                ]),
             }),
         )
         .await

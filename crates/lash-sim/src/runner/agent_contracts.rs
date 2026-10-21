@@ -2,8 +2,8 @@ use super::*;
 use lash_protocol_types::ReportedFailure;
 
 mod process_fixtures;
-use lash_protocol_types::ProcessId;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 use process_fixtures::*;
 
 thread_local! {
@@ -526,7 +526,7 @@ async fn facade_final_value_execution_inner(
     let result = engine
         .run_turn(
             &session,
-            lash_core::TurnId::fixture(format!("{session_id}-turn")),
+            lash_vocabulary::identity::TurnId::fixture(format!("{session_id}-turn")),
             events.clone(),
             Arc::new(move |session: &lash::LashSession| {
                 Ok(session.send(lash::TurnInput::text(prompt)))
@@ -654,7 +654,7 @@ async fn facade_agent_process_execution_with_options(
     let result = engine
         .run_turn(
             &session,
-            lash_core::TurnId::fixture(format!("{session_id}-turn")),
+            lash_vocabulary::identity::TurnId::fixture(format!("{session_id}-turn")),
             contract_turn_events(&events, &graph_store, &core),
             contract_turn(prompt),
         )
@@ -891,8 +891,10 @@ async fn agent_process_contract_core_with_options(
 }
 
 /// The component that serves a contract's tools to its processes.
-const CONTRACT_TOOLS: lash_core::ProcessConfigKey<()> =
-    lash_core::ProcessConfigKey::new("contract-tools", lash_core::FormatVersion::ONE);
+const CONTRACT_TOOLS: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
+    "contract-tools",
+    lash_vocabulary::providers::FormatVersion::ONE,
+);
 
 /// `builder` with the session process controls, `tools` and `delegation`,
 /// each also a process component: a process a contract starts runs under
@@ -1496,7 +1498,7 @@ fn normalize_contract_tool_output(value: Value) -> Value {
                 .unwrap_or_default(),
             "names_its_process": names_its_process,
             "process_id_minted": process_id
-                .is_some_and(|process_id| lash_core::ProcessId::parse(process_id).is_ok()),
+                .is_some_and(|process_id| lash_vocabulary::identity::ProcessId::parse(process_id).is_ok()),
         });
     }
     if !object.contains_key("full_output_path") {

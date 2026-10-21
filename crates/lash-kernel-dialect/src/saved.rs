@@ -5,17 +5,25 @@
 //! ([`lash_kernel_doc::snapshot`]): this module saves every closure a
 //! carried binding reaches ([`save`]) and freezes its captures as pages.
 use crate::Written;
+use lash_kernel_doc::Document;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Function;
+use lash_kernel_doc::FunctionCatalog;
+use lash_kernel_doc::FunctionRepresentation;
 use lash_kernel_doc::heap::*;
 use lash_kernel_doc::snapshot::{
     CodeReads, FrozenToken, SnapshotError, SnapshotHeap, SnapshotRefusal, gather, members, text_is,
     text_of,
 };
-use lash_kernel_doc::{
-    Document, EffectName, Expr, Function, FunctionCatalog, FunctionId, FunctionRepresentation,
-    Name, OperationRequirement, Signature, Site, Unit,
-};
 use lash_kernel_state::kernel_internals::PagedHeap;
 use lash_kernel_state::paged::{FrozenRef, HeapWriteError, SemanticHeap};
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::operations::OperationRequirement;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
+use lash_vocabulary::types::Signature;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 mod carry;

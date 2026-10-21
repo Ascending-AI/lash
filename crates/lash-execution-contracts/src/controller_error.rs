@@ -189,7 +189,7 @@ impl From<PluginError> for RuntimeEffectControllerError {
             PluginError::ToolRegistrationRefused { ref source }
                 if matches!(
                     **source,
-                    crate::RegistrationRefused::UnregisteredIsolationEngine { .. }
+                    lash_vocabulary::tool_contract::RegistrationRefused::UnregisteredIsolationEngine { .. }
                 ) =>
             {
                 Self::new(
@@ -231,7 +231,7 @@ impl From<PluginError> for RuntimeEffectControllerError {
     }
 }
 
-fn err_message(refusal: &crate::RegistrationRefused) -> String {
+fn err_message(refusal: &lash_vocabulary::tool_contract::RegistrationRefused) -> String {
     format!("{refusal}; the work waits for a worker that registers that engine")
 }
 

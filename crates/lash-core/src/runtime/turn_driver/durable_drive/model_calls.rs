@@ -5,7 +5,7 @@ impl RuntimeDrive {
     pub(super) async fn record_unsent_model_call(
         &mut self,
         cx: &ActorContext,
-        id: crate::EffectId,
+        id: lash_vocabulary::sites::EffectId,
         error: crate::LlmCallError,
     ) -> Result<(), TurnError> {
         use lash_core_store::model_calls::{ModelCallEnd, ModelCallEndReason};
@@ -157,15 +157,15 @@ pub(super) async fn project_usage(
 pub(super) struct CommittedFollow {
     sink: lash_durable::runner::WakeSink,
     actor: lash_durable::ActorKey,
-    run: crate::TurnId,
-    inputs: Vec<crate::InputId>,
+    run: lash_vocabulary::identity::TurnId,
+    inputs: Vec<lash_vocabulary::identity::InputId>,
     outcome: crate::store::RunCommittedOutcome,
 }
 
 impl CommittedFollow {
     pub(super) fn new(
         cx: &ActorContext,
-        run: &crate::TurnId,
+        run: &lash_vocabulary::identity::TurnId,
         ingress: Option<&crate::store::IngressSettlement>,
         outcome: crate::store::RunCommittedOutcome,
     ) -> Self {

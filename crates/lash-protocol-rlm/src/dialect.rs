@@ -9,8 +9,8 @@ use lash_core::{ExecRequest, ExecResponse, RuntimeExecutionContext, SessionError
 use lash_kernel_doc::NumberPolicy;
 use lash_rlm_types::RlmGlobalsPatchPluginBody;
 use lash_tool_presenter_api::ToolPresenterSlot;
-use lash_tool_shape::SchemaShape;
 use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
+use lash_vocabulary::tool_shape::SchemaShape;
 
 pub use python::PythonPrompts;
 pub use typescript::TypescriptPrompts;
@@ -319,7 +319,7 @@ pub(crate) struct CodeModeDialectServices {
 /// The operation named by the effect name `effect` as `spelling` writes
 /// it; `effect` itself when it names no canonical operation.
 pub(crate) fn spelled_effect(spelling: lash_kernel_dialect::Spelling, effect: &str) -> String {
-    lash_kernel_dialect::operation_text::parse(effect).map_or_else(
+    lash_vocabulary::operation_text::parse(effect).map_or_else(
         |_| effect.to_owned(),
         |operation| lash_kernel_dialect::spell_operation(spelling, &operation),
     )
@@ -483,7 +483,10 @@ impl SessionDialect {
 
     /// A catalog tool's call path in the selected dialect: its operation,
     /// spelled by the dialect.
-    pub(crate) fn tool_call_path(&self, manifest: &lash_core::ToolManifest) -> String {
+    pub(crate) fn tool_call_path(
+        &self,
+        manifest: &lash_vocabulary::tool_contract::ToolManifest,
+    ) -> String {
         lash_kernel_dialect::spell_operation(self.language().spelling(), &manifest.operation)
     }
 
@@ -570,7 +573,10 @@ impl SessionDialect {
     /// How a cell calls the finish tool `manifest`: Lash's `control.finish`
     /// as the dialect spells it, or a host's own by its call path. Its input
     /// is what the catalog documents.
-    pub(crate) fn finish_call(&self, manifest: &lash_core::ToolManifest) -> String {
+    pub(crate) fn finish_call(
+        &self,
+        manifest: &lash_vocabulary::tool_contract::ToolManifest,
+    ) -> String {
         if manifest.id.as_str() == crate::control_tools::FINISH_TOOL_ID {
             return self.prompt_vocabulary().finish_call.to_owned();
         }

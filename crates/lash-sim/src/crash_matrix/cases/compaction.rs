@@ -28,7 +28,8 @@ use lash_durable::domain::{ModelCallId, ModelCallPinWrite, PromptCallKey, Prompt
 use lash_durable::{ActorState, CommitLabel};
 use lash_durable_test::{Cut, SimNodes};
 use lash_protocol_types::llm::types::{LlmCallId, LlmRequestScope};
-use lash_protocol_types::{BatchId, SessionId};
+use lash_vocabulary::identity::BatchId;
+use lash_vocabulary::identity::SessionId;
 
 use super::command::{settled, submit};
 use super::{session_actor, state};

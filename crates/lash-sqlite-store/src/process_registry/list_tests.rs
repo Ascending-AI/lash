@@ -128,8 +128,8 @@ fn until_scope_roster_page_seeks_the_lifetime_scope_index() {
         &lash_execution_contracts::process::ProcessListFilter {
             status: lash_execution_contracts::process::ProcessStatusFilter::Any,
             until: Some(lash_core_store::scope_identity::ScopeId::turn(
-                lash_protocol_types::SessionId::from("plan-session"),
-                lash_protocol_types::TurnId::from("plan-turn"),
+                lash_vocabulary::identity::SessionId::from("plan-session"),
+                lash_vocabulary::identity::TurnId::from("plan-turn"),
             )),
             ..lash_execution_contracts::process::ProcessListFilter::default()
         },
@@ -267,7 +267,7 @@ fn process_lifecycle_write_size() {
         let wait = WaitState {
             kind: WaitKind::Call {
                 call_id: lash_protocol_types::ToolCallId::fixture("write-size"),
-                tool_id: lash_protocol_types::tool_contract::ToolId::from("write-size"),
+                tool_id: lash_vocabulary::tool_contract::ToolId::from("write-size"),
             },
             since_ms: 20,
             site: None,

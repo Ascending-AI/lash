@@ -3,20 +3,31 @@
 //! makes a slot admit a function, through the one decode the presenters
 //! read too.
 
-use lash_kernel_doc::{MapType, Name, Param, RecordType, RecordTypeField, Signature, Type};
-use lash_tool_shape::{SchemaDocument, ShapeKind};
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::tool_shape::SchemaDocument;
+use lash_vocabulary::tool_shape::ShapeKind;
+use lash_vocabulary::types::MapType;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::RecordType;
+use lash_vocabulary::types::RecordTypeField;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 use serde_json::{Value, json};
 
-use crate::{SchemaConflict, SchemaProjectionRefusal, signature_serves};
+use lash_vocabulary::schema::SchemaConflict;
+use lash_vocabulary::schema::SchemaProjectionRefusal;
+use lash_vocabulary::schema::signature_serves;
 
 /// The kernel type `schema` projects to as an input.
 fn type_of_schema(schema: &Value) -> Type {
-    crate::type_of_schema(schema).unwrap_or_else(|refusal| panic!("{schema}: {refusal}"))
+    lash_vocabulary::schema::type_of_schema(schema)
+        .unwrap_or_else(|refusal| panic!("{schema}: {refusal}"))
 }
 
 /// The kernel type `schema` projects to as a result.
 fn result_type_of_schema(schema: &Value) -> Type {
-    crate::result_type_of_schema(schema).unwrap_or_else(|refusal| panic!("{schema}: {refusal}"))
+    lash_vocabulary::schema::result_type_of_schema(schema)
+        .unwrap_or_else(|refusal| panic!("{schema}: {refusal}"))
 }
 
 /// Some value of `ty` holds a function somewhere: what the crossing walk
@@ -251,10 +262,16 @@ fn json_is_the_data_part_of_any() {
         Type::Task(Box::new(Type::Any)),
         Type::Handle("rows".into()),
     ] {
-        assert!(crate::types::disjoint(&never, &Type::Json), "{never:?}");
+        assert!(
+            lash_vocabulary::type_relations::disjoint(&never, &Type::Json),
+            "{never:?}"
+        );
     }
     for some in [Type::Any, data, Type::Error, Type::Text] {
-        assert!(!crate::types::disjoint(&some, &Type::Json), "{some:?}");
+        assert!(
+            !lash_vocabulary::type_relations::disjoint(&some, &Type::Json),
+            "{some:?}"
+        );
     }
 }
 
@@ -277,7 +294,7 @@ fn field(name: &str, ty: Type, optional: bool) -> RecordTypeField {
 }
 
 fn refusal(schema: &Value) -> SchemaProjectionRefusal {
-    crate::type_of_schema(schema).expect_err("no kernel type")
+    lash_vocabulary::schema::type_of_schema(schema).expect_err("no kernel type")
 }
 
 /// SCHEMA-UNION (FIG-6951): `anyOf`, `oneOf` and a `type` list project to
@@ -449,7 +466,7 @@ fn a_conjunction_projects_to_the_meet_of_its_members_or_is_refused_naming_where(
         }
     );
     // The open result has room for the required field.
-    assert!(crate::result_type_of_schema(&required_out).is_ok());
+    assert!(lash_vocabulary::schema::result_type_of_schema(&required_out).is_ok());
     let nested = json!({"allOf": [
         closed_object(json!({"plan": closed_object(json!({"step": {"type": "string"}}), &[])}), &[]),
         closed_object(json!({"plan": closed_object(json!({"step": {"type": "boolean"}}), &[])}), &[]),
@@ -487,11 +504,11 @@ fn a_marker_under_a_composition_types_and_presents_its_slot_as_the_marked_kind()
         for (schema, nullable) in [
             (
                 json!({"anyOf": [marked, {"type": "null"}]}),
-                crate::types::union([expected.clone(), Type::Null]),
+                lash_vocabulary::type_relations::union([expected.clone(), Type::Null]),
             ),
             (
                 json!({"oneOf": [{"type": "null"}, marked]}),
-                crate::types::union([Type::Null, expected.clone()]),
+                lash_vocabulary::type_relations::union([Type::Null, expected.clone()]),
             ),
         ] {
             assert_eq!(type_of_schema(&schema), nullable, "{schema}");
@@ -832,7 +849,7 @@ fn a_meet_past_its_size_bound_is_refused_naming_where_and_shared_references_are_
         SchemaProjectionRefusal {
             path: "/properties/query/allOf".into(),
             conflict: SchemaConflict::TooLarge {
-                limit: crate::MAX_PROJECTED_TYPE_NODES
+                limit: lash_vocabulary::schema::MAX_PROJECTED_TYPE_NODES
             },
         }
     );
@@ -851,13 +868,16 @@ fn a_meet_past_its_size_bound_is_refused_naming_where_and_shared_references_are_
     );
     // A union larger than the bound is as large as its members: it stands,
     // and so does its meet with a type that only narrows it.
-    let modes: Vec<Value> = (0..=crate::MAX_PROJECTED_TYPE_NODES)
+    let modes: Vec<Value> = (0..=lash_vocabulary::schema::MAX_PROJECTED_TYPE_NODES)
         .map(|index| json!({"const": format!("v{index}")}))
         .collect();
     let Type::Union(wide) = type_of_schema(&json!({"type": "string", "anyOf": modes})) else {
         panic!("a union");
     };
-    assert_eq!(wide.len(), crate::MAX_PROJECTED_TYPE_NODES + 1);
+    assert_eq!(
+        wide.len(),
+        lash_vocabulary::schema::MAX_PROJECTED_TYPE_NODES + 1
+    );
     // Sixteen definitions each naming the next twice resolve 2^17 - 1
     // references in full: the first resolutions are typed, and those past
     // the budget are typed as at a cycle.

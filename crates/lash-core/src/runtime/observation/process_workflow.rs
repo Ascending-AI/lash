@@ -3,19 +3,18 @@
 //! Session cells still use the trace overlay: they have no process event log.
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_protocol_types::EffectId;
-use lash_trace::{
-    TraceLanguageExecutionPayload, TraceNodeFact, TraceRuntimeSubject, WorkflowDocumentRef,
-};
+use lash_trace::{TraceLanguageExecutionPayload, TraceNodeFact, TraceRuntimeSubject};
+use lash_vocabulary::names::LinkedStart;
+use lash_vocabulary::sites::EffectId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::process_replay::ProcessObservationEventPayload;
-use crate::ProcessId;
 use lash_execution_contracts::process::ObservedProcessEvent;
 use lash_execution_contracts::process::ProcessEffectOutcomeClass;
 use lash_execution_contracts::process::ProcessLifecycleFact;
 use lash_execution_contracts::process::WaitKind;
+use lash_vocabulary::identity::ProcessId;
 
 /// What was observed at a site's latest occurrence. An unobserved terminal
 /// does not claim the action succeeded: the process ended without that fact.
@@ -100,7 +99,7 @@ impl From<&WaitKind> for ProcessWorkflowWaitKind {
 pub struct ProcessWorkflowSite {
     /// The authored statement from the effect request, when observed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub origin: Option<lash_kernel_doc::Site>,
+    pub origin: Option<lash_vocabulary::sites::Site>,
     pub at: EffectId,
     /// A display label supplied by the engine, independent of the opaque token.
     pub label: String,
@@ -144,7 +143,7 @@ pub enum ProcessWorkflowLiveCoverage {
     },
 }
 
-pub use lash_kernel_doc::RunObservation as ProcessWorkflowObservation;
+pub use lash_vocabulary::observation::RunObservation as ProcessWorkflowObservation;
 
 /// How many times a document statement started, an empty block was entered,
 /// an action issued or a while condition was tested, by its document count ordinal. `committed` sums the process's
@@ -171,7 +170,7 @@ pub struct ProcessWorkflowOverlay {
     pub process_id: ProcessId,
     /// Supplied by an accepted live observation, absent in a committed-only fold.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub document: Option<WorkflowDocumentRef>,
+    pub document: Option<LinkedStart>,
     pub current_sites: Vec<EffectId>,
     pub live_coverage: ProcessWorkflowLiveCoverage,
     pub sites: Vec<ProcessWorkflowSite>,
@@ -183,8 +182,8 @@ pub struct ProcessWorkflowOverlay {
 impl ProcessWorkflowOverlay {
     /// The counts a host passes to `workflow::view::coverage`, including live
     /// provisional starts. Off remains unobserved even when the vector is empty.
-    pub fn ran_counts(&self) -> lash_kernel_doc::RanCounts {
-        lash_kernel_doc::RanCounts {
+    pub fn ran_counts(&self) -> lash_vocabulary::observation::RanCounts {
+        lash_vocabulary::observation::RanCounts {
             observation: Some(self.observation),
             ran: self
                 .ran
@@ -215,11 +214,11 @@ struct Site {
 /// Replay duplicates and effect retries never increment the entry count.
 pub struct ProcessWorkflowOverlayAccumulator {
     process_id: ProcessId,
-    document: Option<WorkflowDocumentRef>,
+    document: Option<LinkedStart>,
     sites: BTreeMap<lash_trace::WorkflowTaskSite, Site>,
-    current: BTreeMap<lash_kernel_doc::TaskLabel, EffectId>,
-    live_tasks: BTreeSet<lash_kernel_doc::TaskLabel>,
-    live_entries: lash_protocol_types::ObservationReader,
+    current: BTreeMap<lash_vocabulary::sites::TaskLabel, EffectId>,
+    live_tasks: BTreeSet<lash_vocabulary::sites::TaskLabel>,
+    live_entries: lash_vocabulary::sites::ObservationReader,
     through: u64,
     ended: bool,
     live_coverage: ProcessWorkflowLiveCoverage,
@@ -238,7 +237,7 @@ impl ProcessWorkflowOverlayAccumulator {
             sites: BTreeMap::new(),
             current: BTreeMap::new(),
             live_tasks: BTreeSet::new(),
-            live_entries: lash_protocol_types::ObservationReader::default(),
+            live_entries: lash_vocabulary::sites::ObservationReader::default(),
             through: 0,
             ended: false,
             live_coverage: ProcessWorkflowLiveCoverage::NotObserved,
@@ -319,7 +318,7 @@ impl ProcessWorkflowOverlayAccumulator {
                 origin: None,
                 at: at.clone(),
                 label: at.to_string(),
-                occurrences: lash_protocol_types::ObservationReader::counts(at).starts,
+                occurrences: lash_vocabulary::sites::ObservationReader::counts(at).starts,
                 state: state.clone(),
                 first_entered: None,
                 last_settled: None,
@@ -338,7 +337,7 @@ impl ProcessWorkflowOverlayAccumulator {
             }
             held.value.at = at.clone();
             held.value.label = at.to_string();
-            held.value.occurrences = lash_protocol_types::ObservationReader::counts(at).starts;
+            held.value.occurrences = lash_vocabulary::sites::ObservationReader::counts(at).starts;
             held.value.state = state;
             held.durable_terminal = durable_terminal;
             held.timestamp = Some(timestamp);
@@ -468,10 +467,7 @@ impl ProcessWorkflowOverlayAccumulator {
         }
     }
 
-    fn live_document(
-        &mut self,
-        document: &WorkflowDocumentRef,
-    ) -> Result<(), ProcessWorkflowFoldError> {
+    fn live_document(&mut self, document: &LinkedStart) -> Result<(), ProcessWorkflowFoldError> {
         if self.document.as_ref().is_some_and(|held| held != document) {
             return Err(ProcessWorkflowFoldError::DifferentExecution);
         }
@@ -488,7 +484,7 @@ impl ProcessWorkflowOverlayAccumulator {
     /// observations arrive. Nested effect executions leave this fold unchanged.
     pub fn observe(
         &mut self,
-        document: &WorkflowDocumentRef,
+        document: &LinkedStart,
         event: &ProcessObservationEventPayload,
     ) -> Result<(), ProcessWorkflowFoldError> {
         match event {
@@ -641,7 +637,7 @@ mod tests {
     use super::*;
     use lash_trace::{
         LanguageExecutionObservation, TraceLanguageExecution, TraceLanguageExecutionIdentity,
-        TraceRuntimeScope, WorkflowDocumentEntry,
+        TraceRuntimeScope,
     };
 
     /// FIG-6358: committed entry and settlement sequences survive re-entry,
@@ -658,7 +654,7 @@ mod tests {
             (19, 1, false, 7, Some(19)),
             (19, 1, false, 7, Some(19)),
         ] {
-            at = lash_protocol_types::workflow_testkit::with_visit(&at, occurrence);
+            at = lash_vocabulary::sites::testkit::with_visit(&at, occurrence);
             let wait = lash_execution_contracts::process::WaitState {
                 kind: WaitKind::Sleep { until_ms: 100 },
                 since_ms: 1,
@@ -684,9 +680,9 @@ mod tests {
     /// a live completion; a later commit supplies both sequence coordinates.
     fn live_only_site_fixture() -> serde_json::Value {
         let process = ProcessId::fixture("live-site-sequences");
-        let document = WorkflowDocumentRef {
-            document: lash_kernel_doc::DocumentId::from_bytes([7; 32]),
-            entry: WorkflowDocumentEntry::Main,
+        let document = LinkedStart {
+            link: lash_vocabulary::content_ids::LinkId::from_bytes([7; 32]),
+            selector: lash_vocabulary::names::StartSelector::Main,
         };
         let mut overlay = ProcessWorkflowOverlayAccumulator::new(process.clone());
         let at = lash_protocol_types::effect_identity_fixture("effect", 0);
@@ -755,7 +751,7 @@ mod tests {
         // A later live occurrence owns the displayed state before the prior
         // occurrence's next committed settlement reaches this consumer.
         let mut next = at.clone();
-        next = lash_protocol_types::workflow_testkit::with_visit(&next, 1);
+        next = lash_vocabulary::sites::testkit::with_visit(&next, 1);
         observation.execution.payload = TraceLanguageExecutionPayload::Node {
             subject: observation.execution.subject(),
             at: next,
@@ -785,10 +781,7 @@ mod tests {
         });
         let snapshot = overlay.snapshot();
         let site = &snapshot.sites[0];
-        assert_eq!(
-            site.at.visit(),
-            lash_protocol_types::workflow_testkit::visit(1)
-        );
+        assert_eq!(site.at.visit(), lash_vocabulary::sites::testkit::visit(1));
         assert_eq!(site.state, ProcessWorkflowSiteState::Running);
         assert_eq!(site.first_entered, Some(7));
         assert_eq!(site.last_settled, Some(9));
@@ -833,9 +826,9 @@ mod tests {
     #[test]
     fn committed_counts_replace_provisional_ones_and_restart_at_a_carry() {
         let process = ProcessId::fixture("counted-workflow");
-        let document = WorkflowDocumentRef {
-            document: lash_kernel_doc::DocumentId::from_bytes([7; 32]),
-            entry: WorkflowDocumentEntry::Main,
+        let document = LinkedStart {
+            link: lash_vocabulary::content_ids::LinkId::from_bytes([7; 32]),
+            selector: lash_vocabulary::names::StartSelector::Main,
         };
         let live = |frame, ran: Vec<(u32, u64)>| {
             let identity = TraceLanguageExecutionIdentity {
@@ -927,9 +920,9 @@ mod tests {
     #[test]
     fn committed_site_states_do_not_require_a_document() {
         let process = ProcessId::fixture("committed-workflow");
-        let document = WorkflowDocumentRef {
-            document: lash_kernel_doc::DocumentId::from_bytes([7; 32]),
-            entry: WorkflowDocumentEntry::Main,
+        let document = LinkedStart {
+            link: lash_vocabulary::content_ids::LinkId::from_bytes([7; 32]),
+            selector: lash_vocabulary::names::StartSelector::Main,
         };
         let mut committed = ProcessWorkflowOverlayAccumulator::new(process.clone());
         let mut live = ProcessWorkflowOverlayAccumulator::new(process.clone());
@@ -1066,9 +1059,9 @@ mod tests {
     #[test]
     fn nested_effect_executions_leave_the_process_sites_unchanged() {
         let process = ProcessId::fixture("workflow-parent");
-        let document = WorkflowDocumentRef {
-            document: lash_kernel_doc::DocumentId::from_bytes([7; 32]),
-            entry: WorkflowDocumentEntry::Main,
+        let document = LinkedStart {
+            link: lash_vocabulary::content_ids::LinkId::from_bytes([7; 32]),
+            selector: lash_vocabulary::names::StartSelector::Main,
         };
         let mut overlay = ProcessWorkflowOverlayAccumulator::new(process.clone());
         let observation = LanguageExecutionObservation {
@@ -1111,8 +1104,8 @@ mod tests {
             .expect("effect address"),
             effect_id: "nested-code".into(),
         };
-        nested.execution.identity.document.document =
-            lash_kernel_doc::DocumentId::from_bytes([8; 32]);
+        nested.execution.identity.document.link =
+            lash_vocabulary::content_ids::LinkId::from_bytes([8; 32]);
         nested.execution.payload = TraceLanguageExecutionPayload::Node {
             subject: nested_subject,
             at: lash_protocol_types::effect_identity_fixture("child", 9),
@@ -1131,13 +1124,13 @@ mod tests {
     #[test]
     fn request_origins_stay_with_their_occurrence_after_completion_and_reentry() {
         let process = ProcessId::fixture("origins");
-        let document = WorkflowDocumentRef {
-            document: lash_kernel_doc::DocumentId::from_bytes([3; 32]),
-            entry: WorkflowDocumentEntry::Main,
+        let document = LinkedStart {
+            link: lash_vocabulary::content_ids::LinkId::from_bytes([3; 32]),
+            selector: lash_vocabulary::names::StartSelector::Main,
         };
         let mut overlay = ProcessWorkflowOverlayAccumulator::new(process.clone());
         let at = lash_protocol_types::effect_identity_fixture("effect", 0);
-        let origin = lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, vec![4]);
+        let origin = lash_vocabulary::sites::Site::new(lash_vocabulary::sites::Unit::Main, vec![4]);
         let clock = std::cell::Cell::new(100_u64);
         let observe = |overlay: &mut ProcessWorkflowOverlayAccumulator, at: &EffectId, fact| {
             overlay
@@ -1195,7 +1188,7 @@ mod tests {
             ProcessWorkflowSiteState::Completed
         );
         assert_eq!(overlay.snapshot().sites[0].origin, Some(origin.clone()));
-        let next = lash_protocol_types::workflow_testkit::with_visit(&at, 1);
+        let next = lash_vocabulary::sites::testkit::with_visit(&at, 1);
         observe(
             &mut overlay,
             &next,

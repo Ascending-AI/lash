@@ -1,6 +1,6 @@
-use crate::SessionId;
 use crate::session::runtime_ops::RuntimeExecutionContextRuntimeOps as _;
 use lash_protocol_types::sync::MutexExt;
+use lash_vocabulary::identity::SessionId;
 use std::sync::{Arc, OnceLock};
 
 use crate::PluginMessage;
@@ -79,7 +79,7 @@ impl ToolCatalogHandle {
     }
 
     /// The catalog's tools as definitions.
-    pub fn definitions(&self) -> Vec<crate::ToolDefinition> {
+    pub fn definitions(&self) -> Vec<lash_vocabulary::tool_contract::ToolDefinition> {
         self.0.surface.definitions().cloned().collect()
     }
 
@@ -435,7 +435,7 @@ impl Session {
     /// tool or one the surface does not offer.
     pub fn tool_surface_drift(
         &self,
-        tool_id: &crate::ToolId,
+        tool_id: &lash_vocabulary::tool_contract::ToolId,
     ) -> Result<Option<crate::ToolSurfaceDrift>, lash_execution_contracts::plugin_error::PluginError>
     {
         let config =

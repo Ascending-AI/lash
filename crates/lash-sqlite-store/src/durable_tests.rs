@@ -57,8 +57,8 @@ async fn single_statement_durable_reads_use_their_implicit_snapshots() {
 
     let set = SqliteStoreSet::memory().await.unwrap();
     let store = set.durable_store();
-    let session = lash_protocol_types::SessionId::fixture("metadata-read-work");
-    let run = lash_protocol_types::TurnId::fixture("metadata-read-run");
+    let session = lash_vocabulary::identity::SessionId::fixture("metadata-read-work");
+    let run = lash_vocabulary::identity::TurnId::fixture("metadata-read-run");
     let exec = ExecKey::Cell(
         session.clone(),
         run.clone(),
@@ -455,7 +455,7 @@ async fn a_model_start_binds_only_the_text_bodies_the_store_lacks() {
         .await
         .expect("register the owner");
     let epoch = store.claim(&node, 1).await.expect("claim")[0].epoch;
-    let run = lash_protocol_types::TurnId::from("prompt-bytes-turn");
+    let run = lash_vocabulary::identity::TurnId::from("prompt-bytes-turn");
     let text = |name: &str| PromptText {
         hash: BlobRef::for_content(format!("text {name}").as_bytes()).0,
         text: format!("text {name}").into(),
@@ -464,7 +464,7 @@ async fn a_model_start_binds_only_the_text_bodies_the_store_lacks() {
     let record = |ordinal: u32, snapshot: &[&str], request: &[&str]| {
         DomainWrite::Prompt(PromptWrite::Record {
             call: PromptCallKey {
-                session: lash_protocol_types::SessionId::from("prompt-bytes"),
+                session: lash_vocabulary::identity::SessionId::from("prompt-bytes"),
                 call: ModelCallId::Turn {
                     run: run.clone(),
                     ordinal,
@@ -483,7 +483,7 @@ async fn a_model_start_binds_only_the_text_bodies_the_store_lacks() {
     };
     let settle = |open: Option<u32>| {
         DomainWrite::Prompt(PromptWrite::Settle {
-            session: lash_protocol_types::SessionId::from("prompt-bytes"),
+            session: lash_vocabulary::identity::SessionId::from("prompt-bytes"),
             run: run.clone(),
             open,
         })
@@ -763,7 +763,7 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
 
     let (_root, set, _clock) = world(false).await;
     let store = set.durable_store();
-    let session = lash_protocol_types::SessionId::from("fragment-session");
+    let session = lash_vocabulary::identity::SessionId::from("fragment-session");
     let actor = ActorKey::session(session.as_str()).unwrap();
     let formats = FormatSet::new("fragment-index-formats");
     let mut create = MailTx::new();
@@ -825,7 +825,7 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
         let call = PromptCallKey {
             session: session.clone(),
             call: ModelCallId::Turn {
-                run: lash_protocol_types::TurnId::parse(format!("fragment-turn-{ordinal}"))
+                run: lash_vocabulary::identity::TurnId::parse(format!("fragment-turn-{ordinal}"))
                     .unwrap(),
                 ordinal: 1,
             },
@@ -971,7 +971,7 @@ async fn sequential_calls_submit_only_new_fragments_across_settlement() {
     let call = PromptCallKey {
         session: session.clone(),
         call: ModelCallId::Turn {
-            run: lash_protocol_types::TurnId::from("fragment-delete"),
+            run: lash_vocabulary::identity::TurnId::from("fragment-delete"),
             ordinal: 1,
         },
     };
@@ -1018,7 +1018,7 @@ async fn prompt_reclamation_reads_one_edge_batch_per_level() {
     let store = set.durable_store();
     let identity = lash_core_execution::testing::sql_work::owner_commit(&set).await;
     let actor = ActorKey::session("sql-work-owner").unwrap();
-    let session = lash_protocol_types::SessionId::from("sql-work-owner");
+    let session = lash_vocabulary::identity::SessionId::from("sql-work-owner");
     let mut texts: Vec<_> = (0..16)
         .map(|leaf| PromptText {
             hash: BlobRef::for_content(format!("leaf-{leaf}").as_bytes()).0,
@@ -1058,7 +1058,7 @@ async fn prompt_reclamation_reads_one_edge_batch_per_level() {
     let call = |run: &'static str| PromptCallKey {
         session: session.clone(),
         call: ModelCallId::Turn {
-            run: lash_protocol_types::TurnId::from(run),
+            run: lash_vocabulary::identity::TurnId::from(run),
             ordinal: 1,
         },
     };
@@ -1088,7 +1088,7 @@ async fn prompt_reclamation_reads_one_edge_batch_per_level() {
             .unwrap();
         tx.write(DomainWrite::Prompt(PromptWrite::Release {
             session: session.clone(),
-            run: Some(lash_protocol_types::TurnId::from(run)),
+            run: Some(lash_vocabulary::identity::TurnId::from(run)),
         }));
         let (answer, receipt) = lash_core_ids::operational_metrics::sql::collect(
             "prompt.release",
@@ -1164,9 +1164,9 @@ async fn prompt_text_reads_are_batched_in_request_order() {
     let mut tx = store.begin(&actor, Epoch(identity.epoch)).await.unwrap();
     tx.write(DomainWrite::Prompt(PromptWrite::Record {
         call: PromptCallKey {
-            session: lash_protocol_types::SessionId::from("sql-work-owner"),
+            session: lash_vocabulary::identity::SessionId::from("sql-work-owner"),
             call: ModelCallId::Turn {
-                run: lash_protocol_types::TurnId::from("batch-read"),
+                run: lash_vocabulary::identity::TurnId::from("batch-read"),
                 ordinal: 1,
             },
         },

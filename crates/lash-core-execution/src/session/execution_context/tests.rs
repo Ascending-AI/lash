@@ -12,7 +12,7 @@ impl ToolProvider for NoopTools {
         &self,
         _config: &crate::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<crate::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(Vec::new())
@@ -22,7 +22,7 @@ impl ToolProvider for NoopTools {
         &self,
         _name: &str,
         _config: &crate::OwnerConfigView,
-    ) -> Option<Arc<crate::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         None
     }
 
@@ -160,7 +160,7 @@ fn scoped_context(
     crate::testing::TestExecutionContextBuilder::over_controller(
         crate::testing::TestEffectController::Borrowed(controller),
     )
-    .session_id(lash_protocol_types::SessionId::fixture(session_id))
+    .session_id(lash_vocabulary::identity::SessionId::fixture(session_id))
     .plugin_factories(vec![])
     .build()
     .into_runtime()

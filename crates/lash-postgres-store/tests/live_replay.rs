@@ -25,7 +25,7 @@ use lash_core::{
     TurnActivityId, TurnEvent,
 };
 use lash_postgres_store::testing::{IsolatedDatabase, required_database_url};
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 #[path = "live_replay/bench.rs"]
 mod bench;
@@ -159,7 +159,7 @@ async fn publish(
             session,
             SessionRevision::new(1),
             vec![LiveReplayEventDraft::new(
-                None::<lash_core::TurnId>,
+                None::<lash_vocabulary::identity::TurnId>,
                 text(id, body),
             )],
         )
@@ -691,7 +691,7 @@ async fn a_takeover_replica_reads_back_a_dead_replicas_stream_and_continues_it()
             &session,
             SessionRevision::new(1),
             vec![LiveReplayEventDraft::new(
-                None::<lash_core::TurnId>,
+                None::<lash_vocabulary::identity::TurnId>,
                 text("attempt-1#2", "abandoned three"),
             )],
         ));
@@ -872,7 +872,7 @@ async fn session_and_process_tool_progress_reach_subscribers_on_another_replica(
             agent_frame_id: lash_core::FrameNodeId::new("frame").expect("frame"),
         },
         ExecutionOwner::Process {
-            process_id: lash_core::ProcessId::fixture("replica-process"),
+            process_id: lash_vocabulary::identity::ProcessId::fixture("replica-process"),
         },
     ] {
         let address = CallAddress {

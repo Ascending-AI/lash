@@ -3,8 +3,8 @@ use lash_execution_contracts::tool_intent::ToolIntentLedgerColumns;
 use lash_execution_contracts::tool_intent::ToolIntentSubmissionAdmission;
 use lash_execution_contracts::tool_intent::ToolIntentSubmissionRecord;
 use lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome;
-use lash_protocol_types::SessionId;
-use lash_protocol_types::TurnId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use sqlx::{PgConnection, PgPool, Row};
 
 use crate::{plugin_sqlx_error, process_decode_error};

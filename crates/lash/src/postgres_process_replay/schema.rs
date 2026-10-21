@@ -26,7 +26,10 @@
 //! and takes other processes' heads only without waiting, so writers never
 //! deadlock on the store's own order.
 
-use lash_core::{ProcessId, ProcessObservationCursor, ProcessReplayStoreError, ProcessSequence};
+use lash_core::ProcessObservationCursor;
+use lash_core::ProcessReplayStoreError;
+use lash_core::ProcessSequence;
+use lash_vocabulary::identity::ProcessId;
 use sqlx::{PgPool, Postgres, Row as _, Transaction};
 
 use super::codec::Doorbell;

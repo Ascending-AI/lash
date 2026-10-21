@@ -263,7 +263,7 @@ fn core_serving(double: &Double, entries: &[Entry<'_>], worker: &str, serve: boo
 }
 
 async fn created_on(core: &LashCore, id: &str, key: &str) -> lash::LashSession {
-    core.session(lash::SessionId::parse(id).expect("nonblank host identity"))
+    core.session(lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"))
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             key,
             lash::TurnBudget::Unbounded,
@@ -272,7 +272,7 @@ async fn created_on(core: &LashCore, id: &str, key: &str) -> lash::LashSession {
         )))
         .await
         .expect("create the session");
-    core.session(lash::SessionId::parse(id).expect("nonblank host identity"))
+    core.session(lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"))
         .open()
         .await
         .expect("open the session")
@@ -396,7 +396,9 @@ async fn park_of(session: &lash::LashSession, run: &str) -> lash::ParkedTurn {
     let settled = tokio::time::timeout(
         std::time::Duration::from_secs(60),
         session
-            .attach_id(lash::TurnId::parse(run).expect("nonblank host identity"))
+            .attach_id(
+                lash_vocabulary::identity::TurnId::parse(run).expect("nonblank host identity"),
+            )
             .output(),
     )
     .await
@@ -570,7 +572,10 @@ async fn a_catalog_edit_reaches_a_session_only_through_a_profile_change(tier: Ti
         "keys-boot-2",
     );
     let session = edited
-        .session(lash::SessionId::parse(session_id).expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse(session_id)
+                .expect("nonblank host identity"),
+        )
         .open()
         .await
         .expect("the redeployed host opens the session");
@@ -660,7 +665,10 @@ async fn a_recorded_llm_profile_whose_key_left_the_catalog_fails_typed_and_never
     let session = created_on(&first, session_id, KIMI).await;
     session
         .send(TurnInput::text("ask the session's model"))
-        .id(lash::TurnId::parse("keys-key-removed-run").expect("nonblank host identity"))
+        .id(
+            lash_vocabulary::identity::TurnId::parse("keys-key-removed-run")
+                .expect("nonblank host identity"),
+        )
         .await
         .expect("the held build accepts the input");
     drop(session);
@@ -713,7 +721,10 @@ async fn a_recorded_model_whose_key_serves_another_wire_model_is_refused_typed(t
     let session = created_on(&first, session_id, KIMI).await;
     session
         .send(TurnInput::text("ask the session's model"))
-        .id(lash::TurnId::parse("keys-wire-model-changed-run").expect("nonblank host identity"))
+        .id(
+            lash_vocabulary::identity::TurnId::parse("keys-wire-model-changed-run")
+                .expect("nonblank host identity"),
+        )
         .await
         .expect("the held build accepts the input");
     drop(session);
@@ -762,7 +773,10 @@ async fn an_unknown_key_is_refused_before_anything_changes(tier: Tier) {
     let unregistered = "unregistered@nowhere";
 
     let created = core
-        .session(lash::SessionId::parse("keys-unknown-create").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("keys-unknown-create")
+                .expect("nonblank host identity"),
+        )
         .create(lash::SessionCreation::root(lash::SessionSpec::new(
             unregistered,
             lash::TurnBudget::Unbounded,
@@ -776,7 +790,10 @@ async fn an_unknown_key_is_refused_before_anything_changes(tier: Tier) {
         created.as_ref().err()
     );
     let reopened = core
-        .session(lash::SessionId::parse("keys-unknown-create").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("keys-unknown-create")
+                .expect("nonblank host identity"),
+        )
         .open()
         .await;
     assert!(
@@ -892,7 +909,10 @@ async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(tier: 
 
     // Creation: a key with no reasoning controls cannot record an effort.
     let created = core
-        .session(lash::SessionId::parse("keys-reasoning-refused").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("keys-reasoning-refused")
+                .expect("nonblank host identity"),
+        )
         .create(lash::SessionCreation::root(
             lash::SessionSpec::new(
                 GLM,
@@ -914,7 +934,10 @@ async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(tier: 
         ),
     }
     let reopened = core
-        .session(lash::SessionId::parse("keys-reasoning-refused").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("keys-reasoning-refused")
+                .expect("nonblank host identity"),
+        )
         .open()
         .await;
     assert!(
@@ -924,20 +947,26 @@ async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(tier: 
     );
 
     // Send: the session records `high` on the thinking model.
-    core.session(lash::SessionId::parse("keys-reasoning").expect("nonblank host identity"))
-        .create(lash::SessionCreation::root(
-            lash::SessionSpec::new(
-                THINKER,
-                lash::TurnBudget::Unbounded,
-                lash::MaxToolCalls::new(1024),
-                lash::NoProgressBudget::bounded(12),
-            )
-            .reasoning(high.clone()),
-        ))
-        .await
-        .expect("the advertised effort is recorded");
+    core.session(
+        lash_vocabulary::identity::SessionId::parse("keys-reasoning")
+            .expect("nonblank host identity"),
+    )
+    .create(lash::SessionCreation::root(
+        lash::SessionSpec::new(
+            THINKER,
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+            lash::NoProgressBudget::bounded(12),
+        )
+        .reasoning(high.clone()),
+    ))
+    .await
+    .expect("the advertised effort is recorded");
     let session = core
-        .session(lash::SessionId::parse("keys-reasoning").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("keys-reasoning")
+                .expect("nonblank host identity"),
+        )
         .open()
         .await
         .expect("open the session");
@@ -1079,7 +1108,10 @@ async fn an_unjournaled_bind_fault_seals_nothing_and_recovers_after_the_park(tie
     catalog.serve(LlmProfileRegistry::new());
     session
         .send(TurnInput::text("ask the session's model"))
-        .id(lash::TurnId::parse("keys-bind-fault-park-run").expect("nonblank host identity"))
+        .id(
+            lash_vocabulary::identity::TurnId::parse("keys-bind-fault-park-run")
+                .expect("nonblank host identity"),
+        )
         .await
         .expect("the session accepts the input");
 
@@ -1111,9 +1143,9 @@ async fn an_unjournaled_bind_fault_seals_nothing_and_recovers_after_the_park(tie
     );
     let resumed = tokio::time::timeout(
         std::time::Duration::from_secs(60),
-        answer_of(
-            session.attach_id(lash::TurnId::parse("keys-bind-fault-park-run").expect("nonblank")),
-        ),
+        answer_of(session.attach_id(
+            lash_vocabulary::identity::TurnId::parse("keys-bind-fault-park-run").expect("nonblank"),
+        )),
     )
     .await
     .expect("the redriven run answers its follower");
@@ -1289,7 +1321,10 @@ impl AskTwiceRun {
         let session = created_on(&core, session_id, KIMI).await;
         let handle = session
             .send(TurnInput::text("ask the model through the tool"))
-            .id(lash::TurnId::parse(format!("{session_id}-run")).expect("nonblank host identity"))
+            .id(
+                lash_vocabulary::identity::TurnId::parse(format!("{session_id}-run"))
+                    .expect("nonblank host identity"),
+            )
             .await
             .expect("the session accepts the input");
         let run = Self {
@@ -1406,7 +1441,8 @@ async fn a_send_retry_after_its_model_key_left_the_catalog_returns_its_receipt(t
     let catalog = LiveCatalog::serving(registry_of(KIMI, "kimi-k3", route.handle()));
     let core = core_over(&double, &catalog, Vec::new());
     let session = created_on(&core, "keys-send-retry", KIMI).await;
-    let id = lash::TurnId::parse("keys-send-retry-run").expect("nonblank host identity");
+    let id = lash_vocabulary::identity::TurnId::parse("keys-send-retry-run")
+        .expect("nonblank host identity");
     let input = TurnInput::text("accept exactly once");
     let first = session
         .send(input.clone())
@@ -1513,7 +1549,7 @@ macro_rules! tiered {
     };
     (@tiers $law:ident; $(#[$ignored:meta])?) => {
         mod $law {
-            use super::*;
+            use lash_vocabulary::schema_contract::*;
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             $(#[$ignored])?

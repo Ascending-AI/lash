@@ -4,10 +4,11 @@
 //! reads the rows a target resolves through, and these functions decide what
 //! the rows say, so both backends answer one target the same way.
 
+use crate::StoreError;
 use crate::session_store_factory_types::Target;
 use crate::store::RunTerminal;
 use crate::turn_input_vocabulary::TurnInputStateKind;
-use crate::{SessionId, StoreError};
+use lash_vocabulary::identity::SessionId;
 
 /// What the rows a target resolves through say about it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

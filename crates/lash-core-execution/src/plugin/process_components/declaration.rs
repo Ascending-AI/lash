@@ -33,7 +33,9 @@ impl ProcessComponentDeclaration {
     /// start: one format token for every component `env` names, and the
     /// provider and codec version of every tool it links (FIG-6993), which
     /// a node must register to run a call through the link.
-    pub fn env_requirements(env: &ProcessEnv) -> BTreeSet<crate::ObligationToken> {
+    pub fn env_requirements(
+        env: &ProcessEnv,
+    ) -> BTreeSet<lash_vocabulary::claims::ObligationToken> {
         let mut linked = lash_kernel_doc::ExecutionRequirements::default();
         for link in env.effects().values() {
             link.require(&mut linked);
@@ -41,9 +43,14 @@ impl ProcessComponentDeclaration {
         env.components()
             .iter()
             .map(|entry| {
-                crate::ObligationToken::for_component(entry.id(), entry.config().format_version())
+                lash_vocabulary::claims::ObligationToken::for_component(
+                    entry.id(),
+                    entry.config().format_version(),
+                )
             })
-            .chain(crate::ObligationToken::for_requirements(&linked))
+            .chain(lash_vocabulary::claims::ObligationToken::for_requirements(
+                &linked,
+            ))
             .collect()
     }
 }

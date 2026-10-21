@@ -13,6 +13,7 @@ publish = false
 workspace = true
 
 [dependencies]
+lash-vocabulary = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }

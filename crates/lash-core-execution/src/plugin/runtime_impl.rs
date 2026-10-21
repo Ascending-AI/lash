@@ -1,4 +1,5 @@
-use crate::{RuntimeOwner, SessionId};
+use lash_vocabulary::identity::RuntimeOwner;
+use lash_vocabulary::identity::SessionId;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::sync::{Mutex as StdMutex, Weak};
@@ -396,7 +397,7 @@ impl PluginHost {
             return Err(super::CreationConfigError::Recipe(Box::new(
                 PluginError::Runtime(
                     super::RetirementRefusal::Admission {
-                        registry: crate::RegistryKind::Session,
+                        registry: lash_vocabulary::claims::RegistryKind::Session,
                         id: id.clone(),
                     }
                     .into_runtime_error(),
@@ -698,11 +699,11 @@ impl PluginHost {
         let recipes = self.recipes()?;
         for (slot, port) in [
             (
-                lash_core_store::tool_run::CallbackSlot::ProtocolSession,
+                lash_vocabulary::providers::CallbackSlot::ProtocolSession,
                 RequiredPort::ProtocolSession,
             ),
             (
-                lash_core_store::tool_run::CallbackSlot::ProtocolDriver,
+                lash_vocabulary::providers::CallbackSlot::ProtocolDriver,
                 RequiredPort::ProtocolDriver,
             ),
         ] {
@@ -756,7 +757,7 @@ impl PluginHost {
             })
             .collect::<Vec<_>>();
         Ok(InstalledInventory {
-            scope: InventoryScope::Deployment(lash_core_store::obligations::RegistryKind::Session),
+            scope: InventoryScope::Deployment(lash_vocabulary::claims::RegistryKind::Session),
             readiness: vec![readiness; entries.len()],
             entries,
             stateless: self

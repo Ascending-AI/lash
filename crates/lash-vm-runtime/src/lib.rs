@@ -27,11 +27,12 @@ mod projection;
 pub use authority::{
     AuthorityUnread, InternalAuthority, NoInternalOperations, StoredAuthority, admit_internal,
 };
-pub use boundary::{
-    BoundaryError, HostBoundary, MAX_PROJECTED_TYPE_NODES, MAX_RESOLVED_REFERENCES, SchemaConflict,
-    SchemaProjectionRefusal, effect_controls, offered_tool, owned_operation, tool_input,
-    type_of_schema,
-};
+pub use boundary::BoundaryError;
+pub use boundary::HostBoundary;
+pub use boundary::effect_controls;
+pub use boundary::offered_tool;
+pub use boundary::owned_operation;
+pub use boundary::tool_input;
 pub use formats::{
     KERNEL_DOCUMENT_SCHEMA_VERSION, KERNEL_PARKED_STATE_VERSION, KERNEL_SAVED_FUNCTION_VERSION,
     LASH_KERNEL_VERSION, previous_kernel_version, retired_kernel_version,
@@ -44,34 +45,87 @@ pub use lash_vm_broker::kernel::loader::LoadRefusal;
 /// document is linked, admitted and migrated against when the host
 /// installs no package of its own. The parent decodes them from the
 /// build's images, so it links no dialect (FIG-5812, FIG-6917).
-pub use lash_vm_releases::{LibraryError, lash_packages};
+pub use lash_vm_releases::{HelperRelease, LibraryError, helper_release};
 /// The names of the dialects lash ships: what a session or process records
 /// at creation, and what a host passes where it names its dialect
 /// (FIG-5990).
 pub use lash_vm_releases::{PYTHON as PYTHON_DIALECT, TYPESCRIPT as TYPESCRIPT_DIALECT};
+pub use lash_vocabulary::schema::MAX_PROJECTED_TYPE_NODES;
+pub use lash_vocabulary::schema::MAX_RESOLVED_REFERENCES;
+pub use lash_vocabulary::schema::SchemaConflict;
+pub use lash_vocabulary::schema::SchemaProjectionRefusal;
+pub use lash_vocabulary::schema::type_of_schema;
 pub use projection::{ProjectionCatalog, ProjectionProvider, ProjectionRefusal};
 
 /// The machine a worker hosts, as the broker drives it, and the run's
 /// wire-level host.
 pub use lash_vm_client::{RemoteMachine, RemoteMachines, RunHost};
 
-pub use process::{
-    AdmittedWorkflow, AdoptedRun, DocumentStoreError, EFFECT_ARGUMENTS, EFFECT_UNKNOWN,
-    ExecutionDocument, HelperAdoptionRefusal, KERNEL_RUN_STEP, KernelDocuments, KernelEngineSteps,
-    KernelMigrationRefusal, KernelMigrationSurvey, KernelMigrationSurveyError,
-    KernelProcessDefinition, KernelProcessEngine, KernelProcessFailureCode, KernelProcessInput,
-    KernelRecordedSettings, KernelRunPolicy, KernelSettingsError, KernelStateMigration,
-    LASH_VM_ENGINE_KIND, PlannedMigration, ProcessReplayRequest, RefusedKernelCell,
-    RefusedKernelProcess, ReplayFault, ReplayPath, ReplaySegments, SegmentAnswer, SegmentReplay,
-    StoredSourceMap, StoredWorkflow, TOOL_FAILED, TaskPath, UnmigratedKernelSession, Unreplayable,
-    Unretained, WorkflowAdmissionOutcome, WorkflowAdmissionRefusal, WorkflowAdmissionRequest,
-    WorkflowDocument, WorkflowDocumentError, WorkflowEnvironment, WorkflowEnvironmentRequest,
-    admit_kernel_process, carry_parked_checkpoint, carry_snapshot, definition_draft,
-    definition_of_entry, entry_signature, kernel_process_engine_registration,
-    migrate_function_value, migrate_saved_function, migration_refusal, plan_adoption,
-    plan_migration, survey_kernel_processes,
+pub use lash_vocabulary::observation::ReplayPath;
+pub use lash_vocabulary::observation::TaskPath;
+pub use process::AdmittedWorkflow;
+pub use process::AdoptedRun;
+pub use process::DocumentStoreError;
+pub use process::EFFECT_ARGUMENTS;
+pub use process::EFFECT_UNKNOWN;
+pub use process::ExecutionDocument;
+pub use process::HelperAdoptionRefusal;
+pub use process::KERNEL_RUN_STEP;
+pub use process::KernelDocuments;
+pub use process::KernelEngineSteps;
+pub use process::KernelMigrationRefusal;
+pub use process::KernelMigrationSurvey;
+pub use process::KernelMigrationSurveyError;
+pub use process::KernelProcessDefinition;
+pub use process::KernelProcessEngine;
+pub use process::KernelProcessFailureCode;
+pub use process::KernelProcessInput;
+pub use process::KernelRecordedSettings;
+pub use process::KernelRunPolicy;
+pub use process::KernelSettingsError;
+pub use process::KernelStateMigration;
+pub use process::LASH_VM_ENGINE_KIND;
+pub use process::PlannedMigration;
+pub use process::ProcessReplayRequest;
+pub use process::RefusedKernelCell;
+pub use process::RefusedKernelProcess;
+pub use process::ReplayFault;
+pub use process::ReplaySegments;
+pub use process::SegmentAnswer;
+pub use process::SegmentReplay;
+pub use process::StoredSourceMap;
+pub use process::StoredWorkflow;
+pub use process::TOOL_FAILED;
+pub use process::UnmigratedKernelSession;
+pub use process::Unreplayable;
+pub use process::Unretained;
+pub use process::WorkflowAdmissionOutcome;
+pub use process::WorkflowAdmissionRefusal;
+pub use process::WorkflowAdmissionRequest;
+pub use process::WorkflowDocument;
+pub use process::WorkflowDocumentError;
+pub use process::WorkflowEnvironment;
+pub use process::WorkflowEnvironmentRequest;
+pub use process::admit_kernel_process;
+pub use process::carry_parked_checkpoint;
+pub use process::carry_snapshot;
+pub use process::definition_draft;
+pub use process::definition_of_entry;
+pub use process::entry_signature;
+pub use process::kernel_process_engine_registration;
+pub use process::migrate_function_value;
+pub use process::migrate_saved_function;
+pub use process::migration_refusal;
+pub use process::plan_adoption;
+pub use process::plan_migration;
+pub use process::survey_kernel_processes;
+pub use process_plugin::{
+    DIALECT_SERVICE_EXECUTION, KERNEL_SERVICES_CONFIG, KERNEL_SERVICES_OWNER,
+    KernelProcessPluginFactory, KernelServicesComponent, KernelServicesPluginFactory,
 };
-pub use process_plugin::KernelProcessPluginFactory;
 
 /// Statement observation requested by recorded kernel settings.
-pub use lash_kernel_vm::{Bounds as KernelBounds, ObservationMode};
+pub use lash_kernel_vm::Bounds as KernelBounds;
+pub use lash_vocabulary::observation::RunObservation;
+
+pub mod trace_adapter;

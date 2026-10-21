@@ -18,8 +18,12 @@ mod sets;
 
 use std::collections::BTreeSet;
 
-use lash_kernel_doc::{FunctionDefinition, FunctionId, FunctionRegistry};
-use lash_kernel_package::{Package, PackagePath, Root};
+use lash_kernel_doc::FunctionDefinition;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_package::Package;
+use lash_kernel_package::Root;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::names::PackagePath;
 
 type BuildError = Box<dyn std::error::Error>;
 
@@ -247,7 +251,7 @@ fn write_package(
     let mut source = String::from("&[\n");
     for (function, name) in rows {
         source.push_str(&format!(
-            "(lash_kernel_doc::FunctionId::from_bytes({:?}), {:?}),\n",
+            "(lash_vocabulary::legacy_names::FunctionId::from_bytes({:?}), {:?}),\n",
             function.as_bytes(),
             name
         ));

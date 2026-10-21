@@ -8,11 +8,11 @@ use crate::tool_shape::{CanonicalIdentity, DefinitionId, SchemaDocument};
 /// and so on, without changing any earlier name.
 ///
 /// ```
-/// # use lash_tool_shape::{ReadableNameAllocator, SchemaDocument, DefinitionId};
+/// # use lash_vocabulary::tool_shape::{ReadableNameAllocator, SchemaDocument, DefinitionId};
 /// let doc = SchemaDocument::from_json_schema(&serde_json::json!({"title":"Filter"}), 8)?;
 /// let mut names = ReadableNameAllocator::new(["Filter"]);
 /// assert_eq!(names.allocate(&doc, DefinitionId(0)), "Filter_2");
-/// # Ok::<(), lash_tool_shape::ShapeImportRefusal>(())
+/// # Ok::<(), lash_vocabulary::tool_shape::ShapeImportRefusal>(())
 /// ```
 #[derive(Clone, Debug, Default)]
 pub struct ReadableNameAllocator {
@@ -24,7 +24,7 @@ impl ReadableNameAllocator {
     /// Start a listing with all names already claimed by its calling convention.
     ///
     /// ```
-    /// # use lash_tool_shape::ReadableNameAllocator;
+    /// # use lash_vocabulary::tool_shape::ReadableNameAllocator;
     /// let names = ReadableNameAllocator::new(["Process", "tools"]);
     /// ```
     pub fn new(reserved: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
@@ -41,7 +41,7 @@ impl ReadableNameAllocator {
     /// Existing names remain allocated; a false result means it was taken.
     ///
     /// ```
-    /// # use lash_tool_shape::ReadableNameAllocator;
+    /// # use lash_vocabulary::tool_shape::ReadableNameAllocator;
     /// let mut names = ReadableNameAllocator::default();
     /// assert!(names.reserve("HostRecord"));
     /// assert!(!names.reserve("HostRecord"));
@@ -54,10 +54,10 @@ impl ReadableNameAllocator {
     /// Dialects can reserve their keywords through [`Self::new`].
     ///
     /// ```
-    /// # use lash_tool_shape::{ReadableNameAllocator, SchemaDocument, DefinitionId};
+    /// # use lash_vocabulary::tool_shape::{ReadableNameAllocator, SchemaDocument, DefinitionId};
     /// let doc = SchemaDocument::from_json_schema(&serde_json::json!({}), 8)?;
     /// assert_eq!(ReadableNameAllocator::default().allocate(&doc, DefinitionId(0)), "Root");
-    /// # Ok::<(), lash_tool_shape::ShapeImportRefusal>(())
+    /// # Ok::<(), lash_vocabulary::tool_shape::ShapeImportRefusal>(())
     /// ```
     pub fn allocate(&mut self, document: &SchemaDocument, id: DefinitionId) -> String {
         let identity = document.canonical_identity(id);

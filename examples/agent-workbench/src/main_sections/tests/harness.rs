@@ -1,6 +1,6 @@
 use super::*;
-use lash::SessionId;
-use lash::TurnId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 // The in-process workbench (FIG-5316): the `AppState` the binary serves from,
 // built by the binary's own boot functions (`build_workbench_core`,

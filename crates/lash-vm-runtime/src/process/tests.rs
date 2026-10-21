@@ -6,8 +6,11 @@ use lash_execution_contracts::process::EngineEvent;
 use lash_execution_contracts::process::EngineState;
 use lash_execution_contracts::process::StepName;
 use lash_execution_contracts::process::StepRequest;
-use lash_kernel_doc::{DocumentId, EffectId, Site, Unit};
 use lash_vm_client::wire::OutcomeWire;
+use lash_vocabulary::legacy_names::DocumentId;
+use lash_vocabulary::sites::EffectId;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 use super::advance::{advance, decode, state_format};
 use super::state::{
@@ -18,7 +21,7 @@ use lash_kernel_doc::KernelVersion;
 use lash_kernel_state::{AdmittedRequest, AdmittedWait};
 use std::collections::BTreeMap;
 
-fn process() -> lash_core::ProcessId {
+fn process() -> lash_vocabulary::identity::ProcessId {
     lash_core::ProcessIdMint::sequential_id_for_testing(1)
 }
 
@@ -56,7 +59,7 @@ fn every_engine_state_holding_a_run_names_its_page_to_the_process_root() {
             vec![
                 effect(1, element(0)),
                 Issued::Sleep {
-                    wait: lash_kernel_doc::testkit::wait_id(2),
+                    wait: lash_vocabulary::sites::testkit::wait_id(2),
                     admission: admitted(element(1)),
                     until_ms: 5_000,
                 },
@@ -122,13 +125,13 @@ fn admitted(identity: EffectId) -> Admission {
     Admission(AdmittedWait {
         identity,
         request: AdmittedRequest::Effect {
-            effect: lash_kernel_doc::EffectName::new("fetch").expect("a name"),
+            effect: lash_vocabulary::legacy_names::EffectName::new("fetch").expect("a name"),
             args: Vec::new(),
         },
     })
 }
 
-fn parked(issued: Vec<Issued>, withdrawn: Vec<lash_protocol_types::WaitId>) -> SettledOutput {
+fn parked(issued: Vec<Issued>, withdrawn: Vec<lash_vocabulary::sites::WaitId>) -> SettledOutput {
     completed(
         serde_json::to_string(&KernelRunOutput::Parked {
             state: sealed(),
@@ -147,14 +150,14 @@ fn parked(issued: Vec<Issued>, withdrawn: Vec<lash_protocol_types::WaitId>) -> S
 /// The effect a fan-out element performs: the one site, run by the task
 /// the `element`-th execution of the spawn started.
 fn element(element: u64) -> EffectId {
-    lash_kernel_doc::testkit::effect(
-        lash_kernel_doc::testkit::spawned_task(
-            lash_kernel_doc::testkit::root_task(),
+    lash_vocabulary::sites::testkit::effect(
+        lash_vocabulary::sites::testkit::spawned_task(
+            lash_vocabulary::sites::testkit::root_task(),
             Site::new(Unit::Main, vec![0]),
             element,
         ),
         Site::new(
-            Unit::Function(lash_kernel_doc::Name::new("worker")),
+            Unit::Function(lash_vocabulary::legacy_names::Name::new("worker")),
             vec![0],
         ),
         0,
@@ -164,10 +167,11 @@ fn element(element: u64) -> EffectId {
 
 fn effect(wait: u64, identity: EffectId) -> Issued {
     Issued::Effect {
-        wait: lash_kernel_doc::testkit::wait_id(wait),
+        wait: lash_vocabulary::sites::testkit::wait_id(wait),
         admission: admitted(identity),
-        effect: lash_kernel_doc::EffectName::new("tools.fetch").expect("an effect name"),
-        contract: lash_kernel_doc::ContractId::new("1"),
+        effect: lash_vocabulary::legacy_names::EffectName::new("tools.fetch")
+            .expect("an effect name"),
+        contract: lash_vocabulary::operations::ContractId::new("1"),
         input: serde_json::json!({ "wait": wait }),
     }
 }
@@ -325,7 +329,7 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
     assert!(effects.is_empty());
     assert_eq!(
         input.deliver.iter().map(|d| d.wait).collect::<Vec<_>>(),
-        vec![lash_kernel_doc::testkit::wait_id(11)]
+        vec![lash_vocabulary::sites::testkit::wait_id(11)]
     );
     assert!(input.parked.is_some());
     let held = |input: &KernelRunInput| {
@@ -351,7 +355,7 @@ fn a_fan_out_waits_on_every_element_and_delivers_each_outcome_once_in_any_order(
     let (run2, input, _) = run_of(&action);
     assert_eq!(
         input.deliver.iter().map(|d| d.wait).collect::<Vec<_>>(),
-        vec![lash_kernel_doc::testkit::wait_id(10)]
+        vec![lash_vocabulary::sites::testkit::wait_id(10)]
     );
     assert_eq!(
         held(&input),
@@ -404,13 +408,13 @@ fn a_refused_effect_is_raised_without_a_step_and_a_withdrawn_wait_is_never_deliv
             vec![
                 effect(1, element(0)),
                 Issued::Refused {
-                    wait: lash_kernel_doc::testkit::wait_id(2),
+                    wait: lash_vocabulary::sites::testkit::wait_id(2),
                     admission: admitted(element(1)),
                     kind: super::EFFECT_UNKNOWN.to_owned(),
                     message: "no such effect".to_owned(),
                 },
                 Issued::Sleep {
-                    wait: lash_kernel_doc::testkit::wait_id(3),
+                    wait: lash_vocabulary::sites::testkit::wait_id(3),
                     admission: admitted(element(2)),
                     until_ms: 5_000,
                 },
@@ -428,7 +432,7 @@ fn a_refused_effect_is_raised_without_a_step_and_a_withdrawn_wait_is_never_deliv
             .map(|d| (d.wait, d.outcome.clone()))
             .collect::<Vec<_>>(),
         vec![(
-            lash_kernel_doc::testkit::wait_id(2),
+            lash_vocabulary::sites::testkit::wait_id(2),
             refused(super::EFFECT_UNKNOWN, "no such effect".to_owned())
         )]
     );
@@ -447,7 +451,7 @@ fn a_refused_effect_is_raised_without_a_step_and_a_withdrawn_wait_is_never_deliv
     let (state, action) = settle(
         state,
         &run1,
-        parked(vec![], vec![lash_kernel_doc::testkit::wait_id(1)]),
+        parked(vec![], vec![lash_vocabulary::sites::testkit::wait_id(1)]),
     );
     assert_eq!(
         action,
@@ -468,7 +472,10 @@ fn a_refused_effect_is_raised_without_a_step_and_a_withdrawn_wait_is_never_deliv
             .iter()
             .map(|d| (d.wait, d.outcome.clone()))
             .collect::<Vec<_>>(),
-        vec![(lash_kernel_doc::testkit::wait_id(3), OutcomeWire::Elapsed)]
+        vec![(
+            lash_vocabulary::sites::testkit::wait_id(3),
+            OutcomeWire::Elapsed
+        )]
     );
 }
 
@@ -500,7 +507,7 @@ fn workflow_admission_refusals_have_stable_local_codes() {
     );
     assert_eq!(
         WorkflowAdmissionRefusal::NoSuchEntry {
-            entry: lash_kernel_doc::Name::new("missing"),
+            entry: lash_vocabulary::legacy_names::Name::new("missing"),
         }
         .code(),
         "no_such_entry"
@@ -531,13 +538,15 @@ main { let got = perform a.run(null) as Any finish got }
     let functions = BTreeMap::new();
     let mut environment = lash_kernel_check::Environment::new(&functions);
     environment.effects.insert(
-        lash_kernel_doc::EffectName::new("b.run").unwrap(),
-        document.manifest.effects[&lash_kernel_doc::EffectName::new("b.run").unwrap()].clone(),
+        lash_vocabulary::legacy_names::EffectName::new("b.run").unwrap(),
+        document.manifest.effects
+            [&lash_vocabulary::legacy_names::EffectName::new("b.run").unwrap()]
+            .clone(),
     );
     super::WorkflowDocument::admit(
         document,
         lash_trace::WorkflowDocumentEntry::Entry {
-            function: lash_kernel_doc::Name::new("worker"),
+            function: lash_vocabulary::legacy_names::Name::new("worker"),
         },
         &environment,
     )
@@ -562,7 +571,7 @@ fn engine_settings_decode_strictly_to_recorded_settings() {
             join_members: 16,
         },
     )
-    .observing(lash_kernel_vm::ObservationMode::Counts);
+    .observing(lash_vocabulary::observation::RunObservation::Counts);
     let engine = recorded.clone().into_engine_settings();
     assert_eq!(
         KernelRecordedSettings::from_engine_settings(&engine).unwrap(),
@@ -709,7 +718,7 @@ migration_refusal_law!(
     Document,
     DocumentRefusal,
     FunctionNotHeld {
-        function: lash_kernel_doc::FunctionId::from_bytes([2; 32])
+        function: lash_vocabulary::legacy_names::FunctionId::from_bytes([2; 32])
     },
     "document",
     "function_not_held"
@@ -719,8 +728,9 @@ migration_refusal_law!(
     Document,
     DocumentRefusal,
     FunctionRetired {
-        function: lash_kernel_doc::FunctionId::from_bytes([2; 32]),
-        name: lash_kernel_doc::FunctionName::try_from("retired.function".to_owned()).unwrap(),
+        function: lash_vocabulary::legacy_names::FunctionId::from_bytes([2; 32]),
+        name: lash_vocabulary::legacy_names::FunctionName::try_from("retired.function".to_owned())
+            .unwrap(),
     },
     "document",
     "function_retired"
@@ -779,7 +789,7 @@ migration_refusal_law!(
     Parked,
     ParkedRefusal,
     FunctionNotCarried {
-        function: lash_kernel_doc::FunctionId::from_bytes([2; 32])
+        function: lash_vocabulary::legacy_names::FunctionId::from_bytes([2; 32])
     },
     "parked",
     "function_not_carried"
@@ -803,10 +813,18 @@ migration_refusal_law!(
 #[cfg(feature = "synthetic-next")]
 #[test]
 fn a_held_function_value_upgrades_as_its_document_does_and_an_unheld_helper_refuses() {
-    use lash_kernel_doc::{
-        Document, Expr, Function, FunctionId, FunctionValue, Name, NumberPolicy, Param, Rhs,
-        Signature, Stmt, Type,
-    };
+    use lash_kernel_doc::Document;
+    use lash_kernel_doc::Expr;
+    use lash_kernel_doc::Function;
+    use lash_kernel_doc::FunctionValue;
+    use lash_kernel_doc::NumberPolicy;
+    use lash_kernel_doc::Rhs;
+    use lash_kernel_doc::Stmt;
+    use lash_vocabulary::legacy_names::FunctionId;
+    use lash_vocabulary::legacy_names::Name;
+    use lash_vocabulary::types::Param;
+    use lash_vocabulary::types::Signature;
+    use lash_vocabulary::types::Type;
     let functions = lash_vm_releases::lash_packages()
         .map(|packages| std::sync::Arc::clone(packages.functions()))
         .expect("the build's library");
@@ -1002,7 +1020,7 @@ fn a_changed_contract_under_one_signature_is_rebased_and_never_adopted() {
         .map(|definition| (definition.identity(), Arc::new(definition.clone())))
         .collect();
     let [fix1, outer1] = [r1[0].identity(), r1[1].identity()];
-    let send = lash_kernel_doc::EffectName::new("p.send").unwrap();
+    let send = lash_vocabulary::legacy_names::EffectName::new("p.send").unwrap();
 
     // Rebasing a saved function written over R1 takes R2's contract.
     let mut document = parse_document(&format!(
@@ -1010,12 +1028,12 @@ fn a_changed_contract_under_one_signature_is_rebased_and_never_adopted() {
          fn keep(n) {{ let e = invoke p.outer(n) return e }}\nmain {{}}"
     ))
     .unwrap();
-    document
-        .manifest
-        .functions
-        .insert(fix1, lash_kernel_doc::FunctionName::new("p.fix").unwrap());
+    document.manifest.functions.insert(
+        fix1,
+        lash_vocabulary::legacy_names::FunctionName::new("p.fix").unwrap(),
+    );
     let saved = lash_kernel_dialect::SavedFunction {
-        name: lash_kernel_doc::Name::new("keep"),
+        name: lash_vocabulary::legacy_names::Name::new("keep"),
         document,
         captures: BTreeMap::new(),
         closure: lash_kernel_doc::heap::PageRef {
@@ -1045,7 +1063,7 @@ fn a_changed_contract_under_one_signature_is_rebased_and_never_adopted() {
     );
     assert_eq!(
         rebased.document.manifest.effects[&send].contract,
-        lash_kernel_doc::ContractId::new("2")
+        lash_vocabulary::operations::ContractId::new("2")
     );
 
     // Adopting a workflow written over R1 refuses it.

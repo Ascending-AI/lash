@@ -1,5 +1,5 @@
 use super::*;
-use lash::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 // The workbench's session fence: one admission read that every session-bound
 // surface resolves its id through, and the delete sequence that orders itself

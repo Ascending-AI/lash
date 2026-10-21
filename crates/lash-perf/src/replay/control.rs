@@ -225,7 +225,7 @@ pub async fn sample(args: &SampleArgs) -> Result<()> {
         tools,
     )?;
     let cleanup = lash::testing::quiesce_artifact_cleanup(&core).await;
-    let id = lash::SessionId::from("code-mode-control");
+    let id = lash_vocabulary::identity::SessionId::from("code-mode-control");
     if args.phase != Phase::Resume {
         core.session(id.clone())
             .create(lash::SessionCreation::root(lash::SessionSpec::new(
@@ -247,11 +247,11 @@ pub async fn sample(args: &SampleArgs) -> Result<()> {
         observation.start()?;
     }
     let handle = if args.phase == Phase::Resume {
-        session.attach_id(lash::TurnId::from("control-input"))
+        session.attach_id(lash_vocabulary::identity::TurnId::from("control-input"))
     } else {
         session
             .send(lash::TurnInput::text(input))
-            .id(lash::TurnId::from("control-input"))
+            .id(lash_vocabulary::identity::TurnId::from("control-input"))
             .into_future()
             .await
             .map_err(|e| anyhow::anyhow!("send: {e}"))?

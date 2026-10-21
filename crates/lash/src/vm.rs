@@ -100,11 +100,18 @@ pub use lash_vm_worker::{
 /// The host boundary in the kernel type grammar, the providers that answer
 /// projection reads with kernel data, and what a tool is offered as.
 #[cfg(feature = "codemode")]
-pub use lash_vm_runtime::{
-    BoundaryError, HostBoundary, MAX_PROJECTED_TYPE_NODES, MAX_RESOLVED_REFERENCES,
-    ProjectionCatalog, ProjectionProvider, ProjectionRefusal, SchemaConflict,
-    SchemaProjectionRefusal, effect_controls, offered_tool, type_of_schema,
-};
+pub use lash_vm_runtime::BoundaryError;
+pub use lash_vm_runtime::HostBoundary;
+pub use lash_vm_runtime::ProjectionCatalog;
+pub use lash_vm_runtime::ProjectionProvider;
+pub use lash_vm_runtime::ProjectionRefusal;
+pub use lash_vm_runtime::effect_controls;
+pub use lash_vm_runtime::offered_tool;
+pub use lash_vocabulary::schema::MAX_PROJECTED_TYPE_NODES;
+pub use lash_vocabulary::schema::MAX_RESOLVED_REFERENCES;
+pub use lash_vocabulary::schema::SchemaConflict;
+pub use lash_vocabulary::schema::SchemaProjectionRefusal;
+pub use lash_vocabulary::schema::type_of_schema;
 
 // The vocabulary this module's signatures name (the facade-completeness rule).
 /// What a kernel migration would refuse among a deployment's processes and

@@ -11,17 +11,24 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::ErrorDatum;
+use lash_kernel_doc::FunctionDefinition;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::Handle;
+use lash_kernel_doc::Timestamp;
 use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
-use lash_kernel_doc::{
-    Datum, ErrorDatum, FunctionDefinition, FunctionId, FunctionRegistry, Handle, Timestamp,
-    parse_definition, parse_document,
-};
+use lash_kernel_doc::parse_definition;
+use lash_kernel_doc::parse_document;
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource};
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, KernelMachine, Machine, Program, RunError, Step, Target,
 };
+use lash_vocabulary::legacy_names::FunctionId;
 
-use crate::{Package, PackagePath, Root};
+use crate::Package;
+use crate::Root;
+use lash_vocabulary::names::PackagePath;
 
 /// Registers lash's kernel library, natives included.
 fn register_kernel(registry: &mut FunctionRegistry) -> Result<(), String> {

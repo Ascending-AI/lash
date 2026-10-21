@@ -291,7 +291,7 @@ async fn check_cell_snapshot(
     cx: &ActorContext,
     driver: &RuntimeTurnDriver<'static>,
     machine: &TurnMachine,
-    id: crate::EffectId,
+    id: lash_vocabulary::sites::EffectId,
 ) -> Result<(), TurnError> {
     use lash_durable::domain::{CellId, ExecKey};
 
@@ -394,8 +394,8 @@ async fn restore_working(
 /// None for a store that publishes no heap pages.
 fn working_pages(
     cx: &ActorContext,
-    session: &crate::SessionId,
-    run: &crate::TurnId,
+    session: &lash_vocabulary::identity::SessionId,
+    run: &lash_vocabulary::identity::TurnId,
     root: lash_core_store::checkpoint_graph::NodeId,
 ) -> Option<crate::plugin::SessionPages> {
     Some(crate::plugin::SessionPages {
@@ -438,7 +438,7 @@ async fn open_cell_calls(
     driver: &RuntimeTurnDriver<'_>,
     machine: &TurnMachine,
     cx: &ActorContext,
-    id: crate::EffectId,
+    id: lash_vocabulary::sites::EffectId,
 ) -> Result<
     Vec<(
         lash_core_execution::runtime::actor::round::ExecutionDraft,
@@ -495,7 +495,7 @@ async fn cell_calls(
     driver: &RuntimeTurnDriver<'_>,
     machine: &TurnMachine,
     cx: &ActorContext,
-    id: crate::EffectId,
+    id: lash_vocabulary::sites::EffectId,
 ) -> Result<CellToolCalls, TurnError> {
     use lash_core_execution::runtime::actor::round::graph::{ReportView, RoundFact};
     use lash_core_execution::runtime::actor::round::{self, PolicyView};
@@ -595,7 +595,7 @@ impl RuntimeTurnDriver<'_> {
     pub(super) async fn read_cell_calls(
         &self,
         machine: &TurnMachine,
-        id: crate::EffectId,
+        id: lash_vocabulary::sites::EffectId,
     ) -> Result<CellToolCalls, RuntimeError> {
         cell_calls(self, machine, &self.scoped_effect_controller, id)
             .await
@@ -675,7 +675,7 @@ impl TurnDrive for RuntimeDrive {
     async fn model_unsent(
         &mut self,
         cx: &ActorContext,
-        id: crate::EffectId,
+        id: lash_vocabulary::sites::EffectId,
         error: crate::LlmCallError,
     ) -> Result<(), TurnError> {
         self.record_unsent_model_call(cx, id, error).await
@@ -736,7 +736,7 @@ impl TurnDrive for RuntimeDrive {
     async fn model_call(
         &mut self,
         cx: &ActorContext,
-        id: crate::EffectId,
+        id: lash_vocabulary::sites::EffectId,
         request: Arc<LlmRequest>,
         admitted: &lash_protocol_types::llm::types::AdmittedSend,
         attempt: ModelCallAttempt,
@@ -815,7 +815,7 @@ impl TurnDrive for RuntimeDrive {
     async fn derive_answer(
         &mut self,
         _cx: &ActorContext,
-        id: crate::EffectId,
+        id: lash_vocabulary::sites::EffectId,
     ) -> Result<(), TurnError> {
         let Some(answer) = self.owed.clone() else {
             return Err(TurnError::Exec(format!(
@@ -854,7 +854,7 @@ impl TurnDrive for RuntimeDrive {
     async fn settle_cancelled_answer(
         &mut self,
         _cx: &ActorContext,
-        id: crate::EffectId,
+        id: lash_vocabulary::sites::EffectId,
     ) -> Result<(), TurnError> {
         let Some(answer) = self.owed.take() else {
             return Ok(());
@@ -884,7 +884,7 @@ impl TurnDrive for RuntimeDrive {
     async fn prepare_call(
         &mut self,
         _cx: &ActorContext,
-        id: crate::EffectId,
+        id: lash_vocabulary::sites::EffectId,
         call: u32,
         request: Arc<LlmRequest>,
     ) -> Result<PreparedCall, TurnError> {
@@ -959,7 +959,7 @@ impl TurnDrive for RuntimeDrive {
         &mut self,
         _cx: &ActorContext,
         tx: &mut lash_durable::ActorTx,
-        id: crate::EffectId,
+        id: lash_vocabulary::sites::EffectId,
         working: bool,
     ) -> Result<(), TurnError> {
         let Some(code_executor) = self.driver.session.plugins().code_executor() else {
@@ -1033,7 +1033,7 @@ impl TurnDrive for RuntimeDrive {
         carries
     }
 
-    fn answered_cell_end_held(&self, id: crate::EffectId) -> bool {
+    fn answered_cell_end_held(&self, id: lash_vocabulary::sites::EffectId) -> bool {
         self.driver
             .answered_cell_end
             .as_ref()
@@ -1080,7 +1080,7 @@ impl TurnDrive for RuntimeDrive {
     async fn restart_live_stream(
         &mut self,
         _cx: &ActorContext,
-        id: crate::EffectId,
+        id: lash_vocabulary::sites::EffectId,
         pin: &crate::runtime::durable::session::ModelPin,
     ) -> Result<(), TurnError> {
         let invocation = self
@@ -1151,7 +1151,7 @@ impl TurnDrive for RuntimeDrive {
     async fn exec_cell(
         &mut self,
         cx: &ActorContext,
-        id: crate::EffectId,
+        id: lash_vocabulary::sites::EffectId,
         cell: CodeCell,
     ) -> Result<CellExit, TurnError> {
         let exit = Box::pin(self.driver.handle_exec_code_effect(
@@ -1181,7 +1181,7 @@ impl TurnDrive for RuntimeDrive {
         std::mem::take(&mut self.driver.answered_cell_calls)
     }
 
-    fn begin_cell(&mut self, id: crate::EffectId, language: &str) {
+    fn begin_cell(&mut self, id: lash_vocabulary::sites::EffectId, language: &str) {
         self.driver.begin_cell(id, language);
     }
 
@@ -1191,7 +1191,7 @@ impl TurnDrive for RuntimeDrive {
 
     fn answered_cell_close(
         &mut self,
-        id: crate::EffectId,
+        id: lash_vocabulary::sites::EffectId,
     ) -> Option<crate::runtime::durable::session::CellClose> {
         match self.driver.answered_cell_close.take() {
             Some((cell, close)) if cell == id => Some(close),
@@ -1220,7 +1220,7 @@ impl TurnDrive for RuntimeDrive {
     async fn stopped_cell_calls(
         &mut self,
         cx: &ActorContext,
-        id: crate::EffectId,
+        id: lash_vocabulary::sites::EffectId,
     ) -> Result<CellToolCalls, TurnError> {
         cell_calls(&self.driver, &self.machine, cx, id).await
     }

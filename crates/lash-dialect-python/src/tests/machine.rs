@@ -9,15 +9,32 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, OnceLock};
 
 use lash_kernel_dialect::{Environment, Lowered, NamedLibrary};
-use lash_kernel_doc::{
-    Datum, EffectName, ErrorDatum, FunctionRegistry, Handle, Integer, Name, Param, Signature,
-    Timestamp, Type,
-};
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::ErrorDatum;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::Handle;
+use lash_kernel_doc::Integer;
+use lash_kernel_doc::Timestamp;
+use lash_kernel_vm::Bounds;
+use lash_kernel_vm::End;
+use lash_kernel_vm::Host;
+use lash_kernel_vm::KernelMachine;
+use lash_kernel_vm::Machine;
+use lash_kernel_vm::Outcome;
+use lash_kernel_vm::Park;
+use lash_kernel_vm::PreparedLibrary;
+use lash_kernel_vm::Program;
+use lash_kernel_vm::Request;
+use lash_kernel_vm::RunError;
+use lash_kernel_vm::Step;
 use lash_kernel_vm::kernel_internals::conformance::{self, Checkpoint};
-use lash_kernel_vm::{
-    Bounds, End, Host, KernelMachine, Machine, Outcome, Park, PreparedLibrary, Program, Request,
-    RunError, Step, WaitId, register_machine_functions,
-};
+use lash_kernel_vm::register_machine_functions;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::WaitId;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 use serde::Deserialize;
 
 use super::pages::{self, Session};
@@ -98,7 +115,7 @@ fn lower_with(
             library(),
             &lash_kernel_dialect::Namespaces::of_effects(
                 effects,
-                &lash_kernel_doc::ContractId::new("1"),
+                &lash_vocabulary::operations::ContractId::new("1"),
                 controls(),
             )
             .expect("the test's effects are operations"),
@@ -113,18 +130,19 @@ fn lower_with(
 /// The laws' turn-ending tool: `control.finish(x)` ends the turn with `x`,
 /// where a law's host offers it.
 pub(crate) fn controls() -> &'static std::collections::BTreeMap<
-    lash_kernel_doc::EffectName,
+    lash_vocabulary::legacy_names::EffectName,
     std::collections::BTreeSet<lash_kernel_dialect::EffectControl>,
 > {
     static CONTROLS: std::sync::OnceLock<
         std::collections::BTreeMap<
-            lash_kernel_doc::EffectName,
+            lash_vocabulary::legacy_names::EffectName,
             std::collections::BTreeSet<lash_kernel_dialect::EffectControl>,
         >,
     > = std::sync::OnceLock::new();
     CONTROLS.get_or_init(|| {
         std::collections::BTreeMap::from([(
-            lash_kernel_doc::EffectName::new("control.finish").expect("a tool's name"),
+            lash_vocabulary::legacy_names::EffectName::new("control.finish")
+                .expect("a tool's name"),
             std::collections::BTreeSet::from([lash_kernel_dialect::EffectControl::Finish]),
         )])
     })
@@ -309,9 +327,9 @@ fn start(
         .map(|(effect, signature)| {
             (
                 effect.clone(),
-                lash_kernel_doc::OperationRequirement::new(
+                lash_vocabulary::operations::OperationRequirement::new(
                     signature.clone(),
-                    lash_kernel_doc::ContractId::new("1"),
+                    lash_vocabulary::operations::ContractId::new("1"),
                 ),
             )
         })
@@ -910,7 +928,7 @@ fn paged_arithmetic_keeps_held_definitions_and_exact_charge() {
                 named,
                 &lash_kernel_dialect::Namespaces::of_effects(
                     &effects,
-                    &lash_kernel_doc::ContractId::new("1"),
+                    &lash_vocabulary::operations::ContractId::new("1"),
                     &Default::default(),
                 )
                 .expect("the test's effects are operations"),

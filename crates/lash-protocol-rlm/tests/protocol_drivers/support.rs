@@ -1,7 +1,7 @@
 use lash_core::plugin::PluginSessionRequest;
 use lash_protocol_types::ReportedFailure;
-use lash_protocol_types::SessionId;
-use lash_protocol_types::TurnId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 pub(crate) use std::sync::Arc;
 
 pub(crate) use lash_core::facade_support::PluginHost;
@@ -408,7 +408,9 @@ pub(crate) fn rlm_environment() -> sansio::ExecutionEnvironmentSync {
     sansio::ExecutionEnvironmentSync {
         turn_controls: [(
             lash_protocol_rlm::FINISH_TOOL_NAME.to_string(),
-            lash_core::TurnControls::finish(lash_core::JsonSchema::any()),
+            lash_vocabulary::tool_declaration::TurnControls::finish(
+                lash_vocabulary::json_schema::JsonSchema::any(),
+            ),
         )]
         .into(),
         ..sansio::ExecutionEnvironmentSync::default()
@@ -1068,8 +1070,10 @@ fn drive_plugin_stream(
                 let transforms = plugins
                     .transform_assistant_stream(
                         &lash_core::plugin::ModelCallAddress {
-                            session_id: lash_core::SessionId::from("rlm-protocol-scenario-hooks"),
-                            turn_id: lash_core::TurnId::from("hook-turn"),
+                            session_id: lash_vocabulary::identity::SessionId::from(
+                                "rlm-protocol-scenario-hooks",
+                            ),
+                            turn_id: lash_vocabulary::identity::TurnId::from("hook-turn"),
                             call_id: lash_core::LlmCallId("hook-call".into()),
                             attempt: Some(1),
                         },
@@ -1098,8 +1102,10 @@ fn drive_plugin_stream(
             let stream_hook_states = plugins
                 .finish_assistant_stream(
                     &lash_core::plugin::ModelCallAddress {
-                        session_id: lash_core::SessionId::from("rlm-protocol-scenario-hooks"),
-                        turn_id: lash_core::TurnId::from("hook-turn"),
+                        session_id: lash_vocabulary::identity::SessionId::from(
+                            "rlm-protocol-scenario-hooks",
+                        ),
+                        turn_id: lash_vocabulary::identity::TurnId::from("hook-turn"),
                         call_id: lash_core::LlmCallId("hook-call".into()),
                         attempt: Some(1),
                     },
@@ -1114,8 +1120,10 @@ fn drive_plugin_stream(
             let transforms = plugins
                 .transform_assistant_response(
                     &lash_core::plugin::ModelCallAddress {
-                        session_id: lash_core::SessionId::from("rlm-protocol-scenario-hooks"),
-                        turn_id: lash_core::TurnId::from("hook-turn"),
+                        session_id: lash_vocabulary::identity::SessionId::from(
+                            "rlm-protocol-scenario-hooks",
+                        ),
+                        turn_id: lash_vocabulary::identity::TurnId::from("hook-turn"),
                         call_id: lash_core::LlmCallId("hook-call".into()),
                         attempt: Some(1),
                     },

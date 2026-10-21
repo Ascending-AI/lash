@@ -8,9 +8,9 @@
 const LASH_SESSION_APPEND_DRAFT_FALLBACK_DOMAIN_VERSION: &str =
     "lash-session-append-draft-fallback/v2";
 
-use crate::SessionId;
-use crate::TurnId;
 use crate::facade_support::SessionGraphFacadeOps;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 use crate::session_model::{LlmUsage, Message, SessionPolicy, plugin_message_to_message};
 use crate::{PersistedTurnState, SessionSnapshot};
@@ -1068,10 +1068,9 @@ impl RuntimeSessionState {
     pub fn open_unpersisted_initial_frame_under_current_assignment(&mut self) {
         let frame_key = crate::FrameKey::from_caller_material("initial-frame")
             .expect("the initial frame material is non-empty");
-        let frame_node_id = crate::NodeId::from(crate::session_graph::frame_node_id(
-            &self.session_id,
-            frame_key.as_str(),
-        ));
+        let frame_node_id = lash_vocabulary::identity::NodeId::from(
+            crate::session_graph::frame_node_id(&self.session_id, frame_key.as_str()),
+        );
         if self.is_node_persisted(&frame_node_id) {
             return;
         }
@@ -1357,7 +1356,7 @@ pub fn append_session_nodes_to_state_with_clock(
     nodes: &[crate::SessionAppendNode],
     draft_namespace: &str,
     clock: &dyn crate::Clock,
-) -> Vec<crate::NodeId> {
+) -> Vec<lash_vocabulary::identity::NodeId> {
     let drafts = session_append_node_drafts(nodes, draft_namespace);
     state.ensure_agent_frame_initialized_with_clock(clock);
     state
@@ -1406,7 +1405,7 @@ pub fn derive_graph_commit_node_ids(
     state: &mut RuntimeSessionState,
     graph: &mut crate::GraphAppend,
     operation: &crate::OperationId,
-) -> Result<Vec<crate::NodeId>, crate::StoreError> {
+) -> Result<Vec<lash_vocabulary::identity::NodeId>, crate::StoreError> {
     let mapping = graph.derive_node_ids(&state.session_id, operation)?;
     apply_graph_commit_node_id_mapping(state, &mapping)?;
     Ok(mapping.into_iter().map(|(_, derived)| derived).collect())
@@ -1414,7 +1413,10 @@ pub fn derive_graph_commit_node_ids(
 
 pub fn apply_graph_commit_node_id_mapping(
     state: &mut RuntimeSessionState,
-    mapping: &[(crate::NodeId, crate::NodeId)],
+    mapping: &[(
+        lash_vocabulary::identity::NodeId,
+        lash_vocabulary::identity::NodeId,
+    )],
 ) -> Result<(), crate::StoreError> {
     state
         .session_graph
@@ -1434,7 +1436,7 @@ pub fn apply_graph_commit_node_id_mapping(
 pub fn receipt_append_node_ids(
     result: &crate::store::RuntimeCommitReceipt,
     requested_node_count: usize,
-) -> Result<Vec<crate::NodeId>, crate::StoreError> {
+) -> Result<Vec<lash_vocabulary::identity::NodeId>, crate::StoreError> {
     if result.realized_node_timestamps.len() < requested_node_count {
         return Err(crate::StoreError::Backend(format!(
             "append receipt returned {} realized node timestamps for {requested_node_count} requested nodes",
@@ -1450,8 +1452,8 @@ pub fn receipt_append_node_ids(
 
 pub fn resolve_append_node_ids(
     result: &crate::store::RuntimeCommitReceipt,
-    locally_derived_node_ids: Vec<crate::NodeId>,
-) -> Result<Vec<crate::NodeId>, crate::StoreError> {
+    locally_derived_node_ids: Vec<lash_vocabulary::identity::NodeId>,
+) -> Result<Vec<lash_vocabulary::identity::NodeId>, crate::StoreError> {
     if result.receipt_replayed {
         receipt_append_node_ids(result, locally_derived_node_ids.len())
     } else {

@@ -8,12 +8,12 @@
 //! lifecycle — are not part of this surface.
 
 use super::*;
-use lash_protocol_types::ProcessId;
-use lash_protocol_types::SessionId;
 use lash_protocol_types::{
     llm::attachment_delivery::Delivery, llm::attachment_delivery::DeliveryLimits,
     llm::attachment_delivery::ProviderAccepts,
 };
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 
 use std::collections::BTreeSet;
 use std::fs;

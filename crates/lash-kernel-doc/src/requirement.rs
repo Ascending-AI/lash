@@ -6,9 +6,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ast::Node;
 use crate::function::FunctionDefinition;
-use crate::name::{EffectName, FunctionId};
 use crate::native::FunctionCatalog;
-pub use lash_vocabulary::operations::{ContractId, OperationRequirement};
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::operations::OperationRequirement;
 
 /// For each operation, what each body among `functions` that performs it
 /// requires, by that body's function (`K-DOC-002`). `functions` is a

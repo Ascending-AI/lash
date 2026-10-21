@@ -1,9 +1,17 @@
 //! JSON and number formatting natives (FIG-6144's laws, ported onto heap
 //! values).
-use lash_kernel_doc::{
-    Datum, FunctionRegistry, Handle, MapType, Measure, NumberPolicy, NumberToken, Operand,
-    RecordType, RecordTypeField, Type, Value,
-};
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::Handle;
+use lash_kernel_doc::Measure;
+use lash_kernel_doc::NumberPolicy;
+use lash_kernel_doc::NumberToken;
+use lash_kernel_doc::Operand;
+use lash_kernel_doc::Value;
+use lash_vocabulary::types::MapType;
+use lash_vocabulary::types::RecordType;
+use lash_vocabulary::types::RecordTypeField;
+use lash_vocabulary::types::Type;
 
 use super::super::{decode_number, parse_json, stringify_json};
 use super::lab::{Lab, VALUE, b, deep, f, i, list, raised, run, t};

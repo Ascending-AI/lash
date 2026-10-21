@@ -1,6 +1,6 @@
 //! What the lowered document of each language form must hold.
 
-use lash_kernel_doc::Name;
+use lash_vocabulary::legacy_names::Name;
 
 use super::{lower, lower_in_session};
 use crate::DiagnosticCode;
@@ -132,7 +132,7 @@ fn spans_map_sites_and_label_comments_are_trivia() {
     let effects = super::machine::effects();
     let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
         &effects,
-        &lash_kernel_doc::ContractId::new("1"),
+        &lash_vocabulary::operations::ContractId::new("1"),
         super::controls(),
     )
     .expect("the test's effects are operations");

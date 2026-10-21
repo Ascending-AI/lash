@@ -15,8 +15,8 @@
 mod durable;
 pub(crate) use durable::RuntimePerfDurableStore;
 
-use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt;
+use lash_vocabulary::identity::SessionId;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};

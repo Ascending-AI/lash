@@ -19,9 +19,9 @@
 //! the durable row is the only continuity between attempts.
 
 use super::*;
-use crate::TurnId;
 use crate::plugin::PluginSessionRequest;
 use crate::runtime::host::EmbeddedRuntimeHost;
+use lash_vocabulary::identity::TurnId;
 
 /// A create request resolved into everything materialization needs. Nothing
 /// on the plan reads another session: the initial runtime state is fully
@@ -36,7 +36,7 @@ pub(in crate::runtime::session_manager) struct SessionInitPlan {
     /// The `SessionTurn` process whose start creates this session, recorded
     /// on the session's metadata as its owner (FIG-3607 R1). `None` for a
     /// host create.
-    owning_process_id: Option<crate::ProcessId>,
+    owning_process_id: Option<lash_vocabulary::identity::ProcessId>,
 }
 
 /// The resolved request with its runtime assembled but not yet committed.
@@ -688,7 +688,7 @@ pub(in crate::runtime::session_manager) async fn create_session(
 async fn initialize_session(
     current: &CurrentOwnerCapability,
     request: SessionCreateRequest,
-    owning_process_id: &crate::ProcessId,
+    owning_process_id: &lash_vocabulary::identity::ProcessId,
 ) -> Result<InitializedSession, lash_execution_contracts::plugin_error::PluginError> {
     if let Some(session_id) = request.session_id.as_ref()
         && let Some(store) = durable_session_store(current, session_id).await?
@@ -899,7 +899,7 @@ impl RuntimeSessionServices {
     pub(in crate::runtime::session_manager) async fn initialize_session_and_mail_turn(
         &self,
         create_request: SessionCreateRequest,
-        process_id: &crate::ProcessId,
+        process_id: &lash_vocabulary::identity::ProcessId,
         turn_id: &TurnId,
         turn_input: crate::TurnInput,
         parent: Option<lash_trace::TraceParent>,
@@ -984,7 +984,7 @@ impl RuntimeSessionServices {
     pub(in crate::runtime::session_manager) async fn withdraw_process_child_inputs(
         &self,
         requested_session_id: Option<&SessionId>,
-        process_id: &crate::ProcessId,
+        process_id: &lash_vocabulary::identity::ProcessId,
         turn_id: &TurnId,
     ) -> Result<Option<TurnId>, lash_execution_contracts::plugin_error::PluginError> {
         let factory = self.current.host.core.session_store_factory();
@@ -1030,7 +1030,7 @@ impl RuntimeSessionServices {
         &self,
         factory: &Arc<dyn lash_execution_contracts::deployment::DeploymentStore>,
         session_id: &SessionId,
-        process_id: &crate::ProcessId,
+        process_id: &lash_vocabulary::identity::ProcessId,
         turn_id: &TurnId,
     ) -> Result<Option<TurnId>, lash_execution_contracts::plugin_error::PluginError> {
         let store = match lash_execution_contracts::deployment::live_session_view(

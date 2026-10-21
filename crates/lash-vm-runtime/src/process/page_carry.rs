@@ -101,7 +101,7 @@ pub async fn carry_snapshot(
     authority: &dyn crate::InternalAuthority,
     held: &lash_kernel_package::HeldPackages,
     pinned: lash_kernel_doc::PackageSetDigest,
-    functions: impl IntoIterator<Item = lash_kernel_doc::FunctionId>,
+    functions: impl IntoIterator<Item = lash_vocabulary::legacy_names::FunctionId>,
 ) -> Result<Arc<lash_kernel_package::SurfaceSnapshot>, CarryFault> {
     let surface = if pinned == held.digest() {
         Arc::clone(held.surface())
@@ -132,7 +132,7 @@ impl KernelProcessEngine {
     /// run metadata. `staged` is transferred to the fenced owner transaction.
     pub(super) async fn carry_pages(
         &self,
-        process: &lash_core::ProcessId,
+        process: &lash_vocabulary::identity::ProcessId,
         state: &mut KernelEngineState,
         rewritten: &Rewritten,
         environment: Option<&lash_execution_contracts::process::ProcessEnv>,

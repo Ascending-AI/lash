@@ -27,7 +27,9 @@ use lash_execution_contracts::process::ProcessOutcome;
 use lash_execution_contracts::process::ProcessRecord;
 use lash_execution_contracts::process::StepName;
 use lash_execution_contracts::process::StepRequest;
-use lash_protocol_types::{ExecutionLimit, ExecutionPolicy, ToolId};
+use lash_protocol_types::ExecutionLimit;
+use lash_vocabulary::tool_contract::ExecutionPolicy;
+use lash_vocabulary::tool_contract::ToolId;
 use serde_json::{Value, json};
 
 use crate::events::{Event, report};
@@ -183,9 +185,9 @@ impl ProcessEngine for WorkerEngine {
                 "pin",
                 EngineAction::PinKey {
                     name: KeyName(WAIT.to_owned()),
-                    bound: lash_core::ParkBound::Within(Duration::from_millis(
-                        script["wait_ms"].as_u64().unwrap_or(1_000),
-                    )),
+                    bound: lash_vocabulary::tool_contract::ParkBound::Within(
+                        Duration::from_millis(script["wait_ms"].as_u64().unwrap_or(1_000)),
+                    ),
                 },
             ),
             EngineEvent::KeyPinned { name, .. } => {

@@ -5,12 +5,30 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::sync::Arc;
 
+use lash_kernel_doc::Args;
+use lash_kernel_doc::Float;
+use lash_kernel_doc::Formula;
+use lash_kernel_doc::FunctionDefinition;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::Guard;
+use lash_kernel_doc::Implementation;
+use lash_kernel_doc::Integer;
+use lash_kernel_doc::KERNEL_VERSION;
+use lash_kernel_doc::NativeCall;
+use lash_kernel_doc::NativeError;
+use lash_kernel_doc::NativeFunction;
+use lash_kernel_doc::Nursery;
+use lash_kernel_doc::Operand;
+use lash_kernel_doc::PreparedNative;
+use lash_kernel_doc::RegistryError;
+use lash_kernel_doc::Value;
+use lash_kernel_doc::ValueKind;
 use lash_kernel_doc::arena::ShortText;
-use lash_kernel_doc::{
-    Args, Float, Formula, FunctionDefinition, FunctionRegistry, Guard, Implementation, Integer,
-    KERNEL_VERSION, Name, NativeCall, NativeError, NativeFunction, Nursery, Operand, Param,
-    PreparedNative, QualifiedName, RegistryError, Signature, Type, Value, ValueKind,
-};
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::legacy_names::QualifiedName;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 use num_bigint::BigInt;
 
 use crate::arithmetic::{self, Binary, Unary};

@@ -30,22 +30,28 @@ use std::collections::{BTreeMap, BTreeSet};
 use num_bigint::{BigInt, Sign};
 use num_traits::ToPrimitive;
 
+use crate::Bytes;
+use crate::Datum;
+use crate::ErrorDatum;
+use crate::Float;
+use crate::Handle;
+use crate::Integer;
+use crate::JoinMode;
+use crate::NumberPolicy;
+use crate::NumberToken;
+use crate::TaskId;
+use crate::Timestamp;
+use lash_vocabulary::legacy_names::Name;
 #[cfg(test)]
-use crate::TaskIdentity;
-use crate::graph_tokens::{CodecVariant, TokenCodec, TokenError, TokenReader, TokenWriter};
-use crate::{
-    Bytes, Datum, ErrorDatum, Float, Handle, Integer, JoinMode, Name, NumberPolicy, NumberToken,
-    TaskId, Timestamp,
-};
-
-/// The deepest a decoded value, form or type may nest, in recursive
-/// decodes. Deeper input is refused as a [`DecodeDimension::Depth`] limit.
-pub const MAX_DECODE_DEPTH: u64 = 512;
+use lash_vocabulary::sites::TaskIdentity;
+use lash_vocabulary::tokens::CodecVariant;
+use lash_vocabulary::tokens::TokenCodec;
+use lash_vocabulary::tokens::TokenError;
+use lash_vocabulary::tokens::TokenReader;
+use lash_vocabulary::tokens::TokenWriter;
 
 /// FrozenValue (node kind 8) variant numbers: what a frozen tree is.
-pub const FROZEN_DATUM: u32 = 0;
-pub const FROZEN_TOOL_VALUE: u32 = 1;
-pub const FROZEN_JSON: u32 = 2;
+use lash_vocabulary::tokens::FROZEN_DATUM;
 
 /// A datum as the body of a FrozenValue node: `sum(0, 1, <Datum>)`. A
 /// committed effect outcome and a run's result are staged through it, so
@@ -345,9 +351,13 @@ mod tests;
 /// authority and are deliberately absent from the durable grammar.
 pub mod heap_values {
     use super::{invalid, variant};
-    use crate::graph_tokens::{ChildRef, TokenCodec, TokenError, TokenReader, TokenWriter};
     use crate::heap::*;
     use crate::{Float, Integer, TaskId, Timestamp};
+    use lash_vocabulary::tokens::ChildRef;
+    use lash_vocabulary::tokens::TokenCodec;
+    use lash_vocabulary::tokens::TokenError;
+    use lash_vocabulary::tokens::TokenReader;
+    use lash_vocabulary::tokens::TokenWriter;
     use num_bigint::{BigInt, Sign};
     use num_traits::FromPrimitive;
     use sha2::{Digest, Sha256};

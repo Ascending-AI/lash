@@ -1,7 +1,7 @@
 use super::*;
-use lash::ProcessId;
-use lash::SessionId;
-use lash::TurnId;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 #[derive(Clone)]
 pub(crate) struct AppState {

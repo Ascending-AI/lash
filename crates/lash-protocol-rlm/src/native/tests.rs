@@ -1,9 +1,9 @@
 use lash_core::plugin::PluginSessionRequest;
 use lash_core::sansio::Response;
 use lash_core::{Effect, LlmOutputPart, LlmResponse, TurnMachine, TurnMachineConfig};
-use lash_protocol_types::SessionId;
-use lash_protocol_types::TurnId;
 use lash_rlm_types::{RlmCreateExtras, RlmProtocolEvent};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use std::collections::VecDeque;
 use std::sync::Arc;
 
@@ -149,7 +149,9 @@ pub(super) fn drain(machine: &mut TurnMachine) -> Vec<Effect> {
                 result: Ok(lash_core::sansio::ExecutionEnvironmentSync {
                     turn_controls: [(
                         crate::FINISH_TOOL_NAME.to_string(),
-                        lash_core::TurnControls::finish(lash_core::JsonSchema::any()),
+                        lash_vocabulary::tool_declaration::TurnControls::finish(
+                            lash_vocabulary::json_schema::JsonSchema::any(),
+                        ),
                     )]
                     .into(),
                     ..lash_core::sansio::ExecutionEnvironmentSync::default()
@@ -802,8 +804,8 @@ async fn factory_selects_native_abi_and_completed_cell_events() {
     let transforms = session
         .transform_assistant_response(
             &lash_core::plugin::ModelCallAddress {
-                session_id: lash_core::SessionId::from("native-plugin"),
-                turn_id: lash_core::TurnId::from("hook-turn"),
+                session_id: lash_vocabulary::identity::SessionId::from("native-plugin"),
+                turn_id: lash_vocabulary::identity::TurnId::from("hook-turn"),
                 call_id: lash_core::LlmCallId("hook-call".into()),
                 attempt: Some(1),
             },

@@ -1,9 +1,14 @@
 use serde::{Deserialize, Serialize};
 
-use super::{
-    DeclaredInlineLaunch, DeclaredLaunch, EngineLaunch, LifetimeDecision, ProcessInput,
-    ProcessProvenance, ProcessStartRegistration, ProcessStartTarget, SessionId,
-};
+use super::DeclaredInlineLaunch;
+use super::DeclaredLaunch;
+use super::EngineLaunch;
+use super::LifetimeDecision;
+use super::ProcessInput;
+use super::ProcessProvenance;
+use super::ProcessStartRegistration;
+use super::ProcessStartTarget;
+use lash_vocabulary::identity::SessionId;
 
 /// A start request as a leaf tool attempt declares it: everything a process
 /// start needs except its key.
@@ -136,12 +141,11 @@ impl ProcessStartDeclaration {
         originator: super::ProcessOriginator,
         lifetime: impl Into<LifetimeDecision>,
     ) -> Self {
-        let (engine_kind, payload, packages, launch) = launch.into_parts();
+        let (engine_kind, request, launch) = launch.into_parts();
         Self::of_target(
             ProcessStartTarget::Inline {
                 engine_kind,
-                payload,
-                packages,
+                request,
                 args,
                 launch,
             },
@@ -268,7 +272,6 @@ impl ProcessStartRequest {
     /// [`Self::with_host_start_key`].
     pub fn engine(
         kind: impl Into<String>,
-        payload: serde_json::Value,
         launch: EngineLaunch,
         originator: super::ProcessOriginator,
         lifetime: impl Into<LifetimeDecision>,
@@ -276,7 +279,6 @@ impl ProcessStartRequest {
         Self::of_target(
             ProcessStartTarget::Input(ProcessInput::Engine {
                 kind: kind.into(),
-                payload,
                 launch,
             }),
             originator,
@@ -322,8 +324,7 @@ impl ProcessStartRequest {
     /// [`crate::PluginError::StartKeyConflict`].
     pub fn inline(
         engine_kind: impl Into<String>,
-        payload: serde_json::Value,
-        packages: lash_kernel_doc::PackageSetDigest,
+        request: crate::process::engine::InlineRequest,
         args: serde_json::Map<String, serde_json::Value>,
         launch: EngineLaunch,
         originator: super::ProcessOriginator,
@@ -332,8 +333,7 @@ impl ProcessStartRequest {
         Self::of_target(
             ProcessStartTarget::Inline {
                 engine_kind: engine_kind.into(),
-                payload,
-                packages,
+                request,
                 args,
                 launch,
             },

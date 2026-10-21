@@ -16,7 +16,8 @@ use lash_durable::runner::{Exit, Owned};
 use lash_durable::{ActorTx, ClaimPurpose, CommitLabel, DomainWrite, DurableError, Release};
 
 use super::{TurnError, TurnRestoreError};
-use crate::{ActorContext, SessionId};
+use crate::ActorContext;
+use lash_vocabulary::identity::SessionId;
 
 /// Why a session actor parked: the actor row's typed reason. A parked
 /// session runs nothing until an operator redrives it, a control wake (a
@@ -379,7 +380,7 @@ mod tests {
         let reasons = [
             SessionParkReason::PluginRetired {
                 refusal: crate::plugin::RetirementRefusal::HasState {
-                    registry: crate::RegistryKind::Session,
+                    registry: lash_vocabulary::claims::RegistryKind::Session,
                     id: "retired".into(),
                 },
             },

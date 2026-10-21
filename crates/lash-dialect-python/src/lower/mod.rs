@@ -26,10 +26,25 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use lash_kernel_dialect::{
     CellEnvironment, Diagnostic, Environment, Library, Lowered, Mode, workflow,
 };
-use lash_kernel_doc::{
-    ActExpr, ActKind, AssignOrder, Callee, Catch, Closure, Document, EffectName, Expr, FunctionId,
-    FunctionName, Literal, Name, NumberPolicy, Place, Rhs, Stmt, TryStmt, validate_document,
-};
+use lash_kernel_doc::ActExpr;
+use lash_kernel_doc::ActKind;
+use lash_kernel_doc::AssignOrder;
+use lash_kernel_doc::Callee;
+use lash_kernel_doc::Catch;
+use lash_kernel_doc::Closure;
+use lash_kernel_doc::Document;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Literal;
+use lash_kernel_doc::NumberPolicy;
+use lash_kernel_doc::Place;
+use lash_kernel_doc::Rhs;
+use lash_kernel_doc::Stmt;
+use lash_kernel_doc::TryStmt;
+use lash_kernel_doc::validate_document;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::legacy_names::Name;
 use ruff_python_ast::{self as ast};
 use ruff_text_size::{Ranged, TextRange};
 
@@ -165,7 +180,7 @@ pub(crate) struct Lowerer<'a> {
     /// An operation that declares controls ends the turn: a control call
     /// ends `main` when it settles, and is written only where it can.
     namespaces: &'a lash_kernel_dialect::Namespaces,
-    performed: BTreeMap<EffectName, lash_kernel_doc::OperationRequirement>,
+    performed: BTreeMap<EffectName, lash_vocabulary::operations::OperationRequirement>,
     used: BTreeMap<FunctionId, FunctionName>,
     private: BTreeSet<Name>,
     taken: HashSet<String>,
@@ -441,8 +456,8 @@ pub(crate) fn lower_with_calls(
             && let Some(metadata) = &function.written
         {
             written.insert(
-                lash_kernel_doc::Site::new(
-                    lash_kernel_doc::Unit::Function(function.name.clone()),
+                lash_vocabulary::sites::Site::new(
+                    lash_vocabulary::sites::Unit::Function(function.name.clone()),
                     Vec::new(),
                 ),
                 metadata.clone(),

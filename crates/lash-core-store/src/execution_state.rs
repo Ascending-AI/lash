@@ -1,6 +1,7 @@
 //! Durable protocol-owned execution state carried in a session checkpoint,
 //! and a session's recorded plugin configuration.
-use crate::plugin_state::{FormatVersion, PluginConfigNamespace};
+use crate::plugin_state::PluginConfigNamespace;
+use lash_vocabulary::providers::FormatVersion;
 use serde::de::DeserializeOwned;
 
 use serde::{Deserialize, Serialize};

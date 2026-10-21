@@ -14,6 +14,7 @@ publish = false
 workspace = true
 
 [dependencies]
+lash-vocabulary = { workspace = true }
 axum = "0.8"
 futures-util = { workspace = true }
 anyhow = { workspace = true }

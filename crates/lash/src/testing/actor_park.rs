@@ -19,7 +19,7 @@ use crate::durable::{
 /// typed durable refusals; store, lease and commit errors remain typed too.
 pub async fn park_session(
     backend: &crate::Backend,
-    session: &crate::SessionId,
+    session: &lash_vocabulary::identity::SessionId,
     reason: crate::SessionParkReason,
 ) -> Result<(), DurableError> {
     let actor = ActorKey::session(session.as_str()).map_err(invalid_actor)?;
@@ -42,7 +42,7 @@ pub async fn park_session(
 /// existing typed durable errors. A store or commit failure remains typed.
 pub async fn park_process(
     backend: &crate::Backend,
-    process: &crate::ProcessId,
+    process: &lash_vocabulary::identity::ProcessId,
     reason: crate::process::ProcessParkReason,
 ) -> Result<(), DurableError> {
     let actor = ActorKey::process(process.as_str()).map_err(invalid_actor)?;

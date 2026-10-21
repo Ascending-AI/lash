@@ -108,7 +108,7 @@ async fn a_terminal_wait_pinned_during_the_targets_terminal_commit_is_resolved()
         .expect("register the target")
         .id;
     let target_actor = ActorKey::process(target.as_str()).expect("the target's key");
-    let awaiter = lash_protocol_types::ProcessId::fixture("terminal-law-awaiter");
+    let awaiter = lash_vocabulary::identity::ProcessId::fixture("terminal-law-awaiter");
     let awaiter_actor = ActorKey::process(awaiter.as_str()).expect("the awaiter's key");
     let awaiter_formats = FormatSet::new("terminal-law");
     let mut create = MailTx::new();

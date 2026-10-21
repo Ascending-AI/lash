@@ -37,13 +37,13 @@ use super::session_close::{
 use super::turn_scope::{await_turn_children, continue_scope_ends, end_turn_scope};
 use crate::ActorContext;
 use crate::AdmittedScope;
-use crate::ProcessId;
 use crate::ScopeId;
-use crate::SessionId;
-use crate::TurnId;
 use crate::store::{ObligationKey, ObligationKind, ObligationState, SessionLookup};
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::backend::StoreSet;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 /// The format set the laws' session actors are written in.
 const SESSION_FORMATS: &str = "law-session";
@@ -92,7 +92,7 @@ impl CutStore {
 impl DurableReads for CutStore {
     async fn model_call_pins(
         &self,
-        session: &lash_protocol_types::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
         self.inner.model_call_pins(session, owner).await
@@ -100,7 +100,7 @@ impl DurableReads for CutStore {
 
     async fn model_calls(
         &self,
-        session: &lash_protocol_types::SessionId,
+        session: &lash_vocabulary::identity::SessionId,
         owner: &str,
     ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
         self.inner.model_calls(session, owner).await
@@ -155,15 +155,15 @@ impl DurableReads for CutStore {
 
     async fn cell_roots(
         &self,
-        session: &lash_protocol_types::SessionId,
-        run: &lash_protocol_types::TurnId,
+        session: &lash_vocabulary::identity::SessionId,
+        run: &lash_vocabulary::identity::TurnId,
     ) -> Result<Vec<ExecRootRow>, DurableError> {
         self.inner.cell_roots(session, run).await
     }
     async fn cell_roots_within(
         &self,
-        session: &lash_protocol_types::SessionId,
-        run: &lash_protocol_types::TurnId,
+        session: &lash_vocabulary::identity::SessionId,
+        run: &lash_vocabulary::identity::TurnId,
         max_rows: usize,
     ) -> Result<Vec<lash_durable::domain::ExecRootRow>, DurableError> {
         self.inner.cell_roots_within(session, run, max_rows).await
@@ -322,10 +322,10 @@ impl DurableStore for CutStore {
 
     async fn package_paths(
         &self,
-        functions: &[lash_durable::packages::FunctionId],
+        functions: &[lash_vocabulary::legacy_names::FunctionId],
     ) -> Result<
         std::collections::BTreeMap<
-            lash_durable::packages::FunctionId,
+            lash_vocabulary::legacy_names::FunctionId,
             std::collections::BTreeSet<String>,
         >,
         DurableError,
@@ -335,10 +335,10 @@ impl DurableStore for CutStore {
 
     async fn internal_operations(
         &self,
-        operations: &[lash_durable::packages::EffectName],
+        operations: &[lash_vocabulary::legacy_names::EffectName],
     ) -> Result<
         std::collections::BTreeMap<
-            lash_durable::packages::EffectName,
+            lash_vocabulary::legacy_names::EffectName,
             std::collections::BTreeSet<String>,
         >,
         DurableError,
@@ -1423,7 +1423,7 @@ impl lash_execution_contracts::process::ProcessEngine for LawEngine {
                     steps: vec![lash_execution_contracts::process::StepRequest::Tool {
                         step: lash_execution_contracts::process::StepName("forever".into()),
                         effect: lash_core_execution::testing::effect(HANGING_TOOL),
-                        contract: crate::ContractId::new("fixture"),
+                        contract: lash_vocabulary::operations::ContractId::new("fixture"),
                         input: serde_json::Value::Null,
                         site: None,
                         matched: None,
@@ -1530,7 +1530,7 @@ impl ProcessSteps for HangingSteps {
         let long = Duration::from_secs(60);
         Ok(StepAdmission::new(
             lash_core_execution::testing::step_tool(_step, "law"),
-            lash_protocol_types::ExecutionPolicy::Once,
+            lash_vocabulary::tool_contract::ExecutionPolicy::Once,
             lash_protocol_types::ExecutionLimit::starting_at(now_ms, long, long),
             None,
         ))

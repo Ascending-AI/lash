@@ -22,11 +22,13 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use lash_kernel_doc::{Datum, EffectName, ErrorDatum};
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::ErrorDatum;
 use lash_protocol_types::sync::MutexExt;
 use lash_vm_broker::ParentFault;
 use lash_vm_broker::kernel::{EFFECT_CANCELLED, EFFECT_RESULT, EFFECT_TIMED_OUT, datum_from_json};
 use lash_vm_runtime::{EffectReads, HostBoundary};
+use lash_vocabulary::legacy_names::EffectName;
 
 use super::host::{CellArgs, CellHostLedgers, TOOL_CALL_LIMIT, TOOL_FAILED, refused, tool_failed};
 
@@ -141,8 +143,8 @@ impl EffectReads for CellReads {
         &self,
         effect: &EffectName,
         args: &[Datum],
-        site: &lash_kernel_doc::PositionLabel,
-        origin: &lash_kernel_doc::Site,
+        site: &lash_vocabulary::sites::PositionLabel,
+        origin: &lash_vocabulary::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
         // The plan names every effect the machine binds as a read, and the
         // activation routed each before the run started.

@@ -176,13 +176,13 @@ mod tests {
     async fn await_terminal_unknown_process_errors() {
         let registry = memory_registry().await;
         let err = ProcessRegistryAwaiter::for_registry(registry)
-            .await_terminal(&crate::ProcessId::fixture("missing"))
+            .await_terminal(&lash_vocabulary::identity::ProcessId::fixture("missing"))
             .await
             .expect_err("unknown process should error");
         assert!(
             matches!(
                 err,
-                PluginError::ProcessUnknown { ref process_id } if process_id == crate::ProcessId::fixture("missing")
+                PluginError::ProcessUnknown { ref process_id } if process_id == lash_vocabulary::identity::ProcessId::fixture("missing")
             ),
             "unknown process should return ProcessUnknown, got: {err:?}"
         );

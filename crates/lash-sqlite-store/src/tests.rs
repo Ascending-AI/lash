@@ -10,7 +10,8 @@ use std::collections::BTreeMap;
 use lash_core_store::store::RunStore as _;
 use lash_core_store::store::SessionCatalogStore as _;
 use lash_core_store::store::SessionHistoryStore as _;
-use lash_protocol_types::{ProcessId, SessionId};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 use std::sync::atomic::Ordering;
 
 static CHECKPOINT_DATA_STATEMENT_COUNT: AtomicUsize = AtomicUsize::new(0);
@@ -38,8 +39,8 @@ pub(crate) fn input_run_sql_fixture() -> Connection {
 fn a_settled_inputs_run_and_pinned_revision_survive_without_a_binding_table() {
     let connection = input_run_sql_fixture();
     let session = SessionId::from("session");
-    let input = lash_protocol_types::InputId::from("input");
-    let run = lash_protocol_types::TurnId::from("run");
+    let input = lash_vocabulary::identity::InputId::from("input");
+    let run = lash_vocabulary::identity::TurnId::from("run");
     crate::session_runs::bind_run_inputs_conn(
         &connection,
         &session,
@@ -173,8 +174,8 @@ fn a_settled_inputs_run_and_pinned_revision_survive_without_a_binding_table() {
 fn a_fork_rebinds_only_the_inputs_the_old_run_released() {
     let connection = input_run_sql_fixture();
     let session = SessionId::from("session");
-    let input = lash_protocol_types::InputId::from("input");
-    let run = lash_protocol_types::TurnId::from("run");
+    let input = lash_vocabulary::identity::InputId::from("input");
+    let run = lash_vocabulary::identity::TurnId::from("run");
     crate::session_runs::bind_run_inputs_conn(
         &connection,
         &session,
@@ -191,7 +192,7 @@ fn a_fork_rebinds_only_the_inputs_the_old_run_released() {
             params!["session", "run"],
         )
         .expect("fork release");
-    let fork = lash_protocol_types::TurnId::from("fork");
+    let fork = lash_vocabulary::identity::TurnId::from("fork");
     crate::session_runs::bind_run_inputs_conn(
         &connection,
         &session,
@@ -387,7 +388,7 @@ fn pending_turn_inputs_reject_a_duplicate_source_key_insert() {
     let mapped = crate::sqlite_pending_turn_input_insert_error(
         error,
         &SessionId::from("session"),
-        &lash_protocol_types::InputId::from("second"),
+        &lash_vocabulary::identity::InputId::from("second"),
     );
     assert!(
         matches!(
@@ -403,7 +404,7 @@ fn pending_turn_inputs_reject_a_duplicate_source_key_insert() {
     let mapped = crate::sqlite_pending_turn_input_insert_error(
         error,
         &SessionId::from("session"),
-        &lash_protocol_types::InputId::from("first"),
+        &lash_vocabulary::identity::InputId::from("first"),
     );
     assert!(
         matches!(&mapped, StoreError::PendingTurnInputIdConflict { .. }),
@@ -571,7 +572,9 @@ async fn session_listing_statement_count_is_session_count_invariant() {
         } else {
             lash_core_store::session_identity::SessionRelation::Fork {
                 source_session_id: SessionId::from("listing-statement-count-0"),
-                source_node_id: Some(lash_core::NodeId::fixture(format!("source-node-{index}"))),
+                source_node_id: Some(lash_vocabulary::identity::NodeId::fixture(format!(
+                    "source-node-{index}"
+                ))),
             }
         };
         store
@@ -830,7 +833,7 @@ async fn commit_pair(same_operation: bool, grouped: bool) -> (Vec<String>, u64, 
             &mut state,
             lash_core_store::store::OperationId::turn(
                 &session,
-                lash_protocol_types::TurnId::fixture(name.to_owned()),
+                lash_vocabulary::identity::TurnId::fixture(name.to_owned()),
                 "commit",
             ),
         )
@@ -1403,7 +1406,7 @@ fn partial_run_terminals_are_corruption_at_decode() {
     conn.pragma_update(None, "ignore_check_constraints", true)
         .unwrap();
     let session = SessionId::try_from("s".to_owned()).unwrap();
-    let run = lash_protocol_types::TurnId::try_from("r".to_owned()).unwrap();
+    let run = lash_vocabulary::identity::TurnId::try_from("r".to_owned()).unwrap();
     for bits in 0..8 {
         conn.execute("DELETE FROM session_runs", []).unwrap();
         conn.execute(
@@ -1476,7 +1479,7 @@ async fn a_terminal_writes_its_window_in_constant_bytes_at_every_history_positio
             )]),
             reply_marker: None,
         }]);
-        let run = lash_protocol_types::TurnId::fixture(format!("terminal-window-{position}"));
+        let run = lash_vocabulary::identity::TurnId::fixture(format!("terminal-window-{position}"));
         let (commit, appended) = RuntimeCommit::persisted_state_with_operation(
             &mut state,
             lash_core_store::store::OperationId::turn(&session, run.clone(), "commit"),
@@ -1500,7 +1503,7 @@ async fn a_terminal_writes_its_window_in_constant_bytes_at_every_history_positio
         written.iter().all(|bytes| *bytes == 8),
         "a terminal's window bytes are not its 8-byte revision: {written:?}"
     );
-    let window = |store: Arc<SqliteStore>, run: lash_protocol_types::TurnId| {
+    let window = |store: Arc<SqliteStore>, run: lash_vocabulary::identity::TurnId| {
         let session = session.clone();
         async move {
             store
@@ -1696,7 +1699,7 @@ async fn receipt_replay_uses_scalar_columns_and_preserves_the_original_answer() 
         lash_core_store::store::OperationId::new(
             lash_core_execution::ExecutionScope::turn(
                 session.clone(),
-                lash_protocol_types::TurnId::from("receipt-turn"),
+                lash_vocabulary::identity::TurnId::from("receipt-turn"),
             ),
             "final",
         ),

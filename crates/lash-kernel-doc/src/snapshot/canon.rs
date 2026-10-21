@@ -7,10 +7,20 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::{
-    ActKind, Action, Atom, Callee, Catch, Document, Expr, Function, Literal, Member, Name, Place,
-    Rhs, Stmt,
-};
+use crate::ActKind;
+use crate::Action;
+use crate::Atom;
+use crate::Callee;
+use crate::Catch;
+use crate::Document;
+use crate::Expr;
+use crate::Function;
+use crate::Literal;
+use crate::Member;
+use crate::Place;
+use crate::Rhs;
+use crate::Stmt;
+use lash_vocabulary::legacy_names::Name;
 
 use super::reads::CodeReads;
 

@@ -508,14 +508,15 @@ impl HostArtifacts {
         else {
             return Ok(unsupported());
         };
-        let typed = match document.decode(lash_kernel_doc::KernelDataLimits::standard()) {
-            Ok(document) => document,
-            Err(refusal) => {
-                return Ok(WorkflowPublish::Refused(
-                    crate::workflow::WorkflowAdmissionRefusal::Bytes(refusal),
-                ));
-            }
-        };
+        let typed =
+            match document.decode(lash_vocabulary::data_limits::KernelDataLimits::standard()) {
+                Ok(document) => document,
+                Err(refusal) => {
+                    return Ok(WorkflowPublish::Refused(
+                        crate::workflow::WorkflowAdmissionRefusal::Bytes(refusal),
+                    ));
+                }
+            };
         if let Some((map, text)) = source
             && let Err(refusal) = map.validate_identified(&typed, text)
         {

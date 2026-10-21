@@ -5,7 +5,7 @@ use super::{
     SessionCheckpoint, StoreError, commit_identity,
     ensure_supported_record_schema_version_for_fleet, ensure_supported_schema_version_for_fleet,
 };
-use crate::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 /// A committed frame switch's artifact half (ADR 0113 §3.1).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -95,7 +95,7 @@ pub struct RuntimeCommit {
     /// into the whole-commit hash; for `Extend` it records the base the
     /// appended nodes extend.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub graph_base_leaf_node_id: Option<crate::NodeId>,
+    pub graph_base_leaf_node_id: Option<lash_vocabulary::identity::NodeId>,
     pub checkpoint: HydratedSessionCheckpoint,
     /// Bounded, non-transcript evidence settled with this turn record.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -128,7 +128,10 @@ pub struct RuntimeCommit {
     /// the head revision compare-and-set and covered by the commit identity.
     /// Every key must belong to [`Self::applied_commands`].
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
-    pub command_outcomes: std::collections::BTreeMap<crate::BatchId, crate::SessionCommandOutcome>,
+    pub command_outcomes: std::collections::BTreeMap<
+        lash_vocabulary::identity::BatchId,
+        crate::SessionCommandOutcome,
+    >,
     /// Unique attachment-manifest rows this commit will stamp as adopted.
     /// Runtime assembly derives this from explicit attachment references and
     /// turn-owned write-ahead intents before store validation begins. Per ADR
@@ -249,7 +252,7 @@ impl RuntimeCommit {
     pub fn persisted_state_with_operation(
         state: &mut crate::RuntimeSessionState,
         operation: OperationId,
-    ) -> Result<(Self, Vec<crate::NodeId>), StoreError> {
+    ) -> Result<(Self, Vec<lash_vocabulary::identity::NodeId>), StoreError> {
         Self::persisted_state_with_operation_and_budget(
             state,
             operation,
@@ -397,7 +400,7 @@ pub struct RuntimeCommitReceipt {
     ///
     /// Integrator class (ADR 0051): **store and durable-substrate implementors**.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub committed_leaf_node_id: Option<crate::NodeId>,
+    pub committed_leaf_node_id: Option<lash_vocabulary::identity::NodeId>,
     /// Node timestamps are clock-derived and excluded from commit intent, so a
     /// receipt replay must return the first attempt's values for the resident
     /// graph to converge with durable history.
@@ -416,7 +419,10 @@ pub struct RuntimeCommitReceipt {
     /// later resubmissions answer their own result.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     #[schemars(with = "std::collections::BTreeMap<String, serde_json::Value>")]
-    pub command_outcomes: std::collections::BTreeMap<crate::BatchId, crate::SessionCommandOutcome>,
+    pub command_outcomes: std::collections::BTreeMap<
+        lash_vocabulary::identity::BatchId,
+        crate::SessionCommandOutcome,
+    >,
     /// Whether session work remained after ingress settlement in the committing
     /// transaction. Receipt replay returns this decision unchanged.
     pub work_remaining: bool,

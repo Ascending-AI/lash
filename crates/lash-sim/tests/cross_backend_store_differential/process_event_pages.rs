@@ -1,5 +1,5 @@
 fn page_wait(
-    id: &lash_protocol_types::ProcessId,
+    id: &lash_vocabulary::identity::ProcessId,
     label: &str,
 ) -> lash_execution_contracts::process::ProcessEventAppendRequest {
     lash_execution_contracts::process::ProcessEventAppendRequest::wait_entered(
@@ -8,7 +8,7 @@ fn page_wait(
             since_ms: 1,
             kind: lash_execution_contracts::process::WaitKind::Call {
                 call_id: lash_protocol_types::ToolCallId::fixture(label),
-                tool_id: lash_protocol_types::ToolId::new("page_fixture"),
+                tool_id: lash_vocabulary::tool_contract::ToolId::new("page_fixture"),
             },
             site: None,
         },
@@ -26,7 +26,7 @@ use lash_execution_contracts::process::ProcessRegistryTestSupport as _;
 async fn release_observations(
     registry: &dyn lash_execution_contracts::process::ConformanceProcessRegistry,
 ) -> (
-    lash_protocol_types::ProcessId,
+    lash_vocabulary::identity::ProcessId,
     Vec<lash_execution_contracts::process::ProcessEventRelease>,
 ) {
     let bounds = registry
@@ -162,7 +162,7 @@ async fn event_release_differential_on_sqlite_memory_and_file() {
 
 async fn read_all_event_metadata<R>(
     registry: &R,
-    process_id: &lash_protocol_types::ProcessId,
+    process_id: &lash_vocabulary::identity::ProcessId,
     mode: lash_execution_contracts::process::ProcessEventQueryMode,
 ) -> Result<(u64, Vec<usize>), lash_execution_contracts::plugin_error::PluginError>
 where
@@ -420,7 +420,7 @@ pub(super) async fn compare_bounded_process_event_pages(
         since_ms: 1,
         kind: lash_execution_contracts::process::WaitKind::Call {
             call_id: lash_protocol_types::ToolCallId::fixture("process-wait-law"),
-            tool_id: lash_protocol_types::ToolId::new("process_wait"),
+            tool_id: lash_vocabulary::tool_contract::ToolId::new("process_wait"),
         },
         site: None,
     };

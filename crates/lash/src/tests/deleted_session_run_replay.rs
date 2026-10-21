@@ -14,7 +14,8 @@
 //! every cut (`lash-durable-test`'s `deleted_session_crash_laws.rs`).
 
 use super::*;
-use crate::{SessionId, TurnInput};
+use crate::TurnInput;
+use lash_vocabulary::identity::SessionId;
 
 /// A model whose first call signals [`Held::entered`] and holds until the
 /// law releases it; every call is counted.

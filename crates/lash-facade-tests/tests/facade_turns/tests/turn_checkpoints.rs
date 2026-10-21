@@ -44,7 +44,7 @@ fn core_with(
 }
 
 async fn created(core: &LashCore, id: &'static str) -> lash::DurableSession {
-    core.session(lash::SessionId::from(id))
+    core.session(lash_vocabulary::identity::SessionId::from(id))
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await
         .expect("created")
@@ -70,7 +70,7 @@ async fn normal_turn_stores_effective_user_text_in_state() {
         None,
     );
     let session = created(&core, "skill-command-visibility").await;
-    let turn = lash::TurnId::from("skill-command-visibility-turn");
+    let turn = lash_vocabulary::identity::TurnId::from("skill-command-visibility-turn");
     let handle = session
         .send(lash::TurnInput::text(INPUT))
         .id(turn.clone())
@@ -240,12 +240,12 @@ async fn provider_failure_surfaces_typed_kind_and_retryability_on_turn_issue() {
 const SEND_TOOL: &str = "send_to_turn";
 const SEND_TOOL_OPERATION: &str = "tools.send_to_turn";
 
-fn send_tool_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn send_tool_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{SEND_TOOL}"),
         SEND_TOOL_OPERATION,
         "Sends the law's input to the running turn.",
-        lash_core::ToolDefinition::default_input_schema(),
+        lash_vocabulary::tool_contract::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "string" }),
     )
     .expect("the tool's schemas")
@@ -264,7 +264,10 @@ impl ToolProvider for SendTool {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![send_tool_definition().manifest()])
     }
 
@@ -272,7 +275,7 @@ impl ToolProvider for SendTool {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == SEND_TOOL_OPERATION).then(|| Arc::new(send_tool_definition().contract()))
     }
 
@@ -300,8 +303,13 @@ fn send_then_answer(n: usize) -> Answer {
 
 /// Send `input` to `session`'s running turn `run`, delivered at its next
 /// work checkpoint.
-async fn steer(core: &LashCore, session: &'static str, run: &lash::TurnId, input: lash::TurnInput) {
-    core.session(lash::SessionId::from(session))
+async fn steer(
+    core: &LashCore,
+    session: &'static str,
+    run: &lash_vocabulary::identity::TurnId,
+    input: lash::TurnInput,
+) {
+    core.session(lash_vocabulary::identity::SessionId::from(session))
         .durable()
         .await
         .expect("the session's durable handle")
@@ -322,7 +330,7 @@ type LateCore = Arc<std::sync::OnceLock<LashCore>>;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn queued_checkpoint_input_preserves_images() {
     const SESSION: &str = "image-attachment";
-    let run = lash::TurnId::from("image-attachment-turn");
+    let run = lash_vocabulary::identity::TurnId::from("image-attachment-turn");
     let late: LateCore = Arc::default();
     let sender: Sender = {
         let late = Arc::clone(&late);
@@ -337,7 +345,7 @@ async fn queued_checkpoint_input_preserves_images() {
                     SESSION,
                     &run,
                     lash::TurnInput::text("see image").with_attachment(
-                        core.session(lash::SessionId::from(SESSION))
+                        core.session(lash_vocabulary::identity::SessionId::from(SESSION))
                             .open()
                             .await
                             .expect("open")
@@ -374,7 +382,7 @@ async fn queued_checkpoint_input_preserves_images() {
         }
     }
     let session = core
-        .session(lash::SessionId::from(SESSION))
+        .session(lash_vocabulary::identity::SessionId::from(SESSION))
         .create(lash::SessionCreation::root(
             mock_session_spec().attachment_acceptance(Arc::new(acceptance)),
         ))
@@ -428,8 +436,8 @@ fn failing_checkpoint_observer() -> Arc<dyn PluginFactory> {
 async fn checkpoint_observer_failure_leaves_active_input_pending_without_application_evidence() {
     const SESSION: &str = "checkpoint-observer-failure";
     const STEER: &str = "must remain pending";
-    let run = lash::TurnId::from("checkpoint-observer-failure-turn");
-    let steer_run = lash::TurnId::from("checkpoint-observer-failure-steer");
+    let run = lash_vocabulary::identity::TurnId::from("checkpoint-observer-failure-turn");
+    let steer_run = lash_vocabulary::identity::TurnId::from("checkpoint-observer-failure-steer");
     let late: LateCore = Arc::default();
     let sender: Sender = {
         let late = Arc::clone(&late);
@@ -439,7 +447,7 @@ async fn checkpoint_observer_failure_leaves_active_input_pending_without_applica
             let (run, steer_run) = (run.clone(), steer_run.clone());
             Box::pin(async move {
                 let core = late.get().expect("the core is built");
-                core.session(lash::SessionId::from(SESSION))
+                core.session(lash_vocabulary::identity::SessionId::from(SESSION))
                     .durable()
                     .await
                     .expect("the session's durable handle")
@@ -514,7 +522,7 @@ async fn checkpoint_observer_failure_leaves_active_input_pending_without_applica
     );
     assert_ne!(
         steered.run().await.expect("the steer's run"),
-        Some(lash::RunId::parse(run.as_str()).unwrap()),
+        Some(lash_vocabulary::identity::RunId::parse(run.as_str()).unwrap()),
         "the steer is not bound to the turn whose checkpoint failed"
     );
     core.shutdown().await.expect("shutdown");

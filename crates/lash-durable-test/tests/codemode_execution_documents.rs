@@ -54,8 +54,10 @@ impl RecordingSink {
 }
 
 /// The component that serves the law's tools to a process body.
-const TOOLS_COMPONENT: lash_core::ProcessConfigKey<()> =
-    lash_core::ProcessConfigKey::new("codemode-document-tools", lash_core::FormatVersion::ONE);
+const TOOLS_COMPONENT: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
+    "codemode-document-tools",
+    lash_vocabulary::providers::FormatVersion::ONE,
+);
 
 /// A core running RLM turns on `workers`, with the session process
 /// controls, `tools`, and `sink` tracing every record. A process a cell
@@ -155,7 +157,7 @@ impl lash_core::ToolProvider for ReadingFetch {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![web_fetch::fetch_definition().manifest()])
@@ -165,7 +167,7 @@ impl lash_core::ToolProvider for ReadingFetch {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         lash_core::ToolProvider::resolve_contract(
             &Fetch,
             name,
@@ -265,7 +267,7 @@ await control.finish(fetched.url);
         panic!("one cell started");
     };
     let emitted = emitted_sites(&events, started);
-    let index = lash::workflow::WorkflowOverlayDocument::of(document);
+    let index = lash::workflow::workflow_overlay_document(document);
     assert_eq!(
         emitted.len(),
         2,
@@ -273,7 +275,7 @@ await control.finish(fetched.url);
     );
     let output_tool_calls = world
         .core
-        .session(lash::SessionId::from("cell-document"))
+        .session(lash_vocabulary::identity::SessionId::from("cell-document"))
         .durable()
         .await
         .unwrap()

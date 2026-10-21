@@ -193,7 +193,10 @@ async fn a_failed_cell(
     .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = core
-        .session(lash::SessionId::parse("protocol-effects").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("protocol-effects")
+                .expect("nonblank host identity"),
+        )
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;
     let output = session.send(TurnInput::text("run code")).output().await?;
@@ -243,8 +246,8 @@ async fn runtime_stop_cause_survives_owner_replacement() -> Result<()> {
     }
     let backend = sqlite_memory_store_backend().await;
     let running = core(backend.clone())?;
-    let id = lash::SessionId::from("runtime-stop-cause");
-    let run = lash::TurnId::from("runtime-stop-cause-run");
+    let id = lash_vocabulary::identity::SessionId::from("runtime-stop-cause");
+    let run = lash_vocabulary::identity::TurnId::from("runtime-stop-cause-run");
     let session = running
         .session(id.clone())
         .create(lash::SessionCreation::root(mock_session_spec()))

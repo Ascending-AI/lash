@@ -100,9 +100,12 @@ fn tagged_node(
     lash_core_store::checkpoint_graph::NodeId,
     lash_core_store::checkpoint_graph::EncodedNode,
 ) {
-    use lash_core_store::checkpoint_graph::{
-        EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TokenWriter, TypedBody,
-    };
+    use lash_core_store::checkpoint_graph::EncodeBudget;
+    use lash_core_store::checkpoint_graph::ExplicitLimit;
+    use lash_core_store::checkpoint_graph::GraphStaging;
+    use lash_core_store::checkpoint_graph::NodeKind;
+    use lash_core_store::checkpoint_graph::TypedBody;
+    use lash_vocabulary::tokens::TokenWriter;
     let mut out = TokenWriter::new();
     out.text(tag);
     let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));
@@ -651,9 +654,10 @@ pub async fn an_owner_commit_reports_a_turn_cancel_accepted_after_its_open(
 ) -> LawOutcome {
     use crate::domain::{DomainWrite, MailDomainWrite, TurnCancelRequest, TurnWrite};
     use lash_core_store::store::{AdmittedTurnRows, RunAdmissionRecord};
-    use lash_protocol_types::{
-        SessionId, TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnId,
-    };
+    use lash_protocol_types::TurnCancelMode;
+    use lash_protocol_types::TurnCancelUndeliveredInputPolicy;
+    use lash_vocabulary::identity::SessionId;
+    use lash_vocabulary::identity::TurnId;
 
     let id = SessionId::try_from("late-cancel-session".to_owned())
         .map_err(|_| LawBroken("a constant session id".into()))?;
@@ -672,7 +676,7 @@ pub async fn an_owner_commit_reports_a_turn_cancel_accepted_after_its_open(
         admission: RunAdmissionRecord::Turn {
             took: AdmittedTurnRows::Inputs {
                 ids: lash_core_store::store::AdmittedInputIds::one(
-                    lash_protocol_types::InputId::from("late-cancel-batch"),
+                    lash_vocabulary::identity::InputId::from("late-cancel-batch"),
                 ),
             },
             trace: None,
@@ -732,9 +736,10 @@ pub async fn a_turn_cancel_is_a_first_winner_row_with_a_wake(
         DomainWrite, MailAnswer, MailDomainWrite, TurnCancelAnswer, TurnCancelRequest, TurnWrite,
     };
     use lash_core_store::store::{AdmittedTurnRows, RunAdmissionRecord, RunTerminalCause};
-    use lash_protocol_types::{
-        SessionId, TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnId,
-    };
+    use lash_protocol_types::TurnCancelMode;
+    use lash_protocol_types::TurnCancelUndeliveredInputPolicy;
+    use lash_vocabulary::identity::SessionId;
+    use lash_vocabulary::identity::TurnId;
 
     let id = SessionId::try_from("cancelled-session".to_owned())
         .map_err(|_| LawBroken("a constant session id".into()))?;
@@ -754,7 +759,7 @@ pub async fn a_turn_cancel_is_a_first_winner_row_with_a_wake(
         admission: RunAdmissionRecord::Turn {
             took: AdmittedTurnRows::Inputs {
                 ids: lash_core_store::store::AdmittedInputIds::one(
-                    lash_protocol_types::InputId::from("cancelled-batch"),
+                    lash_vocabulary::identity::InputId::from("cancelled-batch"),
                 ),
             },
             trace: None,

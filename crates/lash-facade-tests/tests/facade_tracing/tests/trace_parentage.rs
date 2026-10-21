@@ -80,7 +80,8 @@ async fn a_serialized_process_start_links_its_explicit_caller() -> Result<()> {
     let (observed, builder) = Observed::install(builder);
     let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
     core.session(
-        lash::SessionId::parse(session_turn_process::PARENT).expect("nonblank session id"),
+        lash_vocabulary::identity::SessionId::parse(session_turn_process::PARENT)
+            .expect("nonblank session id"),
     )
     .create(lash::SessionCreation::root(mock_session_spec()))
     .await?;
@@ -138,7 +139,7 @@ async fn a_sent_turn_joins_the_trace_of_its_send() -> Result<()> {
     let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse(SENT_SESSION).expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(SENT_SESSION).expect("nonblank host identity"),
     )
     .await
     .open()
@@ -189,13 +190,17 @@ async fn a_retried_send_keeps_the_parent_its_first_acceptance_retained() -> Resu
     let (observed, builder) = Observed::install(builder);
     let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
     let durable = core
-        .session(lash::SessionId::parse(SENT_SESSION).expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse(SENT_SESSION)
+                .expect("nonblank host identity"),
+        )
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;
     let send = |context: u8| {
         durable
             .send(TurnInput::text("the same words"))
-            .id(lash::TurnId::parse("retried-send").expect("nonblank host identity"))
+            .id(lash_vocabulary::identity::TurnId::parse("retried-send")
+                .expect("nonblank host identity"))
             .trace_context(caller(context))
     };
     let first = send(1).await?;
@@ -286,7 +291,8 @@ async fn send_the_law(
 ) -> Result<tokio::task::JoinHandle<Result<lash::TurnOutput>>> {
     let session = created_session(
         core,
-        lash::SessionId::parse(CONSUMED_SESSION).expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(CONSUMED_SESSION)
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -294,21 +300,24 @@ async fn send_the_law(
     let opened = tokio::spawn(async move {
         session
             .send(TurnInput::text("call the held tool"))
-            .id(lash::TurnId::parse(T1).expect("nonblank host identity"))
+            .id(lash_vocabulary::identity::TurnId::parse(T1).expect("nonblank host identity"))
             .trace_context(caller(A))
             .output()
             .await
     });
     let (key, value) = keys.recv().await.expect("T1's first call is held");
     let durable = core
-        .session(lash::SessionId::parse(CONSUMED_SESSION).expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse(CONSUMED_SESSION)
+                .expect("nonblank host identity"),
+        )
         .durable()
         .await?;
     drop(
         durable
             .send(TurnInput::text("steer the running turn"))
             .ingress(lash_core::TurnInputIngress::active_turn(
-                lash::TurnId::parse(T1).expect("nonblank host identity"),
+                lash_vocabulary::identity::TurnId::parse(T1).expect("nonblank host identity"),
                 lash_core::TurnInputCheckpointBoundary::AfterWork,
             ))
             .trace_context(caller(B))
@@ -456,7 +465,10 @@ async fn a_consumed_input_stays_linked_across_a_resume_on_another_owner() -> Res
         vec![text_call("T1 answered"), text_call("T2 answered")],
     )?;
     let session = node_b
-        .session(lash::SessionId::parse(CONSUMED_SESSION).expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse(CONSUMED_SESSION)
+                .expect("nonblank host identity"),
+        )
         .open()
         .await?;
     assert_eq!(
@@ -470,7 +482,7 @@ async fn a_consumed_input_stays_linked_across_a_resume_on_another_owner() -> Res
         lash_core::ResolveAnswer::Resolved
     );
     let output = session
-        .attach_id(lash::TurnId::parse(T1).expect("nonblank host identity"))
+        .attach_id(lash_vocabulary::identity::TurnId::parse(T1).expect("nonblank host identity"))
         .output()
         .await?;
     assert!(output.is_success(), "{:?}", output.outcome);
@@ -500,7 +512,8 @@ async fn a_session_turn_child_shares_the_trace_of_its_process() -> Result<()> {
     let (observed, builder) = Observed::install(builder);
     let core = builder.build(lash_facade_tests::runtime_lease_owner())?;
     core.session(
-        lash::SessionId::parse(session_turn_process::PARENT).expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse(session_turn_process::PARENT)
+            .expect("nonblank host identity"),
     )
     .create(lash::SessionCreation::root(mock_session_spec()))
     .await?;

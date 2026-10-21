@@ -55,7 +55,10 @@ impl RuntimeError {
     /// The refusal of the config `session_id`'s creation stated, with its
     /// cause typed.
     #[must_use]
-    pub fn session_config_refused(session_id: &crate::SessionId, refusal: ConfigRefusal) -> Self {
+    pub fn session_config_refused(
+        session_id: &lash_vocabulary::identity::SessionId,
+        refusal: ConfigRefusal,
+    ) -> Self {
         Self::new(
             RuntimeErrorCode::SessionConfigRefused,
             format!("session `{session_id}` config refused at creation: {refusal}"),

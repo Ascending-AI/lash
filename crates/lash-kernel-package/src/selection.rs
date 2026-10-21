@@ -1,8 +1,12 @@
 //! A host's explicit package and operation attachment for one workflow.
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_dialect::{Export, ExportView, PackagePath, QualifiedOperation, Segment};
-use lash_kernel_doc::FunctionId;
+use lash_kernel_dialect::Export;
+use lash_kernel_dialect::ExportView;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::names::PackagePath;
+use lash_vocabulary::names::QualifiedOperation;
+use lash_vocabulary::names::Segment;
 
 use crate::SurfaceSnapshot;
 
@@ -61,8 +65,8 @@ impl<'a> SelectedPackages<'a> {
     /// checker's structural reach, including transitively called bodies.
     pub fn undeclared<'b>(
         &self,
-        functions: &BTreeMap<FunctionId, lash_kernel_doc::FunctionName>,
-        effects: impl Iterator<Item = &'b lash_kernel_doc::EffectName>,
+        functions: &BTreeMap<FunctionId, lash_vocabulary::legacy_names::FunctionName>,
+        effects: impl Iterator<Item = &'b lash_vocabulary::legacy_names::EffectName>,
     ) -> Vec<String> {
         let mut missing = BTreeSet::new();
         for (id, name) in functions {

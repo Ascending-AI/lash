@@ -53,9 +53,9 @@ use telemetry::Telemetry;
 const DEFERRED: &str = "trace_deferred";
 const DEFERRED_OPERATION: &str = "tools.trace_deferred";
 
-fn definition() -> lash_core::ToolDefinition {
+fn definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
-    lash_core::ToolDefinition::raw(
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{DEFERRED}"),
         DEFERRED_OPERATION,
         "Parks until the trace law resolves it.",
@@ -65,8 +65,8 @@ fn definition() -> lash_core::ToolDefinition {
     .expect("the tool's schemas")
     .with_execution(std::time::Duration::from_secs(120))
     .with_declaration(
-        lash_core::ToolDeclaration::deferring(),
-        Some(lash_core::ParkBound::Within(
+        lash_vocabulary::tool_declaration::ToolDeclaration::deferring(),
+        Some(lash_vocabulary::tool_contract::ParkBound::Within(
             std::time::Duration::from_secs(120),
         )),
     )
@@ -84,7 +84,7 @@ impl lash_core::ToolProvider for DeferredTool {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![definition().manifest()])
@@ -94,7 +94,7 @@ impl lash_core::ToolProvider for DeferredTool {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == DEFERRED_OPERATION).then(|| Arc::new(definition().contract()))
     }
 
@@ -222,7 +222,10 @@ async fn resumed_turn_keeps_its_trace_scope(tier: Tier, resume: Resume) {
             drop(sent);
             let session = world
                 .core
-                .session(lash::SessionId::try_from(name.clone()).expect("a session id"))
+                .session(
+                    lash_vocabulary::identity::SessionId::try_from(name.clone())
+                        .expect("a session id"),
+                )
                 .durable()
                 .await
                 .expect("the session is open on the taking-over node");
@@ -317,12 +320,12 @@ async fn suspended_cell_closes_on_takeover(tier: Tier, discard: bool) {
     if discard {
         world
             .core
-            .session(lash::SessionId::try_from(name.to_owned()).unwrap())
+            .session(lash_vocabulary::identity::SessionId::try_from(name.to_owned()).unwrap())
             .durable()
             .await
             .unwrap()
             .cancel(lash::CancelTarget::Run(
-                lash::RunId::parse("trace-suspended-cell-run").unwrap(),
+                lash_vocabulary::identity::RunId::parse("trace-suspended-cell-run").unwrap(),
             ))
             .mode(lash::TurnCancelMode::Immediate)
             .request_id("takeover-discard")
@@ -340,7 +343,9 @@ async fn suspended_cell_closes_on_takeover(tier: Tier, discard: bool) {
     drop(sent);
     let session = world
         .core
-        .session(lash::SessionId::try_from(name.to_owned()).expect("a session id"))
+        .session(
+            lash_vocabulary::identity::SessionId::try_from(name.to_owned()).expect("a session id"),
+        )
         .durable()
         .await
         .expect("the session is open on the taking-over node");
@@ -348,7 +353,7 @@ async fn suspended_cell_closes_on_takeover(tier: Tier, discard: bool) {
         tokio::time::timeout(
             WATCHDOG,
             session
-                .run(lash::RunId::parse("trace-suspended-cell-run").unwrap())
+                .run(lash_vocabulary::identity::RunId::parse("trace-suspended-cell-run").unwrap())
                 .output(),
         )
         .await
@@ -480,9 +485,9 @@ const HELD_OPERATION: &str = "tools.trace_held";
 /// The plugin whose before-turn callback holds on the node the law loses.
 const HOLD_PLUGIN: &str = "trace-hold-law";
 
-fn held_definition() -> lash_core::ToolDefinition {
+fn held_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
     let object = serde_json::json!({ "type": "object", "additionalProperties": true });
-    lash_core::ToolDefinition::raw(
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{HELD}"),
         HELD_OPERATION,
         "Holds on the node the trace law loses.",
@@ -493,7 +498,7 @@ fn held_definition() -> lash_core::ToolDefinition {
     .with_execution(std::time::Duration::from_secs(120))
     // A call its node lost while it ran runs again on the node that takes
     // the cell over, which builds its body without the candidate.
-    .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
+    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
         1,
         1,
@@ -524,7 +529,7 @@ impl lash_core::ToolProvider for Hold {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![held_definition().manifest()])
@@ -534,7 +539,7 @@ impl lash_core::ToolProvider for Hold {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == HELD_OPERATION).then(|| Arc::new(held_definition().contract()))
     }
 
@@ -663,7 +668,9 @@ async fn a_lost_nodes_admission_is_exported_once(tier: Tier, lost: Lost) {
     drop(sent);
     let session = world
         .core
-        .session(lash::SessionId::try_from(name.clone()).expect("a session id"))
+        .session(
+            lash_vocabulary::identity::SessionId::try_from(name.clone()).expect("a session id"),
+        )
         .durable()
         .await
         .expect("the session is open on the taking-over node");

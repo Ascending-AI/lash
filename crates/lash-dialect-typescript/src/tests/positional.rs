@@ -1,10 +1,19 @@
 //! TS-CALL-SLOTS: a stable direct call and its exported packed entry share
 //! one body, preserving argument/default evaluation and parked state.
 use super::machine;
-use lash_kernel_doc::{Datum, Expr, Handle, Integer, Literal, Name, Rhs, Stmt, Timestamp, Type};
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Handle;
+use lash_kernel_doc::Integer;
+use lash_kernel_doc::Literal;
+use lash_kernel_doc::Rhs;
+use lash_kernel_doc::Stmt;
+use lash_kernel_doc::Timestamp;
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, KernelMachine, Machine, Outcome, Program, Request, Step, Target,
 };
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::types::Type;
 use std::sync::Arc;
 
 #[test]
@@ -137,7 +146,7 @@ fn returning_branch(stmts: &mut [Stmt]) -> Option<&mut Vec<Stmt>> {
 /// What a session cell's end saved, recorded through the dialect's own
 /// saving rules.
 struct Saving {
-    written: std::collections::BTreeMap<lash_kernel_doc::Site, lash_kernel_dialect::Written>,
+    written: std::collections::BTreeMap<lash_vocabulary::sites::Site, lash_kernel_dialect::Written>,
     saved: std::rc::Rc<
         std::cell::RefCell<std::collections::BTreeMap<Name, lash_kernel_dialect::SavedFunction>>,
     >,
@@ -179,12 +188,12 @@ fn a_saved_positional_function_runs_and_resumes_without_its_partner_in_scope() {
     .unwrap();
     let written = lowered.written;
     let mut document = lowered.document.into_document();
-    let echo = lash_kernel_doc::EffectName::new("host.echo").unwrap();
+    let echo = lash_vocabulary::legacy_names::EffectName::new("host.echo").unwrap();
     document.manifest.effects.insert(
         echo.clone(),
-        lash_kernel_doc::OperationRequirement::new(
+        lash_vocabulary::operations::OperationRequirement::new(
             machine::effects()[&echo].clone(),
-            lash_kernel_doc::ContractId::new("1"),
+            lash_vocabulary::operations::ContractId::new("1"),
         ),
     );
     let mut bodies = 0;

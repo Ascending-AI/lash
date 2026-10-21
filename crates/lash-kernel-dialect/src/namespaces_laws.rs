@@ -3,12 +3,26 @@
 
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{EffectName, FunctionName, Signature, Type};
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
-use crate::{
-    Export, ExportView, Member, NamespaceRefusal, Namespaces, Offered, Operations, PackagePath,
-    QualifiedOperation, Reserving, Resolution, Segment, Spelling, TypeMember, ValueType,
-};
+use crate::Export;
+use crate::ExportView;
+use crate::Member;
+use crate::NamespaceRefusal;
+use crate::Namespaces;
+use crate::Offered;
+use crate::Operations;
+use crate::Reserving;
+use crate::Resolution;
+use crate::Spelling;
+use crate::TypeMember;
+use crate::ValueType;
+use lash_vocabulary::names::PackagePath;
+use lash_vocabulary::names::QualifiedOperation;
+use lash_vocabulary::names::Segment;
 
 /// Code packages, by path.
 struct Packages(BTreeMap<PackagePath, BTreeMap<Segment, Export>>);
@@ -43,9 +57,9 @@ fn operations(names: &[&str]) -> Operations {
                 operation(name),
                 Offered::tool(
                     *name,
-                    lash_kernel_doc::OperationRequirement::new(
+                    lash_vocabulary::operations::OperationRequirement::new(
                         signature(),
-                        lash_kernel_doc::ContractId::new("1"),
+                        lash_vocabulary::operations::ContractId::new("1"),
                     ),
                 ),
             )
@@ -61,9 +75,9 @@ fn dataframe() -> Packages {
             (
                 Segment::new("run").unwrap(),
                 Export::Operation(crate::OperationExport {
-                    requirement: lash_kernel_doc::OperationRequirement::new(
+                    requirement: lash_vocabulary::operations::OperationRequirement::new(
                         signature(),
-                        lash_kernel_doc::ContractId::new("1"),
+                        lash_vocabulary::operations::ContractId::new("1"),
                     ),
                     intents: Default::default(),
                     visibility: crate::Visibility::Public,
@@ -190,9 +204,9 @@ fn an_operation_at_a_code_export_is_refused_naming_both() {
     exports.insert(
         Segment::new("run").expect("a segment"),
         Export::Operation(crate::OperationExport {
-            requirement: lash_kernel_doc::OperationRequirement::new(
+            requirement: lash_vocabulary::operations::OperationRequirement::new(
                 signature(),
-                lash_kernel_doc::ContractId::new("1"),
+                lash_vocabulary::operations::ContractId::new("1"),
             ),
             intents: Default::default(),
             visibility: crate::Visibility::Public,
@@ -221,16 +235,16 @@ fn an_operation_at_a_code_export_is_refused_naming_both() {
             run.clone(),
             Offered::tool(
                 "dataframe.run",
-                lash_kernel_doc::OperationRequirement::new(
+                lash_vocabulary::operations::OperationRequirement::new(
                     Signature {
-                        params: vec![lash_kernel_doc::Param {
-                            name: lash_kernel_doc::Name::new("input"),
+                        params: vec![lash_vocabulary::types::Param {
+                            name: lash_vocabulary::legacy_names::Name::new("input"),
                             ty: Type::Json,
                             optional: false,
                         }],
                         result: Type::Any,
                     },
-                    lash_kernel_doc::ContractId::new(contract),
+                    lash_vocabulary::operations::ContractId::new(contract),
                 ),
             ),
         )])
@@ -242,9 +256,9 @@ fn an_operation_at_a_code_export_is_refused_naming_both() {
         Resolution::Operation { operation, offered }
             if *operation == run
                 && offered.requirement
-                    == lash_kernel_doc::OperationRequirement::new(
+                    == lash_vocabulary::operations::OperationRequirement::new(
                         signature(),
-                        lash_kernel_doc::ContractId::new("1"),
+                        lash_vocabulary::operations::ContractId::new("1"),
                     )
     ));
     assert_eq!(

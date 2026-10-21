@@ -12,12 +12,28 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::ControlFlow;
 
+use crate::Action;
+use crate::Atom;
+use crate::Callee;
+use crate::Document;
+use crate::Expr;
+use crate::Function;
+use crate::FunctionCatalog;
+use crate::FunctionRepresentation;
+use crate::FunctionValue;
+use crate::FunctionValueLimits;
+use crate::Literal;
+use crate::MapEntry;
+use crate::RecordEntry;
+use crate::Rhs;
+use crate::StartAdapter;
+use crate::StartConvention;
+use crate::Stmt;
 use crate::heap::{Chunk, Element, EntityId, HeapFault, IntRef, PageReader, PageValue};
-use crate::{
-    Action, Atom, Callee, Document, Expr, Function, FunctionCatalog, FunctionId,
-    FunctionRepresentation, FunctionValue, FunctionValueLimits, KernelDataLimits, Literal,
-    MapEntry, Name, RecordEntry, Rhs, StartAdapter, StartConvention, Stmt, Unit,
-};
+use lash_vocabulary::data_limits::KernelDataLimits;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Unit;
 
 use super::collect::{
     SnapshotError, SnapshotHeap, SnapshotRefusal, closure_at, gather, members, text_is, text_of,
@@ -283,7 +299,7 @@ pub fn extract<H: SnapshotHeap<Frozen = Expr>>(
         origins.insert(
             name.clone(),
             (
-                crate::Site::new(Unit::Function(name.clone()), []),
+                lash_vocabulary::sites::Site::new(Unit::Function(name.clone()), []),
                 captures.len(),
             ),
         );
@@ -349,7 +365,7 @@ pub fn extract<H: SnapshotHeap<Frozen = Expr>>(
                 *statement += prelude as u32;
             }
             entries.push(crate::CaptionEntry::site(
-                crate::Site::new(Unit::Function(name.clone()), path),
+                lash_vocabulary::sites::Site::new(Unit::Function(name.clone()), path),
                 caption.caption.clone(),
             ));
         }
@@ -382,7 +398,7 @@ fn library_closure(
     document: &Document,
     catalog: &dyn FunctionCatalog,
     direct: BTreeSet<FunctionId>,
-) -> Result<BTreeMap<FunctionId, crate::FunctionName>, SnapshotError> {
+) -> Result<BTreeMap<FunctionId, lash_vocabulary::legacy_names::FunctionName>, SnapshotError> {
     let mut listed = BTreeMap::new();
     let mut pending: Vec<FunctionId> = direct.into_iter().collect();
     while let Some(function) = pending.pop() {

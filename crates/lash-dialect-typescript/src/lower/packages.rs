@@ -18,12 +18,18 @@
 //!   member's identity; `const { col } = dataframe` binds one by name. A
 //!   namespace, a value type, an error and an operation are never values.
 
+use lash_kernel_dialect::Export;
+use lash_kernel_dialect::ExportView;
+use lash_kernel_dialect::Member;
+use lash_kernel_dialect::Resolution;
+use lash_kernel_dialect::SpellKind;
+use lash_kernel_dialect::Spelling;
+use lash_kernel_dialect::TypeMember;
+use lash_kernel_dialect::ValueType;
 use lash_kernel_dialect::dispatch::{self, Adapt, Brand, Filled, Selection, Target};
-use lash_kernel_dialect::{
-    Export, ExportView, Member, PackagePath, Resolution, Segment, SpellKind, Spelling, TypeMember,
-    ValueType,
-};
 use lash_kernel_doc::{ActKind, Callee, Expr, Literal, Place, Rhs, Stmt};
+use lash_vocabulary::names::PackagePath;
+use lash_vocabulary::names::Segment;
 
 use super::calls::Key;
 use super::{Lowerer, Lowering, Operand, Ty};
@@ -720,7 +726,7 @@ impl<'a> Lowerer<'a> {
                     self.invoke("ts.callable", std::slice::from_ref(&value), Ty::Unknown)?
                         .expr()
                 };
-                let params: Vec<lash_kernel_doc::Name> =
+                let params: Vec<lash_vocabulary::legacy_names::Name> =
                     signature.params.iter().map(|_| self.fresh("arg")).collect();
                 let wrapped = |this: &mut Self| -> Lowering<Operand> {
                     let callable = this.let_expr(callable.clone(), Ty::Unknown);

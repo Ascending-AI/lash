@@ -73,7 +73,7 @@ mod prompts;
 /// tool-intent payloads whose owning run's revision is released (FIG-6612).
 pub(crate) fn release_material_batch(
     tx: &Connection,
-    session: Option<&lash_protocol_types::SessionId>,
+    session: Option<&lash_vocabulary::identity::SessionId>,
 ) -> rusqlite::Result<usize> {
     let mut released = prompts::release_unretained(tx, session)?;
     let limit = i64::from(lash_store_sql::session::revisions::MATERIAL_RELEASE_BATCH);
@@ -85,7 +85,10 @@ pub(crate) fn release_material_batch(
         released += cached_execute(
             tx,
             statement.sql(),
-            rusqlite::params![session.map(lash_protocol_types::SessionId::as_str), limit],
+            rusqlite::params![
+                session.map(lash_vocabulary::identity::SessionId::as_str),
+                limit
+            ],
         )?;
     }
     // A released body no longer holds its attachments (FIG-6611).
@@ -94,7 +97,7 @@ pub(crate) fn release_material_batch(
         cached_execute(
             tx,
             statement.sql(),
-            rusqlite::params![session.map(lash_protocol_types::SessionId::as_str)],
+            rusqlite::params![session.map(lash_vocabulary::identity::SessionId::as_str)],
         )?;
     }
     released += crate::turn_ingress::release_settled_tool_intent_payloads(tx, session)?;
@@ -150,7 +153,7 @@ pub(crate) use waits::TABLES as WAITS_TABLES;
 /// those rows held: the delete's to retire.
 pub(crate) fn retire_session_rows(
     tx: &Connection,
-    session: &lash_protocol_types::SessionId,
+    session: &lash_vocabulary::identity::SessionId,
 ) -> rusqlite::Result<Vec<String>> {
     use lash_durable::domain::{ExecKey, OwnerKey, ScopeKey};
 
@@ -172,7 +175,7 @@ pub(crate) fn retire_session_rows(
 /// nodes they held are peeled.
 pub(crate) fn retire_process_rows(
     tx: &Connection,
-    process: &lash_protocol_types::ProcessId,
+    process: &lash_vocabulary::identity::ProcessId,
 ) -> rusqlite::Result<()> {
     let mut facts = run_records::delete_owner(
         tx,
@@ -180,7 +183,7 @@ pub(crate) fn retire_process_rows(
     )?;
     facts.extend(model_calls::delete_session(
         tx,
-        &lash_protocol_types::SessionId::prefixed("process:", process.as_str()),
+        &lash_vocabulary::identity::SessionId::prefixed("process:", process.as_str()),
     )?);
     if let Ok(actor) = ActorKey::process(process.as_str()) {
         waits::delete_owned(tx, &actor)?;
@@ -727,7 +730,7 @@ pub(crate) fn wake_within(
 /// belongs to a live one. `control` marks a cancel.
 pub(crate) fn wake_session_within(
     tx: &Connection,
-    session: &lash_protocol_types::SessionId,
+    session: &lash_vocabulary::identity::SessionId,
     control: bool,
     now: DurableInstant,
 ) -> Answer<Woken> {
@@ -757,7 +760,7 @@ pub(crate) fn wake_session_within(
 /// refuses such a session itself.
 pub(crate) fn wake_session_tx(
     tx: &Connection,
-    session: &lash_protocol_types::SessionId,
+    session: &lash_vocabulary::identity::SessionId,
     control: bool,
     at_ms: u64,
 ) -> Result<Option<Woken>, lash_core_store::store::StoreError> {
@@ -1209,10 +1212,10 @@ impl DurableStore for SqliteDurableStore {
 
     async fn package_paths(
         &self,
-        functions: &[lash_durable::packages::FunctionId],
+        functions: &[lash_vocabulary::legacy_names::FunctionId],
     ) -> Result<
         std::collections::BTreeMap<
-            lash_durable::packages::FunctionId,
+            lash_vocabulary::legacy_names::FunctionId,
             std::collections::BTreeSet<String>,
         >,
         DurableError,
@@ -1234,10 +1237,10 @@ impl DurableStore for SqliteDurableStore {
 
     async fn internal_operations(
         &self,
-        operations: &[lash_durable::packages::EffectName],
+        operations: &[lash_vocabulary::legacy_names::EffectName],
     ) -> Result<
         std::collections::BTreeMap<
-            lash_durable::packages::EffectName,
+            lash_vocabulary::legacy_names::EffectName,
             std::collections::BTreeSet<String>,
         >,
         DurableError,
@@ -1254,7 +1257,7 @@ impl DurableStore for SqliteDurableStore {
         let at = self.instant()?;
         let session = match actor.kind() {
             lash_durable::ActorKind::Session => Some(
-                lash_protocol_types::SessionId::try_from(actor.id().to_owned())
+                lash_vocabulary::identity::SessionId::try_from(actor.id().to_owned())
                     .map_err(|_| corrupt("session id", actor.id()))?,
             ),
             lash_durable::ActorKind::Process => None,
@@ -1267,7 +1270,9 @@ impl DurableStore for SqliteDurableStore {
                 let mut statement = connection.prepare_cached(SQL.sqlite.open.sql())?;
                 let mut rows = statement.query(rusqlite::params![
                     actor.as_str(),
-                    session.as_ref().map(lash_protocol_types::SessionId::as_str)
+                    session
+                        .as_ref()
+                        .map(lash_vocabulary::identity::SessionId::as_str)
                 ])?;
                 let mut opened: Option<(OpenedActor, Option<_>)> = None;
                 while let Some(row) = rows.next()? {

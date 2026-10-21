@@ -4,8 +4,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use num_traits::ToPrimitive;
 
+use super::ParseError;
+use super::ParseErrorReason;
 use super::lexer::{Spanned, Token, lex};
-use super::{ParseError, ParseErrorReason, is_keyword};
 use crate::ast::{
     ActExpr, ActKind, Action, AssignOrder, Atom, Block, Callee, Catch, Closure, Expr, Function,
     JoinMode, Literal, MapEntry, Member, Place, ProjectionRead, Protocol, RecordEntry, Rhs, Stmt,
@@ -14,12 +15,23 @@ use crate::ast::{
 use crate::document::{Document, Manifest};
 use crate::function::{Formula, FunctionBody, FunctionDefinition, Guard, Implementation, Operand};
 use crate::function_value::{FunctionRepresentation, StartAdapter, StartConvention};
-use crate::name::{EffectName, FunctionId, FunctionName, Name, QualifiedName};
 use crate::number::{Float, NumberPolicy};
-use crate::requirement::{ContractId, OperationRequirement};
-use crate::types::{MapType, Param, RecordType, RecordTypeField, Signature, Type};
 use crate::validate::StatementForm;
 use crate::value::Bytes;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::legacy_names::QualifiedName;
+use lash_vocabulary::operations::ContractId;
+use lash_vocabulary::operations::OperationRequirement;
+use lash_vocabulary::type_text::is_keyword;
+use lash_vocabulary::types::MapType;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::RecordType;
+use lash_vocabulary::types::RecordTypeField;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 /// Reads a document from kernel text.
 ///
@@ -37,11 +49,14 @@ use crate::value::Bytes;
 /// `tests/document_example.rs`; the workspace builds no doctests, so that
 /// test is its proof.
 pub fn parse_document(text: &str) -> Result<Document, ParseError> {
-    parse_document_with_limits(text, crate::KernelDataLimits::standard())
+    parse_document_with_limits(
+        text,
+        lash_vocabulary::data_limits::KernelDataLimits::standard(),
+    )
 }
 pub fn parse_document_with_limits(
     text: &str,
-    limits: crate::KernelDataLimits,
+    limits: lash_vocabulary::data_limits::KernelDataLimits,
 ) -> Result<Document, ParseError> {
     let mut parser = Parser::new(text, limits)?;
     let mut kernel = None;
@@ -151,7 +166,10 @@ pub fn parse_document_with_limits(
 /// Reads a signature, `(name: Type, …) -> Type`, from kernel text: the
 /// notation a package surface declares its members' slots in.
 pub fn parse_signature(text: &str) -> Result<Signature, ParseError> {
-    let mut parser = Parser::new(text, crate::KernelDataLimits::standard())?;
+    let mut parser = Parser::new(
+        text,
+        lash_vocabulary::data_limits::KernelDataLimits::standard(),
+    )?;
     let signature = parser.signature()?;
     if parser.peek() != &Token::End {
         return Err(parser.unexpected("the end of the signature"));
@@ -161,11 +179,14 @@ pub fn parse_signature(text: &str) -> Result<Signature, ParseError> {
 
 /// Reads a library-function definition from kernel text.
 pub fn parse_definition(text: &str) -> Result<FunctionDefinition, ParseError> {
-    parse_definition_with_limits(text, crate::KernelDataLimits::standard())
+    parse_definition_with_limits(
+        text,
+        lash_vocabulary::data_limits::KernelDataLimits::standard(),
+    )
 }
 pub fn parse_definition_with_limits(
     text: &str,
-    limits: crate::KernelDataLimits,
+    limits: lash_vocabulary::data_limits::KernelDataLimits,
 ) -> Result<FunctionDefinition, ParseError> {
     crate::document_work::note_definition_parse();
     let mut parser = Parser::new(text, limits)?;
@@ -264,7 +285,7 @@ struct Parser {
 type Parsed<T> = Result<T, ParseError>;
 
 impl Parser {
-    fn new(text: &str, limits: crate::KernelDataLimits) -> Parsed<Self> {
+    fn new(text: &str, limits: lash_vocabulary::data_limits::KernelDataLimits) -> Parsed<Self> {
         Ok(Self {
             tokens: lex(text)?,
             position: 0,

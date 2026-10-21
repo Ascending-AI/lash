@@ -5,8 +5,9 @@ use std::str::FromStr;
 use num_bigint::BigInt;
 
 use super::{ParseError, ParseErrorReason};
-use crate::name::{FunctionId, parse_hex};
 use crate::number::{Float, Integer};
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::parse_hex;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum Token {
@@ -322,6 +323,3 @@ impl Lexer<'_> {
 fn is_word_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_'
 }
-
-/// Writes `text` between `quote`s with the escapes the lexer reads back.
-pub(super) use lash_vocabulary::type_text::write_quoted;

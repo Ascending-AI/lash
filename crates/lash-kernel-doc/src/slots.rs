@@ -11,10 +11,20 @@
 
 use std::collections::BTreeSet;
 
-use crate::ast::{ActKind, Action, Callee, Expr, Node, NodeMut, Protocol, Site, Stmt, Unit};
+use crate::ast::ActKind;
+use crate::ast::Action;
+use crate::ast::Callee;
+use crate::ast::Expr;
+use crate::ast::Node;
+use crate::ast::NodeMut;
+use crate::ast::Protocol;
+use crate::ast::Stmt;
 use crate::document::Document;
 use crate::function_value::StartConvention;
-use crate::name::{FunctionId, Name};
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 /// Spells each slot listing once for reading (no `mut`) and once for
 /// writing (`mut`), so the two inventories cannot drift.

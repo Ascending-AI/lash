@@ -21,11 +21,16 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_dialect::{Export, MemberPath, PackagePath};
-use lash_kernel_doc::{
-    ArtifactDigest, ExecutionRequirements, FunctionId, FunctionName, FunctionRegistry,
-    NodeCapabilities, PackageSetDigest,
-};
+use lash_kernel_dialect::Export;
+use lash_kernel_doc::ArtifactDigest;
+use lash_kernel_doc::ExecutionRequirements;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::NodeCapabilities;
+use lash_kernel_doc::PackageSetDigest;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::names::MemberPath;
+use lash_vocabulary::names::PackagePath;
 use serde::{Deserialize, Serialize};
 
 use crate::{ArtifactKey, Origin, Package, PackageDisplay, PackageSet, Root};
@@ -71,7 +76,7 @@ pub struct SnapshotPackage {
     requires: BTreeMap<PackagePath, ArtifactDigest>,
     roots: BTreeSet<Root>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    exports: BTreeMap<lash_kernel_dialect::Segment, Export>,
+    exports: BTreeMap<lash_vocabulary::names::Segment, Export>,
     digest: ArtifactDigest,
     functions: Vec<(FunctionName, FunctionId)>,
     #[serde(skip)]
@@ -129,7 +134,7 @@ impl SnapshotPackage {
         &self.roots
     }
 
-    pub fn exports(&self) -> &BTreeMap<lash_kernel_dialect::Segment, Export> {
+    pub fn exports(&self) -> &BTreeMap<lash_vocabulary::names::Segment, Export> {
         &self.exports
     }
 
@@ -172,7 +177,7 @@ impl SnapshotPackage {
 
     /// The kernel error kind of the export `segment` when it is an error:
     /// `<path>.<segment>`, derived and never written.
-    pub fn error_kind(&self, segment: &lash_kernel_dialect::Segment) -> Option<String> {
+    pub fn error_kind(&self, segment: &lash_vocabulary::names::Segment) -> Option<String> {
         matches!(self.exports().get(segment), Some(Export::Error))
             .then(|| format!("{}.{segment}", self.path()))
     }
@@ -360,7 +365,7 @@ impl SurfaceSnapshot {
     /// `function` is one of its declaring package's definitions.
     pub fn internal_authority(
         &self,
-        operation: &lash_kernel_dialect::QualifiedOperation,
+        operation: &lash_vocabulary::names::QualifiedOperation,
         function: FunctionId,
     ) -> Option<bool> {
         let package = self.package(&operation.package)?;

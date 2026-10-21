@@ -3,11 +3,18 @@ use super::Selection;
 
 use std::borrow::Cow;
 
+use lash_kernel_doc::Args;
+use lash_kernel_doc::Float;
+use lash_kernel_doc::Integer;
+use lash_kernel_doc::NativeCall;
+use lash_kernel_doc::NativeError;
+use lash_kernel_doc::NewObject;
+use lash_kernel_doc::NumberPolicy;
+use lash_kernel_doc::NumberToken;
+use lash_kernel_doc::Nursery;
+use lash_kernel_doc::Value;
 use lash_kernel_doc::arena::ArenaHandle;
-use lash_kernel_doc::{
-    Args, Float, Integer, NativeCall, NativeError, NewObject, NumberPolicy, NumberToken, Nursery,
-    Type, Value,
-};
+use lash_vocabulary::types::Type;
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 

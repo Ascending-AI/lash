@@ -5,16 +5,17 @@
 
 use lash_protocol_types::{ToolCallId, ToolCallPosition};
 
+use crate::ExecutionScope;
 use crate::effect_opener::EffectOpener;
 use crate::process_identity::{StartKey, StartKeyDerivation};
-use crate::{ExecutionScope, ProcessId};
+use lash_vocabulary::identity::ProcessId;
 
 const DERIVE: StartKeyDerivation = StartKeyDerivation::LASH_START_PATHS;
 
 #[test]
 fn start_keys_keep_every_family_and_scope_tag() {
     let intent = lash_protocol_types::ToolIntentIdentity {
-        owner: lash_protocol_types::RuntimeOwner::Session("session-1".into()),
+        owner: lash_vocabulary::identity::RuntimeOwner::Session("session-1".into()),
         execution_scope_id: "turn-1".into(),
         tool_call_id: ToolCallId::fixture("start"),
         intent_index: 0,

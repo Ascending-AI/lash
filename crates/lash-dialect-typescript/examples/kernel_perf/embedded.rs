@@ -80,7 +80,7 @@ pub(super) fn main() -> Result<(), String> {
     )]);
     let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
         &effects,
-        &lash_kernel_doc::ContractId::new("1"),
+        &lash_vocabulary::operations::ContractId::new("1"),
         &controls,
     )
     .expect("the test's effects are operations");

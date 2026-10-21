@@ -147,7 +147,7 @@ pub(super) async fn run_live_turn_facts(
         .serve_test_llm_profile(provider_handle, model.clone())
         .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let session_id = lash_protocol_types::SessionId::fixture(format!(
+    let session_id = lash_vocabulary::identity::SessionId::fixture(format!(
         "sim-live-failure-{provider_kind}-{offered_prose_deltas}"
     ));
     let session = crate::open_created_session(model.wire_model.clone(), &core, session_id)
@@ -732,7 +732,7 @@ impl lash_core::ToolProvider for PendingToolProvider {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![pending_tool_definition().manifest()])
@@ -742,7 +742,7 @@ impl lash_core::ToolProvider for PendingToolProvider {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.app_lookup").then(|| Arc::new(pending_tool_definition().contract()))
     }
 
@@ -768,8 +768,8 @@ impl lash_core::ToolProvider for PendingToolProvider {
     clippy::expect_used,
     reason = "this module declares the tool or payload schema and admission checks its invariant"
 )]
-fn pending_tool_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn pending_tool_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:app_lookup",
         "tools.app_lookup",
         "Look up app state.",
@@ -783,8 +783,8 @@ fn pending_tool_definition() -> lash_core::ToolDefinition {
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
     .with_declaration(
-        lash_core::ToolDeclaration::deferring(),
-        Some(lash_core::ParkBound::Within(
+        lash_vocabulary::tool_declaration::ToolDeclaration::deferring(),
+        Some(lash_vocabulary::tool_contract::ParkBound::Within(
             std::time::Duration::from_secs(120),
         )),
     )

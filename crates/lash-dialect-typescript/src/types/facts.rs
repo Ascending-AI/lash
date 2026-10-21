@@ -22,7 +22,8 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use lash_kernel_doc::{Name, Signature};
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::types::Signature;
 
 use super::{FRESH_LIST_METHODS, Ty, believed, binary_result, unary_result};
 use crate::adapter::{

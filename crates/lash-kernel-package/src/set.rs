@@ -2,8 +2,8 @@
 
 use std::collections::BTreeMap;
 
-use lash_kernel_dialect::PackagePath;
 use lash_kernel_doc::{ArtifactDigest, PackageSetDigest};
+use lash_vocabulary::names::PackagePath;
 
 use crate::{ArtifactKey, Package, PackageRefusal, SetHolds};
 

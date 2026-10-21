@@ -14,7 +14,12 @@ fn requests_of(served: &Served, id: &str) -> Vec<LlmRequest> {
     served
         .lock_recover()
         .iter()
-        .filter(|request| request.session_id().map(lash::SessionId::as_str) == Some(id))
+        .filter(|request| {
+            request
+                .session_id()
+                .map(lash_vocabulary::identity::SessionId::as_str)
+                == Some(id)
+        })
         .cloned()
         .collect()
 }
@@ -136,12 +141,14 @@ async fn two_sessions_under_two_profile_keys_each_keep_their_request_defaults_ac
     };
     let run = async |core: &LashCore, text: &str| -> Result<()> {
         for (id, _, _) in &recorded {
-            core.session(lash::SessionId::parse(*id).expect("nonblank host identity"))
-                .durable()
-                .await?
-                .send(lash::TurnInput::text(text))
-                .output()
-                .await?;
+            core.session(
+                lash_vocabulary::identity::SessionId::parse(*id).expect("nonblank host identity"),
+            )
+            .durable()
+            .await?
+            .send(lash::TurnInput::text(text))
+            .output()
+            .await?;
         }
         Ok(())
     };
@@ -153,7 +160,9 @@ async fn two_sessions_under_two_profile_keys_each_keep_their_request_defaults_ac
     ))?;
     for (id, key, _) in &recorded {
         creating
-            .session(lash::SessionId::parse(*id).expect("nonblank host identity"))
+            .session(
+                lash_vocabulary::identity::SessionId::parse(*id).expect("nonblank host identity"),
+            )
             .create(lash::SessionCreation::root(mock_session_spec().model(*key)))
             .await?;
     }

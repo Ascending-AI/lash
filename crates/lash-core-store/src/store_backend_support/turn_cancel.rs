@@ -20,7 +20,9 @@ pub struct EndedRunInputRelease<I>(Vec<I>);
 impl<I> EndedRunInputRelease<I> {
     pub fn select(
         ended: &crate::store::RunTurns,
-        inputs: impl IntoIterator<Item = Result<(I, Option<crate::TurnId>), StoreError>>,
+        inputs: impl IntoIterator<
+            Item = Result<(I, Option<lash_vocabulary::identity::TurnId>), StoreError>,
+        >,
     ) -> Result<Self, StoreError> {
         let mut addressed = Vec::new();
         for input in inputs {
@@ -53,7 +55,7 @@ impl<I> EndedRunInputRelease<I> {
 /// Decode an open active-turn input selected by the terminal transaction.
 /// Inputs addressed to another run are outside this cancellation.
 pub fn affected_input(
-    run: &crate::TurnId,
+    run: &lash_vocabulary::identity::TurnId,
     disposition: crate::TurnCancelUndeliveredInputPolicy,
     input_id: String,
     input_json: &str,
@@ -70,7 +72,7 @@ pub fn affected_input(
     }
     Ok(Some(
         crate::turn_control_vocabulary::TurnCancelAffectedInput {
-            input_id: crate::InputId::parse(input_id)
+            input_id: lash_vocabulary::identity::InputId::parse(input_id)
                 .map_err(|error| corrupt(error.to_string()))?,
             payload: serde_json::from_str(input_json)
                 .map_err(|error| corrupt(error.to_string()))?,

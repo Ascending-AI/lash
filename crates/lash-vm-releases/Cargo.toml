@@ -46,6 +46,7 @@ workspace = true
 # The library holds data alone: a host that only edits links it, and links no
 # dialect or extension (FIG-5812). The build script defines the helpers.
 [dependencies]
+lash-vocabulary = { workspace = true }
 lash-kernel-doc = { workspace = true }
 lash-kernel-package = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

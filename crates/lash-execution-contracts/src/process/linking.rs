@@ -34,19 +34,6 @@ pub enum ReachSelector {
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-/// An advertisement paired with its trusted publication context.
-pub struct AcceptedAdvertisement {
-    pub context: PublicationContext,
-    pub advertisement: PackageAdvertisement,
-}
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-/// Coherent accepted advertisements recorded for a round/start, with no fleet latest pointer.
-pub struct NamespaceSnapshot {
-    pub advertisements: Vec<AcceptedAdvertisement>,
-}
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 /// Immutable document, selected reach, accepted namespace and trusted admission purpose/context.
 pub struct FulfilRequest {
     pub document: DocumentId,
@@ -120,7 +107,7 @@ pub struct LoadedContent {
     pub reference: ContentRef,
     pub material: ProcessDocument,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(
     tag = "kind",
     content = "value",
@@ -183,7 +170,7 @@ pub enum AdmissionRefusal {
         message: String,
     },
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(
     tag = "kind",
     content = "value",
@@ -215,3 +202,18 @@ impl std::fmt::Display for EnginePortError {
     }
 }
 impl std::error::Error for EnginePortError {}
+
+impl EnginePortError {
+    /// Content/admission refusals cannot succeed on an identical retry; missing
+    /// content, fences and service failures remain infrastructure outcomes.
+    pub fn failure_class(&self) -> lash_vocabulary::ToolFailureClass {
+        match self {
+            Self::Refused(_) | Self::Corrupt { .. } | Self::Unsupported { .. } => {
+                lash_vocabulary::ToolFailureClass::InvalidRequest
+            }
+            Self::Missing { .. } | Self::Fenced | Self::Unavailable { .. } => {
+                lash_vocabulary::ToolFailureClass::Unavailable
+            }
+        }
+    }
+}

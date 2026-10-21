@@ -97,7 +97,7 @@ impl ExecutionComposition {
     /// provider.
     pub fn tool_provider(
         &self,
-        tool: &crate::ToolId,
+        tool: &lash_vocabulary::tool_contract::ToolId,
         provider: Option<&ToolProviderHandle>,
     ) -> Result<ToolProviderHandle, PluginError> {
         let provider = provider.cloned().ok_or_else(|| {
@@ -119,7 +119,7 @@ impl ExecutionComposition {
 
     pub(crate) fn tool_run_binding(
         &self,
-        tool: &crate::ToolId,
+        tool: &lash_vocabulary::tool_contract::ToolId,
         provider: Option<&ToolProviderHandle>,
     ) -> Result<crate::tool_run::AdmittedBinding, PluginError> {
         let executable = self.tool_provider(tool, provider)?.callback_identity();
@@ -139,7 +139,7 @@ impl ExecutionComposition {
     /// Bind recorded provider identities to this worker's capabilities.
     pub fn resolve_context_tool_bindings(
         &self,
-        bindings: &[crate::plugin::PluginCallbackIdentity],
+        bindings: &[lash_vocabulary::providers::PluginCallbackIdentity],
     ) -> Result<Vec<Arc<dyn crate::ToolProvider>>, PluginError> {
         let recorded = self.recorded();
         bindings

@@ -3,7 +3,7 @@
 // different manifest to `ToolCall::new` would bypass the dispatcher's
 // prepared-identity refusal. `run_tool_granted` is the sole entry.
 fn main() {
-    let grant = lash::tools::ToolExecutionGrant::from_definition(lash::plugins::ToolProviderHandle::new(lash::plugins::RegistryKind::Session, "mock", lash::tool_provider_key!("tools")), lash::tools::ToolDefinition::raw(
+    let grant = lash::tools::ToolExecutionGrant::from_definition(lash::plugins::ToolProviderHandle::new(lash_vocabulary::claims::RegistryKind::Session, "mock", lash::tool_provider_key!("tools")), lash::tools::ToolDefinition::raw(
         "tool:grant_only",
         "tools.grant_only",
         "granted",

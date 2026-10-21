@@ -12,9 +12,17 @@
 use std::collections::HashSet;
 
 use lash_kernel_dialect::workflow::{Entry, ModuleError, ModuleRefusal};
-use lash_kernel_doc::{
-    AssignOrder, Expr, Function, Literal, Name, Param, Place, Rhs, Signature, Stmt, Type,
-};
+use lash_kernel_doc::AssignOrder;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Function;
+use lash_kernel_doc::Literal;
+use lash_kernel_doc::Place;
+use lash_kernel_doc::Rhs;
+use lash_kernel_doc::Stmt;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 use ruff_python_ast::{self as ast, Expr as PyExpr, Stmt as PyStmt};
 use ruff_text_size::{Ranged, TextRange};
 

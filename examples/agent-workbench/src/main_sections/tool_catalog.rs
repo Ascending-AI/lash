@@ -7,8 +7,8 @@
 //! command. A tool outside the selection stays listed so it can be offered
 //! again.
 use super::*;
-use lash::SessionId;
 use lash::tools::ToolId;
+use lash_vocabulary::identity::SessionId;
 
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()

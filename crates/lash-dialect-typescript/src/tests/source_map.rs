@@ -5,7 +5,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_dialect::Lowered;
-use lash_kernel_doc::{Document, Expr, Node, Site, Unit};
+use lash_kernel_doc::Document;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Node;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 /// Every statement and action site of `document`'s code.
 fn code_sites(document: &Document) -> Vec<(Site, String)> {
@@ -65,7 +69,7 @@ fn every_entry_body_statement_and_action_is_mapped() {
             super::library(),
             &lash_kernel_dialect::Namespaces::of_effects(
                 &effects,
-                &lash_kernel_doc::ContractId::new("1"),
+                &lash_vocabulary::operations::ContractId::new("1"),
                 super::controls(),
             )
             .expect("the test's effects are operations"),

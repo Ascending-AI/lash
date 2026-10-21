@@ -110,13 +110,14 @@ pub(super) fn cell_exec(
             operation_id,
         } => (
             session_id,
-            lash_core::TurnId::try_from(operation_id).map_err(|error| error.to_string())?,
+            lash_vocabulary::identity::TurnId::try_from(operation_id)
+                .map_err(|error| error.to_string())?,
         ),
         lash_core::EffectOpener::Process { process_id } => (
             ctx.session_scope()
                 .map_err(|error| error.to_string())?
                 .session_id,
-            lash_core::TurnId::try_from(process_id.to_string())
+            lash_vocabulary::identity::TurnId::try_from(process_id.to_string())
                 .map_err(|error| error.to_string())?,
         ),
     };

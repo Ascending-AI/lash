@@ -540,7 +540,7 @@ impl ProviderHandle {
                     true,
                     failure_protocol_position(&error),
                     deadline.then_some(RetryDecision::Declined(RetryDeclineCause::TimedOut {
-                        limit: lash_protocol_types::LimitCause::ExecutionTotal,
+                        limit: lash_vocabulary::tool_contract::LimitCause::ExecutionTotal,
                     })),
                 );
                 if interrupted {
@@ -620,7 +620,7 @@ impl ProviderHandle {
                             true,
                             failure_protocol_position(failure),
                             Some(RetryDecision::Declined(RetryDeclineCause::TimedOut {
-                                limit: lash_protocol_types::LimitCause::ExecutionTotal,
+                                limit: lash_vocabulary::tool_contract::LimitCause::ExecutionTotal,
                             })),
                         ),
                         failure
@@ -763,7 +763,7 @@ impl ProviderHandle {
                     let (decision, verdict) = match decision.delay() {
                         Some(delay) if delay >= remaining(clock.as_ref()) => {
                             let cause = RetryDeclineCause::TimedOut {
-                                limit: lash_protocol_types::LimitCause::ExecutionTotal,
+                                limit: lash_vocabulary::tool_contract::LimitCause::ExecutionTotal,
                             };
                             (
                                 RetryDecision::Declined(cause),
@@ -963,7 +963,7 @@ fn model_total_exceeded(
                 true,
                 position,
                 Some(RetryDecision::Declined(RetryDeclineCause::TimedOut {
-                    limit: lash_protocol_types::LimitCause::ExecutionTotal,
+                    limit: lash_vocabulary::tool_contract::LimitCause::ExecutionTotal,
                 })),
             ),
             None,

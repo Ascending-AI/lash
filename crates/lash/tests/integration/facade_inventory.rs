@@ -185,7 +185,7 @@ use lash::tracing::TraceTurnCompletionReason as _;
 use lash::tracing::TraceTurnFailureReason as _;
 use lash::tracing::TraceTurnOutcome as _;
 
-/// `lash_protocol_types::schema_contract`, the one sans-io module the host names.
+/// `lash_vocabulary::schema_contract`, the one sans-io module the host names.
 use lash::schema::{SchemaContract as _, SchemaProjectionPolicy as _};
 
 /// FIG-4373: what a facade-only host needs to wrap a protocol factory, name

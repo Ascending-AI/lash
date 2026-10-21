@@ -10,10 +10,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::ast::Block;
 use crate::document::{DecodeError, EncodeError, from_versioned_json_with_limits, to_json};
-use crate::graph_tokens::{encode_body, logical_digest};
-use crate::name::{EffectName, FunctionId, FunctionName, Name};
-use crate::requirement::OperationRequirement;
-use crate::types::Signature;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::operations::OperationRequirement;
+use lash_vocabulary::tokens::encode_body;
+use lash_vocabulary::tokens::logical_digest;
+use lash_vocabulary::types::Signature;
 
 /// A library's declarations by content identity, without native implementations.
 ///
@@ -300,11 +304,14 @@ impl FunctionDefinition {
     }
 
     pub fn from_json(text: &str) -> Result<Self, DecodeError> {
-        Self::from_json_with_limits(text, crate::KernelDataLimits::standard())
+        Self::from_json_with_limits(
+            text,
+            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+        )
     }
     pub fn from_json_with_limits(
         text: &str,
-        limits: crate::KernelDataLimits,
+        limits: lash_vocabulary::data_limits::KernelDataLimits,
     ) -> Result<Self, DecodeError> {
         from_versioned_json_with_limits(text, limits)
     }

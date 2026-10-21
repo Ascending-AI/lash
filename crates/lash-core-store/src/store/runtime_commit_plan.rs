@@ -6,7 +6,7 @@
 //! set, and the receipt/result projection. A backend therefore reads typed
 //! facts, asks the planner once, and executes the returned plan.
 
-use crate::SessionId;
+use lash_vocabulary::identity::SessionId;
 use std::collections::HashSet;
 
 use super::{
@@ -45,7 +45,7 @@ pub struct FreshRuntimeCommitFacts {
     pub requested_ancestor_is_active: bool,
     /// Incoming node ids already occupied in durable history, including
     /// tombstoned rows.
-    pub occupied_node_ids: HashSet<crate::NodeId>,
+    pub occupied_node_ids: HashSet<lash_vocabulary::identity::NodeId>,
 }
 
 /// The previously published leaf observed under commit authority.
@@ -56,7 +56,9 @@ pub enum PublishedLeafFacts {
     /// A live leaf with its immutable ancestry seed.
     Live(ParentNodeFacts),
     /// The published identity no longer names a live node.
-    Retired { node_id: crate::NodeId },
+    Retired {
+        node_id: lash_vocabulary::identity::NodeId,
+    },
 }
 
 /// Immutable derived facts for an append's durable parent node.
@@ -65,11 +67,11 @@ pub enum PublishedLeafFacts {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParentNodeFacts {
     /// Parent identity cross-checked against the append edge.
-    pub node_id: crate::NodeId,
+    pub node_id: lash_vocabulary::identity::NodeId,
     /// Zero-based distance from the graph root.
     pub generation: u64,
     /// Nearest frame boundary at or above the parent.
-    pub frame_node_id: crate::NodeId,
+    pub frame_node_id: lash_vocabulary::identity::NodeId,
 }
 
 /// Immutable facts the core planner prescribes for one appended node.
@@ -78,11 +80,11 @@ pub struct ParentNodeFacts {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlannedNodeFacts {
     /// Appended node identity.
-    pub node_id: crate::NodeId,
+    pub node_id: lash_vocabulary::identity::NodeId,
     /// Zero-based distance from the graph root.
     pub generation: u64,
     /// Nearest frame boundary at or above this node.
-    pub frame_node_id: crate::NodeId,
+    pub frame_node_id: lash_vocabulary::identity::NodeId,
 }
 
 /// A replay decision for an already committed operation.
@@ -267,7 +269,7 @@ impl RuntimeCommitPlanner {
             && !facts.requested_ancestor_is_active
         {
             return Err(StoreError::AppendAncestorNotActive {
-                required_node_id: crate::NodeId::parse(required_node_id)?,
+                required_node_id: lash_vocabulary::identity::NodeId::parse(required_node_id)?,
             });
         }
         validate_head_revision(
@@ -364,9 +366,9 @@ pub struct RuntimeCommitPlan<'a> {
     operation_key: String,
     actual_head_revision: u64,
     next_head_revision: u64,
-    old_leaf_node_id: Option<crate::NodeId>,
-    committed_leaf_node_id: Option<crate::NodeId>,
-    derived_frame_node_id: Option<crate::NodeId>,
+    old_leaf_node_id: Option<lash_vocabulary::identity::NodeId>,
+    committed_leaf_node_id: Option<lash_vocabulary::identity::NodeId>,
+    derived_frame_node_id: Option<lash_vocabulary::identity::NodeId>,
     planned_node_facts: Vec<PlannedNodeFacts>,
     realized_node_timestamps: Vec<crate::session_graph::RealizedNodeTimestamp>,
     turn_input_applications: Vec<crate::TurnInputApplication>,
@@ -470,7 +472,13 @@ impl<'a> RuntimeCommitPlan<'a> {
 fn derive_appended_node_facts(
     graph: &super::GraphAppend,
     mut parent: Option<ParentNodeFacts>,
-) -> Result<(Vec<PlannedNodeFacts>, Option<crate::NodeId>), StoreError> {
+) -> Result<
+    (
+        Vec<PlannedNodeFacts>,
+        Option<lash_vocabulary::identity::NodeId>,
+    ),
+    StoreError,
+> {
     let mut planned = Vec::with_capacity(graph.nodes().len());
     for node in graph.nodes() {
         let generation = match parent.as_ref() {
@@ -547,9 +555,9 @@ mod tests {
             ))
         };
         let commit = RuntimeCommit::persisted_state_for_test(&state)
-            .settling_ingress(crate::store::IngressSettlement::new(crate::TurnId::from(
-                "run-1",
-            )))
+            .settling_ingress(crate::store::IngressSettlement::new(
+                lash_vocabulary::identity::TurnId::from("run-1"),
+            ))
             .applying_commands(crate::QueuedWorkCompletion {
                 session_id: SessionId::from("ingress-and-command-run"),
                 batch_ids: vec!["batch-1".into()],

@@ -1,7 +1,12 @@
-use crate::{
-    ExecutionPolicy, PreparedToolCall, RuntimeEffectInvocation, RuntimeEffectLocalExecutor,
-    RuntimeInvocation, ToolCallOutput, ToolCallRecord, ToolFailure, ToolFailureClass,
-};
+use crate::PreparedToolCall;
+use crate::RuntimeEffectInvocation;
+use crate::RuntimeEffectLocalExecutor;
+use crate::RuntimeInvocation;
+use crate::ToolCallOutput;
+use crate::ToolCallRecord;
+use crate::ToolFailure;
+use crate::ToolFailureClass;
+use lash_vocabulary::tool_contract::ExecutionPolicy;
 
 use super::{ToolCallLaunch, ToolDispatchContext, ToolDispatchOutcome};
 
@@ -198,8 +203,8 @@ pub async fn coordinate_tool_invocation<'run>(
                                         // call's answer: no repeat repairs it.
                                         | crate::ToolFailureCause::Declaration { .. }
                                         | crate::ToolFailureCause::ExecutionLimit {
-                                            cause: crate::LimitCause::ExecutionTotal
-                                                | crate::LimitCause::WaitDeadline,
+                                            cause: lash_vocabulary::tool_contract::LimitCause::ExecutionTotal
+                                                | lash_vocabulary::tool_contract::LimitCause::WaitDeadline,
                                         }
                                 )
                             ) =>
@@ -424,12 +429,16 @@ fn declares_start_at(
     outcome: &lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome,
     intent_index: u32,
 ) -> bool {
-    declares_at(outcome, crate::ToolIntentKind::StartProcess, intent_index)
+    declares_at(
+        outcome,
+        lash_vocabulary::ToolIntentKind::StartProcess,
+        intent_index,
+    )
 }
 
 fn declares_at(
     outcome: &lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome,
-    kind: crate::ToolIntentKind,
+    kind: lash_vocabulary::ToolIntentKind,
     intent_index: u32,
 ) -> bool {
     let (outcome_kind, index) = match outcome {
@@ -499,8 +508,15 @@ pub(super) fn project_recorded_intent_outcomes(
     };
     if let Some(index) = lash_protocol_types::handle::definition_slot(&value.to_json_value()) {
         let outcome = outcomes.iter().find(|outcome| {
-            declares_at(outcome, crate::ToolIntentKind::PublishDefinition, index)
-                || declares_at(outcome, crate::ToolIntentKind::GetDefinition, index)
+            declares_at(
+                outcome,
+                lash_vocabulary::ToolIntentKind::PublishDefinition,
+                index,
+            ) || declares_at(
+                outcome,
+                lash_vocabulary::ToolIntentKind::GetDefinition,
+                index,
+            )
         });
         match outcome {
             Some(lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Executed { realized, .. }) => {
@@ -655,7 +671,7 @@ async fn sleep_before_retry(
 #[cfg(test)]
 mod projection_tests {
     use super::*;
-    use crate::SessionId;
+    use lash_vocabulary::identity::SessionId;
 
     fn refusal(
         reason: lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason,
@@ -663,7 +679,7 @@ mod projection_tests {
         lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Refused {
             identity: None,
             intent_index: 0,
-            kind: crate::ToolIntentKind::CancelProcess,
+            kind: lash_vocabulary::ToolIntentKind::CancelProcess,
             refusal: reason,
         }
     }
@@ -674,7 +690,7 @@ mod projection_tests {
     ) -> lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome {
         lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Executed {
             identity: crate::ToolIntentIdentity {
-                owner: crate::RuntimeOwner::Session(SessionId::from("session")),
+                owner: lash_vocabulary::identity::RuntimeOwner::Session(SessionId::from("session")),
                 execution_scope_id: "turn".to_string(),
                 tool_call_id: crate::ToolCallId::fixture("call"),
                 intent_index,
@@ -766,7 +782,7 @@ mod projection_tests {
             &[lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Refused {
                 identity: None,
                 intent_index: 0,
-                kind: crate::ToolIntentKind::StartProcess,
+                kind: lash_vocabulary::ToolIntentKind::StartProcess,
                 refusal: lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::CanonicalByteBudgetExceeded {
                     actual: 139_000,
                     maximum: lash_execution_contracts::tool_intent::TOOL_INTENT_MAX_CANONICAL_BYTES,
@@ -864,7 +880,7 @@ mod projection_tests {
             &[lash_execution_contracts::tool_intent_outcome::ToolIntentExecutionOutcome::Refused {
                 identity: None,
                 intent_index: 0,
-                kind: crate::ToolIntentKind::GetDefinition,
+                kind: lash_vocabulary::ToolIntentKind::GetDefinition,
                 refusal: lash_execution_contracts::tool_intent_outcome::ToolIntentRefusalReason::MintingRunCancelled,
             }],
         );

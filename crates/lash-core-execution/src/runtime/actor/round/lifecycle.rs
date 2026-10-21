@@ -83,9 +83,11 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use lash_core_store::tool_run::{AvailableEvidence, CompletionSource, LimitCause};
+use lash_core_store::tool_run::AvailableEvidence;
+use lash_core_store::tool_run::CompletionSource;
 use lash_durable::domain::{AdmittedId, DomainRefusal, RunFacts, RunSeq};
 use lash_durable::{CommitLabel, DueSource, DurableError, DurableInstant};
+use lash_vocabulary::tool_contract::LimitCause;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument as _;
@@ -118,7 +120,7 @@ pub struct MemberOutcome {
     pub store_local: Vec<StoreLocalEffect>,
     /// For a park, the process whose terminal the call also awaits: its
     /// `process_terminal` wait is pinned with the park.
-    pub terminal: Option<crate::ProcessId>,
+    pub terminal: Option<lash_vocabulary::identity::ProcessId>,
     /// The host lacked capacity for the attempt
     /// ([`CapacityVerdict`]): honoured, nothing is recorded and the
     /// member runs again uncounted; refused, `output` is recorded.
@@ -1257,7 +1259,7 @@ impl Lifecycle {
         let pinned = execution.policy();
         let honours_capacity = matches!(
             pinned,
-            lash_protocol_types::ExecutionPolicy::Repeatable { .. }
+            lash_vocabulary::tool_contract::ExecutionPolicy::Repeatable { .. }
         ) && self
             .policies
             .permits_repeat(execution.draft().tool(), pinned);
@@ -1265,7 +1267,7 @@ impl Lifecycle {
         let attempt = async move {
             type Carried = (
                 Vec<StoreLocalEffect>,
-                Option<crate::ProcessId>,
+                Option<lash_vocabulary::identity::ProcessId>,
                 Option<CapacityVerdict>,
                 Option<StepCandidate>,
             );

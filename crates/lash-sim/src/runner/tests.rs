@@ -1,6 +1,6 @@
 use super::*;
 use crate::scheduler::PendingRuntimeBoundary;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 #[tokio::test]
 async fn attachment_owner_sweep_is_deterministic_across_memory_and_sqlite() {
@@ -1371,7 +1371,7 @@ async fn a_world_live_replay_keeps_activity_however_long_the_host_runs() {
             &session,
             revision,
             vec![LiveReplayEventDraft::new(
-                None::<lash_core::TurnId>,
+                None::<lash_vocabulary::identity::TurnId>,
                 SessionObservationEventPayload::ResidentChanged,
             )],
         )

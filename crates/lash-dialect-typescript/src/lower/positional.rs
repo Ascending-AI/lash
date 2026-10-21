@@ -240,7 +240,11 @@ impl super::Lowerer<'_> {
         arguments: &[&ast::Expr],
     ) -> super::Lowering<Option<super::Operand>> {
         use super::{Operand, Ty};
-        use lash_kernel_doc::{ActKind, Callee, Expr as KExpr, Name, Stmt as KStmt};
+        use lash_kernel_doc::ActKind;
+        use lash_kernel_doc::Callee;
+        use lash_kernel_doc::Expr as KExpr;
+        use lash_kernel_doc::Stmt as KStmt;
+        use lash_vocabulary::legacy_names::Name;
         let Some((helper, arity)) = crate::builtins::array_callback(method) else {
             return Ok(None);
         };

@@ -1,11 +1,11 @@
 mod tests {
-    use crate::SessionId;
     use crate::plugin::{SessionObservedProcessOutcome, SessionObserverIntent};
     use crate::runtime::{SessionObserverIntentSource, reconcile_session_process_observer_intents};
     use lash_execution_contracts::{
         ProcessEventLogTestSupport, ProcessLifecycle, ProcessObserverRegistry, ProcessRegistrar,
         ProcessRetention,
     };
+    use lash_vocabulary::identity::SessionId;
 
     use crate::support::sqlite_memory_process_store_set;
 
@@ -47,8 +47,12 @@ mod tests {
             Some(registry.as_ref()),
             &SessionId::from("noproc-session"),
             SessionObserverIntentSource::Unstored(vec![
-                SessionObserverIntent::host_requested(crate::ProcessId::fixture("unknown-host")),
-                SessionObserverIntent::host_requested(crate::ProcessId::fixture("unknown-fork")),
+                SessionObserverIntent::host_requested(
+                    lash_vocabulary::identity::ProcessId::fixture("unknown-host"),
+                ),
+                SessionObserverIntent::host_requested(
+                    lash_vocabulary::identity::ProcessId::fixture("unknown-fork"),
+                ),
                 SessionObserverIntent::host_requested(pruned.id.clone()),
                 SessionObserverIntent::host_requested(pruned.id.clone()),
             ]),
@@ -115,7 +119,9 @@ mod tests {
             &session_id,
             SessionObserverIntentSource::Unstored(vec![
                 SessionObserverIntent::host_requested(ids["named"].clone()),
-                SessionObserverIntent::host_requested(crate::ProcessId::fixture("missing-process")),
+                SessionObserverIntent::host_requested(
+                    lash_vocabulary::identity::ProcessId::fixture("missing-process"),
+                ),
                 SessionObserverIntent::host_requested(ids["pruned"].clone()),
             ]),
         )
@@ -129,7 +135,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             [
                 ids["named"].clone(),
-                crate::ProcessId::fixture("missing-process"),
+                lash_vocabulary::identity::ProcessId::fixture("missing-process"),
                 ids["pruned"].clone(),
             ],
             "one receipt per named process, in the order named"

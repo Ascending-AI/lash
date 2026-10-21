@@ -1,5 +1,5 @@
 use super::*;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 pub(crate) fn decode_turn_input_ingress(
     value: String,
@@ -109,7 +109,7 @@ pub(crate) fn pending_turn_input_read_from_row(
     Ok(match admitted_run {
         Some(run) => lash_core_store::turn_input_vocabulary::PendingTurnInputRead::admitted(
             input,
-            lash_protocol_types::TurnId::parse(run)?,
+            lash_vocabulary::identity::TurnId::parse(run)?,
         ),
         None => lash_core_store::turn_input_vocabulary::PendingTurnInputRead::open(input),
     })

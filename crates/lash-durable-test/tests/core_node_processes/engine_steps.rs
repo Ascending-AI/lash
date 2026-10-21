@@ -73,8 +73,8 @@ impl lash_execution_contracts::process::EngineSteps for Double {
     fn retry(
         &self,
         _kind: &lash_execution_contracts::process::EngineStepKind,
-    ) -> lash_core::ExecutionPolicy {
-        lash_core::ExecutionPolicy::Once
+    ) -> lash_vocabulary::tool_contract::ExecutionPolicy {
+        lash_vocabulary::tool_contract::ExecutionPolicy::Once
     }
 
     async fn run(
@@ -258,7 +258,7 @@ const RETRY_ENGINE: &str = "core-node-retry-engine";
 /// The `flaky` body, declared with `retry` as its engine author's policy.
 struct Flaky {
     runs: Arc<AtomicUsize>,
-    retry: lash_core::ExecutionPolicy,
+    retry: lash_vocabulary::tool_contract::ExecutionPolicy,
 }
 
 #[async_trait::async_trait]
@@ -279,7 +279,7 @@ impl lash_execution_contracts::process::EngineSteps for Flaky {
     fn retry(
         &self,
         _kind: &lash_execution_contracts::process::EngineStepKind,
-    ) -> lash_core::ExecutionPolicy {
+    ) -> lash_vocabulary::tool_contract::ExecutionPolicy {
         self.retry
     }
 
@@ -340,8 +340,8 @@ fn flaky_advance(
 /// there is one.
 struct RetryPlugin {
     runs: Arc<AtomicUsize>,
-    declared: lash_core::ExecutionPolicy,
-    overridden: Option<lash_core::ExecutionPolicy>,
+    declared: lash_vocabulary::tool_contract::ExecutionPolicy,
+    overridden: Option<lash_vocabulary::tool_contract::ExecutionPolicy>,
 }
 
 struct NoRetrySessionPlugin;
@@ -437,8 +437,8 @@ impl lash_core::plugin::PluginMetadata for RetryPlugin {
 /// engine's `declared` policy and the host's `overridden` one.
 async fn flaky_runs(
     tier: Tier,
-    declared: lash_core::ExecutionPolicy,
-    overridden: Option<lash_core::ExecutionPolicy>,
+    declared: lash_vocabulary::tool_contract::ExecutionPolicy,
+    overridden: Option<lash_vocabulary::tool_contract::ExecutionPolicy>,
 ) -> usize {
     let runs = Arc::new(AtomicUsize::new(0));
     let plugin = Arc::new(RetryPlugin {
@@ -462,20 +462,38 @@ async fn flaky_runs(
 /// override retries it to its attempts, and a host's `Once` override stops
 /// an engine's declared retries.
 async fn an_engine_step_retries_as_its_kind_declares_unless_its_host_overrides(tier: Tier) {
-    let three =
-        lash_core::ExecutionPolicy::repeatable(std::num::NonZeroU32::MIN.saturating_add(2), 0, 0);
+    let three = lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
+        std::num::NonZeroU32::MIN.saturating_add(2),
+        0,
+        0,
+    );
     assert_eq!(
-        flaky_runs(tier, lash_core::ExecutionPolicy::Once, None).await,
+        flaky_runs(
+            tier,
+            lash_vocabulary::tool_contract::ExecutionPolicy::Once,
+            None
+        )
+        .await,
         1,
         "a step kind declared `Once` is not retried after its failure"
     );
     assert_eq!(
-        flaky_runs(tier, lash_core::ExecutionPolicy::Once, Some(three)).await,
+        flaky_runs(
+            tier,
+            lash_vocabulary::tool_contract::ExecutionPolicy::Once,
+            Some(three)
+        )
+        .await,
         3,
         "the host's `Repeatable` override retries it"
     );
     assert_eq!(
-        flaky_runs(tier, three, Some(lash_core::ExecutionPolicy::Once)).await,
+        flaky_runs(
+            tier,
+            three,
+            Some(lash_vocabulary::tool_contract::ExecutionPolicy::Once)
+        )
+        .await,
         1,
         "the host's `Once` override stops the engine's declared retries"
     );
@@ -566,8 +584,10 @@ fn failed_step_advance(
 }
 
 /// The component whose tool catalog contribution refuses.
-const FAILING_CATALOG: lash_core::ProcessConfigKey<()> =
-    lash_core::ProcessConfigKey::new("core-node-failing-catalog", lash_core::FormatVersion::ONE);
+const FAILING_CATALOG: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
+    "core-node-failing-catalog",
+    lash_vocabulary::providers::FormatVersion::ONE,
+);
 
 fn failing_catalog_component() -> Arc<dyn lash::process::ProcessComponentFactory> {
     let refuse: lash_core::plugin::ToolCatalogContributor = Arc::new(|_| {

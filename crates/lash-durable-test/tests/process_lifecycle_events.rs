@@ -98,7 +98,7 @@ impl lash::process::ProcessEventSink for Heard {
 
 impl Heard {
     /// The sequences heard of `process`, in the order they were heard.
-    fn sequences(&self, process: &lash_core::ProcessId) -> Vec<u64> {
+    fn sequences(&self, process: &lash_vocabulary::identity::ProcessId) -> Vec<u64> {
         self.0
             .lock()
             .unwrap()
@@ -398,11 +398,13 @@ impl lash::tools::StaticToolExecute for Write {
 }
 
 /// The component that serves the write tool to a process.
-const WRITE_COMPONENT: lash_core::ProcessConfigKey<()> =
-    lash_core::ProcessConfigKey::new("lifecycle-events-write", lash_core::FormatVersion::ONE);
+const WRITE_COMPONENT: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
+    "lifecycle-events-write",
+    lash_vocabulary::providers::FormatVersion::ONE,
+);
 
-fn write_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn write_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         WRITE_TOOL,
         WRITE_TOOL_OPERATION,
         "Writes x to the outside world, once.",
@@ -417,11 +419,13 @@ fn write_definition() -> lash_core::ToolDefinition {
     .expect("the write tool's schemas")
     .with_execution(std::time::Duration::from_secs(120))
     .with_declaration(
-        lash_core::ToolDeclaration::deferring(),
-        Some(lash_core::ParkBound::Within(Duration::from_secs(300))),
+        lash_vocabulary::tool_declaration::ToolDeclaration::deferring(),
+        Some(lash_vocabulary::tool_contract::ParkBound::Within(
+            Duration::from_secs(300),
+        )),
     )
     .expect("a deferring tool declares its park bound")
-    .with_execution_policy(lash_core::ExecutionPolicy::Once)
+    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::Once)
 }
 
 fn write_tool(world: &Arc<World>) -> Arc<dyn lash_core::ToolProvider> {
@@ -472,7 +476,7 @@ fn environment() -> lash_core::ProcessEnv {
 }
 
 /// Start a detached process of the scripted engine.
-async fn start(core: &lash::LashCore) -> lash_core::ProcessId {
+async fn start(core: &lash::LashCore) -> lash_vocabulary::identity::ProcessId {
     let env_ref = core
         .host_artifacts()
         .publish_process_env(&lash_core::HostArtifactPin::mint(), &environment())
@@ -492,7 +496,7 @@ async fn start(core: &lash::LashCore) -> lash_core::ProcessId {
         .process_id
 }
 
-async fn ended(core: &lash::LashCore, process: &lash_core::ProcessId) {
+async fn ended(core: &lash::LashCore, process: &lash_vocabulary::identity::ProcessId) {
     let output = tokio::time::timeout(
         Duration::from_secs(60),
         core.processes().await_output(process),
@@ -506,7 +510,11 @@ async fn ended(core: &lash::LashCore, process: &lash_core::ProcessId) {
 /// deadline is a minute without a new write rather than a minute in all: a
 /// long sequential run ends however loaded the host is, and a stalled one
 /// still fails a minute after its last write.
-async fn ended_while_writing(core: &lash::LashCore, process: &lash_core::ProcessId, world: &World) {
+async fn ended_while_writing(
+    core: &lash::LashCore,
+    process: &lash_vocabulary::identity::ProcessId,
+    world: &World,
+) {
     let processes = core.processes();
     let output = processes.await_output(process);
     tokio::pin!(output);
@@ -536,7 +544,7 @@ fn succeeded<E: std::fmt::Debug>(
 /// `process`'s whole durable log.
 async fn log(
     backend: &lash::Backend,
-    process: &lash_core::ProcessId,
+    process: &lash_vocabulary::identity::ProcessId,
 ) -> Vec<lash::process::ProcessEvent> {
     backend
         .process_registry()
@@ -570,7 +578,7 @@ static EFFECT_LAW_GUARD: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(
 
 /// The identity of the `n`-th write of [`NODE`], from 0: the one site of
 /// the node, at its `n`-th occurrence.
-fn node_site(n: u64) -> lash_protocol_types::EffectId {
+fn node_site(n: u64) -> lash_vocabulary::sites::EffectId {
     lash_protocol_types::effect_identity_fixture(NODE, n)
 }
 
@@ -649,7 +657,7 @@ async fn each_committed_effect_is_one_effect_outcome_event(tier: Tier) {
         .expect("an effect outcome decodes")
     })
     .collect();
-    let recorded: Vec<lash_protocol_types::EffectId> =
+    let recorded: Vec<lash_vocabulary::sites::EffectId> =
         outcomes.iter().map(|outcome| outcome.at.clone()).collect();
     let first_cap: Vec<_> = (0..64).map(node_site).collect();
     assert_eq!(
@@ -1194,7 +1202,7 @@ impl Fleet {
     }
 
     /// Register a detached process of the scripted engine.
-    async fn register(&self) -> lash_core::ProcessId {
+    async fn register(&self) -> lash_vocabulary::identity::ProcessId {
         let registration = lash_execution_contracts::process::ProcessRegistration::new(
             lash_execution_contracts::process::ProcessInput::Engine {
                 kind: KIND.to_owned(),
@@ -1215,7 +1223,10 @@ impl Fleet {
             .id
     }
 
-    async fn events(&self, process: &lash_core::ProcessId) -> Vec<lash::process::ProcessEvent> {
+    async fn events(
+        &self,
+        process: &lash_vocabulary::identity::ProcessId,
+    ) -> Vec<lash::process::ProcessEvent> {
         self.backend
             .process_registry()
             .full_event_window(process, 0)
@@ -1223,7 +1234,7 @@ impl Fleet {
             .expect("the log is read")
     }
 
-    async fn log(&self, process: &lash_core::ProcessId) -> Vec<u64> {
+    async fn log(&self, process: &lash_vocabulary::identity::ProcessId) -> Vec<u64> {
         self.events(process)
             .await
             .iter()
@@ -1231,7 +1242,7 @@ impl Fleet {
             .collect()
     }
 
-    async fn types(&self, process: &lash_core::ProcessId) -> Vec<String> {
+    async fn types(&self, process: &lash_vocabulary::identity::ProcessId) -> Vec<String> {
         self.events(process)
             .await
             .into_iter()
@@ -1239,7 +1250,7 @@ impl Fleet {
             .collect()
     }
 
-    async fn ended(&self, process: &lash_core::ProcessId) -> bool {
+    async fn ended(&self, process: &lash_vocabulary::identity::ProcessId) -> bool {
         self.backend
             .process_registry()
             .get_process(process)
@@ -1250,7 +1261,7 @@ impl Fleet {
 
     async fn actor_state(
         &self,
-        process: &lash_core::ProcessId,
+        process: &lash_vocabulary::identity::ProcessId,
     ) -> Option<lash_durable::ActorState> {
         self.nodes
             .database()
@@ -1499,7 +1510,7 @@ on_every_tier!(a_deferred_call_records_one_waiting_event_and_resumes);
 async fn parked_call(
     core: &lash::LashCore,
     backend: &lash::Backend,
-    process: &lash_core::ProcessId,
+    process: &lash_vocabulary::identity::ProcessId,
 ) -> lash::admin::ParkedCall {
     tokio::time::timeout(Duration::from_secs(60), async {
         loop {

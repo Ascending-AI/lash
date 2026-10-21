@@ -5,7 +5,14 @@
 use num_bigint::BigInt;
 use num_traits::{FromPrimitive, ToPrimitive, Zero};
 
-use crate::{Datum, ErrorDatum, Float, Integer, Name, NumberPolicy, NumberToken, Type};
+use crate::Datum;
+use crate::ErrorDatum;
+use crate::Float;
+use crate::Integer;
+use crate::NumberPolicy;
+use crate::NumberToken;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::types::Type;
 
 /// How an inbound datum is read.
 pub struct Decoder<'a> {

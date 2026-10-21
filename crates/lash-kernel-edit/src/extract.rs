@@ -4,7 +4,11 @@ use std::collections::BTreeSet;
 
 use crate::apply::Working;
 use lash_kernel_check::{Environment, entry_reachability};
-use lash_kernel_doc::{Document, EffectName, Name, Site, Unit};
+use lash_kernel_doc::Document;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 use crate::refusal::refused;
 use crate::{Applied, Edit, EditDiagnostic, EditDiagnosticKind, EditRefusal};

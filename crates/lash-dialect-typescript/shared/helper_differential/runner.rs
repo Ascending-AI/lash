@@ -3,13 +3,20 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use lash_kernel_dialect::{Environment, NamedLibrary};
-use lash_kernel_doc::{
-    Datum, EffectName, ErrorDatum, Handle, Integer, Name, Param, Signature, Timestamp, Type,
-};
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::ErrorDatum;
+use lash_kernel_doc::Handle;
+use lash_kernel_doc::Integer;
+use lash_kernel_doc::Timestamp;
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, Machine, Outcome, PreparedLibrary, Program, Request, RunError,
     Step, Target,
 };
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -99,7 +106,7 @@ impl Runner {
         )]);
         let env_namespaces = lash_kernel_dialect::Namespaces::of_effects(
             &effects,
-            &lash_kernel_doc::ContractId::new("1"),
+            &lash_vocabulary::operations::ContractId::new("1"),
             &Default::default(),
         )
         .map_err(|e| e.to_string())?;
@@ -135,9 +142,9 @@ impl Runner {
             .map(|(effect, signature)| {
                 (
                     effect.clone(),
-                    lash_kernel_doc::OperationRequirement::new(
+                    lash_vocabulary::operations::OperationRequirement::new(
                         signature.clone(),
-                        lash_kernel_doc::ContractId::new("1"),
+                        lash_vocabulary::operations::ContractId::new("1"),
                     ),
                 )
             })

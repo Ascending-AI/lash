@@ -16,12 +16,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use lash_core_store::checkpoint_graph::EncodedCommitMeasurement;
+use lash_core_store::checkpoint_graph::GraphRefusal;
+use lash_core_store::checkpoint_graph::NodeId;
 use lash_core_store::checkpoint_graph::stage::{
     CandidateManifest, EdgeLog, ManifestSummary, StageFault,
 };
-use lash_core_store::checkpoint_graph::{
-    EncodedCommitMeasurement, GraphRefusal, NodeId, TokenWriter,
-};
+use lash_vocabulary::tokens::TokenWriter;
 
 use super::DomainWrite;
 use super::graph::{
@@ -592,7 +593,7 @@ pub fn check_candidate(
 /// the session's execution root, and it is the candidate's root.
 fn check_session_candidate(
     writes: &[DomainWrite],
-    session: &lash_protocol_types::SessionId,
+    session: &lash_vocabulary::identity::SessionId,
     summary: &ManifestSummary,
 ) -> Result<(), GraphRefusal> {
     let mut owned = writes.iter().filter_map(|write| match write {
@@ -1181,8 +1182,9 @@ fn merge(own: InstallEntry, manifest: InstallEntry) -> Result<InstallEntry, Grap
 
 #[cfg(test)]
 mod tests {
-    use lash_core_store::checkpoint_graph::TokenReader;
-    use lash_protocol_types::{SessionId, TurnId};
+    use lash_vocabulary::identity::SessionId;
+    use lash_vocabulary::identity::TurnId;
+    use lash_vocabulary::tokens::TokenReader;
 
     use super::*;
     use crate::domain::{

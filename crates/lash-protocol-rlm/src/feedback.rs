@@ -23,9 +23,12 @@
 use std::collections::BTreeMap;
 
 use lash_core::{CellDefect, CellFailure, CellFailureKind};
-use lash_kernel_doc::{Datum, Name, SourceMap, TaskLabel};
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::SourceMap;
 use lash_kernel_vm::{Bound, BoundExceeded, RunError};
 use lash_vm_client::service::DialectRefusal;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::TaskLabel;
 
 use crate::dialect::DialectPrompts;
 
@@ -261,7 +264,7 @@ pub(crate) enum CellObservation {
     TasksOutstanding {
         unfinished: Vec<TaskLabel>,
         unobserved: Vec<TaskLabel>,
-        sources: Vec<(TaskLabel, lash_kernel_doc::PositionLabel)>,
+        sources: Vec<(TaskLabel, lash_vocabulary::sites::PositionLabel)>,
     },
     /// No task is ready and none waits on anything the host can answer.
     Deadlock { waiting: Vec<TaskLabel> },
@@ -354,7 +357,7 @@ impl CellObservation {
     ) -> CellFailure {
         let vocabulary = prompts.prompt_vocabulary();
         let place = |tasks: &[TaskLabel],
-                     sources: &[(TaskLabel, lash_kernel_doc::PositionLabel)]|
+                     sources: &[(TaskLabel, lash_vocabulary::sites::PositionLabel)]|
          -> String {
             tasks
                 .iter()
@@ -528,7 +531,7 @@ fn line_column(source: &str, offset: usize) -> (usize, usize) {
 /// A task as a typed label: the site that spawned it and which run of
 /// that site it is.
 pub(crate) fn task_label(task: &TaskLabel) -> String {
-    lash_kernel_doc::ObservationReader::task_label(task)
+    lash_vocabulary::sites::ObservationReader::task_label(task)
 }
 
 /// Which task, for the model: the source line of the async code it runs
@@ -538,12 +541,14 @@ fn task_place(
     task: &TaskLabel,
     source: &str,
     map: Option<&SourceMap>,
-    body: Option<&lash_kernel_doc::PositionLabel>,
+    body: Option<&lash_vocabulary::sites::PositionLabel>,
 ) -> String {
-    if lash_kernel_doc::ObservationReader::task_is_root(task) {
+    if lash_vocabulary::sites::ObservationReader::task_is_root(task) {
         return "the program itself".to_owned();
     }
-    match map.and_then(|map| lash_kernel_doc::ObservationReader::task_source(task, map, body)) {
+    match map
+        .and_then(|map| lash_vocabulary::sites::ObservationReader::task_source(task, map, body))
+    {
         Some(start) => {
             let (line, _) = line_column(source, start);
             let text = source.lines().nth(line - 1).unwrap_or_default().trim();
@@ -624,8 +629,9 @@ mod tests {
             let observation = CellObservation::Bound(BoundExceeded {
                 bound: Bound::Memory,
                 limit: 67_108_864,
-                function: function
-                    .map(|name| lash_kernel_doc::FunctionName::new(name).expect("function name")),
+                function: function.map(|name| {
+                    lash_vocabulary::legacy_names::FunctionName::new(name).expect("function name")
+                }),
             });
             let failure =
                 observation.failure("", None, crate::plugin::RlmChannel::Cell, prompts.as_ref());

@@ -1,6 +1,8 @@
 //! Statements, and the statement runs the front end lowers one read to.
 
-use lash_kernel_doc::{self as k, Name, Site};
+use lash_kernel_doc as k;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
 
 use super::lift::{Lift, Lifter, refuse};
 use super::source::{self, Arm, Body, Expr, StmtKind};

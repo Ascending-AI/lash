@@ -1079,11 +1079,11 @@ async fn a_prepared_frame_is_reclaimed_only_after_its_failed_commit_cannot_repla
     let harness = harness();
     let scope = journal("failed-frame-prepare");
     let predecessor = ArtifactReferrer::FrameEnvironment(crate::FrameEnvironmentId::new(
-        crate::SessionId::from("carry"),
+        lash_vocabulary::identity::SessionId::from("carry"),
         crate::FrameNodeId::new("old").unwrap(),
     ));
     let successor_frame = crate::FrameEnvironmentId::new(
-        crate::SessionId::from("carry"),
+        lash_vocabulary::identity::SessionId::from("carry"),
         crate::FrameNodeId::new("never-committed").unwrap(),
     );
     let successor = ArtifactReferrer::FrameEnvironment(successor_frame.clone());
@@ -1164,7 +1164,7 @@ async fn a_committed_prepared_frame_retains_its_engine_share_until_ended_without
     let harness = harness();
     let scope = journal("committed-frame-prepare");
     let frame_id = crate::FrameEnvironmentId::new(
-        crate::SessionId::from("carry"),
+        lash_vocabulary::identity::SessionId::from("carry"),
         crate::FrameNodeId::new("committed").unwrap(),
     );
     let frame = ArtifactReferrer::FrameEnvironment(frame_id.clone());

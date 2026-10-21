@@ -4,10 +4,10 @@
 //! reload from the store reads the same instant.
 
 use super::failures::Module;
-use super::*;
 use lash::workflow::ProcessWorkflowSiteState;
 use lash::workflow::ProcessWorkflowWaitKind;
 use lash::workflow::document::SourceLanguage;
+use lash_vocabulary::schema_contract::*;
 
 /// `nap(minutes)` sleeps the duration its argument computes.
 const TYPESCRIPT: &str = "export async function nap(minutes: number) {\n  await sleep(minutes * 60000);\n  return \"woke\";\n}\n";
@@ -28,7 +28,7 @@ const RESUME_AT: i64 = PARKED_AT as i64 + MINUTES * 60_000;
 /// observation snapshot.
 async fn sleep_state(
     core: &lash::LashCore,
-    process: &lash_core::ProcessId,
+    process: &lash_vocabulary::identity::ProcessId,
 ) -> ProcessWorkflowSiteState {
     let snapshot = core
         .processes()
@@ -58,7 +58,7 @@ async fn sleep_state(
 async fn parked_naps(
     core: &lash::LashCore,
     files: &Files,
-) -> Vec<(SourceLanguage, lash_core::ProcessId)> {
+) -> Vec<(SourceLanguage, lash_vocabulary::identity::ProcessId)> {
     files.clock.set(PARKED_AT);
     let mut parked = Vec::new();
     for (language, source) in DIALECTS {

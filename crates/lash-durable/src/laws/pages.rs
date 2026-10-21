@@ -13,15 +13,22 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
+use lash_core_store::checkpoint_graph::CommitId;
+use lash_core_store::checkpoint_graph::DecodeLimits;
+use lash_core_store::checkpoint_graph::EncodeBudget;
+use lash_core_store::checkpoint_graph::EncodedNode;
+use lash_core_store::checkpoint_graph::ExplicitLimit;
+use lash_core_store::checkpoint_graph::GraphRefusal;
+use lash_core_store::checkpoint_graph::GraphStaging;
+use lash_core_store::checkpoint_graph::NodeId;
+use lash_core_store::checkpoint_graph::NodeKind;
+use lash_core_store::checkpoint_graph::TypedBody;
 use lash_core_store::checkpoint_graph::node::VerifiedNode;
 use lash_core_store::checkpoint_graph::stage::{
     CandidateManifest, EdgeLog, ManifestEntry, ManifestSummary, MemoryEdgeLog, StageFault,
     node_range,
 };
-use lash_core_store::checkpoint_graph::{
-    CommitId, DecodeLimits, EncodeBudget, EncodedNode, ExplicitLimit, GraphRefusal, GraphStaging,
-    NodeId, NodeKind, TokenWriter, TypedBody,
-};
+use lash_vocabulary::tokens::TokenWriter;
 
 use super::{LABEL, LawBroken, LawOutcome, create, ensure, node, session};
 use crate::domain::graph::{EffectAdmissionWrite, EffectKey, ExecRootWrite, RootOwner};
@@ -308,9 +315,9 @@ pub struct Owned {
 impl Owned {
     fn exec(&self, cell: &str) -> ExecKey {
         ExecKey::Cell(
-            lash_protocol_types::SessionId::try_from(self.session.clone())
+            lash_vocabulary::identity::SessionId::try_from(self.session.clone())
                 .unwrap_or_else(|_| panic!("a constant session id")),
-            lash_protocol_types::TurnId::try_from("pages-turn".to_owned())
+            lash_vocabulary::identity::TurnId::try_from("pages-turn".to_owned())
                 .unwrap_or_else(|_| panic!("a constant turn id")),
             CellId::new(cell),
         )

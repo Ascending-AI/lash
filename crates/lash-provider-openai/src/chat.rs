@@ -327,7 +327,7 @@ impl OpenAiCompatibleProvider {
                         "name": tool.name,
                         "description": tool.description,
                         "parameters": resolved.schema,
-                        "strict": resolved.dialect == lash_protocol_types::SchemaDialect::OpenaiStrictToolParameters,
+                        "strict": resolved.dialect == lash_vocabulary::schema_contract::SchemaDialect::OpenaiStrictToolParameters,
                     },
                 }))
             })

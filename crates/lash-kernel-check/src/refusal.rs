@@ -4,10 +4,16 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use lash_kernel_doc::{
-    EffectName, FunctionId, FunctionName, Invalid, InvalidReason, Name, OperationRequirement,
-    Signature, Site, Type,
-};
+use lash_kernel_doc::Invalid;
+use lash_kernel_doc::InvalidReason;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::operations::OperationRequirement;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 /// Everything that keeps a document from being admitted. Admission does not
 /// stop at the first fault of the environment: every missing effect, every
@@ -209,4 +215,4 @@ pub(crate) fn refused(site: Option<&Site>, reason: RefusalReason) -> Refused {
     }
 }
 
-pub use lash_vocabulary::types::{SignatureMismatch, SignatureSide};
+use lash_vocabulary::types::{SignatureMismatch, SignatureSide};

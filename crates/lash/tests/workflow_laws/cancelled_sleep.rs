@@ -4,9 +4,9 @@
 //! cancelled later.
 
 use super::failures::Module;
-use super::*;
 use lash::workflow::ProcessWorkflowSiteState;
 use lash::workflow::document::SourceLanguage;
+use lash_vocabulary::schema_contract::*;
 
 /// `nap()` sleeps a minute; `naps()` sleeps a minute, then ten.
 const TYPESCRIPT: &str = "export async function nap() {\n  await sleep(60000);\n  return \"woke\";\n}\n\nexport async function naps() {\n  await sleep(60000);\n  await sleep(600000);\n  return \"woke\";\n}\n";
@@ -21,7 +21,7 @@ const DIALECTS: [(SourceLanguage, &str); 2] = [
 /// entered them, read from its observation snapshot.
 async fn sleeps(
     core: &lash::LashCore,
-    process: &lash_core::ProcessId,
+    process: &lash_vocabulary::identity::ProcessId,
 ) -> Vec<ProcessWorkflowSiteState> {
     let snapshot = core
         .processes()
@@ -44,7 +44,10 @@ async fn sleeps(
 }
 
 /// The stored kinds of `process`'s wait-ending events, in order.
-async fn wait_ends(core: &lash::LashCore, process: &lash_core::ProcessId) -> Vec<&'static str> {
+async fn wait_ends(
+    core: &lash::LashCore,
+    process: &lash_vocabulary::identity::ProcessId,
+) -> Vec<&'static str> {
     let page = core
         .processes()
         .events(

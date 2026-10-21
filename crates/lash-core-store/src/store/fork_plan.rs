@@ -1,6 +1,7 @@
 //! Backend-neutral lineage derivation for zero-copy forks.
 
-use crate::{NodeId, SessionId};
+use lash_vocabulary::identity::NodeId;
+use lash_vocabulary::identity::SessionId;
 use std::collections::BTreeMap;
 
 use super::StoreError;
@@ -107,7 +108,7 @@ mod tests {
     fn node(owner: &str, generation: u64, parent: Option<&str>) -> ForkNodeFacts {
         ForkNodeFacts {
             node_id: NodeId::fixture(format!("{owner}-{generation}")),
-            parent_node_id: parent.map(crate::NodeId::fixture),
+            parent_node_id: parent.map(lash_vocabulary::identity::NodeId::fixture),
             owning_session_id: SessionId::fixture(owner.to_string()),
             generation,
         }

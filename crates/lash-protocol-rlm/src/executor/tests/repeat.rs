@@ -29,17 +29,17 @@ impl Flaky {
     }
 }
 
-fn flaky_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn flaky_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         format!("tool:{FLAKY}"),
         FLAKY_OPERATION,
         "Fails its first attempt.",
-        lash_core::ToolDefinition::default_input_schema(),
+        lash_vocabulary::tool_contract::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "string" }),
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
+    .with_execution_policy(lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(2).expect("a nonzero attempt bound"),
         0,
         0,
@@ -52,7 +52,7 @@ impl lash_core::ToolProvider for Flaky {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![flaky_definition().manifest()])
@@ -62,7 +62,7 @@ impl lash_core::ToolProvider for Flaky {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == FLAKY_OPERATION).then(|| Arc::new(flaky_definition().contract()))
     }
 
@@ -146,8 +146,8 @@ async fn an_unanswerable_wait_ends_the_turn_with_a_typed_terminal_failure() {
     );
     let call = lash_core::ToolCallId::fixture("unanswered");
     let exec = lash_vm_broker::ExecKey::Cell(
-        lash_core::SessionId::from(SESSION),
-        lash_core::TurnId::try_from(TURN.to_owned()).expect("a turn id"),
+        lash_vocabulary::identity::SessionId::from(SESSION),
+        lash_vocabulary::identity::TurnId::try_from(TURN.to_owned()).expect("a turn id"),
         lash_vm_broker::CellId::new("exec-code:0"),
     );
     let response = super::super::broker_failure(

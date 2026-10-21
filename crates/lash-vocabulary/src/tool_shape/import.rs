@@ -14,7 +14,7 @@ use crate::tool_shape::{
 /// Reference targets are imported separately.
 ///
 /// ```
-/// # use lash_tool_shape::ImportLimits;
+/// # use lash_vocabulary::tool_shape::ImportLimits;
 /// let limits = ImportLimits { max_depth: 32, max_nodes: 10_000 };
 /// assert_eq!(limits.max_depth, 32);
 /// ```
@@ -47,10 +47,10 @@ impl SchemaDocument {
     /// The node limit is 10,000; use [`Self::import`] to choose both limits.
     ///
     /// ```
-    /// # use lash_tool_shape::SchemaDocument;
+    /// # use lash_vocabulary::tool_shape::SchemaDocument;
     /// let doc = SchemaDocument::from_json_schema(&serde_json::json!({"type":"string"}), 8)?;
     /// assert_eq!(doc.roots.len(), 1);
-    /// # Ok::<(), lash_tool_shape::ShapeImportRefusal>(())
+    /// # Ok::<(), lash_vocabulary::tool_shape::ShapeImportRefusal>(())
     /// ```
     ///
     /// # Errors
@@ -72,11 +72,11 @@ impl SchemaDocument {
     /// reading its body; a queue makes even long reference chains stack bounded.
     ///
     /// ```
-    /// # use lash_tool_shape::{SchemaDocument, ImportLimits};
+    /// # use lash_vocabulary::tool_shape::{SchemaDocument, ImportLimits};
     /// let doc = SchemaDocument::import(&serde_json::json!({}),
     ///     ImportLimits { max_depth: 8, max_nodes: 100 })?;
     /// assert_eq!(doc.roots.len(), 1);
-    /// # Ok::<(), lash_tool_shape::ShapeImportRefusal>(())
+    /// # Ok::<(), lash_vocabulary::tool_shape::ShapeImportRefusal>(())
     /// ```
     ///
     /// # Errors
@@ -344,6 +344,7 @@ impl<'a> Importer<'a> {
             None => None,
         };
         Ok(match declared {
+            XLashType::Timestamp | XLashType::Bytes => ShapeKind::Str,
             XLashType::Function { .. } => ShapeKind::Function(signature),
             XLashType::Process { .. } | XLashType::ProcessUnknown => ShapeKind::Process(signature),
         }

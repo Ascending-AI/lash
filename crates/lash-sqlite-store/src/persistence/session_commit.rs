@@ -128,7 +128,7 @@ impl SessionCommitStore for SqliteStore {
     async fn committed_turn_exists(
         &self,
         session_id: &SessionId,
-        turn_id: &lash_protocol_types::TurnId,
+        turn_id: &lash_vocabulary::identity::TurnId,
     ) -> Result<bool, StoreError> {
         let session_id = session_id.clone();
         let key = lash_core_store::store_backend_support::turn_commit_receipt_storage_key(

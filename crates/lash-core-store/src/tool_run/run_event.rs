@@ -119,7 +119,7 @@ pub enum KnownFailureReason {
     StartRefused,
 }
 
-pub use lash_protocol_types::LimitCause;
+use lash_vocabulary::tool_contract::LimitCause;
 
 /// Only material actually retained before an attempt stopped.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

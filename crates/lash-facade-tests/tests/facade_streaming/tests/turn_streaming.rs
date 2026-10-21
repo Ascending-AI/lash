@@ -6,8 +6,9 @@ use lash::provider::LlmTransportError;
 use lash::{TurnActivity, TurnInput};
 use lash_core::facade_support::{SessionObservationSubscription, SessionResume, TurnOutcome};
 
-use lash_core::{SessionId, TurnId};
 use lash_protocol_types::{llm::types::StreamBlockEvent, llm::types::StreamBlockKind};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 use lash_facade_tests::streaming::{
     AppTools, FailingAppTools, PendingAppTools, QueuedWorkHydrationProbeFactory,

@@ -75,15 +75,18 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use lash_core_store::tool_run::{CompletionSource, MaterialRef};
 use lash_durable::domain::{AdmittedId, Ordinal};
 use lash_durable::{ActorTx, DurableError};
-use lash_protocol_types::{ExecutionLimit, ExecutionPolicy, LimitCause};
+use lash_protocol_types::ExecutionLimit;
+use lash_vocabulary::tool_contract::ExecutionPolicy;
+use lash_vocabulary::tool_contract::LimitCause;
 use tokio_util::sync::CancellationToken;
 
 use super::ActorContext;
 use super::waits::WaitId;
-use crate::{ToolCallId, ToolId};
+use crate::ToolCallId;
 use lash_durable::domain::WaitKind;
 use lash_execution_contracts::waits::ParkDeadline;
 use lash_execution_contracts::waits::WaitRef;
+use lash_vocabulary::tool_contract::ToolId;
 
 pub use crate::plugin::StagedPluginState;
 pub use lash_durable::domain::{OwnerKey, ProcessStartRows, RunSeq};
@@ -159,7 +162,7 @@ pub struct ExecutionDraft {
     park: Option<ParkDeadline>,
     pinned: Option<PinnedWait>,
     trace: Option<lash_trace::DurableTraceScope>,
-    declaration: Option<crate::ToolDeclaration>,
+    declaration: Option<lash_vocabulary::tool_declaration::ToolDeclaration>,
     binding: Option<crate::tool_run::AdmittedBinding>,
 }
 
@@ -209,7 +212,10 @@ impl ExecutionDraft {
     /// This draft with `declaration`, the one its call settles under
     /// ([`MemberPin::declaration`]).
     #[must_use]
-    pub fn with_declaration(mut self, declaration: Option<crate::ToolDeclaration>) -> Self {
+    pub fn with_declaration(
+        mut self,
+        declaration: Option<lash_vocabulary::tool_declaration::ToolDeclaration>,
+    ) -> Self {
         self.declaration = declaration;
         self
     }
@@ -217,7 +223,7 @@ impl ExecutionDraft {
     /// The declaration its admission pinned: what every attempt of the
     /// call settles under. `None` when it pinned none.
     #[must_use]
-    pub fn declaration(&self) -> Option<&crate::ToolDeclaration> {
+    pub fn declaration(&self) -> Option<&lash_vocabulary::tool_declaration::ToolDeclaration> {
         self.declaration.as_ref()
     }
 

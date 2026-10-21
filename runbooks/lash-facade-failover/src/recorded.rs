@@ -15,6 +15,9 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use lash::ObligationKind;
+use lash::StoreBindingId;
+use lash::StoreSet;
 use lash::durable::domain::{
     ExecKey, ExecRootRow, HydratedGraph, OwnerKey, ProcessActorRow, RootOwner, RunFacts, ScopeKey,
     SessionCloseRow, TurnEnd, TurnRow, WaitId, WaitRow,
@@ -31,7 +34,9 @@ use lash::persistence::{
     ToolMaterialStore, TurnPreludeStore,
 };
 use lash::runtime::Clock;
-use lash::{ObligationKind, ProcessId, SessionId, StoreBindingId, StoreSet, TurnId};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use tokio::sync::Notify;
 
 use crate::events::{Event, report};

@@ -1,8 +1,8 @@
 use super::*;
 use crate::session_sql::session_sql;
-use lash_protocol_types::ProcessId;
-use lash_protocol_types::SessionId;
-use lash_protocol_types::TurnId;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 use lash_core_store::store_backend_support::CausalColumns;
 use lash_core_store::store_backend_support::SessionMetaCodec;

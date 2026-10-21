@@ -96,10 +96,10 @@ async fn turn_prelude_bytes_do_not_grow_with_history_depth() {
     use lash_core_store::store::SessionCommitStore;
     use lash_execution_contracts::turn_prelude::TurnPreludeStore;
     use lash_protocol_types::MessageSequence;
-    use lash_protocol_types::SessionId;
     use lash_protocol_types::session_model::Message;
     use lash_protocol_types::session_model::MessageRole;
     use lash_protocol_types::session_model::Part;
+    use lash_vocabulary::identity::SessionId;
     let mut sizes = Vec::new();
     for depth in [8, 128] {
         let backend = TestBackend::open(SUBSTRATE).await;

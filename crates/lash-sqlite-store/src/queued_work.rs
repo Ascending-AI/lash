@@ -1,5 +1,5 @@
 use super::*;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 pub(crate) fn decode_delivery_policy(value: String) -> Result<DeliveryPolicy, StoreError> {
     DeliveryPolicy::from_wire_str(&value).ok_or_else(|| {
@@ -234,8 +234,8 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
 pub(crate) fn complete_admitted_batch_conn(
     conn: &Connection,
     session_id: &SessionId,
-    run: &lash_protocol_types::TurnId,
-    batch_id: &lash_protocol_types::BatchId,
+    run: &lash_vocabulary::identity::TurnId,
+    batch_id: &lash_vocabulary::identity::BatchId,
     terminal: lash_core_store::store::IngressTerminal,
 ) -> Result<(), StoreError> {
     let turn_ingress = crate::turn_ingress::turn_ingress_sql();
@@ -287,7 +287,7 @@ pub(crate) fn complete_admitted_batch_conn(
 pub(crate) fn settle_open_command_conn(
     conn: &Connection,
     commit: &lash_core_store::store::RuntimeCommit,
-    batch_id: &lash_protocol_types::BatchId,
+    batch_id: &lash_vocabulary::identity::BatchId,
     at_ms: u64,
 ) -> Result<(), StoreError> {
     let session_id = &commit.session_id;

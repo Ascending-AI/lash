@@ -57,7 +57,7 @@ impl Traced {
     async fn session(&self, id: &str) -> Result<lash::LashSession> {
         created_session(
             &self.core,
-            lash::SessionId::parse(id).expect("nonblank host identity"),
+            lash_vocabulary::identity::SessionId::parse(id).expect("nonblank host identity"),
         )
         .await
         .open()
@@ -332,9 +332,9 @@ async fn composition_trace_fires_once_when_the_tool_selection_changes_with_full_
         .apply(
             lash::config::ConfigWrite::new("deselect-echo", revision),
             lash::config::ConfigTransaction::of(lash::tools::SetToolSelection {
-                tools: lash::tools::ToolSelection::AllExcept(vec![lash_core::ToolId::from(
-                    "tool:echo_tool",
-                )]),
+                tools: lash::tools::ToolSelection::AllExcept(vec![
+                    lash_vocabulary::tool_contract::ToolId::from("tool:echo_tool"),
+                ]),
             }),
         )
         .await?
@@ -390,13 +390,13 @@ struct SchemaChangingTool {
 }
 
 impl SchemaChangingTool {
-    fn definition(&self) -> lash_core::ToolDefinition {
+    fn definition(&self) -> lash_vocabulary::tool_contract::ToolDefinition {
         let field = if *self.revision.lock_recover() == 1 {
             "first_value"
         } else {
             "second_value"
         };
-        lash_core::ToolDefinition::raw(
+        lash_vocabulary::tool_contract::ToolDefinition::raw(
             "tool:schema_changing",
             "tools.schema_changing",
             "A stable member whose contract can refresh",
@@ -418,7 +418,10 @@ impl ToolProvider for SchemaChangingTool {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![self.definition().manifest()])
     }
 
@@ -426,7 +429,7 @@ impl ToolProvider for SchemaChangingTool {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.schema_changing").then(|| Arc::new(self.definition().contract()))
     }
 
@@ -763,7 +766,10 @@ impl ToolProvider for PendingEchoTool {
     fn tool_manifests(
         &self,
         _config: &lash_core::OwnerConfigView,
-    ) -> std::result::Result<Vec<lash_core::ToolManifest>, lash::plugins::PluginError> {
+    ) -> std::result::Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash::plugins::PluginError,
+    > {
         Ok(vec![pending_echo_tool_definition().manifest()])
     }
 
@@ -771,7 +777,7 @@ impl ToolProvider for PendingEchoTool {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == "tools.echo_tool").then(|| Arc::new(pending_echo_tool_definition().contract()))
     }
 
@@ -791,8 +797,8 @@ impl ToolProvider for PendingEchoTool {
     }
 }
 
-fn pending_echo_tool_definition() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
+fn pending_echo_tool_definition() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:echo_tool",
         "tools.echo_tool",
         "Return a tool payload",
@@ -807,8 +813,8 @@ fn pending_echo_tool_definition() -> lash_core::ToolDefinition {
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
     .with_declaration(
-        lash_core::ToolDeclaration::deferring(),
-        Some(lash_core::ParkBound::Within(
+        lash_vocabulary::tool_declaration::ToolDeclaration::deferring(),
+        Some(lash_vocabulary::tool_contract::ParkBound::Within(
             std::time::Duration::from_secs(120),
         )),
     )
@@ -1170,7 +1176,8 @@ async fn provider_request_trace_sender_requires_extended_level_and_sink() -> Res
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("extended-without-sink").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("extended-without-sink")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -1377,7 +1384,8 @@ async fn golden_tree_survives_a_kill_and_resume_on_another_node() -> Result<()> 
     let send = |session: &lash::LashSession| {
         session
             .send(TurnInput::text("call the pending tool"))
-            .id(lash::TurnId::parse(TREE_TURN).expect("nonblank host identity"))
+            .id(lash_vocabulary::identity::TurnId::parse(TREE_TURN)
+                .expect("nonblank host identity"))
             .output()
     };
 
@@ -1442,12 +1450,17 @@ async fn golden_tree_survives_a_kill_and_resume_on_another_node() -> Result<()> 
     )?;
     let session = node_b
         .core
-        .session(lash::SessionId::parse(TREE_SESSION).expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse(TREE_SESSION)
+                .expect("nonblank host identity"),
+        )
         .open()
         .await?;
     resolve_tree_key(&node_b.core, &key).await?;
     let output = session
-        .attach_id(lash::TurnId::parse(TREE_TURN).expect("nonblank host identity"))
+        .attach_id(
+            lash_vocabulary::identity::TurnId::parse(TREE_TURN).expect("nonblank host identity"),
+        )
         .output()
         .await?;
     assert!(completed(&output), "{:?}", output.outcome);

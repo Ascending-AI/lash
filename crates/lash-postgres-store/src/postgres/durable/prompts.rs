@@ -30,9 +30,10 @@ use lash_durable::domain::{
     RequestTexts,
 };
 use lash_durable::{DurableError, Epoch};
-use lash_protocol_types::{SessionId, TurnId};
 use lash_store_sql::Dialect;
 use lash_store_sql::durable::prompts::{PromptStatements, REQUEST_PART, SNAPSHOT_PART};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use sqlx::PgConnection;
 
 use super::steps::{Collect, Entry, Shape, Step, Ty, Value};
@@ -734,7 +735,7 @@ mod tests {
         .await
         .unwrap();
         let admission = lash_core_store::store::RunAdmissionRecord::Command {
-            batch: lash_protocol_types::BatchId::from("finish"),
+            batch: lash_vocabulary::identity::BatchId::from("finish"),
         }
         .to_stored()
         .unwrap();

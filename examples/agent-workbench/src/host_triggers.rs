@@ -58,12 +58,14 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use lash::LashCore;
 use lash::sync::RwLockExt;
 use lash::tools::{
     ToolAttemptOutcome, ToolCall, ToolContract, ToolDefinition, ToolManifest, ToolOutcome,
     ToolProvider,
 };
-use lash::{LashCore, ProcessId, SessionId};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};

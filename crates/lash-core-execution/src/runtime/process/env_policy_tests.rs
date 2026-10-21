@@ -1,11 +1,11 @@
 use super::*;
 const RECORDED: crate::ProcessConfigKey<()> =
-    crate::ProcessConfigKey::new("z-recorded", crate::FormatVersion::ONE);
+    crate::ProcessConfigKey::new("z-recorded", lash_vocabulary::providers::FormatVersion::ONE);
 const OTHER: crate::ProcessConfigKey<()> =
-    crate::ProcessConfigKey::new("a-other", crate::FormatVersion::ONE);
+    crate::ProcessConfigKey::new("a-other", lash_vocabulary::providers::FormatVersion::ONE);
 
-fn tool() -> crate::ToolDefinition {
-    crate::ToolDefinition::raw(
+fn tool() -> lash_vocabulary::tool_contract::ToolDefinition {
+    lash_vocabulary::tool_contract::ToolDefinition::raw(
         "search",
         "search.run",
         "Search",
@@ -15,20 +15,23 @@ fn tool() -> crate::ToolDefinition {
     .unwrap()
     .with_execution(std::time::Duration::from_secs(60))
 }
-struct Answer(crate::ToolDefinition);
+struct Answer(lash_vocabulary::tool_contract::ToolDefinition);
 #[async_trait::async_trait]
 impl crate::ToolProvider for Answer {
     fn tool_manifests(
         &self,
         _: &crate::OwnerConfigView,
-    ) -> Result<Vec<crate::ToolManifest>, lash_execution_contracts::plugin_error::PluginError> {
+    ) -> Result<
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
+        lash_execution_contracts::plugin_error::PluginError,
+    > {
         Ok(vec![self.0.manifest.clone()])
     }
     fn resolve_contract(
         &self,
         name: &str,
         _: &crate::OwnerConfigView,
-    ) -> Option<Arc<crate::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         (name == self.0.manifest.tool()).then(|| Arc::new(self.0.contract.clone()))
     }
     async fn execute(&self, _: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
@@ -46,8 +49,10 @@ enum Served {
 }
 /// `definition` with another output schema: the tool under its next
 /// contract.
-fn next_contract(mut definition: crate::ToolDefinition) -> crate::ToolDefinition {
-    definition.contract.output_schema = lash_protocol_types::SchemaContract::admit(
+fn next_contract(
+    mut definition: lash_vocabulary::tool_contract::ToolDefinition,
+) -> lash_vocabulary::tool_contract::ToolDefinition {
+    definition.contract.output_schema = lash_vocabulary::schema_contract::SchemaContract::admit(
         serde_json::json!({"type":"object", "additionalProperties":false, "required":["hits"], "properties":{"hits":{"type":"string"}, "next":{"type":"string"}}}),
     )
     .unwrap();
@@ -59,7 +64,7 @@ fn registry(served: Served, recorded: bool) -> crate::ProcessEngineRegistry {
 fn registry_of(
     change: Served,
     recorded: bool,
-    served: crate::ToolDefinition,
+    served: lash_vocabulary::tool_contract::ToolDefinition,
 ) -> crate::ProcessEngineRegistry {
     let mut components = crate::plugin::ProcessComponentRegistry::new();
     for key in [OTHER, RECORDED] {
@@ -71,12 +76,13 @@ fn registry_of(
             match change {
                 Served::AsRecorded => {}
                 Served::OtherPolicy => {
-                    definition =
-                        definition.with_execution_policy(crate::ExecutionPolicy::repeatable(
+                    definition = definition.with_execution_policy(
+                        lash_vocabulary::tool_contract::ExecutionPolicy::repeatable(
                             std::num::NonZeroU32::new(2).unwrap(),
                             1,
                             1,
-                        ));
+                        ),
+                    );
                 }
                 Served::OtherContract => definition = next_contract(definition),
             }
@@ -108,9 +114,9 @@ fn target() -> ResolvedStartTarget {
         payload: serde_json::json!({}),
         args: Default::default(),
         performed: std::collections::BTreeMap::from([(
-            crate::EffectName::new("search.run").unwrap(),
-            lash_kernel_doc::OperationRequirement::new(
-                lash_protocol_types::tool_signature(
+            lash_vocabulary::legacy_names::EffectName::new("search.run").unwrap(),
+            lash_vocabulary::operations::OperationRequirement::new(
+                lash_vocabulary::json_schema::tool_signature(
                     &tool().contract.input_schema.canonical,
                     &tool().contract.output_schema.canonical,
                 ),
@@ -138,8 +144,8 @@ async fn capture_keeps_recorded_provider_and_link() {
     ));
     let surface = SurfaceTools::of_entries(
         [crate::SurfaceEntry::advertised(
-            crate::plugin::ToolProviderHandle::new(
-                crate::RegistryKind::Session,
+            lash_vocabulary::providers::ToolProviderHandle::new(
+                lash_vocabulary::claims::RegistryKind::Session,
                 RECORDED.component(),
                 crate::tool_provider_key!("tools"),
             ),
@@ -164,7 +170,8 @@ async fn capture_keeps_recorded_provider_and_link() {
             &engines,
         );
         let captured = cx.capture(&run, &surface, components(true)).await.unwrap();
-        let link = &captured.effects()[&crate::EffectName::new("search.run").unwrap()];
+        let link = &captured.effects()
+            [&lash_vocabulary::legacy_names::EffectName::new("search.run").unwrap()];
         assert_eq!(
             link.provider,
             RECORDED.tool_provider(crate::tool_provider_key!("tools"))
@@ -216,8 +223,8 @@ async fn a_child_start_is_judged_against_its_own_requirement() {
     ));
     let surface = SurfaceTools::of_entries(
         [crate::SurfaceEntry::advertised(
-            crate::plugin::ToolProviderHandle::new(
-                crate::RegistryKind::Session,
+            lash_vocabulary::providers::ToolProviderHandle::new(
+                lash_vocabulary::claims::RegistryKind::Session,
                 RECORDED.component(),
                 crate::tool_provider_key!("tools"),
             ),
@@ -233,9 +240,9 @@ async fn a_child_start_is_judged_against_its_own_requirement() {
     let next = next_contract(tool());
     let mut child = target();
     child.performed = std::collections::BTreeMap::from([(
-        crate::EffectName::new("search.run").unwrap(),
-        lash_kernel_doc::OperationRequirement::new(
-            lash_protocol_types::tool_signature(
+        lash_vocabulary::legacy_names::EffectName::new("search.run").unwrap(),
+        lash_vocabulary::operations::OperationRequirement::new(
+            lash_vocabulary::json_schema::tool_signature(
                 &next.contract.input_schema.canonical,
                 &next.contract.output_schema.canonical,
             ),
@@ -302,7 +309,7 @@ async fn launch_holding_checks_links_and_exact_fit() {
 async fn an_exact_fit_is_required_before_a_launch_is_held() {
     let scope = crate::ExecutionScope::runtime_operation("exact-link-law");
     let target = target();
-    let wider = crate::ToolDefinition::raw(
+    let wider = lash_vocabulary::tool_contract::ToolDefinition::raw(
         "search", "search.run", "Search",
         serde_json::json!({"type":"object", "additionalProperties":false, "required":["q"], "properties":{"q":{"type":"string"}, "limit":{"type":"integer"}}}),
         serde_json::json!({"type":"object", "additionalProperties":false, "required":["hits"], "properties":{"hits":{"type":"string"}, "extra":{"type":"string"}}}),
@@ -311,7 +318,7 @@ async fn an_exact_fit_is_required_before_a_launch_is_held() {
     .declared_contract(tool().contract_id())
     .with_execution(std::time::Duration::from_secs(60));
     let engines = registry_of(Served::AsRecorded, true, wider.clone());
-    let effect = crate::EffectName::new("search.run").unwrap();
+    let effect = lash_vocabulary::legacy_names::EffectName::new("search.run").unwrap();
     let env = ProcessEnv::builder(crate::MaxToolCalls::new(4))
         .component(RECORDED, &())
         .link_tool(
@@ -382,9 +389,9 @@ impl lash_execution_contracts::process::ProcessEngine for SearchEngine {
         _payload: &serde_json::Value,
     ) -> Result<lash_execution_contracts::process::PerformedEffects, crate::ProcessEnvRefusal> {
         Ok(std::collections::BTreeMap::from([(
-            crate::EffectName::new("search.run").unwrap(),
-            lash_kernel_doc::OperationRequirement::new(
-                lash_protocol_types::tool_signature(
+            lash_vocabulary::legacy_names::EffectName::new("search.run").unwrap(),
+            lash_vocabulary::operations::OperationRequirement::new(
+                lash_vocabulary::json_schema::tool_signature(
                     &tool().contract.input_schema.canonical,
                     &tool().contract.output_schema.canonical,
                 ),

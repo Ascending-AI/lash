@@ -4,10 +4,20 @@
 
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{
-    Caption, CaptionEntry, Captions, CaptionsRefusal, Name, Node, Site, SourceLanguage, SourceMap,
-    SourceMapRefusal, SourceSite, Span, Stmt, Unit,
-};
+use lash_kernel_doc::Caption;
+use lash_kernel_doc::CaptionEntry;
+use lash_kernel_doc::Captions;
+use lash_kernel_doc::CaptionsRefusal;
+use lash_kernel_doc::Node;
+use lash_kernel_doc::SourceLanguage;
+use lash_kernel_doc::SourceMap;
+use lash_kernel_doc::SourceMapRefusal;
+use lash_kernel_doc::SourceSite;
+use lash_kernel_doc::Span;
+use lash_kernel_doc::Stmt;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 
 use crate::Written;
 

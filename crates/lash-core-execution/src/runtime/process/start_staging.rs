@@ -598,9 +598,9 @@ async fn stage<'a>(
         && let Some(provider) = stores.engines.document_provider(kind)
         && let Some(record) = provider.start_requirements(payload).await?
     {
-        registration
-            .requires
-            .extend(crate::ObligationToken::for_requirements(&record).map(String::from));
+        registration.requires.extend(
+            lash_vocabulary::claims::ObligationToken::for_requirements(&record).map(String::from),
+        );
         registration.requires.sort();
         registration.requires.dedup();
     }

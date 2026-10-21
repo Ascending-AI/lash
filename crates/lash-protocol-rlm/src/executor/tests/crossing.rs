@@ -5,14 +5,17 @@
 //! the typed datum encoder writes. Every other JSON-schema slot is data, and
 //! a function there raises `not_data` naming its path.
 
-use lash_kernel_doc::{FUNCTION_VALUE_TAG, FunctionValue, FunctionValueLimits, KernelDataLimits};
+use lash_kernel_doc::FUNCTION_VALUE_TAG;
+use lash_kernel_doc::FunctionValue;
+use lash_kernel_doc::FunctionValueLimits;
+use lash_vocabulary::data_limits::KernelDataLimits;
 
 use super::*;
 
 /// `keep.run`: a tool that keeps every call's arguments, in order. Its
 /// input marks each slot a law passes a function in; `forged` is data.
 struct Keeps {
-    tool: fn() -> lash_core::ToolDefinition,
+    tool: fn() -> lash_vocabulary::tool_contract::ToolDefinition,
     received: std::sync::Mutex<Vec<serde_json::Value>>,
 }
 
@@ -23,7 +26,7 @@ impl Default for Keeps {
 }
 
 impl Keeps {
-    fn of(tool: fn() -> lash_core::ToolDefinition) -> Self {
+    fn of(tool: fn() -> lash_vocabulary::tool_contract::ToolDefinition) -> Self {
         Self {
             tool,
             received: std::sync::Mutex::default(),
@@ -35,7 +38,7 @@ impl Keeps {
     }
 }
 
-fn keep() -> lash_core::ToolDefinition {
+fn keep() -> lash_vocabulary::tool_contract::ToolDefinition {
     let function = serde_json::json!({ "x-lash": { "kind": "function" } });
     let mut properties = serde_json::Map::new();
     for name in ["pick", "a", "b", "c", "d", "run"] {
@@ -67,7 +70,7 @@ impl lash_core::ToolProvider for Keeps {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(vec![(self.tool)().manifest()])
@@ -77,7 +80,7 @@ impl lash_core::ToolProvider for Keeps {
         &self,
         name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         let tool = (self.tool)();
         (name == tool.manifest.tool() || name == tool.id().as_str())
             .then(|| Arc::new(tool.contract()))
@@ -246,7 +249,7 @@ async fn a_function_that_cannot_cross_raises_before_the_call() {
 /// `x-lash` marker declares, the same marker under `anyOf` beside null (as
 /// pydantic and MCP spell an optional function), an open object, a text
 /// and a closed object.
-fn slots() -> lash_core::ToolDefinition {
+fn slots() -> lash_vocabulary::tool_contract::ToolDefinition {
     typed_definition(
         "tool:slots_take",
         "slots.take",
@@ -274,7 +277,7 @@ fn slots() -> lash_core::ToolDefinition {
 /// with an `Optional[Callable]` field and a field of a marked `$defs` type:
 /// an open object (no `additionalProperties`), as MCP servers write theirs
 /// too.
-fn open_take() -> lash_core::ToolDefinition {
+fn open_take() -> lash_vocabulary::tool_contract::ToolDefinition {
     typed_definition(
         "tool:model_take",
         "model.take",
@@ -308,7 +311,7 @@ async fn slots_raised(dialect: &CellDialect, input: &str) -> (String, Vec<serde_
 /// What `<module>.take(input)` raised, as [`slots_raised`] does for
 /// `slots.take`, `tool` being that operation.
 async fn take_raised(
-    tool: fn() -> lash_core::ToolDefinition,
+    tool: fn() -> lash_vocabulary::tool_contract::ToolDefinition,
     module: &str,
     dialect: &CellDialect,
     input: &str,
@@ -603,9 +606,9 @@ async fn captioned_function(dialect: CellDialect, source: &str, send: &str) {
     for args in received {
         let value = function_value(&args["run"]);
         let captions = &value.captions;
-        let encoded = lash_kernel_doc::graph_tokens::encode_body(&value);
+        let encoded = lash_vocabulary::tokens::encode_body(&value);
         let decoded: FunctionValue =
-            lash_kernel_doc::graph_tokens::decode_body(&encoded).expect("stored function value");
+            lash_vocabulary::tokens::decode_body(&encoded).expect("stored function value");
         assert_eq!(decoded, value, "captions survive the stored token boundary");
         captions
             .validate(&value.document)

@@ -92,7 +92,7 @@ pub(super) async fn link_cell(
                 ),
             )
             .map_err(|error| host_failure(format!("invalid host tool surface: {error}")))?;
-        if tool.manifest.execution_policy == lash_core::ExecutionPolicy::Read {
+        if tool.manifest.execution_policy == lash_vocabulary::tool_contract::ExecutionPolicy::Read {
             read_tools.insert(
                 tool.manifest.operation.effect_name(),
                 tool.manifest.id.clone(),
@@ -166,7 +166,7 @@ pub(super) async fn link_cell(
             let candidates = calls
                 .into_iter()
                 .filter(|path| {
-                    !lash_kernel_doc::EffectName::new(path.as_str())
+                    !lash_vocabulary::legacy_names::EffectName::new(path.as_str())
                         .is_ok_and(|name| boundary.effect(&name).is_some())
                 })
                 .collect::<BTreeSet<_>>();
@@ -274,9 +274,11 @@ pub(super) async fn link_cell(
     // The worker's token body is decoded here, once: the identity is its
     // digest, and the envelope, the store and every checkout share all
     // three.
-    let document =
-        IdentifiedDocument::decode(&document, lash_kernel_doc::KernelDataLimits::standard())
-            .map_err(|error| host_failure(format!("the worker's document is not one: {error}")))?;
+    let document = IdentifiedDocument::decode(
+        &document,
+        lash_vocabulary::data_limits::KernelDataLimits::standard(),
+    )
+    .map_err(|error| host_failure(format!("the worker's document is not one: {error}")))?;
     packages::admit(&document, &boundary, &packages)?;
     let envelope = CellEnvelope {
         code: CellEnvelope::code_digest(code),

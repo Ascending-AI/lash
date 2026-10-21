@@ -1,5 +1,5 @@
 pub use lash_core_store::turn_input_vocabulary::*;
-use lash_protocol_types::TurnId;
+use lash_vocabulary::identity::TurnId;
 pub mod actor;
 pub mod attachment_delivery;
 pub mod causal;
@@ -125,8 +125,6 @@ pub use process::env_policy;
 
 pub use lash_core_store::process_env::ProcessComponentConfig;
 pub use lash_core_store::process_env::ProcessComponentEntry;
-pub use lash_core_store::process_env::ProcessComponentId;
-pub use lash_core_store::process_env::ProcessComponentIdError;
 pub use lash_core_store::process_env::ProcessConfigKey;
 pub use lash_core_store::process_env::ProcessEnv;
 pub use lash_core_store::process_env::ProcessEnvBuilder;
@@ -138,8 +136,10 @@ pub use lash_core_store::process_identity::ProcessEnvRef;
 pub use lash_core_store::process_identity::ProcessIdMint;
 pub use lash_protocol_types::InvalidProcessDefinitionId;
 pub use lash_protocol_types::ProcessDefinitionId;
-pub use lash_protocol_types::ProcessId;
 pub use lash_protocol_types::handle::HandleId;
+pub use lash_vocabulary::identity::ProcessId;
+pub use lash_vocabulary::providers::ProcessComponentId;
+pub use lash_vocabulary::providers::ProcessComponentIdError;
 pub use process::EnclosingProcess;
 pub use process::HoldEnvError;
 pub use process::ProcessChangeHub;
@@ -164,7 +164,7 @@ pub use lash_core_store::process_identity::StartKey;
 pub use lash_core_store::scope_identity::SCOPE_STORAGE_PAYLOAD_VERSION;
 pub use lash_core_store::scope_identity::ScopeId;
 pub use lash_core_store::scope_identity::ScopeStorageError;
-pub use lash_protocol_types::SessionId;
+pub use lash_vocabulary::identity::SessionId;
 pub use process::SessionObserverIntentSource;
 
 pub use process::WatchedRegistry;

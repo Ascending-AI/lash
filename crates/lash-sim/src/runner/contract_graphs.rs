@@ -3,7 +3,7 @@
 //! proof states about them.
 
 use super::*;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 /// One execution a contract core observed: what it did, and the workflow
 /// document it ran when lash still answers it.
@@ -203,8 +203,8 @@ pub(super) fn agent_contract_graph_facts(
             }
         }
         if matches!(
-            identity.document.entry,
-            lash::workflow::WorkflowDocumentEntry::Entry { .. }
+            identity.document.selector,
+            lash_vocabulary::names::StartSelector::Export(_)
         ) && matches!(
             graph.subject,
             lash::tracing::TraceRuntimeSubject::Process { .. }

@@ -5,12 +5,12 @@ use super::{
 };
 #[cfg(any(test, feature = "testing"))]
 use super::{AttachmentStoreFailureClass, StoredBlobRef};
-use crate::SessionId;
 use crate::store::{
     AttachmentReferrers, AttachmentWrite, AttachmentWriteFence, AttachmentWritePermit, StoreError,
 };
 use lash_protocol_types::sync::MutexExt;
 use lash_protocol_types::{AttachmentCreateMeta, AttachmentId, AttachmentRef};
+use lash_vocabulary::identity::SessionId;
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
@@ -128,7 +128,7 @@ pub const STANDARD_ATTACHMENT_UPLOAD_EXPIRY_MS: u64 = 86_400_000;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AttachmentHolder {
     Ephemeral,
-    Runtime(crate::runtime_owner::RuntimeOwner),
+    Runtime(lash_vocabulary::identity::RuntimeOwner),
 }
 pub use lash_core_llm::provider::AttachmentReadPolicy;
 
@@ -252,7 +252,7 @@ impl RuntimeAttachmentStore {
     pub fn new(
         backend: Arc<dyn AttachmentStore>,
         referrers: Arc<dyn AttachmentReferrers>,
-        owner: crate::runtime_owner::RuntimeOwner,
+        owner: lash_vocabulary::identity::RuntimeOwner,
         policy: AttachmentPolicy,
     ) -> Self {
         Self::new_with_clock(
@@ -266,7 +266,7 @@ impl RuntimeAttachmentStore {
     pub fn new_with_clock(
         backend: Arc<dyn AttachmentStore>,
         referrers: Arc<dyn AttachmentReferrers>,
-        owner: crate::runtime_owner::RuntimeOwner,
+        owner: lash_vocabulary::identity::RuntimeOwner,
         clock: Arc<dyn crate::Clock>,
         policy: AttachmentPolicy,
     ) -> Self {
@@ -417,7 +417,7 @@ impl RuntimeAttachmentStore {
     ) -> Result<AttachmentExecutionBinding, AttachmentStoreError> {
         if !matches!(
             self.holder,
-            AttachmentHolder::Runtime(crate::runtime_owner::RuntimeOwner::Session(_))
+            AttachmentHolder::Runtime(lash_vocabulary::identity::RuntimeOwner::Session(_))
         ) {
             return Err(AttachmentStoreError::Contract(
                 "only a session runtime can bind an attachment execution".into(),
@@ -496,12 +496,12 @@ impl RuntimeAttachmentStore {
         let attachment_id = content_id(&bytes);
         let execution = self.execution.lock_recover().clone();
         let claim = match &self.holder {
-            AttachmentHolder::Runtime(crate::runtime_owner::RuntimeOwner::Process(id)) => {
+            AttachmentHolder::Runtime(lash_vocabulary::identity::RuntimeOwner::Process(id)) => {
                 crate::artifact_referrer::ReferrerClaim::unguarded(
                     crate::artifact_referrer::ArtifactReferrer::ProcessRecord(id.clone()),
                 )
             }
-            AttachmentHolder::Runtime(crate::runtime_owner::RuntimeOwner::Session(id)) => {
+            AttachmentHolder::Runtime(lash_vocabulary::identity::RuntimeOwner::Session(id)) => {
                 match &execution {
                     Some(bound) => Ok(crate::artifact_referrer::ReferrerClaim::guarded(
                         crate::artifact_referrer::ReferrerGuard::Journal(bound.journal.clone()),
@@ -676,7 +676,7 @@ impl RuntimeAttachmentStore {
         &self,
         claims: Vec<AttachmentRef>,
     ) -> Result<Vec<AttachmentRef>, AttachmentStoreError> {
-        let AttachmentHolder::Runtime(crate::runtime_owner::RuntimeOwner::Process(process_id)) =
+        let AttachmentHolder::Runtime(lash_vocabulary::identity::RuntimeOwner::Process(process_id)) =
             &self.holder
         else {
             return Ok(Vec::new());
@@ -703,10 +703,10 @@ impl RuntimeAttachmentStore {
     pub async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
         let referrer = match &self.holder {
             AttachmentHolder::Ephemeral => return Ok(()),
-            AttachmentHolder::Runtime(crate::runtime_owner::RuntimeOwner::Session(id)) => {
+            AttachmentHolder::Runtime(lash_vocabulary::identity::RuntimeOwner::Session(id)) => {
                 crate::artifact_referrer::ArtifactReferrer::Session(id.clone())
             }
-            AttachmentHolder::Runtime(crate::runtime_owner::RuntimeOwner::Process(id)) => {
+            AttachmentHolder::Runtime(lash_vocabulary::identity::RuntimeOwner::Process(id)) => {
                 crate::artifact_referrer::ArtifactReferrer::ProcessRecord(id.clone())
             }
         };

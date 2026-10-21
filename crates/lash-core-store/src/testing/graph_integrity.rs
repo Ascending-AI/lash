@@ -1,6 +1,6 @@
 //! Graph fault injection vocabulary for backend test support.
 
-use crate::SessionId;
+use lash_vocabulary::identity::SessionId;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GraphIntegrityCorruption {
     OrphanLeaf,
@@ -38,9 +38,9 @@ impl GraphIntegrityRead {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GraphIntegrityTarget {
     pub session_id: SessionId,
-    pub root_node_id: crate::NodeId,
-    pub leaf_node_id: crate::NodeId,
-    pub missing_node_id: crate::NodeId,
+    pub root_node_id: lash_vocabulary::identity::NodeId,
+    pub leaf_node_id: lash_vocabulary::identity::NodeId,
+    pub missing_node_id: lash_vocabulary::identity::NodeId,
     pub corruption: GraphIntegrityCorruption,
     pub read: GraphIntegrityRead,
 }

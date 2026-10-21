@@ -2,10 +2,18 @@
 //!
 //! Native calls allocate new data and never mutate their inputs. The dialect
 //! owns setters and the stable live URLSearchParams alias.
-use lash_kernel_doc::{
-    FunctionId, FunctionRegistry, NativeCall, NativeError, NativeFunction, NewObject, RecordType,
-    RecordTypeField, RegistryError, Type, Value, parse_definition,
-};
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::NativeCall;
+use lash_kernel_doc::NativeError;
+use lash_kernel_doc::NativeFunction;
+use lash_kernel_doc::NewObject;
+use lash_kernel_doc::RegistryError;
+use lash_kernel_doc::Value;
+use lash_kernel_doc::parse_definition;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::types::RecordType;
+use lash_vocabulary::types::RecordTypeField;
+use lash_vocabulary::types::Type;
 use std::{borrow::Cow, collections::BTreeMap, sync::Arc};
 use url::{Url, form_urlencoded};
 

@@ -1,4 +1,6 @@
-use lash_tool_shape::{ExtraKeys, SchemaShape, ShapeKind};
+use lash_vocabulary::tool_shape::ExtraKeys;
+use lash_vocabulary::tool_shape::SchemaShape;
+use lash_vocabulary::tool_shape::ShapeKind;
 
 use crate::{is_identifier, is_reserved_word};
 

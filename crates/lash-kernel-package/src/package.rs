@@ -6,11 +6,17 @@ use std::fmt;
 use std::sync::Arc;
 
 use lash_helper_labels::MemberDisplay;
-use lash_kernel_dialect::{Export, MemberPath, PackagePath, Segment};
-use lash_kernel_doc::{
-    ArtifactDigest, FunctionDefinition, FunctionId, FunctionName, FunctionRegistry, NativeFunction,
-    ReleasedFunctions,
-};
+use lash_kernel_dialect::Export;
+use lash_kernel_doc::ArtifactDigest;
+use lash_kernel_doc::FunctionDefinition;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::NativeFunction;
+use lash_kernel_doc::ReleasedFunctions;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::names::MemberPath;
+use lash_vocabulary::names::PackagePath;
+use lash_vocabulary::names::Segment;
 use serde::{Deserialize, Serialize};
 
 use crate::PackageRefusal;

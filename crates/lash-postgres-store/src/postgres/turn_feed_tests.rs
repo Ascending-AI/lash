@@ -10,7 +10,7 @@ use std::time::Duration;
 use lash_core_store::store::SessionCatalogStore as _;
 use lash_core_store::store::SessionCommitStore as _;
 use lash_execution_contracts::deployment::DeploymentStore as _;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 use crate::testing::{BeforeTurnCommit, IsolatedDatabase};
 

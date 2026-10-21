@@ -5,9 +5,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use lash_kernel_check::{
     EdgeKind, ExprNode, Graph, MemberNode, NodeKind, PlaceNode, Reference, StmtNode, Target,
 };
-use lash_kernel_doc::{
-    Document, Expr, FunctionDeclarations, Site, SourceMap, SourceMapRefusal, Span, Stmt,
-};
+use lash_kernel_doc::Document;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::FunctionDeclarations;
+use lash_kernel_doc::SourceMap;
+use lash_kernel_doc::SourceMapRefusal;
+use lash_kernel_doc::Span;
+use lash_kernel_doc::Stmt;
+use lash_vocabulary::sites::Site;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -180,7 +185,10 @@ impl WorkflowView {
             .or_else(|| self.nodes.iter().find(|node| node.members.contains(site)))
     }
 
-    pub fn action_node(&self, site: &lash_kernel_doc::PositionLabel) -> Option<&WorkflowNode> {
+    pub fn action_node(
+        &self,
+        site: &lash_vocabulary::sites::PositionLabel,
+    ) -> Option<&WorkflowNode> {
         self.nodes
             .iter()
             .find(|node| node.kind == WorkflowNodeKind::Action && node.site == *site)

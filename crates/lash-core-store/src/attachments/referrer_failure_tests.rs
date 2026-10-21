@@ -1,6 +1,6 @@
 use super::*;
 use crate::artifact_referrer::{ArtifactReferrer, ReferrerClaim};
-use crate::runtime_owner::RuntimeOwner;
+use lash_vocabulary::identity::RuntimeOwner;
 use std::error::Error;
 use std::sync::atomic::{AtomicUsize, Ordering};
 

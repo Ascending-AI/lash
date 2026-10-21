@@ -1,6 +1,6 @@
 use super::*;
-use lash_protocol_types::ProcessId;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 
 /// Which arm of the prepared append plan the store actually applied.
 ///

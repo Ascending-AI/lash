@@ -18,7 +18,6 @@ use super::singleton_run::{
     SingletonBodyOutcome, SingletonCapture, SingletonPreparedRequest, SingletonPresentationError,
     SingletonRunError, SingletonToolCall, SingletonToolHandlers, StartLaunch,
 };
-use crate::ProcessId;
 use crate::ScopeId;
 use crate::ToolCallId;
 use crate::runtime::actor::round::StoreLocalEffect;
@@ -34,7 +33,8 @@ use crate::tool_run::{
 };
 use lash_execution_contracts::process::ConsumerHold;
 use lash_execution_contracts::process::ProcessStartRegistration;
-use lash_protocol_types::ToolIntentKind;
+use lash_vocabulary::ToolIntentKind;
+use lash_vocabulary::identity::ProcessId;
 
 #[cfg(test)]
 #[path = "call_run/tests.rs"]

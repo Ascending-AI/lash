@@ -965,11 +965,11 @@ impl PluginFactory for FormattedCounter {
 
     fn migrate_format(
         &self,
-        from: crate::FormatVersion,
+        from: lash_vocabulary::providers::FormatVersion,
         _namespace: crate::FormatNamespace,
         value: serde_json::Value,
     ) -> Result<serde_json::Value, crate::FormatRefusal> {
-        Ok(if from == crate::FormatVersion::ONE {
+        Ok(if from == lash_vocabulary::providers::FormatVersion::ONE {
             Self::rename(value, "tally", "count")
         } else {
             value
@@ -978,11 +978,11 @@ impl PluginFactory for FormattedCounter {
 
     fn encode_format(
         &self,
-        to: crate::FormatVersion,
+        to: lash_vocabulary::providers::FormatVersion,
         _namespace: crate::FormatNamespace,
         value: &serde_json::Value,
     ) -> Result<serde_json::Value, crate::FormatRefusal> {
-        Ok(if to == crate::FormatVersion::ONE {
+        Ok(if to == lash_vocabulary::providers::FormatVersion::ONE {
             Self::rename(value.clone(), "count", "tally")
         } else {
             value.clone()
@@ -1002,8 +1002,12 @@ impl PluginFactory for FormattedCounter {
 impl FormattedCounter {
     pub fn declaration() -> crate::plugin::PluginDeclaration {
         let mut declaration = crate::plugin::PluginDeclaration::initial(Self::ID);
-        declaration.format_version = crate::FormatVersion::new(2).expect("a format version");
-        declaration.writable_formats = vec![crate::FormatVersion::ONE, declaration.format_version];
+        declaration.format_version =
+            lash_vocabulary::providers::FormatVersion::new(2).expect("a format version");
+        declaration.writable_formats = vec![
+            lash_vocabulary::providers::FormatVersion::ONE,
+            declaration.format_version,
+        ];
         declaration
     }
 }
@@ -1018,7 +1022,8 @@ fn formatted_admission(writer: u32) -> crate::store::plugin_writers::PluginAdmis
     crate::store::plugin_writers::PluginAdmission::from_plugins(vec![
         crate::store::plugin_writers::AdmittedPlugin {
             plugin: FormattedCounter::ID.to_string(),
-            writer: crate::FormatVersion::new(writer).expect("a format version"),
+            writer: lash_vocabulary::providers::FormatVersion::new(writer)
+                .expect("a format version"),
         },
     ])
 }

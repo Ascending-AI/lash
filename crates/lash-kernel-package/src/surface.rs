@@ -20,14 +20,27 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_dialect::{
-    BRAND_FIELD, BUILT_FIELD, Export, Intent, Member, OperationExport, PackagePath, Segment,
-    TypeMember, ValueType, Visibility, brand_tuple, brand_type,
-};
-use lash_kernel_doc::{
-    ContractId, FunctionName, OperationRequirement, RecordTypeField, Signature, Type,
-    parse_signature, print_type,
-};
+use lash_kernel_dialect::BRAND_FIELD;
+use lash_kernel_dialect::BUILT_FIELD;
+use lash_kernel_dialect::Export;
+use lash_kernel_dialect::Intent;
+use lash_kernel_dialect::Member;
+use lash_kernel_dialect::OperationExport;
+use lash_kernel_dialect::TypeMember;
+use lash_kernel_dialect::ValueType;
+use lash_kernel_dialect::Visibility;
+use lash_kernel_dialect::brand_tuple;
+use lash_kernel_dialect::brand_type;
+use lash_kernel_doc::parse_signature;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::names::PackagePath;
+use lash_vocabulary::names::Segment;
+use lash_vocabulary::operations::ContractId;
+use lash_vocabulary::operations::OperationRequirement;
+use lash_vocabulary::print_type;
+use lash_vocabulary::types::RecordTypeField;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 use crate::{Declared, NameRole, PackageRefusal};
 

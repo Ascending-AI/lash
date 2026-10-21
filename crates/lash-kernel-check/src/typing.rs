@@ -8,17 +8,29 @@
 
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{
-    EffectName, Function, FunctionCatalog, JoinMode, Literal, MapType, Name, OperationRequirement,
-    RecordType, RecordTypeField, Signature, Type,
-};
+use lash_kernel_doc::Function;
+use lash_kernel_doc::FunctionCatalog;
+use lash_kernel_doc::JoinMode;
+use lash_kernel_doc::Literal;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::operations::OperationRequirement;
+use lash_vocabulary::types::MapType;
+use lash_vocabulary::types::RecordType;
+use lash_vocabulary::types::RecordTypeField;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 use crate::graph::{
     ActNode, ActionNode, AtomNode, CalleeNode, ExprNode, Graph, MemberNode, NodeId, NodeKind,
     PlaceNode, Reference, StmtNode,
 };
 use crate::refusal::{RefusalReason, Refused, refused};
-use crate::types::{common, disjoint, function_of, stable, union};
+use lash_vocabulary::type_relations::common;
+use lash_vocabulary::type_relations::disjoint;
+use lash_vocabulary::type_relations::function_of;
+use lash_vocabulary::type_relations::stable;
+use lash_vocabulary::type_relations::union;
 
 pub(crate) struct Typer<'a> {
     pub(crate) graph: &'a mut Graph,
@@ -352,7 +364,7 @@ impl Typer<'_> {
         signature: &Signature,
         index: usize,
         found: &Type,
-        site: &lash_kernel_doc::Site,
+        site: &lash_vocabulary::sites::Site,
     ) {
         let Some(param) = signature.params.get(index) else {
             return;

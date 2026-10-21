@@ -19,7 +19,6 @@ use super::effects::record_omitted_effects;
 use super::node_trace::NodeCloses;
 use super::terminal::record_terminal;
 use super::waiting::Ending;
-use crate::ProcessId;
 use crate::runtime::actor::round::{self, AdmittedExecution, ExecutionDraft, RoundDraft, RunFold};
 use crate::runtime::actor::waits;
 use crate::runtime::actor::waits::WaitPurpose;
@@ -33,6 +32,7 @@ use lash_execution_contracts::process::StepRequest;
 use lash_execution_contracts::waits::ParkDeadline;
 use lash_execution_contracts::waits::WaitDeadline;
 use lash_execution_contracts::waits::WaitSpec;
+use lash_vocabulary::identity::ProcessId;
 
 use super::ProcessActivation;
 
@@ -419,7 +419,7 @@ pub(super) fn step_requests(driver: &Driver) -> Vec<StepRequest> {
 /// `fold`'s rounds admitted it.
 pub(super) fn outstanding_work(
     process: &ProcessId,
-    environment: BTreeSet<crate::ObligationToken>,
+    environment: BTreeSet<lash_vocabulary::claims::ObligationToken>,
     record: &lash_kernel_doc::ExecutionRequirements,
     driver: &Driver,
     fold: Option<&RunFold>,

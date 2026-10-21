@@ -17,7 +17,7 @@ use lash_core_store::store::StoreError;
 use lash_core_store::store::WriterPin;
 use lash_execution_contracts::process::ProcessRegistrar as _;
 use lash_execution_contracts::process::ProcessRetention as _;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 use super::WriterFence;
 use crate::PostgresStorage;
@@ -316,7 +316,7 @@ async fn pg_fence_retries_contended_with_a_fresh_read() {
         async move {
             registry
                 .release_consumer_hold(
-                    &lash_protocol_types::ProcessId::fixture("fence-retry"),
+                    &lash_vocabulary::identity::ProcessId::fixture("fence-retry"),
                     "fence-retry",
                 )
                 .await

@@ -3,10 +3,17 @@
 use std::collections::BTreeMap;
 
 use lash_kernel_doc::Correspondence;
-use lash_kernel_doc::{
-    Document, DocumentId, EffectName, FunctionCatalog, FunctionDefinition, FunctionId,
-    FunctionName, FunctionRegistry, KernelVersion, RegistryError, Site,
-};
+use lash_kernel_doc::Document;
+use lash_kernel_doc::FunctionCatalog;
+use lash_kernel_doc::FunctionDefinition;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::KernelVersion;
+use lash_kernel_doc::RegistryError;
+use lash_vocabulary::legacy_names::DocumentId;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::sites::Site;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

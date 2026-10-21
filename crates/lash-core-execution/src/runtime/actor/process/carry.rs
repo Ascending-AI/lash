@@ -19,11 +19,11 @@ use lash_durable::{
 
 use super::activation::{Pass, ProcessActivation};
 use super::driver::Driver;
-use crate::ProcessId;
 use lash_execution_contracts::park::ProcessParkReason;
 use lash_execution_contracts::process::EngineState;
 use lash_execution_contracts::process::EngineStateFormat;
 use lash_execution_contracts::process::ProcessEngine;
+use lash_vocabulary::identity::ProcessId;
 
 /// What the claim-time step did with the pass's transaction.
 pub(super) enum Carry {
@@ -51,7 +51,7 @@ impl ProcessActivation {
         engine: &dyn ProcessEngine,
         state: &EngineState,
         root: Option<&ExecRootRow>,
-        environment: std::collections::BTreeSet<crate::ObligationToken>,
+        environment: std::collections::BTreeSet<lash_vocabulary::claims::ObligationToken>,
         fold: &crate::runtime::actor::round::RunFold,
     ) -> Result<Carry, DurableError> {
         let written = state.format.clone();

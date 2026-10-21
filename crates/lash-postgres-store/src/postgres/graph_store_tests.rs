@@ -14,15 +14,21 @@ use std::sync::Arc;
 
 use lash_core_ids::operational_metrics::sql;
 use lash_core_ids::test_clock::TestClock;
-use lash_core_store::checkpoint_graph::{
-    DecodeLimits, EncodeBudget, EncodedNode, ExplicitLimit, GraphRefusal, GraphStaging, NodeId,
-    NodeKind, TokenWriter, TypedBody,
-};
+use lash_core_store::checkpoint_graph::DecodeLimits;
+use lash_core_store::checkpoint_graph::EncodeBudget;
+use lash_core_store::checkpoint_graph::EncodedNode;
+use lash_core_store::checkpoint_graph::ExplicitLimit;
+use lash_core_store::checkpoint_graph::GraphRefusal;
+use lash_core_store::checkpoint_graph::GraphStaging;
+use lash_core_store::checkpoint_graph::NodeId;
+use lash_core_store::checkpoint_graph::NodeKind;
+use lash_core_store::checkpoint_graph::TypedBody;
 use lash_durable::domain::graph::{HydratedGraph, RootOwner};
 use lash_durable::domain::pages::PageStore;
 use lash_durable::laws::graph::{self as laws, ForeignWrite, GraphTier, LockHold, ServerProbe};
 use lash_durable::laws::pages::{self, PageTier};
 use lash_durable::{DurableError, DurableReads as _, DurableStore};
+use lash_vocabulary::tokens::TokenWriter;
 use sqlx::{PgPool, Postgres, Transaction};
 
 use super::super::PostgresDurableStore;
@@ -492,8 +498,8 @@ impl PageTier for Tier {
 
     async fn delete_session(&self, session: &str) -> u64 {
         let factory = self._storage.session_store_factory();
-        let session =
-            lash_protocol_types::SessionId::try_from(session.to_owned()).expect("a law session id");
+        let session = lash_vocabulary::identity::SessionId::try_from(session.to_owned())
+            .expect("a law session id");
         let (answer, receipt) = sql::collect(
             "pages.session-delete",
             "postgres",

@@ -20,10 +20,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_check::Performs;
-use lash_kernel_doc::{
-    Document, EffectName, FunctionCatalog, FunctionDefinition, FunctionId, FunctionName,
-    OperationRequirement,
-};
+use lash_kernel_doc::Document;
+use lash_kernel_doc::FunctionCatalog;
+use lash_kernel_doc::FunctionDefinition;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::operations::OperationRequirement;
 
 use crate::migration::{DocumentRefusal, Rewritten};
 use crate::rewrite::unchanged;
@@ -159,7 +162,10 @@ fn requirements(
 mod tests {
     use std::collections::BTreeMap;
 
-    use lash_kernel_doc::{FunctionDefinition, FunctionId, parse_definition, parse_document};
+    use lash_kernel_doc::FunctionDefinition;
+    use lash_kernel_doc::parse_definition;
+    use lash_kernel_doc::parse_document;
+    use lash_vocabulary::legacy_names::FunctionId;
 
     use crate::DocumentRefusal;
 

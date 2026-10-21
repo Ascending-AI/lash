@@ -91,7 +91,7 @@ fn imported_mcp_tools_declare_the_fixed_result_envelope() {
             error,
             McpError::UnusableSchema(
                 lash_core::facade_support::ToolCatalogBuildError::UnusableSchema {
-                    source: lash_core::SchemaAdmissionError::Compilation { .. },
+                    source: lash_vocabulary::json_schema::SchemaAdmissionError::Compilation { .. },
                     ..
                 }
             )
@@ -214,7 +214,7 @@ fn mcp_name(server: &str, native_tool: &str) -> String {
 /// declared no leaf intents.
 async fn execute_by_id<P: ToolProvider>(
     provider: &P,
-    tool_id: &lash_core::ToolId,
+    tool_id: &lash_vocabulary::tool_contract::ToolId,
     args: &Value,
     context: &lash_core::AttemptContext<'_>,
 ) -> ToolOutcome {
@@ -229,14 +229,14 @@ async fn execute_by_id<P: ToolProvider>(
 /// the typed unknown-id path.
 async fn execute_with_manifest<P: ToolProvider>(
     provider: &P,
-    manifest: &lash_core::ToolManifest,
+    manifest: &lash_vocabulary::tool_contract::ToolManifest,
     args: &Value,
     context: &lash_core::AttemptContext<'_>,
 ) -> ToolOutcome {
     match provider
         .execute(lash_core::ToolCall::new(
             manifest,
-            &lash_core::ToolContract::default(),
+            &lash_vocabulary::tool_contract::ToolContract::default(),
             args,
             context,
         ))
@@ -589,7 +589,7 @@ impl lash_core::ToolProvider for NativeAndMcpProvider {
         &self,
         config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok({
@@ -603,7 +603,7 @@ impl lash_core::ToolProvider for NativeAndMcpProvider {
         &self,
         name: &str,
         config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         if name == self.native.manifest.tool() {
             return Some(Arc::new(self.native.contract()));
         }

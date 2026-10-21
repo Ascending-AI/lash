@@ -1,5 +1,5 @@
 use lash_tool_presenter_python::render_shape;
-use lash_tool_shape::SchemaShape;
+use lash_vocabulary::tool_shape::SchemaShape;
 
 use super::{
     CellTags, DialectPromptVocabulary, DialectPrompts, ExecutionSection, ExecutionSectionRequest,

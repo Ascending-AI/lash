@@ -1,6 +1,10 @@
 //! Canvas batches and private tree mutations.
 use crate::authoring::Operation;
-use lash_kernel_doc::{DocumentId, Expr, Name, Site, Stmt};
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Stmt;
+use lash_vocabulary::legacy_names::DocumentId;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;

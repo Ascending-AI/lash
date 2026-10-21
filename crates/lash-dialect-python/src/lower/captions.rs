@@ -2,10 +2,19 @@
 //! the construct is lowered (spec §2): exactly one per construct, and never
 //! scaffolding, a predeclaration or another construct's statement.
 
-use lash_kernel_doc::{
-    Caption, CaptionEntry, CaptionTarget, Expr, FieldPath, FieldRoot, FieldTarget, Name, Node,
-    ParamTarget, Site, Stmt, Unit,
-};
+use lash_kernel_doc::Caption;
+use lash_kernel_doc::CaptionEntry;
+use lash_kernel_doc::CaptionTarget;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::FieldPath;
+use lash_kernel_doc::FieldRoot;
+use lash_kernel_doc::FieldTarget;
+use lash_kernel_doc::Node;
+use lash_kernel_doc::ParamTarget;
+use lash_kernel_doc::Stmt;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
 use ruff_python_ast::{self as ast, Stmt as PyStmt};
 use ruff_text_size::{Ranged, TextSize};
 

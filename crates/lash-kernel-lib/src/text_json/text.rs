@@ -1,8 +1,16 @@
 use super::Selection;
-use lash_kernel_doc::{
-    Formula, Integer, Name, NativeCall, NativeError, NewObject, Nursery, Operand, PreparedNative,
-    TextView, Type, Value,
-};
+use lash_kernel_doc::Formula;
+use lash_kernel_doc::Integer;
+use lash_kernel_doc::NativeCall;
+use lash_kernel_doc::NativeError;
+use lash_kernel_doc::NewObject;
+use lash_kernel_doc::Nursery;
+use lash_kernel_doc::Operand;
+use lash_kernel_doc::PreparedNative;
+use lash_kernel_doc::TextView;
+use lash_kernel_doc::Value;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::types::Type;
 use num_traits::ToPrimitive;
 use unicode_normalization::UnicodeNormalization;
 

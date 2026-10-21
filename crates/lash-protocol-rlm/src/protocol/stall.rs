@@ -14,8 +14,8 @@ use crate::rlm_support::RlmCompletion;
 use lash_core::llm::types::ProviderReasoningReplay;
 use lash_core::session_model::SessionHistoryRecord;
 use lash_core::{DriverAction, DriverContextView};
-use lash_protocol_types::TurnId;
 use lash_rlm_types::RlmProtocolEvent;
+use lash_vocabulary::identity::TurnId;
 use serde::ser::{Serialize, SerializeMap, Serializer};
 use serde_json::Value;
 

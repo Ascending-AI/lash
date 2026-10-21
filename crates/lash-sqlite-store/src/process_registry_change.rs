@@ -1,6 +1,6 @@
 use super::*;
 use crate::process_registry::sql::process_sql;
-use lash_protocol_types::ProcessId;
+use lash_vocabulary::identity::ProcessId;
 
 pub(crate) fn max_change_sequence(
     watermark: lash_execution_contracts::process::ProjectionWatermark,

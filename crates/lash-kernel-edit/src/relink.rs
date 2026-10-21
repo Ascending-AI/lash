@@ -7,8 +7,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::{Document, FunctionId, FunctionName, InvalidReason, Site};
+use lash_kernel_doc::Document;
+use lash_kernel_doc::InvalidReason;
 use lash_kernel_package::PackageView;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::sites::Site;
 
 use crate::EditRefusal;
 use crate::refusal::refused;

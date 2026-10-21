@@ -28,7 +28,7 @@ pub enum ToolFailureCause {
         step_kind: String,
     },
     ExecutionLimit {
-        cause: crate::LimitCause,
+        cause: lash_vocabulary::tool_contract::LimitCause,
     },
     /// A result check proposed state commands outside the recorded body
     /// that owns its decision. No command was reduced or published.
@@ -36,20 +36,20 @@ pub enum ToolFailureCause {
         plugin: String,
     },
     ToolSchemaAdmission {
-        source: Box<crate::ToolCatalogBuildError>,
+        source: Box<lash_vocabulary::ToolCatalogBuildError>,
     },
     SchemaAdmission {
-        source: crate::SchemaAdmissionError,
+        source: lash_vocabulary::json_schema::SchemaAdmissionError,
     },
     ValueMismatch {
-        source: crate::ValueMismatch,
+        source: lash_vocabulary::json_schema::ValueMismatch,
     },
     /// The body's outcome is one its recorded declaration does not admit: a
     /// Deferred without `may_defer`, an undeclared intent kind, or an
     /// undeclared turn control. Nothing
     /// the outcome declared was realized.
     Declaration {
-        refusal: crate::DeclarationRefusal,
+        refusal: lash_vocabulary::tool_declaration::DeclarationRefusal,
     },
     /// A start the body declared names an environment its attempt did not
     /// hold through `AttemptContext::declare_launch` (D10). Nothing the
@@ -61,21 +61,21 @@ pub enum ToolFailureCause {
     /// links it to on this node (D3). The body did not run.
     LinkedToolMissing {
         effect: String,
-        tool: crate::ToolId,
+        tool: lash_vocabulary::tool_contract::ToolId,
     },
     /// A call's linked tool is served on this node under another contract
     /// id than the call is pinned to (`operation_contract_changed`). The
     /// body did not run.
     OperationContractChanged {
         effect: String,
-        tool: crate::ToolId,
-        pinned: lash_kernel_doc::ContractId,
-        live: lash_kernel_doc::ContractId,
+        tool: lash_vocabulary::tool_contract::ToolId,
+        pinned: lash_vocabulary::operations::ContractId,
+        live: lash_vocabulary::operations::ContractId,
     },
     /// A granted tool's transform refused the tool's input: it names no
     /// call. Nothing was resolved.
     DispatchInputRefused {
-        tool: crate::ToolId,
+        tool: lash_vocabulary::tool_contract::ToolId,
         reason: String,
     },
     /// A computed target or returned alias entered a statically linked
@@ -88,14 +88,14 @@ pub enum ToolFailureCause {
     /// only a granted tool dispatches. Nothing was resolved.
     DispatchNotGranted {
         effect: String,
-        tool: crate::ToolId,
+        tool: lash_vocabulary::tool_contract::ToolId,
     },
     /// A granted tool's transform, run again for the call of the matched
     /// tool, named another call path than the committed match resolved: the
     /// transform is not deterministic, a host bug. The matched tool did not
     /// run.
     DispatchDiverged {
-        tool: crate::ToolId,
+        tool: lash_vocabulary::tool_contract::ToolId,
         committed: String,
         recomputed: String,
     },
@@ -144,7 +144,7 @@ pub enum ToolFailureCause {
         /// cleanup held it (a Python entry that started tasks), or no
         /// document statement was left to name it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<crate::Site>,
+        site: Option<lash_vocabulary::sites::Site>,
     },
     /// A value retained out of history was asked for whole, and the
     /// attachment that held it is no longer stored: its shape is all history

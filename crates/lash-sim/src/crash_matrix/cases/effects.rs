@@ -8,7 +8,8 @@ use lash_core_store::store::RunTerminalKind;
 use lash_core_store::tool_run::SettledOutput;
 use lash_durable::domain::OwnerKey;
 use lash_durable_test::{Cut, SimNodes};
-use lash_protocol_types::{SessionId, ToolCallId};
+use lash_protocol_types::ToolCallId;
+use lash_vocabulary::identity::SessionId;
 
 use super::{admit_turn, run_of, turn_end, turn_settled};
 use crate::crash_matrix::deployment::Workload;

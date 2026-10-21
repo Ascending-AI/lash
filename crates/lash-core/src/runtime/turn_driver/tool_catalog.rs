@@ -5,7 +5,7 @@ pub(in crate::runtime) use crate::session::ExecutionEnvironmentSyncError as Sync
 use lash_execution_contracts::plugin_error::PluginError;
 
 pub(super) struct PreparedExecutionEnvironment {
-    pub(super) tool_definitions: Vec<crate::ToolDefinition>,
+    pub(super) tool_definitions: Vec<lash_vocabulary::tool_contract::ToolDefinition>,
     surface: crate::RecordedSurface,
     turn_driver_preamble: Arc<TurnDriverPreamble>,
 }
@@ -104,7 +104,7 @@ impl RuntimeTurnDriver<'_> {
                 turn_controls: execution_environment
                     .tool_definitions
                     .iter()
-                    .map(crate::ToolDefinition::manifest)
+                    .map(lash_vocabulary::tool_contract::ToolDefinition::manifest)
                     .filter(|manifest| !manifest.declaration().controls.is_empty())
                     .map(|manifest| {
                         let controls = manifest.declaration().controls.clone();
@@ -114,7 +114,7 @@ impl RuntimeTurnDriver<'_> {
                 truncated_names: execution_environment
                     .tool_definitions
                     .iter()
-                    .map(crate::ToolDefinition::manifest)
+                    .map(lash_vocabulary::tool_contract::ToolDefinition::manifest)
                     .map(|manifest| (manifest.standard_name(), manifest.tool()))
                     .filter(|(name, operation)| name.replace("__", ".") != *operation)
                     .collect(),

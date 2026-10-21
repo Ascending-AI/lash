@@ -8,11 +8,12 @@ pub use meter::{LoopBounds, audit_metering};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use lash_kernel_doc::{FunctionId, FunctionRegistry};
+use lash_kernel_doc::FunctionRegistry;
 use lash_kernel_exec::charge::Weight;
 use lash_kernel_package::PackageView;
 use lash_kernel_vm::kernel_internals::{Layout, prepare_with_layout};
 use lash_kernel_vm::{ChargeTape, KernelMachine, PreparedLibrary};
+use lash_vocabulary::legacy_names::FunctionId;
 
 use crate::machine::{Run, run_case_in};
 use crate::{Case, ExpectedEnd, HarnessError, Observations};

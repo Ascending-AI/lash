@@ -57,7 +57,8 @@ async fn finished_under(
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("standard-budget").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("standard-budget")
+            .expect("nonblank host identity"),
     )
     .await
     .open()

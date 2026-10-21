@@ -1,5 +1,5 @@
 use super::*;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 /// Agreement alone misses a missing-root defect shared by every backend.
 /// Apply the same independent byte-survival and rollback oracle to all three.
@@ -220,10 +220,9 @@ impl BackendRunner {
                                 "{}:foreign-source",
                                 self.session_id
                             )),
-                            source_node_id: Some(lash_core::NodeId::fixture(format!(
-                                "{}:foreign-node",
-                                self.session_id
-                            ))),
+                            source_node_id: Some(lash_vocabulary::identity::NodeId::fixture(
+                                format!("{}:foreign-node", self.session_id),
+                            )),
                         },
                         config: lash_core::PersistedSessionConfig::new(
                             lash_core::TurnBudget::Unbounded,
@@ -263,7 +262,9 @@ impl BackendRunner {
                         head_revision,
                         relation: SessionRelation::Fork {
                             source_session_id: self.session_id.clone(),
-                            source_node_id: Some(lash_core::NodeId::fixture(node_id.clone())),
+                            source_node_id: Some(lash_vocabulary::identity::NodeId::fixture(
+                                node_id.clone(),
+                            )),
                         },
                         config: lash_core::PersistedSessionConfig::new(
                             lash_core::TurnBudget::Unbounded,
@@ -300,10 +301,9 @@ impl BackendRunner {
                         head_revision: 0,
                         relation: SessionRelation::Fork {
                             source_session_id: branch_session_id.clone(),
-                            source_node_id: Some(lash_core::NodeId::fixture(format!(
-                                "{}:rewind-source-node",
-                                self.session_id
-                            ))),
+                            source_node_id: Some(lash_vocabulary::identity::NodeId::fixture(
+                                format!("{}:rewind-source-node", self.session_id),
+                            )),
                         },
                         config: lash_core::PersistedSessionConfig::new(
                             lash_core::TurnBudget::Unbounded,
@@ -316,7 +316,10 @@ impl BackendRunner {
                     .expect("rewind must re-fork after deleting the superseded source");
                 assert_eq!(
                     (rewound.source_session_id, rewound.leaf_node_id),
-                    (branch_session_id, Some(lash_core::NodeId::fixture(node_id))),
+                    (
+                        branch_session_id,
+                        Some(lash_vocabulary::identity::NodeId::fixture(node_id))
+                    ),
                     "re-fork must name the surviving branch's creation revision"
                 );
                 Ok(None)

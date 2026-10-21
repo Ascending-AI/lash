@@ -10,8 +10,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::NodeId;
 use crate::session_graph::SessionGraph;
+use lash_vocabulary::identity::NodeId;
 
 /// The full structural-integrity check: unique ids, the anchor's base
 /// resident, an acyclic ancestry from a resolvable leaf, and a parent

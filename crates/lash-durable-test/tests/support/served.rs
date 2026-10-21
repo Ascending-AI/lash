@@ -494,7 +494,10 @@ impl World {
     /// Create the session `name` under `spec`.
     pub async fn session(&self, name: &str, spec: lash::SessionSpec) -> lash::DurableSession {
         self.core
-            .session(lash::SessionId::try_from(name.to_owned()).expect("a session id"))
+            .session(
+                lash_vocabulary::identity::SessionId::try_from(name.to_owned())
+                    .expect("a session id"),
+            )
             .create(lash::SessionCreation::root(spec))
             .await
             .expect("the session is created")
@@ -525,7 +528,10 @@ impl World {
     /// Read the committed head explicitly for transcript and graph laws.
     pub async fn read(&self, name: &str) -> lash::persistence::SessionReadView {
         self.core
-            .session(lash::SessionId::try_from(name.to_owned()).expect("session id"))
+            .session(
+                lash_vocabulary::identity::SessionId::try_from(name.to_owned())
+                    .expect("session id"),
+            )
             .durable()
             .await
             .expect("durable session")

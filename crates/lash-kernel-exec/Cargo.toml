@@ -21,4 +21,5 @@ doctest = false
 workspace = true
 
 [dependencies]
+lash-vocabulary = { workspace = true }
 thiserror = { workspace = true }

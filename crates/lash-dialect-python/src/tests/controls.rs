@@ -6,8 +6,13 @@
 //! runs. A control call made into a task, or inside a function, could
 //! settle beside work still running, and is refused before anything runs.
 
-use lash_kernel_doc::{Datum, EffectName, Name, Param, Signature, Type};
+use lash_kernel_doc::Datum;
 use lash_kernel_vm::{End, Outcome, Request};
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 use super::machine;
 

@@ -139,7 +139,7 @@
 //! execution identities. Their richer provisional history remains a
 //! [`WorkflowExecutionOverlay`], built with
 //! [`WorkflowExecutionOverlayAccumulator`] or [`fold_workflow_overlay`].
-//! Give that reducer [`WorkflowOverlayDocument::of`] the document read through
+//! Give that reducer [`workflow_overlay_document`] the document read through
 //! [`HostArtifacts::execution_document`](crate::process::HostArtifacts::execution_document).
 //!
 //! # Source
@@ -212,37 +212,148 @@ pub use import::{
 pub mod document {
     // Observation inputs belong to `view`; data limits belong to `persistence`.
     // An explicit vocabulary keeps those names out of this module.
-    pub use lash_kernel_doc::{
-        ActExpr, ActKind, Action, Args, AssignOrder, Atom, Block, BodyCensus, Bytes, BytesView,
-        Callee, Catch, CheckedDeclarations, Closure, ContractId, Correspondence,
-        DOCUMENT_GRAMMAR_VERSION, Datum, DeclarationRefusal as DocumentDeclarationRefusal,
-        DecodeError, DecodeMismatch, Decoder, Document, DocumentBytes, DocumentBytesRefusal,
-        DocumentId, EffectId, EffectName, EncodeError, Entry, ErrorDatum, Expr,
-        FIRST_NATIVE_VERSION, FROZEN_DATUM, FROZEN_JSON, FROZEN_TOOL_VALUE, FUNCTION_VALUE_ENTRY,
-        FUNCTION_VALUE_TAG, Float, Formula, FrozenDatum, Function, FunctionBody, FunctionCatalog,
-        FunctionDeclarations, FunctionDefinition, FunctionHeader, FunctionId, FunctionName,
-        FunctionRegistry, FunctionRepresentation, FunctionValue, FunctionValueLimits,
-        FunctionValueRefusal, Guard, GuardExceeded, Handle, IdentifiedDocument, Identity,
-        ImageError, Implementation, ImplementationKind, Integer, Invalid, InvalidBytes,
-        InvalidFloat, InvalidIdentity, InvalidInteger, InvalidNumberToken, InvalidQualifiedName,
-        InvalidReason, JoinMode, KERNEL_VERSION, KernelVersion, Literal, LoopCounts,
-        MAX_DECODE_DEPTH, MAX_NESTING_DEPTH, Manifest, MapEntry, MapType, Measure, Member, Name,
-        NativeCall, NativeCtor, NativeError, NativeFunction, NewObject, Node, NodeMut,
-        NumberPolicy, NumberToken, Nursery, ObservationReader, Operand, OperationRequirement,
-        Ordinals, Param, ParseError, ParseErrorReason, Place, PositionCounts, PositionLabel,
-        PreparedAnswer, PreparedNative, ProjectionRead, Protocol, QualifiedName, RecordEntry,
-        RecordType, RecordTypeField, RegisteredFunction, RegistryError, ReleasedFunctions,
-        Reservation, Retry, Rhs, Semantics, SequenceView, Signature, Site, SourceLanguage,
-        SourceMap, SourceMapId, SourceMapRefusal, SourceSite, Span, StartAdapter, StartConvention,
-        StatementForm, StatementRuleViolation, Stmt, Survivor, TableView, TaskId, TaskLabel,
-        TextView, Timestamp, TryStmt, Type, Unit, ValidatedFunctions, Value, ValueKind, VisitId,
-        WaitId, WorkCounter, arena, check_declarations, check_statement, core_support,
-        document_work, graph_tokens, heap, parse_definition, parse_definition_with_limits,
-        parse_document, parse_document_with_limits, performed_by, performed_through, plan,
-        print_definition, print_document, required_declarations, scalar, testkit,
-        validate_definition, validate_definition_with_limits, validate_document,
-        validate_document_with_limits,
-    };
+    pub use lash_kernel_doc::ActExpr;
+    pub use lash_kernel_doc::ActKind;
+    pub use lash_kernel_doc::Action;
+    pub use lash_kernel_doc::Args;
+    pub use lash_kernel_doc::AssignOrder;
+    pub use lash_kernel_doc::Atom;
+    pub use lash_kernel_doc::Block;
+    pub use lash_kernel_doc::BodyCensus;
+    pub use lash_kernel_doc::Bytes;
+    pub use lash_kernel_doc::BytesView;
+    pub use lash_kernel_doc::Callee;
+    pub use lash_kernel_doc::Catch;
+    pub use lash_kernel_doc::CheckedDeclarations;
+    pub use lash_kernel_doc::Closure;
+    pub use lash_kernel_doc::Correspondence;
+    pub use lash_kernel_doc::DOCUMENT_GRAMMAR_VERSION;
+    pub use lash_kernel_doc::Datum;
+    pub use lash_kernel_doc::DeclarationRefusal as DocumentDeclarationRefusal;
+    pub use lash_kernel_doc::DecodeError;
+    pub use lash_kernel_doc::DecodeMismatch;
+    pub use lash_kernel_doc::Decoder;
+    pub use lash_kernel_doc::Document;
+    pub use lash_kernel_doc::DocumentBytes;
+    pub use lash_kernel_doc::DocumentBytesRefusal;
+    pub use lash_kernel_doc::EncodeError;
+    pub use lash_kernel_doc::Entry;
+    pub use lash_kernel_doc::ErrorDatum;
+    pub use lash_kernel_doc::Expr;
+    pub use lash_kernel_doc::FIRST_NATIVE_VERSION;
+    pub use lash_kernel_doc::FROZEN_DATUM;
+    pub use lash_kernel_doc::FROZEN_JSON;
+    pub use lash_kernel_doc::FROZEN_TOOL_VALUE;
+    pub use lash_kernel_doc::FUNCTION_VALUE_ENTRY;
+    pub use lash_kernel_doc::FUNCTION_VALUE_TAG;
+    pub use lash_kernel_doc::Float;
+    pub use lash_kernel_doc::Formula;
+    pub use lash_kernel_doc::FrozenDatum;
+    pub use lash_kernel_doc::Function;
+    pub use lash_kernel_doc::FunctionBody;
+    pub use lash_kernel_doc::FunctionCatalog;
+    pub use lash_kernel_doc::FunctionDeclarations;
+    pub use lash_kernel_doc::FunctionDefinition;
+    pub use lash_kernel_doc::FunctionHeader;
+    pub use lash_kernel_doc::FunctionRegistry;
+    pub use lash_kernel_doc::FunctionRepresentation;
+    pub use lash_kernel_doc::FunctionValue;
+    pub use lash_kernel_doc::FunctionValueLimits;
+    pub use lash_kernel_doc::FunctionValueRefusal;
+    pub use lash_kernel_doc::Guard;
+    pub use lash_kernel_doc::GuardExceeded;
+    pub use lash_kernel_doc::Handle;
+    pub use lash_kernel_doc::IdentifiedDocument;
+    pub use lash_kernel_doc::Identity;
+    pub use lash_kernel_doc::ImageError;
+    pub use lash_kernel_doc::Implementation;
+    pub use lash_kernel_doc::ImplementationKind;
+    pub use lash_kernel_doc::Integer;
+    pub use lash_kernel_doc::Invalid;
+    pub use lash_kernel_doc::InvalidBytes;
+    pub use lash_kernel_doc::InvalidFloat;
+    pub use lash_kernel_doc::InvalidInteger;
+    pub use lash_kernel_doc::InvalidNumberToken;
+    pub use lash_kernel_doc::InvalidReason;
+    pub use lash_kernel_doc::JoinMode;
+    pub use lash_kernel_doc::KERNEL_VERSION;
+    pub use lash_kernel_doc::KernelVersion;
+    pub use lash_kernel_doc::Literal;
+    pub use lash_kernel_doc::MAX_DECODE_DEPTH;
+    pub use lash_kernel_doc::MAX_NESTING_DEPTH;
+    pub use lash_kernel_doc::Manifest;
+    pub use lash_kernel_doc::MapEntry;
+    pub use lash_kernel_doc::Measure;
+    pub use lash_kernel_doc::Member;
+    pub use lash_kernel_doc::NativeCall;
+    pub use lash_kernel_doc::NativeCtor;
+    pub use lash_kernel_doc::NativeError;
+    pub use lash_kernel_doc::NativeFunction;
+    pub use lash_kernel_doc::NewObject;
+    pub use lash_kernel_doc::Node;
+    pub use lash_kernel_doc::NodeMut;
+    pub use lash_kernel_doc::NumberPolicy;
+    pub use lash_kernel_doc::NumberToken;
+    pub use lash_kernel_doc::Nursery;
+    pub use lash_kernel_doc::Operand;
+    pub use lash_kernel_doc::Ordinals;
+    pub use lash_kernel_doc::ParseError;
+    pub use lash_kernel_doc::ParseErrorReason;
+    pub use lash_kernel_doc::Place;
+    pub use lash_kernel_doc::PreparedAnswer;
+    pub use lash_kernel_doc::PreparedNative;
+    pub use lash_kernel_doc::ProjectionRead;
+    pub use lash_kernel_doc::Protocol;
+    pub use lash_kernel_doc::RecordEntry;
+    pub use lash_kernel_doc::RegisteredFunction;
+    pub use lash_kernel_doc::RegistryError;
+    pub use lash_kernel_doc::ReleasedFunctions;
+    pub use lash_kernel_doc::Reservation;
+    pub use lash_kernel_doc::Retry;
+    pub use lash_kernel_doc::Rhs;
+    pub use lash_kernel_doc::Semantics;
+    pub use lash_kernel_doc::SequenceView;
+    pub use lash_kernel_doc::SourceLanguage;
+    pub use lash_kernel_doc::SourceMap;
+    pub use lash_kernel_doc::SourceMapRefusal;
+    pub use lash_kernel_doc::SourceSite;
+    pub use lash_kernel_doc::Span;
+    pub use lash_kernel_doc::StartAdapter;
+    pub use lash_kernel_doc::StartConvention;
+    pub use lash_kernel_doc::StatementForm;
+    pub use lash_kernel_doc::StatementRuleViolation;
+    pub use lash_kernel_doc::Stmt;
+    pub use lash_kernel_doc::Survivor;
+    pub use lash_kernel_doc::TableView;
+    pub use lash_kernel_doc::TaskId;
+    pub use lash_kernel_doc::TextView;
+    pub use lash_kernel_doc::Timestamp;
+    pub use lash_kernel_doc::TryStmt;
+    pub use lash_kernel_doc::ValidatedFunctions;
+    pub use lash_kernel_doc::Value;
+    pub use lash_kernel_doc::ValueKind;
+    pub use lash_kernel_doc::WorkCounter;
+    pub use lash_kernel_doc::arena;
+    pub use lash_kernel_doc::check_declarations;
+    pub use lash_kernel_doc::check_statement;
+    pub use lash_kernel_doc::core_support;
+    pub use lash_kernel_doc::document_work;
+    pub use lash_kernel_doc::heap;
+    pub use lash_kernel_doc::parse_definition;
+    pub use lash_kernel_doc::parse_definition_with_limits;
+    pub use lash_kernel_doc::parse_document;
+    pub use lash_kernel_doc::parse_document_with_limits;
+    pub use lash_kernel_doc::performed_by;
+    pub use lash_kernel_doc::performed_through;
+    pub use lash_kernel_doc::plan;
+    pub use lash_kernel_doc::print_definition;
+    pub use lash_kernel_doc::print_document;
+    pub use lash_kernel_doc::required_declarations;
+    pub use lash_kernel_doc::scalar;
+    pub use lash_kernel_doc::validate_definition;
+    pub use lash_kernel_doc::validate_definition_with_limits;
+    pub use lash_kernel_doc::validate_document;
+    pub use lash_kernel_doc::validate_document_with_limits;
     /// Plain-language captions for a document's steps, its entries'
     /// parameters and the fields of their types, held beside it like its
     /// source map (`K-CAP-001`..`K-CAP-007`).
@@ -251,6 +362,35 @@ pub mod document {
         CaptionKind, CaptionRefusal, CaptionTarget, Captions, CaptionsRefusal, FieldPath,
         FieldRoot, FieldTarget, ParamTarget, Rekeyed,
     };
+    pub use lash_vocabulary::legacy_names::DocumentId;
+    pub use lash_vocabulary::legacy_names::EffectName;
+    pub use lash_vocabulary::legacy_names::FunctionId;
+    pub use lash_vocabulary::legacy_names::FunctionName;
+    pub use lash_vocabulary::legacy_names::InvalidIdentity;
+    pub use lash_vocabulary::legacy_names::InvalidQualifiedName;
+    pub use lash_vocabulary::legacy_names::Name;
+    pub use lash_vocabulary::legacy_names::QualifiedName;
+    pub use lash_vocabulary::legacy_names::SourceMapId;
+    pub use lash_vocabulary::operations::ContractId;
+    pub use lash_vocabulary::operations::OperationRequirement;
+    pub use lash_vocabulary::sites::EffectId;
+    pub use lash_vocabulary::sites::LoopCounts;
+    pub use lash_vocabulary::sites::ObservationReader;
+    pub use lash_vocabulary::sites::PositionCounts;
+    pub use lash_vocabulary::sites::PositionLabel;
+    pub use lash_vocabulary::sites::Site;
+    pub use lash_vocabulary::sites::TaskLabel;
+    pub use lash_vocabulary::sites::Unit;
+    pub use lash_vocabulary::sites::VisitId;
+    pub use lash_vocabulary::sites::WaitId;
+    pub use lash_vocabulary::sites::testkit;
+    pub use lash_vocabulary::tokens;
+    pub use lash_vocabulary::types::MapType;
+    pub use lash_vocabulary::types::Param;
+    pub use lash_vocabulary::types::RecordType;
+    pub use lash_vocabulary::types::RecordTypeField;
+    pub use lash_vocabulary::types::Signature;
+    pub use lash_vocabulary::types::Type;
 }
 
 /// The total view of a document and its admission: nodes, edges, scopes,
@@ -291,22 +431,68 @@ pub use lash_kernel_edit::authoring;
 /// document name when that set has no label for the function.
 #[cfg(feature = "workflow-view")]
 pub mod view {
-    pub use lash_kernel_view::{
-        ActionActivity, ActionObservation, ActionRole, ActionState, ActionView, ActivityRefusal,
-        ArgumentView, AssignmentView, BindingKind, BindingView, CallableView, CalleeView,
-        ComparisonView, ControlArm, ControlHeader, Dataflow, EntryParamView, EntryView,
-        ExecutionSiteView, ExpressionView, FlowEdge, FlowKind, FlowTarget, HeaderRole, JSON_SCHEMA,
-        LazyArm, LineRange, NodeCoverage, PackageMemberView, PathSite, PathStep, RanCounts,
-        ReadableLens, ReadableRefusal, ReplayPath, ReturnView, RunObservation, ScopeCoverage,
-        ScopeKind, ScopeView, SiteKind, StatementCoverage, StatementView, TYPESCRIPT_DECLARATION,
-        TaskPath, Use, ValueRef, ValueSource, ViewError, WorkflowCoverage, WorkflowNode,
-        WorkflowNodeKind, WorkflowView, coverage, derive, derive_callable, path,
-    };
+    pub use lash_kernel_view::ActionActivity;
+    pub use lash_kernel_view::ActionObservation;
+    pub use lash_kernel_view::ActionRole;
+    pub use lash_kernel_view::ActionState;
+    pub use lash_kernel_view::ActionView;
+    pub use lash_kernel_view::ActivityRefusal;
+    pub use lash_kernel_view::ArgumentView;
+    pub use lash_kernel_view::AssignmentView;
+    pub use lash_kernel_view::BindingKind;
+    pub use lash_kernel_view::BindingView;
+    pub use lash_kernel_view::CallableView;
+    pub use lash_kernel_view::CalleeView;
+    pub use lash_kernel_view::ComparisonView;
+    pub use lash_kernel_view::ControlArm;
+    pub use lash_kernel_view::ControlHeader;
+    pub use lash_kernel_view::Dataflow;
+    pub use lash_kernel_view::EntryParamView;
+    pub use lash_kernel_view::EntryView;
+    pub use lash_kernel_view::ExecutionSiteView;
+    pub use lash_kernel_view::ExpressionView;
+    pub use lash_kernel_view::FlowEdge;
+    pub use lash_kernel_view::FlowKind;
+    pub use lash_kernel_view::FlowTarget;
+    pub use lash_kernel_view::HeaderRole;
+    pub use lash_kernel_view::JSON_SCHEMA;
+    pub use lash_kernel_view::LazyArm;
+    pub use lash_kernel_view::LineRange;
+    pub use lash_kernel_view::NodeCoverage;
+    pub use lash_kernel_view::PackageMemberView;
+    pub use lash_kernel_view::PathSite;
+    pub use lash_kernel_view::PathStep;
+    pub use lash_kernel_view::ReadableLens;
+    pub use lash_kernel_view::ReadableRefusal;
+    pub use lash_kernel_view::ReturnView;
+    pub use lash_kernel_view::ScopeCoverage;
+    pub use lash_kernel_view::ScopeKind;
+    pub use lash_kernel_view::ScopeView;
+    pub use lash_kernel_view::SiteKind;
+    pub use lash_kernel_view::StatementCoverage;
+    pub use lash_kernel_view::StatementView;
+    pub use lash_kernel_view::TYPESCRIPT_DECLARATION;
+    pub use lash_kernel_view::Use;
+    pub use lash_kernel_view::ValueRef;
+    pub use lash_kernel_view::ValueSource;
+    pub use lash_kernel_view::ViewError;
+    pub use lash_kernel_view::WorkflowCoverage;
+    pub use lash_kernel_view::WorkflowNode;
+    pub use lash_kernel_view::WorkflowNodeKind;
+    pub use lash_kernel_view::WorkflowView;
+    pub use lash_kernel_view::coverage;
+    pub use lash_kernel_view::derive;
+    pub use lash_kernel_view::derive_callable;
+    pub use lash_kernel_view::path;
     /// A view's captions, joined by view location ([`WorkflowView::captions`]).
     pub use lash_kernel_view::{
         ArmCaption, BindingCaption, CallableCaption, CaptionView, CaptionViewRefusal, FieldCaption,
         NodeCaption, ParamCaption,
     };
+    pub use lash_vocabulary::observation::RanCounts;
+    pub use lash_vocabulary::observation::ReplayPath;
+    pub use lash_vocabulary::observation::RunObservation;
+    pub use lash_vocabulary::observation::TaskPath;
 }
 
 /// A checked document entered at one entry, with its graph and the library
@@ -328,18 +514,20 @@ pub use lash_trace::{
 /// ([`ProcessDocumentIdentity`](crate::process::ProcessDocumentIdentity))
 /// and an execution's start name it.
 pub use lash_trace::{WorkflowDocumentEntry, WorkflowDocumentRef};
+pub use lash_vm_runtime::trace_adapter::workflow_overlay_document;
 #[cfg(feature = "codemode")]
 pub use lash_vm_runtime::{
     ExecutionDocument, ReplaySegments, SegmentAnswer, SegmentReplay, Unreplayable,
     WorkflowEnvironment,
 };
 
+use crate::Result;
 #[cfg(feature = "codemode")]
 use crate::persistence::ArtifactName;
 #[cfg(feature = "codemode")]
 use crate::process::{ProcessDefinition, ProcessDefinitionId, ProcessEngineKind};
 #[cfg(feature = "codemode")]
-use crate::{ProcessId, Result};
+use lash_vocabulary::identity::ProcessId;
 
 #[cfg(feature = "codemode")]
 /// One definition as a host inspects it.
@@ -501,8 +689,12 @@ pub(crate) async fn read(
 /// Process overlays consume the lifecycle events hosts store and the same
 /// process feed's live entries. The trace overlay above serves session cells,
 /// which have no process log. Process observation snapshots include this fold.
-pub use lash_core::{
-    ProcessWorkflowFoldError, ProcessWorkflowLiveCoverage, ProcessWorkflowObservation,
-    ProcessWorkflowOverlay, ProcessWorkflowOverlayAccumulator, ProcessWorkflowRan,
-    ProcessWorkflowSite, ProcessWorkflowSiteState, ProcessWorkflowWaitKind,
-};
+pub use lash_core::ProcessWorkflowFoldError;
+pub use lash_core::ProcessWorkflowLiveCoverage;
+pub use lash_core::ProcessWorkflowOverlay;
+pub use lash_core::ProcessWorkflowOverlayAccumulator;
+pub use lash_core::ProcessWorkflowRan;
+pub use lash_core::ProcessWorkflowSite;
+pub use lash_core::ProcessWorkflowSiteState;
+pub use lash_core::ProcessWorkflowWaitKind;
+pub use lash_vocabulary::observation::RunObservation;

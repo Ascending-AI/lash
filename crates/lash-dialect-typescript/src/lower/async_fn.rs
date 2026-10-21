@@ -30,7 +30,13 @@
 //! actual spawn site and its occurrence name the child (`K-TASK-020`).
 
 use lash_kernel_dialect::{Resolution, Spelling};
-use lash_kernel_doc::{ActKind, EffectName, Expr, Literal, Rhs, Signature, Stmt};
+use lash_kernel_doc::ActKind;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Literal;
+use lash_kernel_doc::Rhs;
+use lash_kernel_doc::Stmt;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::types::Signature;
 
 use super::{Lowerer, Lowering, Operand, Ty};
 use crate::adapter as ast;
@@ -230,7 +236,10 @@ impl Lowerer<'_> {
 
     /// The requirement `effect`, an offered operation, is performed under:
     /// its signature and the contract its offer states.
-    fn requirement_of(&self, effect: &EffectName) -> &lash_kernel_doc::OperationRequirement {
+    fn requirement_of(
+        &self,
+        effect: &EffectName,
+    ) -> &lash_vocabulary::operations::OperationRequirement {
         match self.namespaces.operation(effect) {
             Some((_, offered)) => &offered.requirement,
             None => unreachable!("a wait's effect is an offered operation"),

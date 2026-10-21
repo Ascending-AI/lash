@@ -8,7 +8,11 @@ use crate::render::CodeRenderer;
 use lash_core::LlmUsage;
 use lash_render::{RenderNode, RenderParams, RenderValue};
 use lash_tool_presenter_api::PresentationRefusal;
-use lash_tool_shape::{ExtraKeys, ObjectShape, SchemaShape, ShapeField, ShapeKind};
+use lash_vocabulary::tool_shape::ExtraKeys;
+use lash_vocabulary::tool_shape::ObjectShape;
+use lash_vocabulary::tool_shape::SchemaShape;
+use lash_vocabulary::tool_shape::ShapeField;
+use lash_vocabulary::tool_shape::ShapeKind;
 use serde_json::Value as FlowValue;
 
 /// How a turn may end: the termination its session recorded at creation.
@@ -44,7 +48,7 @@ pub(crate) fn decode_rlm_termination_options(
 
 /// A turn that only a control call ends needs a tool that can end it with
 /// a value: a TerminalRequired turn whose surface declares no
-/// [`Finish`](lash_core::TurnControlKind::Finish) is refused before its
+/// [`Finish`](lash_vocabulary::tool_declaration::TurnControlKind::Finish) is refused before its
 /// model is called, whether the session recorded the mode or the send
 /// stated it.
 pub(crate) fn finish_available(
@@ -1124,7 +1128,7 @@ mod bound_variable_tests {
         let encoded = crate::projection::plain_json_for_transport(value.clone());
         let decoded = crate::projection::normalize_tool_args_for_projection(
             encoded,
-            &lash_core::ToolArgumentProjectionPolicy::MaterializeProjectedValues,
+            &lash_vocabulary::tool_contract::ToolArgumentProjectionPolicy::MaterializeProjectedValues,
         )
         .expect("transport codec should decode its escaped record key");
         assert_eq!(

@@ -2,10 +2,14 @@
 use std::sync::Arc;
 
 use lash_kernel_dialect::{NamedLibrary, define_functions};
-use lash_kernel_doc::{Datum, Integer, Name, Timestamp, parse_document};
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::Integer;
+use lash_kernel_doc::Timestamp;
+use lash_kernel_doc::parse_document;
 use lash_kernel_vm::{
     Bounds, CellStart, End, Host, Machine, PreparedLibrary, Program, Step, Target,
 };
+use lash_vocabulary::legacy_names::Name;
 
 // Independent pre-optimization TrimString oracle; never used in production.
 const REFERENCE: &str = r#"

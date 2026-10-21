@@ -15,10 +15,15 @@
 use std::collections::BTreeMap;
 use std::ops::Range;
 
-use lash_kernel_doc::{
-    Caption, CaptionEntry, CaptionKind, CaptionTarget, FieldPath, FieldRoot, FieldTarget, Name,
-    ParamTarget,
-};
+use lash_kernel_doc::Caption;
+use lash_kernel_doc::CaptionEntry;
+use lash_kernel_doc::CaptionKind;
+use lash_kernel_doc::CaptionTarget;
+use lash_kernel_doc::FieldPath;
+use lash_kernel_doc::FieldRoot;
+use lash_kernel_doc::FieldTarget;
+use lash_kernel_doc::ParamTarget;
+use lash_vocabulary::legacy_names::Name;
 use swc_common::comments::{CommentKind, SingleThreadedComments};
 use swc_ecma_ast as swc;
 

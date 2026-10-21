@@ -111,9 +111,9 @@ fn failed_child_failure(
         "precondition: the stop must fold to a failed process"
     );
     let output = output_from_process_turn(
-        &lash_protocol_types::ProcessId::fixture("failing-child-process"),
+        &lash_vocabulary::identity::ProcessId::fixture("failing-child-process"),
         &SessionId::from("failing-child"),
-        &lash_protocol_types::TurnId::fixture("projected-child-turn"),
+        &lash_vocabulary::identity::TurnId::fixture("projected-child-turn"),
         turn,
         &lash_execution_contracts::process::SessionTurnOutcome::Turn,
         lash_core_store::execution_limits::DiagnosticLimits::standard(),
@@ -131,7 +131,8 @@ use std::sync::Arc;
 
 #[tokio::test]
 async fn child_turn_cancellation_evidence_survives_runner_record_and_parent_result() {
-    let child_session_id = lash_protocol_types::SessionId::from("child-turn-cancellation-evidence");
+    let child_session_id =
+        lash_vocabulary::identity::SessionId::from("child-turn-cancellation-evidence");
     let registration = lash_execution_contracts::testing::held_engine_registration(
         serde_json::json!({"fixture": "child-turn-cancellation-evidence"}),
         lash_execution_contracts::process::ProcessProvenance::host(),
@@ -162,7 +163,7 @@ async fn child_turn_cancellation_evidence_survives_runner_record_and_parent_resu
     let runner_output = output_from_process_turn(
         &process_id,
         &child_session_id,
-        &lash_protocol_types::TurnId::fixture("projected-child-turn"),
+        &lash_vocabulary::identity::TurnId::fixture("projected-child-turn"),
         turn,
         &lash_execution_contracts::process::SessionTurnOutcome::FinalValue { schema: None },
         lash_core_store::execution_limits::DiagnosticLimits::standard(),
@@ -226,9 +227,9 @@ fn project_turn(
     result: &lash_execution_contracts::process::SessionTurnOutcome,
 ) -> lash_protocol_types::tool_output::ToolCallOutput {
     output_from_process_turn(
-        &lash_protocol_types::ProcessId::fixture("projected-child-process"),
+        &lash_vocabulary::identity::ProcessId::fixture("projected-child-process"),
         &SessionId::from("projected-child"),
-        &lash_protocol_types::TurnId::fixture("projected-child-turn"),
+        &lash_vocabulary::identity::TurnId::fixture("projected-child-turn"),
         turn,
         result,
         lash_core_store::execution_limits::DiagnosticLimits::standard(),
@@ -274,7 +275,7 @@ fn child_final_value_keeps_typed_values_and_checks_the_schema() {
     let value = serde_json::json!({ "answer": 42 });
     let typed = lash_execution_contracts::process::SessionTurnOutcome::FinalValue {
         schema: Some(
-            lash_protocol_types::JsonSchema::admit(serde_json::json!({
+            lash_vocabulary::json_schema::JsonSchema::admit(serde_json::json!({
                 "type": "object",
                 "properties": { "answer": { "type": "integer" } },
                 "required": ["answer"],

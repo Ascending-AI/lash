@@ -81,9 +81,12 @@ struct Sample {
 }
 
 use lash_kernel_dialect::{EffectControl, Environment, NamedLibrary};
-use lash_kernel_doc::{
-    Datum, EffectName, ErrorDatum, FunctionRegistry, Handle, Integer, Timestamp, Unit,
-};
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::ErrorDatum;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::Handle;
+use lash_kernel_doc::Integer;
+use lash_kernel_doc::Timestamp;
 use lash_kernel_vm::perf_witness::{
     GuestContext, GuestProfile, GuestSymbols, Profiling as _, WorkReport,
 };
@@ -91,6 +94,8 @@ use lash_kernel_vm::{
     Bounds, CellStart, End, Host, KernelMachine, Machine, Outcome, PreparedLibrary, Program,
     Request, Step, Target,
 };
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::sites::Unit;
 use serde_json::{Value as Json, json};
 #[expect(
     dead_code,
@@ -360,7 +365,7 @@ fn start_observed(
     match observe {
         ObservationMode::Nothing => {}
         ObservationMode::Counts => machine.set_options(lash_kernel_vm::MachineOptions {
-            observation: lash_kernel_vm::ObservationMode::Counts,
+            observation: lash_vocabulary::observation::RunObservation::Counts,
             ..Default::default()
         }),
         ObservationMode::Work => machine.count_work(),
@@ -484,7 +489,7 @@ fn main() -> Result<(), String> {
     )]);
     let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
         &effects,
-        &lash_kernel_doc::ContractId::new("1"),
+        &lash_vocabulary::operations::ContractId::new("1"),
         &controls,
     )
     .expect("the test's effects are operations");
@@ -1122,7 +1127,7 @@ fn host_json_probe() -> Result<(), String> {
     let effects = effects();
     let env_namespaces = lash_kernel_dialect::Namespaces::of_effects(
         &effects,
-        &lash_kernel_doc::ContractId::new("1"),
+        &lash_vocabulary::operations::ContractId::new("1"),
         &Default::default(),
     )
     .unwrap();

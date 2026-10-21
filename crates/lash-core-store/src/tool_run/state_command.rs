@@ -29,7 +29,7 @@ use crate::plugin_state::{
     FormatRefusal, KeyRejection, PLUGIN_STATE_NAMESPACE_LIMIT, PLUGIN_STATE_VALUE_LIMIT,
     validate_state_key_with_limit,
 };
-use crate::store::plugin_writers::PluginCallbackIdentity;
+use lash_vocabulary::providers::PluginCallbackIdentity;
 
 /// One declared command against the owning plugin's namespace.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -376,7 +376,7 @@ pub struct StateResolution {
     pub publisher: crate::EffectAddress,
     pub plugin: String,
     /// The format of the namespace this resolution changes.
-    pub format_version: lash_core_ids::FormatVersion,
+    pub format_version: lash_vocabulary::providers::FormatVersion,
     pub origin: StateCommandOrigin,
     /// The segment that published it.
     pub segment: SegmentOrdinal,
@@ -542,4 +542,4 @@ impl StateFrontier {
     }
 }
 
-pub use lash_vocabulary::providers::{CallbackSlot, StateAuthority, TraceScopeOf};
+use lash_vocabulary::providers::{CallbackSlot, StateAuthority};

@@ -33,7 +33,7 @@ pub trait ProcessWorkSubstrate: Send + Sync {
     /// overall wait bound through its cancellation select.
     async fn await_process_terminal(
         &self,
-        process_id: &crate::ProcessId,
+        process_id: &lash_vocabulary::identity::ProcessId,
     ) -> Result<ProcessTerminalWait, PluginError>;
 
     /// Deliver `request` to `process`'s live execution under `key`, so the
@@ -43,7 +43,7 @@ pub trait ProcessWorkSubstrate: Send + Sync {
     /// on `key`.
     async fn deliver_cancel(
         &self,
-        process_id: &crate::ProcessId,
+        process_id: &lash_vocabulary::identity::ProcessId,
         request: &crate::CancelRequest,
         key: &str,
     ) -> Result<(), PluginError>;
@@ -141,7 +141,7 @@ impl NoProcessWork {
     /// Wait for `process_id`'s terminal output in the registry.
     pub async fn await_terminal(
         &self,
-        process_id: &crate::ProcessId,
+        process_id: &lash_vocabulary::identity::ProcessId,
     ) -> Result<ProcessAwaitOutput, PluginError> {
         self.terminal_awaiter.await_terminal(process_id).await
     }
@@ -150,7 +150,7 @@ impl NoProcessWork {
     /// `after_sequence` in the registry.
     pub async fn await_event(
         &self,
-        process_id: &crate::ProcessId,
+        process_id: &lash_vocabulary::identity::ProcessId,
         kind: lash_execution_contracts::process::ProcessEventKind,
         after_sequence: u64,
     ) -> Result<lash_execution_contracts::process::ProcessEvent, PluginError> {
@@ -170,7 +170,7 @@ impl std::fmt::Debug for NoProcessWork {
 impl ProcessWorkSubstrate for NoProcessWork {
     async fn await_process_terminal(
         &self,
-        process_id: &crate::ProcessId,
+        process_id: &lash_vocabulary::identity::ProcessId,
     ) -> Result<ProcessTerminalWait, PluginError> {
         self.terminal_awaiter
             .await_terminal(process_id)
@@ -180,7 +180,7 @@ impl ProcessWorkSubstrate for NoProcessWork {
 
     async fn deliver_cancel(
         &self,
-        _process_id: &crate::ProcessId,
+        _process_id: &lash_vocabulary::identity::ProcessId,
         _request: &crate::CancelRequest,
         _key: &str,
     ) -> Result<(), PluginError> {

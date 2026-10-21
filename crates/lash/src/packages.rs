@@ -66,7 +66,7 @@ pub fn install_rows(packages: &HeldPackages) -> (Vec<ArtifactInstall>, Vec<SetIn
                         if operation.visibility == lash_kernel_package::Visibility::Internal =>
                     {
                         Some(
-                            lash_kernel_package::QualifiedOperation {
+                            lash_vocabulary::names::QualifiedOperation {
                                 package: package.path().clone(),
                                 name: segment.clone(),
                             }

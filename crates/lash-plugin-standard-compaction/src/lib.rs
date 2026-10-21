@@ -23,7 +23,8 @@
 /// version_guard(items(LASH_STANDARD_COMPACTION_DOMAIN_VERSION, compaction_request_ids))
 const LASH_STANDARD_COMPACTION_DOMAIN_VERSION: &str = "lash-standard-compaction/v1";
 
-use lash_protocol_types::{SessionId, TurnId};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 mod recovery;
 

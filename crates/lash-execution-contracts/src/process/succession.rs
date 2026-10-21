@@ -1,5 +1,4 @@
 use super::*;
-use lash_kernel_doc::EffectName;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 /// The mail kind that carries a [`ProcessSuccessorRequest`] to the process's
@@ -7,23 +6,17 @@ use std::collections::BTreeMap;
 pub const SUCCESSOR_MAIL: &str = "process.successor";
 
 /// The pair a host names for a process to go on as: the engine start
-/// payload and the published env it runs under, with the fit each effect's
-/// link is checked at (the default is [`FitPolicy::Compatible`]).
+/// payload and the published environment it runs under.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProcessSuccessor {
     pub payload: serde_json::Value,
     pub env: ProcessEnvRef,
-    pub fits: BTreeMap<EffectName, FitPolicy>,
 }
 
 impl ProcessSuccessor {
     #[must_use]
     pub fn new(payload: serde_json::Value, env: ProcessEnvRef) -> Self {
-        Self {
-            payload,
-            env,
-            fits: BTreeMap::new(),
-        }
+        Self { payload, env }
     }
 }
 
@@ -94,23 +87,6 @@ pub enum ProcessSuccessorRefusal {
     },
 }
 
-/// What an engine's [`EngineSuccession::carry`] answers.
-#[derive(Clone, Debug, PartialEq)]
-pub enum SuccessorCarry {
-    /// The state carried onto the successor payload; `None` for a process
-    /// whose engine has not started.
-    Carried {
-        state: Option<Box<EngineState>>,
-        /// The carried state pins what this build's engine writes, such as
-        /// its own helper release: the process's actor is stamped with the
-        /// engine's own format set, so only a node that holds them claims
-        /// it from now on.
-        own_formats: bool,
-    },
-    /// The run is in flight: it is carried at its next park.
-    InFlight,
-}
-
 /// Why an engine did not carry a state onto a successor.
 #[derive(Clone, Debug, PartialEq)]
 pub enum SuccessionError {
@@ -121,23 +97,6 @@ pub enum SuccessionError {
     },
     /// A store did not answer; asked again later.
     Unavailable(String),
-}
-
-/// How an engine carries a process onto a successor payload its host
-/// names (D2): the engine's own correspondence carry. Pure over what it
-/// reads; it writes nothing, and the process's owner commits its answer.
-#[async_trait::async_trait]
-pub trait EngineSuccession: Send + Sync {
-    /// `state`, a run of `from` (`None` before the engine's first
-    /// transition), carried onto `to`.
-    async fn carry(
-        &self,
-        process: &ProcessId,
-        from: &serde_json::Value,
-        to: &serde_json::Value,
-        state: Option<&EngineState>,
-        environment: &ProcessEnv,
-    ) -> Result<SuccessorCarry, SuccessionError>;
 }
 
 /// Whether `record` already runs this pair.
@@ -151,59 +110,54 @@ pub fn successor_is_current(request: &ProcessSuccessorRequest, record: &ProcessR
     }
 }
 
-/// Linked-use succession; implementation belongs to pkg-doc and pkg-exec.
-pub mod linked {
-    use super::SuccessionError;
-    use crate::process::engine_state::linked::EngineState;
-    use lash_core_store::artifact_referrer::ArtifactName;
-    use lash_core_store::{resolutions::*, tool_surface::linked::ExecutionEnvironment};
-    use lash_vocabulary::{claims::*, identity::ProcessId, names::*};
-    use serde::{Deserialize, Serialize};
-    use std::collections::BTreeMap;
-    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-    #[serde(deny_unknown_fields)]
-    /// Total mapping of live/held uses. Many-to-one requires equal requirements and pinned outcomes.
-    pub struct UseCorrespondence {
-        #[serde(with = "lash_vocabulary::ordered_pairs")]
-        pub uses: BTreeMap<OperationUse, OperationUse>,
-    }
-    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-    #[serde(deny_unknown_fields)]
-    /// Stable execution, predecessor/successor starts, accepted environment and retained outcomes; never re-resolved.
-    pub struct SuccessionContext {
-        pub execution: ExecutionId,
-        pub from: LinkedStart,
-        pub to: LinkedStart,
-        pub environment: ExecutionEnvironment,
-        #[serde(with = "lash_vocabulary::ordered_pairs")]
-        pub resolutions: BTreeMap<OperationUse, ResolutionEntry>,
-    }
-    #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-    #[serde(
-        tag = "kind",
-        content = "value",
-        rename_all = "snake_case",
-        deny_unknown_fields
-    )]
-    pub enum SuccessorCarry {
-        Carried {
-            state: Option<Box<EngineState>>,
-            own_formats: bool,
-            correspondence: UseCorrespondence,
-            resolutions: Vec<ResolutionRecord>,
-            requirements: Box<ClaimRequirements>,
-            artifacts: Vec<ArtifactName>,
-        },
-        InFlight,
-    }
-    #[async_trait::async_trait]
-    /// Runtime computes correspondence; Core atomically validates/holds/copies state, environment, outcomes and debt.
-    pub trait EngineSuccession: Send + Sync {
-        async fn carry(
-            &self,
-            process: &ProcessId,
-            context: &SuccessionContext,
-            state: Option<&EngineState>,
-        ) -> Result<SuccessorCarry, SuccessionError>;
-    }
+use lash_core_store::artifact_referrer::ArtifactName;
+use lash_core_store::tool_surface::ExecutionEnvironment;
+use lash_vocabulary::package::*;
+use lash_vocabulary::{claims::*, names::*};
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+/// Total mapping of live/held uses. Many-to-one requires equal requirements and pinned outcomes.
+pub struct UseCorrespondence {
+    #[serde(with = "lash_vocabulary::ordered_pairs")]
+    pub uses: BTreeMap<OperationUse, OperationUse>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+/// Stable execution, predecessor/successor starts, accepted environment and retained outcomes; never re-resolved.
+pub struct SuccessionContext {
+    pub execution: ExecutionId,
+    pub from: LinkedStart,
+    pub to: LinkedStart,
+    pub environment: ExecutionEnvironment,
+    #[serde(with = "lash_vocabulary::ordered_pairs")]
+    pub resolutions: BTreeMap<OperationUse, ResolutionEntry>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub enum SuccessorCarry {
+    Carried {
+        state: Option<Box<EngineState>>,
+        own_formats: bool,
+        correspondence: UseCorrespondence,
+        resolutions: Vec<ResolutionRecord>,
+        requirements: Box<ClaimRequirements>,
+        artifacts: Vec<ArtifactName>,
+    },
+    InFlight,
+}
+#[async_trait::async_trait]
+/// Runtime computes correspondence; Core atomically validates/holds/copies state, environment, outcomes and debt.
+pub trait EngineSuccession: Send + Sync {
+    async fn carry(
+        &self,
+        process: &ProcessId,
+        context: &SuccessionContext,
+        state: Option<&EngineState>,
+    ) -> Result<SuccessorCarry, SuccessionError>;
 }

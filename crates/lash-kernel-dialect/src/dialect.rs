@@ -5,7 +5,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::{CaptionKind, Captions, Document, Name, Site, SourceMap};
+use lash_kernel_doc::CaptionKind;
+use lash_kernel_doc::Captions;
+use lash_kernel_doc::Document;
+use lash_kernel_doc::SourceMap;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
 
 use crate::diagnostic::Diagnostic;
 use crate::library::Library;

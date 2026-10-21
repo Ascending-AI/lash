@@ -3,11 +3,24 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::{
-    Document, EffectName, FunctionDefinition, FunctionId, InvalidReason, Name, Node, Param,
-    Signature, Site, SourceLanguage, SourceMap, SourceSite, Span, Type, Unit, parse_definition,
-    parse_document,
-};
+use lash_kernel_doc::Document;
+use lash_kernel_doc::FunctionDefinition;
+use lash_kernel_doc::InvalidReason;
+use lash_kernel_doc::Node;
+use lash_kernel_doc::SourceLanguage;
+use lash_kernel_doc::SourceMap;
+use lash_kernel_doc::SourceSite;
+use lash_kernel_doc::Span;
+use lash_kernel_doc::parse_definition;
+use lash_kernel_doc::parse_document;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 use crate::{
     ActionNode, BindingKind, Edge, EdgeKind, Environment, ExprNode, Graph, NodeId, NodeKind,
@@ -83,9 +96,9 @@ fn environment(library: &Library) -> Environment<'_> {
     let mut environment = Environment::new(&library.catalog);
     environment.effects.insert(
         effect("fetch"),
-        lash_kernel_doc::OperationRequirement::new(
+        lash_vocabulary::operations::OperationRequirement::new(
             signature(&[("url", Type::Text)], Type::Any),
-            lash_kernel_doc::ContractId::new("1"),
+            lash_vocabulary::operations::ContractId::new("1"),
         ),
     );
     environment
@@ -643,9 +656,9 @@ main {{
     let provided = signature(&[("key", Type::Int)], Type::Any);
     environment.effects.insert(
         effect("store"),
-        lash_kernel_doc::OperationRequirement::new(
+        lash_vocabulary::operations::OperationRequirement::new(
             provided.clone(),
-            lash_kernel_doc::ContractId::new("1"),
+            lash_vocabulary::operations::ContractId::new("1"),
         ),
     );
 
@@ -659,8 +672,8 @@ main {{
             effect: effect("store"),
             expected: signature(&[("key", Type::Text)], Type::Int),
             provided,
-            mismatch: Box::new(crate::SignatureMismatch {
-                side: crate::SignatureSide::Input,
+            mismatch: Box::new(lash_vocabulary::types::SignatureMismatch {
+                side: lash_vocabulary::types::SignatureSide::Input,
                 path: "/input/properties/key".into(),
                 expected: Type::Text,
                 provided: Type::Int,
@@ -707,18 +720,18 @@ fn an_effect_signature_refusal_names_the_output_openness_difference() {
     let mut open = closed.clone();
     open.as_object_mut().unwrap().remove("additionalProperties");
     let signature = |input: &serde_json::Value, output: &serde_json::Value| {
-        crate::tool_signature(
-            crate::type_of_schema(input).unwrap(),
+        lash_vocabulary::schema::tool_signature(
+            lash_vocabulary::schema::type_of_schema(input).unwrap(),
             true,
-            crate::result_type_of_schema(output).unwrap(),
+            lash_vocabulary::schema::result_type_of_schema(output).unwrap(),
         )
     };
     assert_eq!(
-        crate::result_type_of_schema(&open),
-        crate::result_type_of_schema(&closed),
+        lash_vocabulary::schema::result_type_of_schema(&open),
+        lash_vocabulary::schema::result_type_of_schema(&closed),
         "a result is open whether or not its schema closes it"
     );
-    assert!(crate::signature_serves(
+    assert!(lash_vocabulary::schema::signature_serves(
         &signature(&open, &open),
         &signature(&open, &closed)
     ));
@@ -729,13 +742,19 @@ fn an_effect_signature_refusal_names_the_output_openness_difference() {
     );
     document.manifest.effects.insert(
         effect("chat.message_to_self"),
-        lash_kernel_doc::OperationRequirement::new(expected, lash_kernel_doc::ContractId::new("1")),
+        lash_vocabulary::operations::OperationRequirement::new(
+            expected,
+            lash_vocabulary::operations::ContractId::new("1"),
+        ),
     );
     let catalog = BTreeMap::new();
     let mut environment = Environment::new(&catalog);
     environment.effects.insert(
         effect("chat.message_to_self"),
-        lash_kernel_doc::OperationRequirement::new(provided, lash_kernel_doc::ContractId::new("1")),
+        lash_vocabulary::operations::OperationRequirement::new(
+            provided,
+            lash_vocabulary::operations::ContractId::new("1"),
+        ),
     );
     let refusal =
         admit(&document, &environment).expect_err("a closed input cannot take the open input");
@@ -759,18 +778,19 @@ fn an_effect_signature_refusal_names_the_output_openness_difference() {
     else {
         unreachable!()
     };
-    assert_eq!(mismatch.side, crate::SignatureSide::Input);
+    assert_eq!(mismatch.side, lash_vocabulary::types::SignatureSide::Input);
     assert_eq!(mismatch.path, "/input/additionalProperties");
     assert_eq!(mismatch.expected, expected.params[0].ty);
     assert_eq!(mismatch.provided, provided.params[0].ty);
     // A native closed record retains its closedness in the signature, and
     // the open rest is the first part that cannot serve it.
     let closed = Signature {
-        result: crate::type_of_schema(&closed).unwrap(),
+        result: lash_vocabulary::schema::type_of_schema(&closed).unwrap(),
         ..provided.clone()
     };
-    let mismatch = crate::signature_mismatch(provided, &closed).expect("open rest vs closed");
-    assert_eq!(mismatch.side, crate::SignatureSide::Output);
+    let mismatch = lash_vocabulary::schema::signature_mismatch(provided, &closed)
+        .expect("open rest vs closed");
+    assert_eq!(mismatch.side, lash_vocabulary::types::SignatureSide::Output);
     assert_eq!(mismatch.path, "/output/additionalProperties");
     assert_eq!(mismatch.expected, closed.result);
     assert_eq!(mismatch.provided, provided.result);
@@ -805,7 +825,10 @@ main {
     provided.params[1].optional = true;
     environment.effects.insert(
         effect("store"),
-        lash_kernel_doc::OperationRequirement::new(provided, lash_kernel_doc::ContractId::new("1")),
+        lash_vocabulary::operations::OperationRequirement::new(
+            provided,
+            lash_vocabulary::operations::ContractId::new("1"),
+        ),
     );
     admit(&document(text), &environment).unwrap_or_else(|refusal| panic!("{refusal}"));
 }
@@ -969,9 +992,9 @@ fn a_perform_result_the_signature_cannot_give_is_refused() {
     let mut environment = Environment::new(&library.catalog);
     environment.effects.insert(
         effect("count"),
-        lash_kernel_doc::OperationRequirement::new(
+        lash_vocabulary::operations::OperationRequirement::new(
             signature(&[], Type::Int),
-            lash_kernel_doc::ContractId::new("1"),
+            lash_vocabulary::operations::ContractId::new("1"),
         ),
     );
     let text = "kernel 1\nnumbers float\neffect count() -> Int contract \"1\"\n\n\
@@ -1056,12 +1079,12 @@ fn a_manifest_that_is_not_the_derived_one_is_refused() {
 }
 
 trait ParseName {
-    fn parse_name(&self) -> lash_kernel_doc::FunctionName;
+    fn parse_name(&self) -> lash_vocabulary::legacy_names::FunctionName;
 }
 
 impl ParseName for str {
-    fn parse_name(&self) -> lash_kernel_doc::FunctionName {
-        lash_kernel_doc::FunctionName::new(self).unwrap()
+    fn parse_name(&self) -> lash_vocabulary::legacy_names::FunctionName {
+        lash_vocabulary::legacy_names::FunctionName::new(self).unwrap()
     }
 }
 
@@ -1113,9 +1136,9 @@ fn an_optional_result_field_does_not_serve_a_required_one() {
         .clone();
     environment.effects.insert(
         effect("get"),
-        lash_kernel_doc::OperationRequirement::new(
+        lash_vocabulary::operations::OperationRequirement::new(
             provided.clone(),
-            lash_kernel_doc::ContractId::new("1"),
+            lash_vocabulary::operations::ContractId::new("1"),
         ),
     );
     assert_eq!(
@@ -1126,8 +1149,8 @@ fn an_optional_result_field_does_not_serve_a_required_one() {
                 effect: effect("get"),
                 expected,
                 provided,
-                mismatch: Box::new(crate::SignatureMismatch {
-                    side: crate::SignatureSide::Output,
+                mismatch: Box::new(lash_vocabulary::types::SignatureMismatch {
+                    side: lash_vocabulary::types::SignatureSide::Output,
                     path: "/output/properties/x".into(),
                     expected: Type::Int,
                     provided: Type::Union(vec![Type::Int, Type::Absent]),
@@ -1149,9 +1172,9 @@ fn records_that_differ_only_in_optional_fields_share_a_value() {
     let doc = document(text);
     environment.effects.insert(
         effect("count"),
-        lash_kernel_doc::OperationRequirement::new(
+        lash_vocabulary::operations::OperationRequirement::new(
             doc.manifest.effects[&effect("count")].signature.clone(),
-            lash_kernel_doc::ContractId::new("1"),
+            lash_vocabulary::operations::ContractId::new("1"),
         ),
     );
     admit(&doc, &environment).unwrap_or_else(|refusal| panic!("{refusal}"));
@@ -1284,11 +1307,12 @@ fn cached_library_refusals_keep_the_uncached_errors_and_view() {
 fn an_effect_signature_mismatch_locates_the_first_incompatible_nested_type() {
     let expected = document("kernel 1\nnumbers float\neffect check(input: Record{\"a/b~c\": List(Int)}) -> Int contract \"1\"\nmain { finish null }\n").manifest.effects[&effect("check")].signature.clone();
     let provided = document("kernel 1\nnumbers float\neffect check(input: Record{\"a/b~c\": List(Text)}) -> Text contract \"1\"\nmain { finish null }\n").manifest.effects[&effect("check")].signature.clone();
-    let mismatch = crate::signature_mismatch(&provided, &expected).expect("input mismatch first");
+    let mismatch = lash_vocabulary::schema::signature_mismatch(&provided, &expected)
+        .expect("input mismatch first");
     assert_eq!(
         mismatch,
-        crate::SignatureMismatch {
-            side: crate::SignatureSide::Input,
+        lash_vocabulary::types::SignatureMismatch {
+            side: lash_vocabulary::types::SignatureSide::Input,
             path: "/input/properties/a~1b~0c/items".into(),
             expected: Type::Int,
             provided: Type::Text
@@ -1297,12 +1321,12 @@ fn an_effect_signature_mismatch_locates_the_first_incompatible_nested_type() {
     let mut provided = provided;
     provided.params = expected.params.clone();
     provided.params[0].name = Name::new("renamed");
-    let mismatch =
-        crate::signature_mismatch(&provided, &expected).expect("only result is incompatible");
+    let mismatch = lash_vocabulary::schema::signature_mismatch(&provided, &expected)
+        .expect("only result is incompatible");
     assert_eq!(
         mismatch,
-        crate::SignatureMismatch {
-            side: crate::SignatureSide::Output,
+        lash_vocabulary::types::SignatureMismatch {
+            side: lash_vocabulary::types::SignatureSide::Output,
             path: "/output".into(),
             expected: Type::Int,
             provided: Type::Text
@@ -1339,7 +1363,7 @@ fn reached_perform() -> (
     BTreeMap<FunctionId, FunctionDefinition>,
     FunctionId,
     FunctionId,
-    lash_kernel_doc::OperationRequirement,
+    lash_vocabulary::operations::OperationRequirement,
 ) {
     let mut catalog = BTreeMap::new();
     let fetch = register(
@@ -1381,9 +1405,9 @@ fn the_manifest_lists_every_requirement_reached_through_bodies() {
     let mut environment = Environment::new(&catalog);
     environment.effects.insert(
         effect("web.fetch"),
-        lash_kernel_doc::OperationRequirement::new(
+        lash_vocabulary::operations::OperationRequirement::new(
             requirement.signature,
-            lash_kernel_doc::ContractId::new("1"),
+            lash_vocabulary::operations::ContractId::new("1"),
         ),
     );
     admit(&document(&text), &environment).unwrap_or_else(|refusal| panic!("{refusal}"));
@@ -1427,9 +1451,9 @@ fn one_effect_under_two_requirements_is_refused_naming_both() {
     let mut environment = Environment::new(&catalog);
     environment.effects.insert(
         effect("web.fetch"),
-        lash_kernel_doc::OperationRequirement::new(
+        lash_vocabulary::operations::OperationRequirement::new(
             requirement.signature.clone(),
-            lash_kernel_doc::ContractId::new("1"),
+            lash_vocabulary::operations::ContractId::new("1"),
         ),
     );
     assert_eq!(

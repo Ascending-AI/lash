@@ -451,7 +451,7 @@ fn prompt_resume_safety_accepts_a_cell_contexts_call_without_a_result() {
             )]
             .into(),
             origin: Some(MessageOrigin::TurnOutput {
-                turn_id: crate::TurnId::from("turn-1"),
+                turn_id: lash_vocabulary::identity::TurnId::from("turn-1"),
                 source: crate::TurnOutputSource::Plugin {
                     plugin_id: "rlm_protocol".to_string(),
                 },

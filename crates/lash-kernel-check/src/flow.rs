@@ -3,9 +3,16 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash_kernel_doc::{
-    ActKind, Action, Callee, EffectName, Expr, FunctionCatalog, FunctionId, Literal, Name, Unit,
-};
+use lash_kernel_doc::ActKind;
+use lash_kernel_doc::Action;
+use lash_kernel_doc::Callee;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::FunctionCatalog;
+use lash_kernel_doc::Literal;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Unit;
 
 use crate::graph::{
     ActNode, ActionNode, AtomNode, CalleeNode, Edge, EdgeKind, ExecutionSite, ExprNode, Graph,

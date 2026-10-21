@@ -11,7 +11,9 @@ use std::future::Future;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use lash_protocol_types::{SessionId, sync::MutexExt};
+use lash_core_ids::clock::{Clock, SystemClock};
+use lash_protocol_types::sync::MutexExt;
+use lash_vocabulary::identity::SessionId;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
@@ -214,8 +216,7 @@ impl CommitAdmissionCoordinator {
         let outcome = tokio::select! {
             () = ticket.waiter.admitted.notified() => WaitOutcome::Admitted,
             () = cancellation.cancelled() => WaitOutcome::Cancelled,
-            // Substrate-boundary allowlist: process-local TTL, not durable time.
-            () = tokio::time::sleep(policy.wait_ttl) => WaitOutcome::TimedOut,
+            () = SystemClock.sleep(policy.wait_ttl) => WaitOutcome::TimedOut,
         };
 
         if !matches!(outcome, WaitOutcome::Admitted) && ticket.withdraw() {

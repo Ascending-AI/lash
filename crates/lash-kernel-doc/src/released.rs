@@ -24,8 +24,10 @@
 
 use std::collections::BTreeSet;
 
-use crate::graph_tokens::TokenError;
-use crate::{FunctionDefinition, FunctionId, ValidatedFunctions};
+use crate::FunctionDefinition;
+use crate::ValidatedFunctions;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::tokens::TokenError;
 
 #[cfg(test)]
 std::thread_local! {
@@ -231,7 +233,7 @@ impl ReleasedFunctions {
     }
 
     /// Function `at`'s definition's canonical token body
-    /// ([`crate::graph_tokens::encode_body`]).
+    /// ([`lash_vocabulary::tokens::encode_body`]).
     pub fn definition_bytes(&self, at: usize) -> &'static [u8] {
         self.slice(self.range(at, 0))
     }
@@ -244,7 +246,7 @@ impl ReleasedFunctions {
     pub fn definition(&self, at: usize) -> Result<FunctionDefinition, TokenError> {
         #[cfg(test)]
         DECODED.with(|decoded| decoded.set(decoded.get() + 1));
-        crate::graph_tokens::decode_body(self.definition_bytes(at))
+        lash_vocabulary::tokens::decode_body(self.definition_bytes(at))
     }
 
     fn records(&self) -> usize {
@@ -317,7 +319,7 @@ impl ValidatedFunctions {
         let mut names = String::new();
         let mut records = Vec::with_capacity(functions.len() * RECORD);
         for (function, definition) in &functions {
-            let body = put(&crate::graph_tokens::encode_body(*definition));
+            let body = put(&lash_vocabulary::tokens::encode_body(*definition));
             let name = [names.len() as u32, definition.name.as_str().len() as u32];
             names.push_str(definition.name.as_str());
             let census = census(function, definition);

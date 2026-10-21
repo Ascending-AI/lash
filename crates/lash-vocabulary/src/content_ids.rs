@@ -80,7 +80,10 @@ macro_rules! digest {
     };
 }
 
-use crate::legacy_package_ids::InvalidDigest;
+/// A content identity must be exactly 64 lowercase hexadecimal characters.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("a digest is exactly 64 lowercase hexadecimal characters")]
+pub struct InvalidDigest;
 digest!(/// Immutable linked code identity.
  LinkId);
 digest!(/// Immutable package content identity.

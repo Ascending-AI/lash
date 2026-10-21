@@ -12,12 +12,14 @@ pub fn mock_session_policy() -> SessionPolicy {
 /// for a test that calls the hook directly.
 pub fn tool_hook_context(
     tool_name: &str,
-    argument_projection: crate::ToolArgumentProjectionPolicy,
+    argument_projection: lash_vocabulary::tool_contract::ToolArgumentProjectionPolicy,
 ) -> crate::plugin::ToolHookContext {
     crate::plugin::ToolHookContext {
-        owner: crate::RuntimeOwner::Session(crate::SessionId::from("session")),
+        owner: lash_vocabulary::identity::RuntimeOwner::Session(
+            lash_vocabulary::identity::SessionId::from("session"),
+        ),
         call_id: crate::ToolCallId::fixture("hook"),
-        tool_id: crate::ToolId::from(format!("tool:{tool_name}")),
+        tool_id: lash_vocabulary::tool_contract::ToolId::from(format!("tool:{tool_name}")),
         tool_name: tool_name.to_string(),
         config: crate::OwnerConfigView::session(Default::default()),
         argument_projection,

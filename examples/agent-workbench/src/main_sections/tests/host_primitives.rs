@@ -9,7 +9,7 @@
 //! process-end notice is one input.
 
 use super::*;
-use lash::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 /// The wall clock's start.
 const START_MS: u64 = 2_000_000_000_500;

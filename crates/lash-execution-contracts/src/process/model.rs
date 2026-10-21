@@ -28,7 +28,8 @@ mod start_request;
 pub use start_request::*;
 
 pub use lash_protocol_types::handle::HandleId;
-pub use lash_protocol_types::{ProcessId, SessionId};
+pub use lash_vocabulary::identity::ProcessId;
+pub use lash_vocabulary::identity::SessionId;
 pub type ProcessOutcome = ProcessAwaitOutput;
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -136,8 +137,7 @@ pub enum ProcessStartTarget {
     /// (FIG-6993).
     Inline {
         engine_kind: String,
-        payload: serde_json::Value,
-        packages: lash_kernel_doc::PackageSetDigest,
+        request: crate::process::engine::InlineRequest,
         #[serde(default)]
         args: serde_json::Map<String, serde_json::Value>,
         launch: EngineLaunch,
@@ -222,7 +222,7 @@ pub enum SessionTurnOutcome {
     /// when one is given.
     FinalValue {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        schema: Option<lash_protocol_types::JsonSchema>,
+        schema: Option<lash_vocabulary::json_schema::JsonSchema>,
     },
 }
 

@@ -609,7 +609,7 @@ mod tests {
                         .build(),
                     state.clone(),
                 );
-                let session_id = lash_core::SessionId::from("mutation-session");
+                let session_id = lash_vocabulary::identity::SessionId::from("mutation-session");
                 let ctx = || {
                     lash_core::plugin::ProtocolSessionContext::new(
                         &session_id,
@@ -712,8 +712,8 @@ mod tests {
     /// The scope [`admitted_context`] claims.
     fn admitted_scope() -> lash_core::AdmittedScope {
         lash_core::AdmittedScope::turn(
-            lash_core::SessionId::from("runtime-state-session"),
-            lash_core::TurnId::from("runtime-state-turn"),
+            lash_vocabulary::identity::SessionId::from("runtime-state-session"),
+            lash_vocabulary::identity::TurnId::from("runtime-state-turn"),
         )
     }
 
@@ -751,7 +751,7 @@ mod tests {
             &self,
             _config: &lash_core::OwnerConfigView,
         ) -> std::result::Result<
-            Vec<lash_core::ToolManifest>,
+            Vec<lash_vocabulary::tool_contract::ToolManifest>,
             lash_execution_contracts::plugin_error::PluginError,
         > {
             Ok(Vec::new())
@@ -761,7 +761,7 @@ mod tests {
             &self,
             _name: &str,
             _config: &lash_core::OwnerConfigView,
-        ) -> Option<Arc<lash_core::ToolContract>> {
+        ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
             None
         }
 
@@ -837,7 +837,7 @@ mod tests {
             ),
             (
                 lash_core::plugin::ToolProviderHandle::new(
-                    lash_core::RegistryKind::Session,
+                    lash_vocabulary::claims::RegistryKind::Session,
                     "tests",
                     lash_core::tool_provider_key!("parking"),
                 ),

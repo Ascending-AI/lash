@@ -7,7 +7,7 @@
 use lash_core::llm::types::{LlmContentBlock, LlmMessage, LlmRole};
 use lash_core::session_model::{Message, MessageRole, shared_parts};
 use lash_core::{MessageOrigin, Part, PartKind};
-use lash_protocol_types::TurnId;
+use lash_vocabulary::identity::TurnId;
 use std::collections::{HashMap, HashSet};
 
 /// The assistant message of a reply whose `execute_code` call ran as the cell

@@ -76,7 +76,9 @@ impl lash_durable::runner::Activation for ParkOnWait {
         {
             tx.write(DomainWrite::Wait(WaitWrite::Pin {
                 id: self.wait,
-                scope: ScopeKey::Process(lash_protocol_types::ProcessId::fixture("resolved-wait")),
+                scope: ScopeKey::Process(lash_vocabulary::identity::ProcessId::fixture(
+                    "resolved-wait",
+                )),
                 purpose: WaitPurpose::EngineKey {
                     name: "law".to_owned(),
                     deadline: None,

@@ -30,10 +30,10 @@ use super::{
     ArenaHandle, Body, Bytes, Chunk, Chunks, ErrorBody, LongText, Objects, Sequence, ShortText,
     Table, Value,
 };
-use crate::KernelDataLimits;
 use crate::heap::{IMMUTABLE_INLINE_MAX, LogicalBytes, NormalKey};
 use crate::native::{GuardExceeded, WorkCounter};
 use crate::number::Integer;
+use lash_vocabulary::data_limits::KernelDataLimits;
 
 /// What the machine must do before a call can answer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -32,8 +32,8 @@ pub(crate) async fn sqlite_memory_store_set() -> std::sync::Arc<lash_sqlite_stor
 /// default test turn. Open the [`DurableHost`] whose context serves it for it.
 pub(crate) fn default_cell_scope() -> lash_core::AdmittedScope {
     lash_core::AdmittedScope::turn(
-        lash_core::SessionId::from("test-session"),
-        lash_core::TurnId::from("test-turn"),
+        lash_vocabulary::identity::SessionId::from("test-session"),
+        lash_vocabulary::identity::TurnId::from("test-turn"),
     )
 }
 
@@ -202,7 +202,7 @@ pub(crate) fn deferred_cell_context(
         lash_core::testing::exec_code_invocation(session, turn, 0, 0, "exec-code", replay_key),
         (
             lash_core::plugin::ToolProviderHandle::new(
-                lash_core::RegistryKind::Session,
+                lash_vocabulary::claims::RegistryKind::Session,
                 "tests",
                 lash_core::tool_provider_key!("deferred"),
             ),
@@ -221,7 +221,7 @@ impl lash_core::ToolProvider for NoTools {
         &self,
         _config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok(Vec::new())
@@ -231,7 +231,7 @@ impl lash_core::ToolProvider for NoTools {
         &self,
         _name: &str,
         _config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         None
     }
 
@@ -244,7 +244,7 @@ impl lash_core::ToolProvider for NoTools {
 /// with to answer a value.
 struct WithFinish {
     tools: Arc<dyn lash_core::ToolProvider>,
-    finish: lash_core::ToolDefinition,
+    finish: lash_vocabulary::tool_contract::ToolDefinition,
 }
 
 #[async_trait::async_trait]
@@ -253,7 +253,7 @@ impl lash_core::ToolProvider for WithFinish {
         &self,
         config: &lash_core::OwnerConfigView,
     ) -> std::result::Result<
-        Vec<lash_core::ToolManifest>,
+        Vec<lash_vocabulary::tool_contract::ToolManifest>,
         lash_execution_contracts::plugin_error::PluginError,
     > {
         Ok({
@@ -265,9 +265,9 @@ impl lash_core::ToolProvider for WithFinish {
 
     fn resolve_manifest_by_id(
         &self,
-        id: &lash_core::ToolId,
+        id: &lash_vocabulary::tool_contract::ToolId,
         config: &lash_core::OwnerConfigView,
-    ) -> Option<lash_core::ToolManifest> {
+    ) -> Option<lash_vocabulary::tool_contract::ToolManifest> {
         let finish = self.finish.manifest();
         if &finish.id == id {
             return Some(finish);
@@ -279,7 +279,7 @@ impl lash_core::ToolProvider for WithFinish {
         &self,
         name: &str,
         config: &lash_core::OwnerConfigView,
-    ) -> Option<Arc<lash_core::ToolContract>> {
+    ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
         let finish = self.finish.manifest();
         if name == finish.tool() || name == finish.id.as_str() {
             return Some(Arc::new(self.finish.contract()));
@@ -312,7 +312,7 @@ pub(crate) fn with_finish(
             .filter_map(|manifest| {
                 let contract = provider
                     .resolve_contract(&manifest.tool(), &lash_core::OwnerConfigView::default())?;
-                Some(lash_core::ToolDefinition::from_parts(
+                Some(lash_vocabulary::tool_contract::ToolDefinition::from_parts(
                     manifest,
                     contract.as_ref().clone(),
                 ))

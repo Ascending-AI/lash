@@ -18,7 +18,7 @@ pub(crate) fn rlm_tool_catalog(
     // A host's own finish tool takes the place of `control.finish`.
     Ok(lash_core::suppress_default_finish(
         &ctx,
-        &lash_core::ToolId::from(crate::control_tools::FINISH_TOOL_ID),
+        &lash_vocabulary::tool_contract::ToolId::from(crate::control_tools::FINISH_TOOL_ID),
     ))
 }
 
@@ -96,7 +96,7 @@ impl ToolListing {
                 presenter: presenter.id().to_owned(),
             });
         }
-        let names = |ids: &[lash_core::ToolId]| {
+        let names = |ids: &[lash_vocabulary::tool_contract::ToolId]| {
             entries
                 .iter()
                 .filter(|entry| ids.contains(&entry.manifest.id))
@@ -211,9 +211,9 @@ pub fn tool_catalogue_disclosure(
 pub fn discovered_tool_signature(
     dialect: &crate::dialect::CellDialect,
     tool_presentation: &serde_json::Value,
-    operation: &lash_core::QualifiedOperation,
-    input: &lash_core::JsonSchema,
-    output: &lash_core::JsonSchema,
+    operation: &lash_vocabulary::names::QualifiedOperation,
+    input: &lash_vocabulary::json_schema::JsonSchema,
+    output: &lash_vocabulary::json_schema::JsonSchema,
 ) -> Result<String, crate::dialect::DialectRefusal> {
     let call_path = lash_kernel_dialect::spell_operation(dialect.prompts().spelling(), operation);
     dialect
@@ -260,7 +260,7 @@ pub fn discovered_tool_signature(
 pub fn loaded_tool_signature(
     dialect: &crate::dialect::CellDialect,
     tool_presentation: &serde_json::Value,
-    tool: &lash_core::ToolDefinition,
+    tool: &lash_vocabulary::tool_contract::ToolDefinition,
 ) -> Result<String, crate::dialect::DialectRefusal> {
     discovered_tool_signature(
         dialect,
@@ -282,7 +282,7 @@ pub fn loaded_tool_signature(
 pub fn discovered_tool_doc(
     dialect: &crate::dialect::CellDialect,
     tool_presentation: &serde_json::Value,
-    tool: &lash_core::ToolDefinition,
+    tool: &lash_vocabulary::tool_contract::ToolDefinition,
 ) -> Result<String, crate::dialect::DialectRefusal> {
     let call_path = lash_kernel_dialect::spell_operation(
         dialect.prompts().spelling(),
@@ -315,7 +315,7 @@ pub fn discovered_tool_doc(
 pub fn discovery_text(
     dialect: &crate::dialect::CellDialect,
     tool_presentation: &serde_json::Value,
-    tool: &lash_core::ToolDefinition,
+    tool: &lash_vocabulary::tool_contract::ToolDefinition,
 ) -> Result<String, crate::dialect::DialectRefusal> {
     dialect
         .tool_presenter()
@@ -332,10 +332,10 @@ pub fn discovery_text(
 mod tests {
     use super::*;
     use crate::dialect::typescript_test_dialect;
-    use lash_core::{
-        ToolDefinition, facade_support::build_tool_catalog, test_support::ToolCatalogBuildInput,
-    };
-    use lash_protocol_types::SessionId;
+    use lash_core::facade_support::build_tool_catalog;
+    use lash_core::test_support::ToolCatalogBuildInput;
+    use lash_vocabulary::identity::SessionId;
+    use lash_vocabulary::tool_contract::ToolDefinition;
     use serde_json::json;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -489,7 +489,7 @@ mod tests {
         let manifests = vec![update_plan.manifest()];
         let contribution = rlm_tool_catalog(
             ToolCatalogContext {
-                owner: lash_core::RuntimeOwner::Session(SessionId::from("session")),
+                owner: lash_vocabulary::identity::RuntimeOwner::Session(SessionId::from("session")),
                 tools: manifests.clone(),
                 config: lash_core::OwnerConfigView::default(),
                 extensions: Default::default(),
@@ -670,7 +670,7 @@ mod tests {
 }
 
 pub(crate) fn validate_discovery(
-    tools: &[lash_core::ToolManifest],
+    tools: &[lash_vocabulary::tool_contract::ToolManifest],
     discovery: Option<&crate::plugin::RlmDiscovery>,
 ) -> Result<(), PluginError> {
     if let Some(discovery) = discovery
@@ -691,7 +691,7 @@ mod discovery_tests {
     #[test]
     fn discovery_filters_each_dialect_and_channel_and_requires_an_inline_operation() {
         let tool = |name: &str, inline| {
-            let mut tool = lash_core::ToolDefinition::raw(
+            let mut tool = lash_vocabulary::tool_contract::ToolDefinition::raw(
                 name,
                 format!("tools.{name}"),
                 format!("Description for {name}"),

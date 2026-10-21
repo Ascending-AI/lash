@@ -266,7 +266,7 @@ mod tests {
     /// head (FIG-4531), and never the retried `LlmProfileUnavailable`.
     #[tokio::test]
     async fn a_recorded_config_that_selects_no_model_is_terminal_model_unconfigured() {
-        let session_id = crate::SessionId::from("recorded-without-model");
+        let session_id = lash_vocabulary::identity::SessionId::from("recorded-without-model");
         let at_the_turn =
             super::llm_profile_unconfigured(crate::SessionError::LlmProfileUnconfigured {
                 session_id: session_id.clone(),
@@ -284,7 +284,9 @@ mod tests {
                 ),
                 crate::testing::runtime_lease_owner(),
             )
-            .with_session_id(crate::SessionId::fixture(session_id.as_str()))
+            .with_session_id(lash_vocabulary::identity::SessionId::fixture(
+                session_id.as_str(),
+            ))
             .with_plugin_factories(crate::testing::test_standard_protocol_factories())
             .with_creation(crate::SessionPolicy {
                 model: Some(crate::testing::test_llm_profile_config(

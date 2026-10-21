@@ -1,7 +1,7 @@
 use super::*;
 
-use lash_core::SessionId;
 use lash_facade_tests::durable::*;
+use lash_vocabulary::identity::SessionId;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn catalog_contention_retains_its_type_and_retryability_across_existing_session_apis() {
@@ -347,7 +347,7 @@ async fn an_input_addressed_to_an_unknown_turn_is_refused_through_the_facade() {
     let error = durable
         .send(lash::TurnInput::text("steer a turn that never ran"))
         .ingress(lash_core::TurnInputIngress::active_turn(
-            lash_core::TurnId::from("unknown-turn-address-never-ran"),
+            lash_vocabulary::identity::TurnId::from("unknown-turn-address-never-ran"),
             lash_core::TurnInputCheckpointBoundary::AfterWork,
         ))
         .await
@@ -545,7 +545,7 @@ async fn a_live_observer_sees_queue_events_from_a_separately_acquired_durable_se
         .expect("accepted");
     let cancelled = durable
         .cancel(lash::CancelTarget::Run(
-            lash::RunId::parse((turn("separate-handle")).as_str()).unwrap(),
+            lash_vocabulary::identity::RunId::parse((turn("separate-handle")).as_str()).unwrap(),
         ))
         .await
         .expect("cancel");
@@ -748,7 +748,7 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() {
     );
     let cancelled = durable
         .cancel(lash::CancelTarget::Run(
-            lash::RunId::parse((turn("fig-3353-pending")).as_str()).unwrap(),
+            lash_vocabulary::identity::RunId::parse((turn("fig-3353-pending")).as_str()).unwrap(),
         ))
         .await
         .expect("cancel");

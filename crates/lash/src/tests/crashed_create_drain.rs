@@ -180,7 +180,7 @@ async fn crashed_create(core: &LashCore, session: &str) -> Result<CrashedCreate>
         let mut request = lash_execution_contracts::session_types::SessionCreateRequest::root(
             lash_core::PluginOptions::default(),
         )
-        .with_session_id(lash_core::SessionId::fixture(id));
+        .with_session_id(lash_vocabulary::identity::SessionId::fixture(id));
         request.policy = Some(policy.clone());
         request
     };
@@ -242,7 +242,8 @@ fn an_append(ancestor: Option<&str>) -> lash_core::AppendSessionNodesRequest {
         nodes: vec![lash_core::SessionAppendNode::message(
             lash_core::PluginMessage::text(lash_core::MessageRole::User, NOTE),
         )],
-        requires_ancestor_node_id: ancestor.map(|id| lash_core::NodeId::fixture(id.to_string())),
+        requires_ancestor_node_id: ancestor
+            .map(|id| lash_vocabulary::identity::NodeId::fixture(id.to_string())),
     }
 }
 
@@ -433,7 +434,7 @@ async fn a_catalog_row_with_no_head_is_refused_and_never_opened_with_defaults(
     assert!(head_of(&store).await?.is_none(), "the row has no head");
 
     let opened = core
-        .session(crate::SessionId::parse(ID).expect("nonblank host identity"))
+        .session(lash_vocabulary::identity::SessionId::parse(ID).expect("nonblank host identity"))
         .open()
         .await;
     assert!(
@@ -464,7 +465,7 @@ async fn a_catalog_row_with_no_head_is_refused_and_never_opened_with_defaults(
     // cannot apply it to a session with no recorded config, and parks the
     // session with that refusal once its passes reach the activation-loop
     // budget, settling nothing over defaults.
-    core.session(crate::SessionId::parse(ID).expect("nonblank host identity"))
+    core.session(lash_vocabulary::identity::SessionId::parse(ID).expect("nonblank host identity"))
         .durable()
         .await?
         .send(TurnInput::text("work the row"))
@@ -522,12 +523,14 @@ async fn a_send_to_a_catalog_row_with_no_head_answers_the_typed_refusal(
     let store = headless_row(&core, seams.as_ref(), ID).await?;
 
     let sent = tokio::time::timeout(std::time::Duration::from_secs(60), async {
-        core.session(crate::SessionId::parse(ID).expect("nonblank host identity"))
-            .durable()
-            .await?
-            .send(TurnInput::text("a turn the row can never run"))
-            .output()
-            .await
+        core.session(
+            lash_vocabulary::identity::SessionId::parse(ID).expect("nonblank host identity"),
+        )
+        .durable()
+        .await?
+        .send(TurnInput::text("a turn the row can never run"))
+        .output()
+        .await
     })
     .await;
     let Ok(output) = sent else {

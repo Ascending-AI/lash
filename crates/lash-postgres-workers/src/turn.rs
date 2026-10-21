@@ -14,14 +14,18 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lash::tools::{StaticToolExecute, StaticToolProvider};
+use lash_core::LlmOutputPart;
+use lash_core::ToolCall;
+use lash_core::ToolOutcome;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{
     LlmRequest, LlmResponse, LlmRole, LlmStreamEvent, StreamBlockIdentity,
 };
-use lash_core::{ExecutionPolicy, LlmOutputPart, ToolCall, ToolOutcome};
 use lash_durable::ActorKey;
 use lash_execution_contracts::backend::Backend;
-use lash_protocol_types::{SessionId, TurnId};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
+use lash_vocabulary::tool_contract::ExecutionPolicy;
 
 use crate::events::{Event, report};
 use crate::witness::{Hold, Witness};
@@ -115,7 +119,7 @@ impl StaticToolExecute for ExtWrite {
 
 #[expect(clippy::expect_used, reason = "the tool's schemas are literals")]
 fn ext_write(witness: Witness, hold: Hold) -> Arc<dyn lash_core::ToolProvider> {
-    let definition = lash_core::ToolDefinition::raw(
+    let definition = lash_vocabulary::tool_contract::ToolDefinition::raw(
         TOOL,
         TOOL_OPERATION,
         "Writes x to the outside world, once.",

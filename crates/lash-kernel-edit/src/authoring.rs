@@ -1,8 +1,14 @@
 //! The closed canvas vocabulary. Source replacement owns all other edits.
 use crate::Position;
-use lash_kernel_doc::{
-    DocumentId, EffectName, Expr, Literal, MapEntry, Name, RecordEntry, Site, Type,
-};
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Literal;
+use lash_kernel_doc::MapEntry;
+use lash_kernel_doc::RecordEntry;
+use lash_vocabulary::legacy_names::DocumentId;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::types::Type;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

@@ -21,12 +21,16 @@
 
 use std::sync::Arc;
 
-use lash_core::ProcessId;
 use lash_execution_contracts::process::EngineState;
 use lash_execution_contracts::process::EngineStateFormat;
 use lash_execution_contracts::process::EngineStateRefusal;
-use lash_kernel_doc::{Document, DocumentId, FunctionRegistry, KernelVersion, validate_document};
+use lash_kernel_doc::Document;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::KernelVersion;
+use lash_kernel_doc::validate_document;
 use lash_kernel_migrate::{DocumentRefusal, Rewritten, migration_from};
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::legacy_names::DocumentId;
 
 use super::state::{KernelEngineState, KernelProcessInput, Phase};
 use super::{DocumentStoreError, KernelDocuments, KernelProcessEngine, advance};
@@ -138,7 +142,7 @@ pub fn migrate_function_value(
         .check(
             functions,
             lash_kernel_doc::FunctionValueLimits::standard(),
-            lash_kernel_doc::KernelDataLimits::standard(),
+            lash_vocabulary::data_limits::KernelDataLimits::standard(),
         )
         .map_err(|refusal| KernelMigrationRefusal::NotAdmitted {
             document,
@@ -450,7 +454,7 @@ pub struct RefusedKernelProcess {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct RefusedKernelCell {
     /// The turn it stopped.
-    pub turn: lash_core::TurnId,
+    pub turn: lash_vocabulary::identity::TurnId,
     /// The cell.
     pub cell: String,
     pub refusal: KernelMigrationRefusal,
@@ -461,7 +465,7 @@ pub struct RefusedKernelCell {
 /// stopped in, if any.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct UnmigratedKernelSession {
-    pub session: lash_core::SessionId,
+    pub session: lash_vocabulary::identity::SessionId,
     /// Each cell of its open turn this build would not resume, with why.
     pub refused: Vec<RefusedKernelCell>,
 }
@@ -483,7 +487,8 @@ pub struct KernelMigrationSurvey {
     pub sessions: Vec<UnmigratedKernelSession>,
     /// Each library function with no counterpart in the next version, by
     /// identity, with the processes whose documents list it.
-    pub retired_functions: std::collections::BTreeMap<lash_kernel_doc::FunctionId, Vec<ProcessId>>,
+    pub retired_functions:
+        std::collections::BTreeMap<lash_vocabulary::legacy_names::FunctionId, Vec<ProcessId>>,
 }
 
 /// Why a survey did not finish.

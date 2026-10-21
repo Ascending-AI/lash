@@ -131,7 +131,7 @@ async fn imported_internal_body(bootstrap: bool) {
         .unwrap();
         Some(serve(&backend, "old-import-serving-node", &old_held).await)
     };
-    let definition = lash_core::ToolDefinition::raw(
+    let definition = lash_vocabulary::tool_contract::ToolDefinition::raw(
         "tool:dataframe",
         "dataframe.run",
         "Runs the private body.",
@@ -139,7 +139,7 @@ async fn imported_internal_body(bootstrap: bool) {
         serde_json::json!({"type":"string"}),
     )
     .unwrap()
-    .declared_contract(lash_core::ContractId::new("run/1"))
+    .declared_contract(lash_vocabulary::operations::ContractId::new("run/1"))
     .with_execution(std::time::Duration::from_secs(30));
     struct Runner;
     #[async_trait::async_trait]
@@ -148,8 +148,10 @@ async fn imported_internal_body(bootstrap: bool) {
             lash_core::ToolOutcome::ok(serde_json::json!("served-internal")).into()
         }
     }
-    const TOOLS: lash_core::ProcessConfigKey<()> =
-        lash_core::ProcessConfigKey::new("internal-runner", lash_core::FormatVersion::ONE);
+    const TOOLS: lash_core::ProcessConfigKey<()> = lash_core::ProcessConfigKey::new(
+        "internal-runner",
+        lash_vocabulary::providers::FormatVersion::ONE,
+    );
     let runner = Arc::new(crate::tools::StaticToolProvider::new(
         vec![definition.clone()],
         Runner,
@@ -160,14 +162,17 @@ async fn imported_internal_body(bootstrap: bool) {
         fn tool_manifests(
             &self,
             _: &lash_core::OwnerConfigView,
-        ) -> Result<Vec<lash_core::ToolManifest>, lash_execution_contracts::PluginError> {
+        ) -> Result<
+            Vec<lash_vocabulary::tool_contract::ToolManifest>,
+            lash_execution_contracts::PluginError,
+        > {
             Ok(Vec::new())
         }
         fn resolve_contract(
             &self,
             _: &str,
             _: &lash_core::OwnerConfigView,
-        ) -> Option<Arc<lash_core::ToolContract>> {
+        ) -> Option<Arc<lash_vocabulary::tool_contract::ToolContract>> {
             None
         }
         async fn execute(&self, _: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
@@ -186,7 +191,7 @@ async fn imported_internal_body(bootstrap: bool) {
         }
     }
     let resolver = Arc::new(NamespaceResolver(std::sync::atomic::AtomicUsize::new(0)));
-    let granted = lash_core::ToolDefinition::raw(
+    let granted = lash_vocabulary::tool_contract::ToolDefinition::raw(
         "host:namespace-call",
         "tools.call_tool",
         "Dispatches a path",
@@ -351,7 +356,7 @@ async fn imported_internal_body(bootstrap: bool) {
             .publish_workflow(
                 &host_pin,
                 &document,
-                &lash_kernel_doc::Name::new("flow"),
+                &lash_vocabulary::legacy_names::Name::new("flow"),
                 &env,
                 packages.clone(),
                 None,
@@ -480,7 +485,7 @@ async fn imported_internal_body(bootstrap: bool) {
     );
     // Use the namespace facts read from the parked process, with a grant
     // this resumed node serves. Its current package view omits legacy.
-    let effect = lash_core::EffectName::new("tools.call_tool").unwrap();
+    let effect = lash_vocabulary::legacy_names::EffectName::new("tools.call_tool").unwrap();
     let env = Arc::new(
         lash_core::ProcessEnv::builder(lash_core::MaxToolCalls::new(1))
             .component(TOOLS, &())
@@ -771,8 +776,9 @@ async fn a_stored_set_outlives_its_installer_and_collection() {
 
     let digest = b.digest();
     let surface = b.surface();
-    let q_path =
-        lash_kernel_package::PackagePath::new(lash_kernel_package::Segment::new("q").expect("q"));
+    let q_path = lash_vocabulary::names::PackagePath::new(
+        lash_vocabulary::names::Segment::new("q").expect("q"),
+    );
     let definitions = surface
         .package_definitions(&q_path)
         .expect("q's definitions")
@@ -894,7 +900,8 @@ async fn stored_code_performs_an_internal_operation_only_as_its_packages_own() {
         .await,
         Ok(Err(lash_vm_runtime::LoadRefusal::InternalOperation {
             function: forged.0,
-            operation: lash_kernel_doc::EffectName::new("s.raw").expect("an operation"),
+            operation: lash_vocabulary::legacy_names::EffectName::new("s.raw")
+                .expect("an operation"),
         })),
     );
 }
@@ -991,7 +998,7 @@ async fn a_bootstrap_native_waits_for_a_capable_node() {
         .publish_workflow(
             &pin,
             &document.into(),
-            &lash_kernel_doc::Name::new("flow"),
+            &lash_vocabulary::legacy_names::Name::new("flow"),
             &env,
             packages.declare_all(),
             None,
@@ -1096,7 +1103,8 @@ mod gate_faults {
         DurableInstant, DurableReads, DurableStore, Epoch, HeartbeatOutcome, MailCommit, MailTx,
         NodeLease, NodeSpec, Reaped,
     };
-    use lash_protocol_types::{ProcessId, SessionId};
+    use lash_vocabulary::identity::ProcessId;
+    use lash_vocabulary::identity::SessionId;
     use std::result::Result;
     use std::sync::{Arc, Mutex};
 
@@ -1173,7 +1181,7 @@ mod gate_faults {
     impl DurableReads for GateStore {
         async fn model_call_pins(
             &self,
-            session: &lash_protocol_types::SessionId,
+            session: &lash_vocabulary::identity::SessionId,
             owner: &str,
         ) -> Result<Vec<lash_durable::domain::ModelCallPinRow>, DurableError> {
             self.inner.model_call_pins(session, owner).await
@@ -1181,7 +1189,7 @@ mod gate_faults {
 
         async fn model_calls(
             &self,
-            session: &lash_protocol_types::SessionId,
+            session: &lash_vocabulary::identity::SessionId,
             owner: &str,
         ) -> Result<Vec<lash_core_store::model_calls::ModelCallRecord>, DurableError> {
             self.inner.model_calls(session, owner).await
@@ -1194,7 +1202,7 @@ mod gate_faults {
         async fn turn_namespaces(
             &self,
             session: &SessionId,
-            run: &lash_protocol_types::TurnId,
+            run: &lash_vocabulary::identity::TurnId,
         ) -> Result<Vec<lash_durable::domain::TurnNamespace>, DurableError> {
             self.inner.turn_namespaces(session, run).await
         }
@@ -1202,7 +1210,7 @@ mod gate_faults {
         async fn turn_end(
             &self,
             session: &SessionId,
-            run: &lash_protocol_types::TurnId,
+            run: &lash_vocabulary::identity::TurnId,
         ) -> Result<Option<lash_durable::domain::TurnEnd>, DurableError> {
             self.inner.turn_end(session, run).await
         }
@@ -1236,15 +1244,15 @@ mod gate_faults {
 
         async fn cell_roots(
             &self,
-            session: &lash_protocol_types::SessionId,
-            run: &lash_protocol_types::TurnId,
+            session: &lash_vocabulary::identity::SessionId,
+            run: &lash_vocabulary::identity::TurnId,
         ) -> Result<Vec<ExecRootRow>, DurableError> {
             self.inner.cell_roots(session, run).await
         }
         async fn cell_roots_within(
             &self,
-            session: &lash_protocol_types::SessionId,
-            run: &lash_protocol_types::TurnId,
+            session: &lash_vocabulary::identity::SessionId,
+            run: &lash_vocabulary::identity::TurnId,
             max_rows: usize,
         ) -> Result<Vec<lash_durable::domain::ExecRootRow>, DurableError> {
             self.inner.cell_roots_within(session, run, max_rows).await
@@ -1304,7 +1312,7 @@ mod gate_faults {
 
         async fn session_mailbox(
             &self,
-            session: &lash_protocol_types::SessionId,
+            session: &lash_vocabulary::identity::SessionId,
         ) -> Result<lash_durable::domain::SessionMailbox, DurableError> {
             self.inner.session_mailbox(session).await
         }
@@ -1413,10 +1421,10 @@ mod gate_faults {
 
         async fn package_paths(
             &self,
-            functions: &[lash_durable::packages::FunctionId],
+            functions: &[lash_vocabulary::legacy_names::FunctionId],
         ) -> Result<
             std::collections::BTreeMap<
-                lash_durable::packages::FunctionId,
+                lash_vocabulary::legacy_names::FunctionId,
                 std::collections::BTreeSet<String>,
             >,
             DurableError,
@@ -1426,10 +1434,10 @@ mod gate_faults {
 
         async fn internal_operations(
             &self,
-            operations: &[lash_durable::packages::EffectName],
+            operations: &[lash_vocabulary::legacy_names::EffectName],
         ) -> Result<
             std::collections::BTreeMap<
-                lash_durable::packages::EffectName,
+                lash_vocabulary::legacy_names::EffectName,
                 std::collections::BTreeSet<String>,
             >,
             DurableError,

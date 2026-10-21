@@ -8,7 +8,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_dialect::{EffectControl, Environment, Lowered};
-use lash_kernel_doc::{EffectName, Name, Param, Signature, Stmt, Type};
+use lash_kernel_doc::Stmt;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 use super::machine;
 use crate::Diagnostic;
@@ -39,7 +44,7 @@ fn lower_against_control(source: &str) -> Result<Lowered, Diagnostic> {
             super::library(),
             &lash_kernel_dialect::Namespaces::of_effects(
                 &effects,
-                &lash_kernel_doc::ContractId::new("1"),
+                &lash_vocabulary::operations::ContractId::new("1"),
                 &controls,
             )
             .expect("the test's effects are operations"),

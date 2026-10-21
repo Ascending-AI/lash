@@ -287,7 +287,7 @@ async fn the_battery_names_the_state_law_for_an_over_limit_plugin() {
         }
         fn initialize_state(
             &self,
-            _: &lash::RuntimeOwner,
+            _: &lash_vocabulary::identity::RuntimeOwner,
             _: &PluginConfig,
         ) -> Result<std::collections::BTreeMap<String, serde_json::Value>, PluginError> {
             Ok(std::collections::BTreeMap::from([(
@@ -596,8 +596,8 @@ async fn deferred_state_free_provider_is_full_under_a_supporting_protocol() {
 
 #[cfg(feature = "rlm")]
 mod deferred_laws {
-    use super::*;
     use lash::tools::*;
+    use lash_vocabulary::schema_contract::*;
     use std::collections::BTreeMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
 

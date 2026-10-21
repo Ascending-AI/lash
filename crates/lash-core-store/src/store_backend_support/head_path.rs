@@ -46,7 +46,8 @@
 //! ADR 0024's ruling that a live path cannot be partly reclaimed.
 
 use crate::store::StoreError;
-use crate::{NodeId, SessionId};
+use lash_vocabulary::identity::NodeId;
+use lash_vocabulary::identity::SessionId;
 
 /// The facts of one graph node the probe reads: its id, owner and
 /// generation.

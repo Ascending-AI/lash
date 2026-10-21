@@ -1,4 +1,4 @@
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 

@@ -7,8 +7,12 @@ use crate::{Library, NamedLibrary, SourceError, define_functions};
 /// signature, through either the worker JSON or stored token boundary.
 #[test]
 fn written_refuses_a_second_start_signature() {
-    use lash_kernel_doc::graph_tokens::{TokenCodec as _, TokenWriter, decode_body};
-    use lash_kernel_doc::{Signature, SourceLanguage, Type};
+    use lash_kernel_doc::SourceLanguage;
+    use lash_vocabulary::tokens::TokenCodec as _;
+    use lash_vocabulary::tokens::TokenWriter;
+    use lash_vocabulary::tokens::decode_body;
+    use lash_vocabulary::types::Signature;
+    use lash_vocabulary::types::Type;
 
     let signature = Signature {
         params: Vec::new(),

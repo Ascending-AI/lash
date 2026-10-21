@@ -490,6 +490,8 @@ impl<'a> Projector<'a> {
             return Ok(Type::Json);
         };
         Ok(match declared {
+            XLashType::Timestamp => Type::Timestamp,
+            XLashType::Bytes => Type::Bytes,
             XLashType::Function { signature: Some(_) } => {
                 // The decode above read the signature out of `declaration`;
                 // its schemas are projected where they stand in the root.

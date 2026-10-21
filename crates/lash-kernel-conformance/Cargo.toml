@@ -18,6 +18,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+lash-vocabulary = { workspace = true }
 arbitrary = "1"
 lash-kernel-check.workspace = true
 lash-kernel-dialect.workspace = true

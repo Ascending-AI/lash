@@ -4,8 +4,15 @@
 use lash_kernel_doc::kernel_internals::{EffectIdentity, TaskIdentity};
 use std::collections::BTreeMap;
 
-use lash_kernel_doc::{Datum, EffectName, ErrorDatum, Handle, Name, Signature, Timestamp, Type};
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::ErrorDatum;
+use lash_kernel_doc::Handle;
+use lash_kernel_doc::Timestamp;
 use lash_kernel_vm::{Bound, Bounds, End, Outcome, RunError};
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 use serde::{Deserialize, Serialize};
 
 use crate::HarnessError;

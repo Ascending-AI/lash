@@ -2,11 +2,12 @@
 //! These helpers make observations. Hosts decide whether to refuse a tool,
 //! filter a list, or cancel a process; lash adds no enforcement.
 
-pub use crate::SessionId;
 pub use crate::plugins::ToolCatalog;
-use crate::process::{ProcessComponentId, ProcessEnv};
+use crate::process::ProcessEnv;
 pub use crate::tools::ToolId;
 pub use crate::{CapabilityRef, SlotId};
+pub use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::providers::ProcessComponentId;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// One linked effect whose tool `offered` does not offer as the process

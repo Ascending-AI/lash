@@ -20,11 +20,13 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::arena::native::NativeFunction;
 use crate::function::FunctionDefinition;
-use crate::name::{EffectName, FunctionId, FunctionName};
 use crate::plan::HelperPlan;
 use crate::released::{BodyCensus, ReleasedFunctions};
-use crate::requirement::OperationRequirement;
 use crate::validate::{Invalid, validate_identified_definition};
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::operations::OperationRequirement;
 
 /// The counter a native function is handed: it counts the function's guard
 /// unit and refuses the unit that passes the limit.
@@ -302,13 +304,15 @@ impl RegisteredFunction {
         self.function
     }
 
-    /// The definition's token body ([`crate::graph_tokens::encode_body`]),
+    /// The definition's token body ([`lash_vocabulary::tokens::encode_body`]),
     /// the bytes its checkpoint graph node is encoded from, encoded once per
     /// registration and shared by the registry's clones.
     pub fn image(&self) -> Arc<[u8]> {
         Arc::clone(self.facts().image.get_or_init(|| match &self.held {
             Held::Released(set, at) => Arc::from(set.image.definition_bytes(*at as usize)),
-            Held::Defined(_) => Arc::from(crate::graph_tokens::encode_body(&**self.definition())),
+            Held::Defined(_) => {
+                Arc::from(lash_vocabulary::tokens::encode_body(&**self.definition()))
+            }
         }))
     }
 
@@ -592,12 +596,15 @@ impl FunctionRegistry {
     ) -> Result<FunctionId, RegistryError> {
         self.materialize();
         let name = definition.name.clone();
-        let identity =
-            validate_identified_definition(&definition, self, crate::KernelDataLimits::standard())
-                .map_err(|source| RegistryError::Invalid {
-                    name: name.clone(),
-                    source,
-                })?;
+        let identity = validate_identified_definition(
+            &definition,
+            self,
+            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+        )
+        .map_err(|source| RegistryError::Invalid {
+            name: name.clone(),
+            source,
+        })?;
         match (
             definition.has_native(),
             definition.body().is_some(),

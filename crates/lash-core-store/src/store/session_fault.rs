@@ -12,7 +12,11 @@
 use serde::{Deserialize, Serialize};
 
 use super::StoreError;
-use crate::{RuntimeError, RuntimeErrorCause, RuntimeErrorCode, SessionId, TurnId};
+use crate::RuntimeError;
+use crate::RuntimeErrorCause;
+use crate::RuntimeErrorCode;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 /// What met the fault.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

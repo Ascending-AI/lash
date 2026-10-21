@@ -22,7 +22,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use lash_core::ProcessId;
 use lash_core_execution::runtime::process::steps::{
     RecordedProcessStep, StepFact, process_step_call,
 };
@@ -36,6 +35,7 @@ use lash_vm_broker::kernel::{KernelFailure, MachineStep, Machines as _};
 use lash_vm_client::wire::OutcomeWire;
 use lash_vm_client::{FrameEpoch, InfrastructureOutcome, OwnerEpoch, RunHost, VmOwner};
 use lash_vm_protocol::{CheckpointRefusal, KernelRestoreRefusal, RunRefusal};
+use lash_vocabulary::identity::ProcessId;
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
@@ -113,9 +113,10 @@ pub enum Unreplayable {
     Unobserved,
 }
 
-pub use lash_kernel_doc::{ReplayPath, TaskPath};
+pub use lash_vocabulary::observation::ReplayPath;
+pub use lash_vocabulary::observation::TaskPath;
 
-fn replay_path(path: lash_kernel_vm::ExecutionPath) -> ReplayPath {
+fn replay_path(path: lash_vocabulary::observation::ExecutionPath) -> ReplayPath {
     path.replay()
 }
 
@@ -170,8 +171,8 @@ impl ReplayHost {
 
 #[async_trait::async_trait]
 impl RunHost for ReplayHost {
-    fn observe(&self) -> lash_kernel_vm::ObservationMode {
-        lash_kernel_vm::ObservationMode::Counts
+    fn observe(&self) -> lash_vocabulary::observation::RunObservation {
+        lash_vocabulary::observation::RunObservation::Counts
     }
 
     fn traces_path(&self) -> bool {
@@ -206,10 +207,10 @@ impl RunHost for ReplayHost {
 
     async fn perform(
         &self,
-        effect: &lash_kernel_doc::EffectName,
+        effect: &lash_vocabulary::legacy_names::EffectName,
         args: &[Datum],
-        site: &lash_kernel_doc::PositionLabel,
-        origin: &lash_kernel_doc::Site,
+        site: &lash_vocabulary::sites::PositionLabel,
+        origin: &lash_vocabulary::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
         let read = self
             .effects
@@ -237,7 +238,7 @@ impl RunHost for ReplayHost {
 struct Start_ {
     parked: Option<(ParkedPage, StepFact)>,
     admissions: Vec<Admission>,
-    deliver: Vec<(lash_protocol_types::WaitId, OutcomeWire)>,
+    deliver: Vec<(lash_vocabulary::sites::WaitId, OutcomeWire)>,
 }
 
 /// What the journal retains of a process, as a replay reads it.
@@ -261,7 +262,7 @@ impl Journal<'_> {
         }
     }
 
-    fn issued(&self, run: u64, wait: lash_protocol_types::WaitId) -> Option<&Issued> {
+    fn issued(&self, run: u64, wait: lash_vocabulary::sites::WaitId) -> Option<&Issued> {
         self.parked(run)?
             .1
             .iter()
@@ -272,7 +273,7 @@ impl Journal<'_> {
     /// from the record that holds it, and bound by its digest.
     fn delivered(
         &self,
-        wait: lash_protocol_types::WaitId,
+        wait: lash_vocabulary::sites::WaitId,
         source: &DeliverySource,
         digest: &str,
     ) -> Result<OutcomeWire, Unreplayable> {
@@ -446,7 +447,9 @@ impl KernelProcessEngine {
             .and_then(|settings| {
                 serde_json::from_value::<KernelRecordedSettings>(settings.value().clone()).ok()
             })
-            .filter(|settings| settings.observe == lash_kernel_vm::ObservationMode::Counts);
+            .filter(|settings| {
+                settings.observe == lash_vocabulary::observation::RunObservation::Counts
+            });
         let mut answers = Vec::with_capacity(chosen.len());
         for segment in chosen {
             let answer = match &settings {
@@ -623,14 +626,14 @@ impl KernelProcessEngine {
                     ..
                 },
             ) => {
-                let replayed: Vec<lash_protocol_types::WaitId> = park.withdrawn.clone();
-                let asked: Vec<(lash_protocol_types::WaitId, Admission)> = park
+                let replayed: Vec<lash_vocabulary::sites::WaitId> = park.withdrawn.clone();
+                let asked: Vec<(lash_vocabulary::sites::WaitId, Admission)> = park
                     .requests
                     .iter()
                     .map(admission_of)
                     .filter(|(wait, _)| !replayed.contains(wait))
                     .collect();
-                let recorded_asks: Vec<(lash_protocol_types::WaitId, Admission)> = issued
+                let recorded_asks: Vec<(lash_vocabulary::sites::WaitId, Admission)> = issued
                     .iter()
                     .map(|issued| (issued.wait(), issued.admission().clone()))
                     .collect();

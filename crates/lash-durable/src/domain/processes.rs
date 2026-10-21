@@ -9,7 +9,8 @@
 //! same commit as the state revision.
 
 use crate::ids::{DurableInstant, Epoch};
-use lash_protocol_types::{CancelOrigin, ProcessId};
+use lash_protocol_types::CancelOrigin;
+use lash_vocabulary::identity::ProcessId;
 
 use super::keys::ScopeKey;
 

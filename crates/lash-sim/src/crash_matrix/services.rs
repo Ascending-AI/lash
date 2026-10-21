@@ -38,12 +38,19 @@ use lash_core_store::tool_run::{
     CompletionSource, KnownFailureReason, MaterialOwner, MaterialRole,
 };
 use lash_durable::domain::OwnerKey;
-use lash_protocol_types::{
-    ExecutionBudgets, ExecutionPolicy, ModelToolReturn, SessionId, ToolCallOutput, ToolFailure,
-    ToolFailureClass, ToolId, TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnId,
-};
+use lash_protocol_types::ExecutionBudgets;
+use lash_protocol_types::ModelToolReturn;
+use lash_protocol_types::ToolCallOutput;
+use lash_protocol_types::ToolFailure;
+use lash_protocol_types::ToolFailureClass;
+use lash_protocol_types::TurnCancelMode;
+use lash_protocol_types::TurnCancelUndeliveredInputPolicy;
 use lash_protocol_types::{llm::types::ProviderRouteIdentity, llm::types::RecordedRequestTemplate};
 use lash_sansio::sansio::ExecutionEnvironmentSync;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
+use lash_vocabulary::tool_contract::ExecutionPolicy;
+use lash_vocabulary::tool_contract::ToolId;
 
 use super::world::{BodyEntry, World, retry};
 
@@ -855,7 +862,7 @@ impl RoundTools for Catalog {
         MemberPin::admitted(
             ToolId::new(tool.name()),
             tool.policy(),
-            lash_protocol_types::ToolBounds {
+            lash_vocabulary::tool_contract::ToolBounds {
                 execution: std::time::Duration::from_secs(120),
                 park: None,
             },

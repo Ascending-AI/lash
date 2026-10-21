@@ -48,13 +48,19 @@ impl StaticToolExecute for SwitchFrame {
             .expect("the turn's spec encodes");
         if let Some(core) = self.0.get() {
             let session = core
-                .session(lash::SessionId::try_from(self.1.to_owned()).expect("a session id"))
+                .session(
+                    lash_vocabulary::identity::SessionId::try_from(self.1.to_owned())
+                        .expect("a session id"),
+                )
                 .durable()
                 .await
                 .expect("the session's durable handle");
             session
                 .send(lash::TurnInput::text(QUEUED))
-                .id(lash::TurnId::try_from("queued-during-switch".to_owned()).expect("a host id"))
+                .id(
+                    lash_vocabulary::identity::TurnId::try_from("queued-during-switch".to_owned())
+                        .expect("a host id"),
+                )
                 .await
                 .expect("the session queues the input");
         }
@@ -75,12 +81,12 @@ async fn world(
     session: &'static str,
     sender: Arc<OnceLock<lash::LashCore>>,
 ) -> Option<World> {
-    let definition = lash_core::ToolDefinition::control(
+    let definition = lash_vocabulary::tool_contract::ToolDefinition::control(
         SWITCH_TOOL,
         SWITCH_TOOL_OPERATION,
         "Switches the agent frame and hands the new frame a task.",
         serde_json::json!({ "type": "object", "additionalProperties": false, "properties": {} }),
-        lash_core::TurnControls::switch_agent_frame(),
+        lash_vocabulary::tool_declaration::TurnControls::switch_agent_frame(),
     )
     .expect("switch_frame's schemas")
     .with_execution(std::time::Duration::from_secs(120));
@@ -138,7 +144,8 @@ async fn the_admitted_window_of_a_frame_switching_turn_is_its_admission_frame(ti
     let session = world.session(SESSION, served::spec(8)).await;
     served::assert_answered(FIRST, &world.send(&session, FIRST).await);
     let store = world.backend.session_store_factory();
-    let id = lash::SessionId::try_from(SESSION.to_owned()).expect("a session id");
+    let id =
+        lash_vocabulary::identity::SessionId::try_from(SESSION.to_owned()).expect("a session id");
     let admitted = store
         .load_session_window(&id, WindowSelector::Current)
         .await

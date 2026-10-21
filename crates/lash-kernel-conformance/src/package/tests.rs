@@ -5,10 +5,15 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use lash_ext_helper_compiler::library::{Dialect, Library};
-use lash_kernel_doc::{
-    Datum, FunctionRegistry, Implementation, NativeCall, NativeError, NativeFunction, Type, Value,
-};
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::Implementation;
+use lash_kernel_doc::NativeCall;
+use lash_kernel_doc::NativeError;
+use lash_kernel_doc::NativeFunction;
+use lash_kernel_doc::Value;
 use lash_kernel_package::{HeldPackages, Package, PackageSources};
+use lash_vocabulary::types::Type;
 
 use super::{Kit, Law, Witness};
 use crate::{Case, Expected, ExpectedEnd};
@@ -330,7 +335,7 @@ fn conf_shape_skipped_check_names_the_difference() {
             ),
             &registry,
         );
-        case.environment.entry = Some(lash_kernel_doc::Name::new("probe"));
+        case.environment.entry = Some(lash_vocabulary::legacy_names::Name::new("probe"));
         case.environment.args = vec![input];
         let (body, _) = super::observe(
             &kit.bodies,

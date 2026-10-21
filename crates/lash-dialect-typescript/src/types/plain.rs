@@ -20,7 +20,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use lash_kernel_doc::Name;
+use lash_vocabulary::legacy_names::Name;
 
 use super::Ty;
 use crate::adapter::{BinaryOp, CallArg, Expr, MemberProperty, ObjectProperty, PropertyKey};

@@ -13,7 +13,10 @@ use lash_durable::{
     ActorKey, CommitLabel, DurableError, DurableReads as _, DurableStore as _, Epoch, FormatSet,
     MailKind, MailTx, NodeId, NodeLease, NodeSpec, Release,
 };
-use lash_protocol_types::{SessionId, TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnId};
+use lash_protocol_types::TurnCancelMode;
+use lash_protocol_types::TurnCancelUndeliveredInputPolicy;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 use crate::{SqliteDurableStore, SqliteStoreSet};
 
@@ -57,7 +60,9 @@ async fn admitted() -> World {
         run: TurnId::from(RUN),
         admission: RunAdmissionRecord::Turn {
             took: AdmittedTurnRows::Inputs {
-                ids: AdmittedInputIds::one(lash_protocol_types::InputId::from("actor-open-batch")),
+                ids: AdmittedInputIds::one(lash_vocabulary::identity::InputId::from(
+                    "actor-open-batch",
+                )),
             },
             trace: None,
         },

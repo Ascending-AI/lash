@@ -35,7 +35,6 @@ use std::time::Duration;
 use lash_core::LlmOutputPart;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent, StreamBlockIdentity};
-use lash_core_execution::ProcessId;
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore};
 use lash_durable_test::{
@@ -51,8 +50,9 @@ use lash_execution_contracts::process::ProcessRegistration;
 use lash_execution_contracts::process::SessionTurnOutcome;
 use lash_execution_contracts::projection::NoProjectionProviders;
 use lash_execution_contracts::session_types::SessionCreateRequest;
-use lash_protocol_types::SessionId;
 use lash_protocol_types::sync::MutexExt as _;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
 
 const CHILD: &str = "child-turn-session";
 const MODEL: &str = "child-turn-model";

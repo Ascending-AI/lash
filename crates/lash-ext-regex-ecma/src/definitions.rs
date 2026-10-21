@@ -3,10 +3,19 @@
 
 use std::collections::BTreeSet;
 
-use lash_kernel_doc::{
-    Formula, FunctionDefinition, FunctionName, Guard, Implementation, KERNEL_VERSION, Name,
-    Operand, Param, RecordType, RecordTypeField, Signature, Type,
-};
+use lash_kernel_doc::Formula;
+use lash_kernel_doc::FunctionDefinition;
+use lash_kernel_doc::Guard;
+use lash_kernel_doc::Implementation;
+use lash_kernel_doc::KERNEL_VERSION;
+use lash_kernel_doc::Operand;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::RecordType;
+use lash_vocabulary::types::RecordTypeField;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 /// The package path in every regex record's canonical brand.
 pub const BRAND: &str = "regex.ecma";

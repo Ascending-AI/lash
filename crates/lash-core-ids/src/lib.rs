@@ -44,5 +44,3 @@ impl std::fmt::Display for PluginId {
         formatter.write_str(self.0)
     }
 }
-
-pub use lash_vocabulary::providers::FormatVersion;

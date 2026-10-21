@@ -88,7 +88,7 @@ pub(crate) fn pending_turn_input_read_from_row(
     Ok(match admitted_run {
         Some(run) => lash_core_store::turn_input_vocabulary::PendingTurnInputRead::admitted(
             input,
-            lash_protocol_types::TurnId::parse(run)?,
+            lash_vocabulary::identity::TurnId::parse(run)?,
         ),
         None => lash_core_store::turn_input_vocabulary::PendingTurnInputRead::open(input),
     })
@@ -166,7 +166,7 @@ pub(crate) async fn load_pending_turn_input_row_by_target_tx(
 /// Which rows a cancel locks in queue order before it writes any.
 pub(crate) enum CancelLockScope<'a> {
     /// The resolved explicit targets.
-    Targets(&'a std::collections::BTreeSet<lash_protocol_types::InputId>),
+    Targets(&'a std::collections::BTreeSet<lash_vocabulary::identity::InputId>),
     /// The suffix from this `enqueue_seq`.
     Suffix(u64),
 }
@@ -232,7 +232,7 @@ pub(crate) async fn cancel_pending_turn_input_row_tx(
                 return Ok(
                     lash_core_store::turn_input_vocabulary::PendingTurnInputCancelOutcome::AlreadyAdmitted {
                         input,
-                        run: lash_protocol_types::TurnId::parse(run)?,
+                        run: lash_vocabulary::identity::TurnId::parse(run)?,
                     },
                 );
             }

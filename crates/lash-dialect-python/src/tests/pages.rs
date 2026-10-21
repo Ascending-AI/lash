@@ -1,8 +1,9 @@
 //! Test-owned page storage; execution and accounting are the real S4/S7 implementations.
+use lash_kernel_doc::Datum;
 use lash_kernel_doc::heap::*;
-use lash_kernel_doc::{Datum, Name};
 use lash_kernel_state::paged::*;
 use lash_kernel_vm::SessionEditor;
+use lash_vocabulary::legacy_names::Name;
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},

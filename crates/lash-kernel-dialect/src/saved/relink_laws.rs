@@ -2,9 +2,19 @@
 //! name to the cell's package set.
 
 use super::*;
+use crate::Export;
+use crate::ExportView;
 use crate::Library as _;
-use crate::{Export, ExportView, NamedLibrary, OperationExport, PackagePath, Segment, Visibility};
-use lash_kernel_doc::{ContractId, FunctionId, FunctionRegistry, parse_definition, parse_document};
+use crate::NamedLibrary;
+use crate::OperationExport;
+use crate::Visibility;
+use lash_kernel_doc::FunctionRegistry;
+use lash_kernel_doc::parse_definition;
+use lash_kernel_doc::parse_document;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::names::PackagePath;
+use lash_vocabulary::names::Segment;
+use lash_vocabulary::operations::ContractId;
 
 const RUN: &str = "effect dataframe.run(plan: Any) -> List(Any) contract";
 

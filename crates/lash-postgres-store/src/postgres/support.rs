@@ -1,6 +1,6 @@
 use crate::session_sql::session_sql;
 use crate::*;
-use lash_protocol_types::SessionId;
+use lash_vocabulary::identity::SessionId;
 
 /// Read the authoritative lease clock from PostgreSQL.
 ///
@@ -84,7 +84,7 @@ pub(crate) async fn graph_node_collision(
     connection: &mut sqlx::PgConnection,
     session_id: &SessionId,
     generation: u64,
-    node_id: &lash_protocol_types::NodeId,
+    node_id: &lash_vocabulary::identity::NodeId,
 ) -> StoreError {
     let taken: Result<Vec<String>, _> = crate::observed_sql::query_scalar(
         crate::session_sql::session_sql()
@@ -118,7 +118,7 @@ pub(crate) async fn graph_node_collision(
 pub(crate) fn pending_turn_input_insert_error(
     err: sqlx::Error,
     session_id: &SessionId,
-    input_id: &lash_protocol_types::InputId,
+    input_id: &lash_vocabulary::identity::InputId,
 ) -> StoreError {
     if let sqlx::Error::Database(database) = &err
         && database.code().as_deref() == Some("23505")
@@ -695,7 +695,7 @@ pub(crate) async fn decode_session_head_meta_row(
         head_revision,
         checkpoint_ref.map(Into::into),
         leaf_node_id
-            .map(lash_protocol_types::NodeId::parse)
+            .map(lash_vocabulary::identity::NodeId::parse)
             .transpose()?,
         current_frame_node_id,
     )?))

@@ -45,7 +45,7 @@ pub(crate) struct ProductionToolHandlers<'run> {
     completion_key: Option<lash_execution_contracts::waits::PinnedKey>,
     /// The declaration a round member's admission pinned: what its attempt
     /// settles under, whatever its tool declares now.
-    admitted_declaration: Option<crate::ToolDeclaration>,
+    admitted_declaration: Option<lash_vocabulary::tool_declaration::ToolDeclaration>,
     /// The trace scope an attempt traces its call's start and terminal
     /// under: a cell member's, which its cell's admission retained and
     /// selected (FIG-5395). A round member is traced by its round's fold,
@@ -87,7 +87,7 @@ struct InlineStop {
 #[derive(Clone, Serialize, Deserialize)]
 struct CallInput {
     attribution: crate::session::ToolObservationAttribution,
-    definition: crate::ToolDefinition,
+    definition: lash_vocabulary::tool_contract::ToolDefinition,
     pending: Option<Box<crate::sansio::PendingToolCall>>,
     grant: Option<Box<crate::ToolExecutionGrant>>,
     parent: Option<crate::RuntimeInvocation>,
@@ -174,7 +174,10 @@ fn cause<T: Serialize>(kind: &str, value: &T) -> HookCause {
 /// The failure of a call whose outcome its tool's declaration refuses.
 /// The failure an outcome of tool `tool_name` that its admitted
 /// declaration or contract does not admit answers with, naming the tool.
-fn declaration_refused(tool_name: &str, refusal: crate::DeclarationRefusal) -> ToolCallOutput {
+fn declaration_refused(
+    tool_name: &str,
+    refusal: lash_vocabulary::tool_declaration::DeclarationRefusal,
+) -> ToolCallOutput {
     ToolCallOutput::failure(
         crate::ToolFailure::runtime(
             crate::ToolFailureClass::Internal,
@@ -227,10 +230,10 @@ impl<'run> ProductionToolHandlers<'run> {
         &self,
         owner: &crate::EffectOpener,
         call_id: &crate::ToolCallId,
-        tool_id: &crate::ToolId,
+        tool_id: &lash_vocabulary::tool_contract::ToolId,
         args: &serde_json::Value,
         engine: &str,
-        executable: &crate::plugin::PluginCallbackIdentity,
+        executable: &lash_vocabulary::providers::PluginCallbackIdentity,
     ) -> Result<IsolatedToolStart, crate::HoldEnvError> {
         let provider = self
             .context
@@ -442,7 +445,7 @@ impl<'run> ProductionToolHandlers<'run> {
     /// its admission pinned.
     pub(crate) fn with_admitted_declaration(
         mut self,
-        declaration: Option<crate::ToolDeclaration>,
+        declaration: Option<lash_vocabulary::tool_declaration::ToolDeclaration>,
     ) -> Self {
         self.admitted_declaration = declaration;
         self
@@ -853,7 +856,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                         ) {
                             prepared.input.definition.manifest.declaration().admits(
                                 OutcomeShape::Done {
-                                    intents: &[crate::ToolIntentKind::StartProcess],
+                                    intents: &[lash_vocabulary::ToolIntentKind::StartProcess],
                                     control: None,
                                 },
                             )

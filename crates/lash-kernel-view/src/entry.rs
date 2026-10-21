@@ -3,7 +3,12 @@
 
 use std::collections::BTreeSet;
 
-use lash_kernel_doc::{Document, Name, Param, Site, Type, Unit};
+use lash_kernel_doc::Document;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Site;
+use lash_vocabulary::sites::Unit;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::Type;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

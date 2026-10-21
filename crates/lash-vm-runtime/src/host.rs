@@ -2,9 +2,14 @@
 
 use std::sync::Arc;
 
-use lash_kernel_doc::{Datum, EffectName, ErrorDatum, Handle, Integer, Timestamp};
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::ErrorDatum;
+use lash_kernel_doc::Handle;
+use lash_kernel_doc::Integer;
+use lash_kernel_doc::Timestamp;
 use lash_vm_broker::{DurableSnapshotStore, ParentFault};
 use lash_vm_client::RunHost;
+use lash_vocabulary::legacy_names::EffectName;
 
 use crate::ProjectionCatalog;
 
@@ -19,8 +24,8 @@ pub trait EffectReads: Send + Sync {
         &self,
         effect: &EffectName,
         args: &[Datum],
-        site: &lash_kernel_doc::PositionLabel,
-        origin: &lash_kernel_doc::Site,
+        site: &lash_vocabulary::sites::PositionLabel,
+        origin: &lash_vocabulary::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault>;
 }
 
@@ -28,9 +33,9 @@ pub trait EffectReads: Send + Sync {
 /// source, the backend's projection providers, the run's reads, and where
 /// prints go.
 pub struct ParentHost {
-    pub observation: lash_kernel_doc::RunObservation,
+    pub observation: lash_vocabulary::observation::RunObservation,
     /// Takes exact deltas from worker frames, outside checkpoint state.
-    pub ran: Arc<dyn Fn(&lash_kernel_vm::SiteCounts) + Send + Sync>,
+    pub ran: Arc<dyn Fn(&lash_vocabulary::observation::SiteCounts) + Send + Sync>,
     /// The run's store, whose clock is the run's clock.
     pub store: Arc<DurableSnapshotStore>,
     pub random: Arc<dyn Fn() -> u64 + Send + Sync>,
@@ -43,11 +48,11 @@ pub struct ParentHost {
 
 #[async_trait::async_trait]
 impl RunHost for ParentHost {
-    fn observe(&self) -> lash_kernel_vm::ObservationMode {
+    fn observe(&self) -> lash_vocabulary::observation::RunObservation {
         self.observation
     }
 
-    fn ran(&self, delta: &lash_kernel_vm::SiteCounts) {
+    fn ran(&self, delta: &lash_vocabulary::observation::SiteCounts) {
         (self.ran)(delta);
     }
 
@@ -79,8 +84,8 @@ impl RunHost for ParentHost {
         &self,
         effect: &EffectName,
         args: &[Datum],
-        site: &lash_kernel_doc::PositionLabel,
-        origin: &lash_kernel_doc::Site,
+        site: &lash_vocabulary::sites::PositionLabel,
+        origin: &lash_vocabulary::sites::Site,
     ) -> Result<Result<Datum, ErrorDatum>, ParentFault> {
         self.reads.perform(effect, args, site, origin).await
     }

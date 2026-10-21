@@ -24,6 +24,7 @@
 //! Admission exports have a retained reconciliation obligation and may duplicate
 //! between export and its record; other diagnostics are best effort and may be
 //! lost or repeated after a crash. See [What survives a crash](https://github.com/Ascending-AI/lash/blob/main/README.md#what-survives-a-crash).
+use lash_vocabulary::names::LinkedStart;
 mod limits;
 pub use limits::ObservationWorkLimits;
 pub mod policy;
@@ -35,9 +36,14 @@ pub use policy::{
     TracePolicyField, TracePolicySelection, TracePolicySnapshot, TraceValue, WriterRemaining,
 };
 
-use lash_protocol_types::{
-    BatchId, CausalRef, InputId, ProcessId, SessionId, ToolCallId, ToolIntentIdentity, TurnId,
-};
+use lash_protocol_types::CausalRef;
+use lash_protocol_types::ToolCallId;
+use lash_protocol_types::ToolIntentIdentity;
+use lash_vocabulary::identity::BatchId;
+use lash_vocabulary::identity::InputId;
+use lash_vocabulary::identity::ProcessId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -88,8 +94,7 @@ pub use flight_recorder::{
 pub use language_execution::{
     LanguageExecutionObservation, StepBodyStarted, StepBodyStartedObservation, TraceCellCounts,
     TraceCountObservation, TraceLanguageExecutionPayload, TraceNodeAwaited, TraceNodeFact,
-    TraceNodeWaitKind, TraceNodeWaitResolution, TraceProcessCounts, WorkflowDocumentEntry,
-    WorkflowDocumentRef,
+    TraceNodeWaitKind, TraceNodeWaitResolution, TraceProcessCounts,
 };
 pub use language_execution_failure::TraceLanguageExecutionFailure;
 pub use lash_protocol_types::llm::types::GenerationReceipt;
@@ -1187,7 +1192,7 @@ impl TraceLanguageExecutionGeneration {
 #[serde(deny_unknown_fields)]
 pub struct TraceLanguageExecutionIdentity {
     pub scope: TraceRuntimeScope,
-    pub document: WorkflowDocumentRef,
+    pub document: LinkedStart,
     pub entry_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub engine_execution_id: Option<String>,
@@ -1201,7 +1206,7 @@ pub struct TraceLanguageExecutionIdentity {
 #[serde(deny_unknown_fields)]
 struct TraceLanguageExecutionIdentityWire {
     scope: TraceRuntimeScope,
-    document: WorkflowDocumentRef,
+    document: LinkedStart,
     entry_name: String,
     engine_execution_id: Option<String>,
     attempt: Option<u32>,
@@ -1315,11 +1320,11 @@ impl TraceLanguageExecution {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceLanguageChildExecution {
     pub scope: TraceRuntimeScope,
-    pub process_id: lash_protocol_types::ProcessId,
+    pub process_id: lash_vocabulary::identity::ProcessId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attempt: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub document: Option<WorkflowDocumentRef>,
+    pub document: Option<LinkedStart>,
 }
 
 impl TraceLanguageChildExecution {

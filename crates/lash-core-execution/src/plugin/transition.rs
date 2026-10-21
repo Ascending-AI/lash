@@ -15,7 +15,7 @@ pub struct PluginTransitionId(pub crate::EffectAddress);
 #[serde(deny_unknown_fields)]
 pub struct PluginTransitionRequest {
     pub id: PluginTransitionId,
-    pub owner: crate::RuntimeOwner,
+    pub owner: lash_vocabulary::identity::RuntimeOwner,
     pub base: PluginTransitionBase,
     pub target: PluginAdmission,
 }
@@ -26,7 +26,7 @@ pub struct PluginTransitionRequest {
 pub enum PluginTransitionBase {
     /// The command run's first recorded effect selects and retains its head.
     SessionCommand {
-        run: crate::TurnId,
+        run: lash_vocabulary::identity::TurnId,
     },
     Session {
         head: crate::store::SessionHeadRef,

@@ -6,9 +6,9 @@ use lash_core_store::effect_identity::RuntimeAttribution;
 use lash_core_store::effect_identity::RuntimeEffectKind;
 use lash_core_store::effect_identity::RuntimeInvocation;
 use lash_core_store::effect_identity::RuntimeReplay;
-use lash_protocol_types::SessionId;
-use lash_protocol_types::TurnId;
 use lash_sansio::sansio::EffectId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 
 #[expect(
     clippy::expect_used,
@@ -459,7 +459,7 @@ pub fn process_effect_invocation(
 )]
 pub fn direct_effect_invocation(
     execution_scope: &ExecutionScope,
-    owner: &crate::RuntimeOwner,
+    owner: &lash_vocabulary::identity::RuntimeOwner,
     usage_source: &str,
     replay_discriminator: String,
     turn_id: Option<&TurnId>,
@@ -504,7 +504,7 @@ pub fn direct_effect_invocation(
 const DIRECT_EFFECT_FAMILY_VERSION: u8 = 3;
 
 fn direct_effect_replay_preimage(
-    owner: &crate::RuntimeOwner,
+    owner: &lash_vocabulary::identity::RuntimeOwner,
     turn_id: Option<&TurnId>,
     usage_source: &str,
     replay_discriminator: &str,
@@ -517,12 +517,8 @@ fn direct_effect_replay_preimage(
     // `process:<id>`. The effect address carries the execution scope too, so
     // the two owners' keys never share an address either way.
     match owner {
-        lash_core_store::runtime_owner::RuntimeOwner::Session(session_id) => {
-            identity.string(session_id)
-        }
-        lash_core_store::runtime_owner::RuntimeOwner::Process(_) => {
-            identity.string(&owner.to_string())
-        }
+        lash_vocabulary::identity::RuntimeOwner::Session(session_id) => identity.string(session_id),
+        lash_vocabulary::identity::RuntimeOwner::Process(_) => identity.string(&owner.to_string()),
     }
     identity.optional(turn_id, |identity, turn_id| identity.string(turn_id));
     identity.string(usage_source);
@@ -847,7 +843,7 @@ mod tests {
 
         let discriminator = direct_request_discriminator(None, None, 1);
         let preimage = direct_effect_replay_preimage(
-            &lash_core_store::runtime_owner::RuntimeOwner::Session(SessionId::from("s")),
+            &lash_vocabulary::identity::RuntimeOwner::Session(SessionId::from("s")),
             Some(&TurnId::from("t")),
             "u",
             &discriminator,
@@ -859,7 +855,7 @@ mod tests {
         assert_eq!(
             direct_effect_invocation(
                 &ExecutionScope::turn("s", "t"),
-                &lash_core_store::runtime_owner::RuntimeOwner::Session(SessionId::from("s")),
+                &lash_vocabulary::identity::RuntimeOwner::Session(SessionId::from("s")),
                 "u",
                 discriminator,
                 Some(&TurnId::from("t")),
@@ -878,7 +874,7 @@ mod tests {
             0,
         );
         let first_preimage = direct_effect_replay_preimage(
-            &lash_core_store::runtime_owner::RuntimeOwner::Session(SessionId::from("s")),
+            &lash_vocabulary::identity::RuntimeOwner::Session(SessionId::from("s")),
             Some(&TurnId::from("t")),
             "u",
             &first_discriminator,
@@ -889,7 +885,7 @@ mod tests {
         );
         let first = direct_effect_invocation(
             &ExecutionScope::turn("s", "t"),
-            &lash_core_store::runtime_owner::RuntimeOwner::Session(SessionId::from("s")),
+            &lash_vocabulary::identity::RuntimeOwner::Session(SessionId::from("s")),
             "u",
             first_discriminator,
             Some(&TurnId::from("t")),
@@ -901,7 +897,7 @@ mod tests {
         );
         let second_discriminator = direct_request_discriminator(None, None, 1);
         let second_preimage = direct_effect_replay_preimage(
-            &lash_core_store::runtime_owner::RuntimeOwner::Session(SessionId::from("s")),
+            &lash_vocabulary::identity::RuntimeOwner::Session(SessionId::from("s")),
             Some(&TurnId::from("t")),
             "u:direct:v2:caller:21:x",
             &second_discriminator,
@@ -912,7 +908,7 @@ mod tests {
         );
         let second = direct_effect_invocation(
             &ExecutionScope::turn("s", "t"),
-            &lash_core_store::runtime_owner::RuntimeOwner::Session(SessionId::from("s")),
+            &lash_vocabulary::identity::RuntimeOwner::Session(SessionId::from("s")),
             "u:direct:v2:caller:21:x",
             second_discriminator,
             Some(&TurnId::from("t")),

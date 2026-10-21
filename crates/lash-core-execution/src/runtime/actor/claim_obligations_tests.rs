@@ -14,13 +14,17 @@ use lash_core_store::tool_run::{
 };
 use lash_durable::domain::{OwnerKey, RunSeq};
 use lash_durable::{ActorKey, ActorTx, DurableInstant, Epoch, MailSeq, OpenedActor, StateRevision};
-use lash_protocol_types::{ExecutionLimit, ExecutionPolicy, SessionId, TurnId};
+use lash_protocol_types::ExecutionLimit;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
+use lash_vocabulary::tool_contract::ExecutionPolicy;
 
 use super::{ReadScope, RecordedWork, SessionObligations, Staged};
+use crate::ToolCallId;
 use crate::runtime::actor::round::{self, AdmittedExecution, ExecutionDraft};
 use crate::tool_run::{AdmittedBinding, PresentationBinding};
-use crate::{ToolCallId, ToolId};
 use lash_core_store::tool_run::SettledOutput;
+use lash_vocabulary::tool_contract::ToolId;
 
 fn session() -> SessionId {
     SessionId::try_from("s".to_owned()).unwrap()
@@ -50,7 +54,7 @@ fn limits() -> DecodeLimits {
 /// The binding of a call to `owner`'s provider `tools`, with no
 /// presentation callbacks.
 fn bound_to(owner: &str) -> AdmittedBinding {
-    let provider = crate::plugin::PluginCallbackIdentity {
+    let provider = lash_vocabulary::providers::PluginCallbackIdentity {
         owner: owner.to_owned(),
         key: "tool_provider:tools".to_owned(),
     };
@@ -106,8 +110,11 @@ fn settling(member: &AdmittedExecution) -> ActorTx {
 }
 
 fn token(owner: &str) -> String {
-    crate::ObligationToken::for_callback(crate::RegistryKind::Session, &bound_to(owner).executable)
-        .to_string()
+    lash_vocabulary::claims::ObligationToken::for_callback(
+        lash_vocabulary::claims::RegistryKind::Session,
+        &bound_to(owner).executable,
+    )
+    .to_string()
 }
 
 /// A commit at the claim's epoch that states no root's debts.
@@ -264,9 +271,10 @@ async fn a_refused_unstarted_turn_on_an_unreadable_head_keeps_the_heads_requirem
 
 /// What `requirements` is as claim tokens, in the order `requires` answers.
 fn hard(requirements: &lash_kernel_doc::ExecutionRequirements) -> Vec<String> {
-    let mut tokens: Vec<String> = crate::ObligationToken::for_requirements(requirements)
-        .map(String::from)
-        .collect();
+    let mut tokens: Vec<String> =
+        lash_vocabulary::claims::ObligationToken::for_requirements(requirements)
+            .map(String::from)
+            .collect();
     tokens.sort();
     tokens
 }
@@ -275,7 +283,10 @@ fn hard(requirements: &lash_kernel_doc::ExecutionRequirements) -> Vec<String> {
 /// provider and a codec version.
 fn record() -> lash_kernel_doc::ExecutionRequirements {
     lash_kernel_doc::ExecutionRequirements {
-        natives: [lash_kernel_doc::FunctionId::from_bytes([3; 32])].into(),
+        natives: [lash_vocabulary::legacy_names::FunctionId::from_bytes(
+            [3; 32],
+        )]
+        .into(),
         kernels: [1].into(),
         providers: ["o/p".to_owned()].into(),
         codecs: [("o/q".to_owned(), 2)].into(),
@@ -313,7 +324,9 @@ fn an_execution_roots_hard_record_is_required_while_the_root_stands() {
         .unwrap();
     assert_eq!(work.requires(), hard(&record()));
     assert_eq!(
-        crate::ObligationToken::requirements_of(work.requires().iter().map(String::as_str)),
+        lash_vocabulary::claims::ObligationToken::requirements_of(
+            work.requires().iter().map(String::as_str)
+        ),
         record(),
         "the tokens read back as the record"
     );
@@ -332,13 +345,13 @@ fn an_execution_roots_hard_record_is_required_while_the_root_stands() {
 /// settles; then nothing of it is required.
 #[test]
 fn a_matched_call_owes_its_provider_and_codec_until_it_settles() {
-    let provider = crate::plugin::ToolProviderHandle::new(
-        crate::RegistryKind::Session,
+    let provider = lash_vocabulary::providers::ToolProviderHandle::new(
+        lash_vocabulary::claims::RegistryKind::Session,
         "o",
         crate::tool_provider_key!("p"),
     );
-    let codec = crate::plugin::ToolProviderHandle::new(
-        crate::RegistryKind::Session,
+    let codec = lash_vocabulary::providers::ToolProviderHandle::new(
+        lash_vocabulary::claims::RegistryKind::Session,
         "o",
         crate::tool_provider_key!("q"),
     );
@@ -347,9 +360,9 @@ fn a_matched_call_owes_its_provider_and_codec_until_it_settles() {
         provider,
         policy: ExecutionPolicy::Once,
         projection: Default::default(),
-        payload: Some(lash_core_store::tool_surface::ExecutionBinding {
+        payload: Some(lash_vocabulary::providers::ExecutionBinding {
             codec,
-            format: crate::FormatVersion::new(2).unwrap(),
+            format: lash_vocabulary::providers::FormatVersion::new(2).unwrap(),
             payload: serde_json::json!({}),
         }),
         source: lash_core_store::tool_surface::LinkSource::Advertised,

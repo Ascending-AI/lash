@@ -1,7 +1,7 @@
 use super::*;
 use crate::ActorContext;
-use crate::SessionId;
 use crate::facade_support::RuntimeSessionStateFacadeOps;
+use lash_vocabulary::identity::SessionId;
 
 impl LashRuntime {
     pub fn session_id(&self) -> &SessionId {
@@ -696,7 +696,10 @@ impl LashRuntime {
         let Some(store) = self.services.store.clone() else {
             let receipt = crate::SessionCommandReceipt {
                 session_id,
-                batch_id: crate::BatchId::prefixed("inline-command:", uuid::Uuid::new_v4()),
+                batch_id: lash_vocabulary::identity::BatchId::prefixed(
+                    "inline-command:",
+                    uuid::Uuid::new_v4(),
+                ),
                 source_key,
             };
             self.apply_session_command_after_admission(vec![command], None)

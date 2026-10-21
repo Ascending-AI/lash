@@ -12,8 +12,8 @@ const PROCESS_ENV_PREFIX_VERSION: &str = "process-env:v6:blake3:";
 /// version_guard(items(LASH_PROCESS_ENV_DOMAIN_VERSION, process_env_ref_for_bytes))
 const LASH_PROCESS_ENV_DOMAIN_VERSION: &str = "lash-process-env/v6";
 
-use crate::ProcessId;
 pub use crate::process_env::*;
+use lash_vocabulary::identity::ProcessId;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -31,7 +31,7 @@ use std::fmt;
 )]
 pub fn mint_process_id() -> ProcessId {
     ProcessId::minted(
-        lash_protocol_types::identity::ProcessIdRegistrar::REGISTRAR,
+        lash_vocabulary::identity::ProcessIdRegistrar::REGISTRAR,
         uuid::Uuid::now_v7().as_u128(),
     )
     .expect("UUIDv7 generator supplies valid process-id bits")
@@ -74,7 +74,7 @@ impl ProcessIdMint {
         // Version 7 in the version nibble and the RFC 4122 variant, around a
         // counter where UUIDv7 carries its random bits.
         ProcessId::minted(
-            lash_protocol_types::identity::ProcessIdRegistrar::REGISTRAR,
+            lash_vocabulary::identity::ProcessIdRegistrar::REGISTRAR,
             (u128::from(ordinal) & ((1_u128 << 62) - 1))
                 | ((u128::from(ordinal) >> 62) << 64)
                 | (0x7_u128 << 76)
@@ -350,7 +350,7 @@ fn write_scope(
     encoder: &mut crate::stable_identity::IdentityEncoder,
     scope: &crate::ExecutionScope,
 ) {
-    let (kind, session_id): (u8, Option<&crate::SessionId>) = match scope {
+    let (kind, session_id): (u8, Option<&lash_vocabulary::identity::SessionId>) = match scope {
         crate::ExecutionScope::Turn { session_id, .. } => (1, Some(session_id)),
         crate::ExecutionScope::Process { .. } => (2, None),
         crate::ExecutionScope::SessionOperation { session_id, .. } => (3, Some(session_id)),

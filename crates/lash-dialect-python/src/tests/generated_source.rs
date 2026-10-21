@@ -175,7 +175,7 @@ fn smith_and_dialect_batches_reconstruct_without_installed_helpers() {
     let library = lash_kernel_dialect::NamedLibrary::from_registry(&built.registry).unwrap();
     let env_namespaces = lash_kernel_dialect::Namespaces::of_effects(
         &Default::default(),
-        &lash_kernel_doc::ContractId::new("1"),
+        &lash_vocabulary::operations::ContractId::new("1"),
         &Default::default(),
     )
     .expect("the test's effects are operations");

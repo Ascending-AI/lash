@@ -54,7 +54,7 @@ fn native_expression_depth_respects_the_document_limit() {
     };
     let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
         &Default::default(),
-        &lash_kernel_doc::ContractId::new("1"),
+        &lash_vocabulary::operations::ContractId::new("1"),
         &Default::default(),
     )
     .expect("the test's effects are operations");

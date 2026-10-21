@@ -7,7 +7,11 @@ use std::collections::BTreeMap;
 
 use lash_kernel_dialect::workflow::ModuleRefusal;
 use lash_kernel_dialect::{Environment, Lowered, Mode};
-use lash_kernel_doc::{MapType, Name, Param, Signature, Type};
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::types::MapType;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 use super::machine;
 
@@ -15,7 +19,7 @@ fn module(source: &str) -> Result<Lowered, lash_kernel_dialect::Diagnostic> {
     let effects = machine::effects();
     let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
         &effects,
-        &lash_kernel_doc::ContractId::new("1"),
+        &lash_vocabulary::operations::ContractId::new("1"),
         machine::controls(),
     )
     .expect("the test's effects are operations");
@@ -146,7 +150,8 @@ if helper():
 /// keywords naming its parameters, as a cell calls a tool by its one name.
 #[test]
 fn a_module_calls_a_namespaced_tool_by_its_dotted_path() {
-    let show = lash_kernel_doc::EffectName::new("display.show_message").expect("a tool's name");
+    let show = lash_vocabulary::legacy_names::EffectName::new("display.show_message")
+        .expect("a tool's name");
     let effects = BTreeMap::from([(
         show.clone(),
         Signature {
@@ -156,7 +161,7 @@ fn a_module_calls_a_namespaced_tool_by_its_dotted_path() {
     )]);
     let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
         &effects,
-        &lash_kernel_doc::ContractId::new("1"),
+        &lash_vocabulary::operations::ContractId::new("1"),
         &Default::default(),
     )
     .expect("the test's effects are operations");
@@ -174,14 +179,15 @@ fn a_module_calls_a_namespaced_tool_by_its_dotted_path() {
 /// declared fields, and the performed argument stays that one record.
 #[test]
 fn tool_keywords_name_the_declared_input_fields() {
-    use lash_kernel_doc::{Datum, EffectName};
+    use lash_kernel_doc::Datum;
     use lash_kernel_vm::{End, Outcome, Request};
+    use lash_vocabulary::legacy_names::EffectName;
 
     let show = EffectName::new("display.show_message").expect("a tool's name");
     let projected = |schema: serde_json::Value| {
-        lash_kernel_check::type_of_schema(&schema).expect("a tool's input type")
+        lash_vocabulary::schema::type_of_schema(&schema).expect("a tool's input type")
     };
-    let signature = lash_kernel_check::tool_signature(
+    let signature = lash_vocabulary::schema::tool_signature(
         projected(serde_json::json!({
             "type": "object",
             "properties": {
@@ -192,12 +198,12 @@ fn tool_keywords_name_the_declared_input_fields() {
             "additionalProperties": false
         })),
         false,
-        lash_kernel_doc::Type::Null,
+        lash_vocabulary::types::Type::Null,
     );
     let effects = BTreeMap::from([(show.clone(), signature.clone())]);
     let environment_namespaces = lash_kernel_dialect::Namespaces::of_effects(
         &effects,
-        &lash_kernel_doc::ContractId::new("1"),
+        &lash_vocabulary::operations::ContractId::new("1"),
         machine::controls(),
     )
     .expect("the test's effects are operations");
@@ -228,9 +234,9 @@ fn tool_keywords_name_the_declared_input_fields() {
             .map(|(effect, signature)| {
                 (
                     effect.clone(),
-                    lash_kernel_doc::OperationRequirement::new(
+                    lash_vocabulary::operations::OperationRequirement::new(
                         signature.clone(),
-                        lash_kernel_doc::ContractId::new("1"),
+                        lash_vocabulary::operations::ContractId::new("1"),
                     ),
                 )
             })

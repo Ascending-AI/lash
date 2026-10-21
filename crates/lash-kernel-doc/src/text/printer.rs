@@ -2,8 +2,6 @@
 
 use std::collections::BTreeMap;
 
-use super::is_keyword;
-use super::lexer::write_quoted;
 use crate::ast::{
     ActKind, Action, AssignOrder, Atom, Block, Callee, Expr, JoinMode, Literal, Member, Place, Rhs,
     Stmt,
@@ -11,10 +9,16 @@ use crate::ast::{
 use crate::document::Document;
 use crate::function::{Formula, FunctionDefinition, Operand};
 use crate::function_value::{FunctionRepresentation, StartAdapter, StartConvention};
-use crate::name::{FunctionId, FunctionName, Name, is_identifier};
 use crate::number::NumberPolicy;
-use crate::requirement::OperationRequirement;
-use crate::types::{Signature, Type};
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::FunctionName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::legacy_names::is_identifier;
+use lash_vocabulary::operations::OperationRequirement;
+use lash_vocabulary::type_text::is_keyword;
+use lash_vocabulary::type_text::write_quoted;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 /// Writes a document as kernel text. [`super::parse_document`] reads the
 /// text back to an equal document.
@@ -26,7 +30,7 @@ pub fn print_document(document: &Document) -> String {
 /// bodies. Locations describe these printed bytes and this document only.
 pub fn print_document_with_ranges(
     document: &Document,
-) -> (String, BTreeMap<crate::Site, crate::Span>) {
+) -> (String, BTreeMap<lash_vocabulary::sites::Site, crate::Span>) {
     let mut printer = Printer::new(&document.manifest.functions);
     let out = &mut printer.out;
     out.push_str(&format!("kernel {}\n", document.manifest.kernel));
@@ -76,8 +80,6 @@ pub fn print_document_with_ranges(
         .collect();
     (printer.out, ranges)
 }
-
-pub use lash_vocabulary::print_type;
 
 /// Writes a library-function definition as kernel text.
 /// [`super::parse_definition`] reads the text back to an equal definition.
@@ -723,7 +725,10 @@ impl<'a> Printer<'a> {
     }
 
     /// One `effect` line for each operation the code requires.
-    fn effects(&mut self, effects: &BTreeMap<crate::EffectName, OperationRequirement>) {
+    fn effects(
+        &mut self,
+        effects: &BTreeMap<lash_vocabulary::legacy_names::EffectName, OperationRequirement>,
+    ) {
         for (name, requirement) in effects {
             self.out.push_str(&format!("effect {name}"));
             self.requirement(requirement);

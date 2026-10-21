@@ -85,7 +85,7 @@ fn search_wide() -> lash::tools::ToolDefinition {
             &["hits"],
         ),
     );
-    wide.manifest.contract = lash_core::ContractSource::Declared {
+    wide.manifest.contract = lash_vocabulary::tool_contract::ContractSource::Declared {
         id: search_a().contract_id(),
     };
     wide
@@ -210,7 +210,7 @@ async fn payload(
         document.manifest.effects.insert(
             lash::workflow::document::EffectName::new(*effect).expect("an effect name"),
             lash::workflow::document::OperationRequirement::new(
-                lash_protocol_types::tool_signature(
+                lash_vocabulary::json_schema::tool_signature(
                     &tool.contract.input_schema.canonical,
                     &tool.contract.output_schema.canonical,
                 ),
@@ -260,7 +260,7 @@ async fn start(
     core: &lash::LashCore,
     env: &ProcessEnv,
     payload: serde_json::Value,
-) -> Result<lash_core::ProcessId, ProcessEnvRefusal> {
+) -> Result<lash_vocabulary::identity::ProcessId, ProcessEnvRefusal> {
     let env_ref = core
         .host_artifacts()
         .publish_process_env(&lash_core::HostArtifactPin::mint(), env)
@@ -303,7 +303,10 @@ fn refusal(error: &lash::EmbedError) -> ProcessEnvRefusal {
     }
 }
 
-async fn answer(core: &lash::LashCore, process: &lash_core::ProcessId) -> serde_json::Value {
+async fn answer(
+    core: &lash::LashCore,
+    process: &lash_vocabulary::identity::ProcessId,
+) -> serde_json::Value {
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(60),
         core.processes().await_output(process),

@@ -27,8 +27,8 @@ use crate::{DeferredOutcome, ToolProvider};
 #[derive(Clone)]
 pub struct DeferredToolProviderRegistration {
     pub(crate) provider: std::sync::Arc<dyn DeferredToolProvider>,
-    resolution_policy: crate::DeferredResolutionPolicy,
-    pub(crate) grants: BTreeMap<crate::ToolId, DispatchGrant>,
+    resolution_policy: lash_vocabulary::providers::DeferredResolutionPolicy,
+    pub(crate) grants: BTreeMap<lash_vocabulary::tool_contract::ToolId, DispatchGrant>,
 }
 
 impl DeferredToolProviderRegistration {
@@ -37,14 +37,17 @@ impl DeferredToolProviderRegistration {
     pub fn new(provider: std::sync::Arc<dyn DeferredToolProvider>) -> Self {
         Self {
             provider,
-            resolution_policy: crate::DeferredResolutionPolicy::default(),
+            resolution_policy: lash_vocabulary::providers::DeferredResolutionPolicy::default(),
             grants: BTreeMap::new(),
         }
     }
 
     /// Select the contract new process environments record for discovery.
     #[must_use]
-    pub fn with_resolution_policy(mut self, policy: crate::DeferredResolutionPolicy) -> Self {
+    pub fn with_resolution_policy(
+        mut self,
+        policy: lash_vocabulary::providers::DeferredResolutionPolicy,
+    ) -> Self {
         self.resolution_policy = policy;
         self
     }
@@ -82,7 +85,7 @@ impl DeferredToolProviderRegistration {
     pub fn dispatch_link(
         &self,
         provider: crate::ProviderKey,
-        tool: &crate::ToolId,
+        tool: &lash_vocabulary::tool_contract::ToolId,
     ) -> Result<crate::OperationLink, DispatchGrantRefusal> {
         let grant = self
             .grants
@@ -128,7 +131,7 @@ pub type DispatchTransform = std::sync::Arc<
 /// call it names.
 #[derive(Clone)]
 pub struct DispatchGrant {
-    pub(crate) definition: crate::ToolDefinition,
+    pub(crate) definition: lash_vocabulary::tool_contract::ToolDefinition,
     pub(crate) transform: DispatchTransform,
 }
 
@@ -136,7 +139,7 @@ impl DispatchGrant {
     /// Grant `definition` dispatch through `transform`, a deterministic,
     /// pure function ([`DispatchTransform`]).
     pub fn new(
-        definition: crate::ToolDefinition,
+        definition: lash_vocabulary::tool_contract::ToolDefinition,
         transform: impl Fn(&serde_json::Value) -> Result<DispatchTarget, TransformRefusal>
         + Send
         + Sync
@@ -155,10 +158,14 @@ impl DispatchGrant {
 pub enum DispatchGrantRefusal {
     /// The registration grants no such tool: only a granted tool dispatches.
     #[error("tool `{tool}` holds no dispatch grant")]
-    NotGranted { tool: crate::ToolId },
+    NotGranted {
+        tool: lash_vocabulary::tool_contract::ToolId,
+    },
     /// The registration already grants a tool with this id.
     #[error("tool `{tool}` is granted dispatch twice")]
-    Duplicate { tool: crate::ToolId },
+    Duplicate {
+        tool: lash_vocabulary::tool_contract::ToolId,
+    },
 }
 
 /// Why a granted tool's call dispatches nothing: a typed tool failure its
@@ -167,15 +174,21 @@ pub enum DispatchGrantRefusal {
 pub enum DispatchRefusal {
     /// This node's deferred provider registration does not grant the
     /// linked tool: only a granted tool dispatches.
-    NotGranted { effect: String, tool: crate::ToolId },
+    NotGranted {
+        effect: String,
+        tool: lash_vocabulary::tool_contract::ToolId,
+    },
     /// The transform or provider alias entered a statically linked package root.
     PackageNamespace { path: String },
     /// The grant's transform refused the tool's input.
-    InputRefused { tool: crate::ToolId, reason: String },
+    InputRefused {
+        tool: lash_vocabulary::tool_contract::ToolId,
+        reason: String,
+    },
     /// The grant's transform, run again for the call of the matched tool,
     /// named another call path than the committed match resolved.
     Diverged {
-        tool: crate::ToolId,
+        tool: lash_vocabulary::tool_contract::ToolId,
         committed: String,
         recomputed: String,
     },
@@ -243,7 +256,7 @@ impl DispatchRefusal {
 pub struct DeferredResolveContext<'a> {
     /// The session frame or process whose call paths are resolved.
     /// The scoped address under which this resolver was registered.
-    pub provider: &'a crate::plugin::ToolProviderHandle,
+    pub provider: &'a lash_vocabulary::providers::ToolProviderHandle,
     pub owner: &'a crate::ExecutionOwner,
     /// The admitted logical Run; `None` for a process.
     pub run: Option<&'a crate::runtime::TurnAddress>,
@@ -255,7 +268,7 @@ pub struct DeferredResolveContext<'a> {
 
 impl<'a> DeferredResolveContext<'a> {
     pub fn new(
-        provider: &'a crate::plugin::ToolProviderHandle,
+        provider: &'a lash_vocabulary::providers::ToolProviderHandle,
         owner: &'a crate::ExecutionOwner,
         run: Option<&'a crate::runtime::TurnAddress>,
         capabilities: &'a BTreeMap<crate::SlotId, crate::CapabilityRef>,
@@ -293,7 +306,7 @@ pub trait DeferredToolProvider: ToolProvider {
     /// This is read-only discovery: it must not install routes or perform
     /// externally visible work, since a resolution that has not committed
     /// may run again. What a resolved tool needs to route its calls travels
-    /// in the match's [`crate::ExecutionBinding`].
+    /// in the match's [`lash_vocabulary::providers::ExecutionBinding`].
     async fn resolve(
         &self,
         cx: &DeferredResolveContext<'_>,

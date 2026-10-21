@@ -14,12 +14,18 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::ControlFlow;
 
+use lash_kernel_doc::Action;
+use lash_kernel_doc::Callee;
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Rhs;
+use lash_kernel_doc::Stmt;
 use lash_kernel_doc::heap::{Element, EntityId, HeapFault, Identity, PageReader, PageValue};
 use lash_kernel_doc::snapshot::{CodeReads, SnapshotHeap as _, closure_at};
 use lash_kernel_doc::snapshot::{closure_held, freeze_token, members, reach, token_closure};
-use lash_kernel_doc::{Action, Callee, Expr, Name, Rhs, Stmt, Unit};
 use lash_kernel_state::kernel_internals::{CARD, PagedHeap, StoredCards};
 use lash_kernel_state::paged::{FieldName, HeapWriteError, ObjectKind, SemanticHeap};
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::sites::Unit;
 
 use super::{
     HeldAt, Left, NotSaved, SaveError, SavedFunction, Saving, Token, function_reference,

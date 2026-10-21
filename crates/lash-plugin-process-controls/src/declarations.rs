@@ -19,13 +19,13 @@ use serde_json::Value;
 
 use lash_core::AttemptContext;
 use lash_core::ToolAttemptOutcome;
-use lash_core::ToolDeclaration;
-use lash_core::ToolDefinition;
-use lash_core::ToolIntentKind;
 use lash_core::ToolOutcome;
 use lash_core::ToolOutcomeDone;
 use lash_execution_contracts::tool_intent::ToolIntent;
 use lash_execution_contracts::tool_intent::ToolIntents;
+use lash_vocabulary::ToolIntentKind;
+use lash_vocabulary::tool_contract::ToolDefinition;
+use lash_vocabulary::tool_declaration::ToolDeclaration;
 
 use crate::done_without_intents;
 

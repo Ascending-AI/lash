@@ -114,7 +114,7 @@ async fn witness(
                 let session = crate::open_created_session(
                     "budget-model",
                     &core,
-                    lash_core::SessionId::fixture(session_id),
+                    lash_vocabulary::identity::SessionId::fixture(session_id),
                 )
                 .await
                 .unwrap();

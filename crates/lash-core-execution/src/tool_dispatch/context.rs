@@ -149,9 +149,9 @@ impl<'run> ToolDispatchContext<'run> {
     /// match grants, else the one its surface entry records.
     pub fn routed_provider<'a>(
         &'a self,
-        tool: &crate::ToolId,
-        granted: Option<&'a crate::plugin::ToolProviderHandle>,
-    ) -> Option<&'a crate::plugin::ToolProviderHandle> {
+        tool: &lash_vocabulary::tool_contract::ToolId,
+        granted: Option<&'a lash_vocabulary::providers::ToolProviderHandle>,
+    ) -> Option<&'a lash_vocabulary::providers::ToolProviderHandle> {
         granted.or_else(|| self.routes.entry(tool).map(crate::SurfaceEntry::provider))
     }
 

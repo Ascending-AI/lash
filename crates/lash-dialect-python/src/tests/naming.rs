@@ -4,7 +4,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_kernel_dialect::{CellEnvironment, Environment, Lowered, Mode, Namespaces};
-use lash_kernel_doc::{self as k, EffectName, Name, Param, Signature, Type};
+use lash_kernel_doc as k;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 use super::machine;
 
@@ -37,7 +42,7 @@ fn lower(
 ) -> Result<Lowered, lash_kernel_dialect::Diagnostic> {
     let namespaces = Namespaces::of_effects(
         &effects(names),
-        &lash_kernel_doc::ContractId::new("1"),
+        &lash_vocabulary::operations::ContractId::new("1"),
         &BTreeMap::new(),
     )
     .expect("the law's effects are operations");

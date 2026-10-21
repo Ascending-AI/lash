@@ -5,9 +5,10 @@
 //! live beside it. The session-facing mapping into `SessionError` stays in
 //! `lash-core`.
 
+use crate::RuntimeEffectKind;
 pub use crate::executable_generation::{ExecutableGeneration, ExecutableGenerationRefusal};
-use crate::{RuntimeEffectKind, SessionId};
-pub use lash_vm_protocol::page::HostResource;
+pub use lash_protocol_types::engine_fault::HostResource;
+use lash_vocabulary::identity::SessionId;
 use serde::{Deserialize, Serialize};
 
 mod attachment_retention;
@@ -948,10 +949,7 @@ impl RuntimeError {
     /// [`HostResource::is_retryable`] states whether redrive can succeed.
     #[must_use]
     pub fn host_resource(&self) -> Option<HostResource> {
-        use lash_vm_protocol::{
-            InfrastructureOutcome,
-            page::{HeapFault, PageRefusal},
-        };
+        use lash_protocol_types::engine_fault::{HeapFault, InfrastructureOutcome, PageRefusal};
 
         let RuntimeErrorCause::VmWorker { outcome } = self.cause.as_ref()? else {
             return None;
@@ -1101,7 +1099,7 @@ impl RuntimeError {
 
     /// The input a send was refused for because the host forsook its id
     /// ([`RuntimeErrorCode::TurnInputForsaken`]), from the structured cause.
-    pub fn forsaken_input(&self) -> Option<&crate::InputId> {
+    pub fn forsaken_input(&self) -> Option<&lash_vocabulary::identity::InputId> {
         match self.cause.as_ref()? {
             RuntimeErrorCause::TurnInputForsaken { input_id } => Some(input_id),
             _ => None,
@@ -1110,7 +1108,7 @@ impl RuntimeError {
 
     /// Extracts the deleted session ID for effect-host implementors only from structured
     /// session-deletion causes, returning `None` for all other errors.
-    pub fn deleted_session_id(&self) -> Option<&crate::SessionId> {
+    pub fn deleted_session_id(&self) -> Option<&lash_vocabulary::identity::SessionId> {
         match self.cause.as_ref()? {
             RuntimeErrorCause::SessionDeleted { session_id } => Some(session_id),
             RuntimeErrorCause::ControlPhaseExpired { .. }

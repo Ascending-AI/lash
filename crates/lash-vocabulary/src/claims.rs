@@ -31,34 +31,6 @@ impl RegistryKind {
     }
 }
 
-/// The hard requirement families' prefixes (FIG-6993).
-const NATIVE: &str = "native:";
-const KERNEL: &str = "kernel:";
-const PROVIDER: &str = "provider:";
-const CODEC: &str = "codec:";
-
-/// The hard tokens of four sets of natives, kernels, providers and codecs.
-fn hard<'a>(
-    natives: &'a std::collections::BTreeSet<crate::FunctionId>,
-    kernels: &'a std::collections::BTreeSet<u32>,
-    providers: &'a std::collections::BTreeSet<String>,
-    codecs: &'a std::collections::BTreeSet<(String, u32)>,
-) -> impl Iterator<Item = ObligationToken> + 'a {
-    let natives = natives
-        .iter()
-        .map(|function| ObligationToken(format!("{NATIVE}{function}")));
-    let kernels = kernels
-        .iter()
-        .map(|version| ObligationToken(format!("{KERNEL}{version}")));
-    let providers = providers
-        .iter()
-        .map(|provider| ObligationToken(format!("{PROVIDER}{provider}")));
-    let codecs = codecs
-        .iter()
-        .map(|(provider, version)| ObligationToken(format!("{CODEC}{provider}@{version}")));
-    natives.chain(kernels).chain(providers).chain(codecs)
-}
-
 /// One claim token: what an actor's `requires` holds and a node's `serves`
 /// offers. Only this codec spells them, including the owner token a
 /// deployment serves to refuse a retired owner's outstanding callbacks.
@@ -105,66 +77,6 @@ impl ObligationToken {
         Self(format!("component:{component}@fmt{format}"))
     }
 
-    /// The tokens of a hard requirements record (FIG-6993): `native:<id>`
-    /// for each native-only function the code reached, `kernel:<n>` for
-    /// each kernel version, `provider:<key>` for each linked provider and
-    /// `codec:<key>@<n>` for each codec version that reads a link's
-    /// payload. Work carrying them runs only on a node whose capabilities
-    /// serve each ([`Self::for_capabilities`]).
-    pub fn for_requirements(
-        requirements: &crate::legacy_capabilities::ExecutionRequirements,
-    ) -> impl Iterator<Item = Self> + '_ {
-        hard(
-            &requirements.natives,
-            &requirements.kernels,
-            &requirements.providers,
-            &requirements.codecs,
-        )
-    }
-
-    /// The tokens a node offering `capabilities` serves: the same spelling
-    /// as [`Self::for_requirements`], so a record is met exactly when each
-    /// of its tokens is served.
-    pub fn for_capabilities(
-        capabilities: &crate::legacy_capabilities::NodeCapabilities,
-    ) -> impl Iterator<Item = Self> + '_ {
-        hard(
-            &capabilities.natives,
-            &capabilities.kernels,
-            &capabilities.providers,
-            &capabilities.codecs,
-        )
-    }
-
-    /// The hard requirements `tokens` name, read back: every other token is
-    /// left out, and so is one that does not read.
-    #[must_use]
-    pub fn requirements_of<'a>(
-        tokens: impl IntoIterator<Item = &'a str>,
-    ) -> crate::legacy_capabilities::ExecutionRequirements {
-        let mut requirements = crate::legacy_capabilities::ExecutionRequirements::default();
-        for token in tokens {
-            if let Some(function) = token.strip_prefix(NATIVE) {
-                if let Ok(function) = crate::FunctionId::parse(function) {
-                    requirements.natives.insert(function);
-                }
-            } else if let Some(version) = token.strip_prefix(KERNEL) {
-                if let Ok(version) = version.parse() {
-                    requirements.kernels.insert(version);
-                }
-            } else if let Some(provider) = token.strip_prefix(PROVIDER) {
-                requirements.providers.insert(provider.to_owned());
-            } else if let Some((provider, version)) = token
-                .strip_prefix(CODEC)
-                .and_then(|codec| codec.rsplit_once('@'))
-                && let Ok(version) = version.parse()
-            {
-                requirements.codecs.insert((provider.to_owned(), version));
-            }
-        }
-        requirements
-    }
-
     /// The token as the scheduler stores it.
     #[must_use]
     pub fn as_str(&self) -> &str {
@@ -199,21 +111,23 @@ impl PartialEq<ObligationToken> for String {
 use crate::{FunctionId, package::ProviderName};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// Only pure natives and kernel versions required by selected executable reach.
 pub struct NodeRequirements {
     pub natives: BTreeSet<FunctionId>,
     pub kernels: BTreeSet<u32>,
 }
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 /// Exact callback identity qualified by the registry that hosts it.
 pub struct CallbackRequirement {
     pub registry: RegistryKind,
     pub callback: PluginCallbackIdentity,
 }
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// Known machine/provider/codec/callback/component debt. Resolution adds target debt atomically before admission.
 pub struct ClaimRequirements {
@@ -223,7 +137,7 @@ pub struct ClaimRequirements {
     pub callbacks: BTreeSet<CallbackRequirement>,
     pub components: BTreeSet<(ProcessComponentId, FormatVersion)>,
 }
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// Neutral machine and registered execution capabilities offered by one worker.
 pub struct NodeCapabilities {

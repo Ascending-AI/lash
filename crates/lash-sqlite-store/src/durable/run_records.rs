@@ -205,7 +205,7 @@ fn read_limited(
     if let Some(max_rows) = max_rows.filter(|limit| rows.len() > *limit) {
         return Ok(Err(DurableError::Graph(
             lash_core_store::checkpoint_graph::GraphRefusal::DecodeLimit {
-                dimension: lash_core_store::checkpoint_graph::DecodeDimension::Nodes,
+                dimension: lash_vocabulary::tokens::DecodeDimension::Nodes,
                 actual: rows.len() as u64,
                 limit: max_rows as u64,
             },
@@ -278,15 +278,24 @@ mod tests {
     /// STORE-GRAPH-POLICY: SQLite's hydration refuses the deployment's byte budget.
     #[tokio::test]
     async fn a_sqlite_store_honors_its_deployment_graph_read_policy() {
-        use lash_core_store::checkpoint_graph::{
-            EncodeBudget, ExplicitLimit, GraphReadPolicy, GraphRefusal, GraphStaging, NodeKind,
-            TokenWriter, TypedBody,
-        };
+        use lash_core_store::checkpoint_graph::EncodeBudget;
+        use lash_core_store::checkpoint_graph::ExplicitLimit;
+        use lash_core_store::checkpoint_graph::GraphReadPolicy;
+        use lash_core_store::checkpoint_graph::GraphRefusal;
+        use lash_core_store::checkpoint_graph::GraphStaging;
+        use lash_core_store::checkpoint_graph::NodeKind;
+        use lash_core_store::checkpoint_graph::TypedBody;
         use lash_durable::domain::DurableReads as _;
+        use lash_vocabulary::tokens::TokenWriter;
         let mut options = crate::SqliteStoreSetOptions::memory();
-        options.graph_reads =
-            GraphReadPolicy::new(1, 2, 3, 64, lash_kernel_doc::KernelDataLimits::standard())
-                .unwrap();
+        options.graph_reads = GraphReadPolicy::new(
+            1,
+            2,
+            3,
+            64,
+            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+        )
+        .unwrap();
         let stores = crate::SqliteStoreSet::memory_with_options_and_clock(
             options,
             std::sync::Arc::new(lash_core_ids::clock::SystemClock),
@@ -340,9 +349,12 @@ mod tests {
     /// shared descendant once in one walk, regardless of earlier rounds.
     #[test]
     fn resuming_round_k_reads_only_its_rows_and_nodes_in_one_walk() {
-        use lash_core_store::checkpoint_graph::{
-            EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TokenWriter, TypedBody,
-        };
+        use lash_core_store::checkpoint_graph::EncodeBudget;
+        use lash_core_store::checkpoint_graph::ExplicitLimit;
+        use lash_core_store::checkpoint_graph::GraphStaging;
+        use lash_core_store::checkpoint_graph::NodeKind;
+        use lash_core_store::checkpoint_graph::TypedBody;
+        use lash_vocabulary::tokens::TokenWriter;
         let conn = Connection::open_in_memory().expect("SQLite");
         conn.execute_batch(crate::schema::SCHEMA).expect("schema");
         conn.execute_batch(TABLES).expect("facts");
@@ -433,7 +445,7 @@ mod tests {
             super::super::graph::walk_roots(&conn, &roots, &limits).expect("read"),
             Err(
                 lash_core_store::checkpoint_graph::GraphRefusal::DecodeLimit {
-                    dimension: lash_core_store::checkpoint_graph::DecodeDimension::Nodes,
+                    dimension: lash_vocabulary::tokens::DecodeDimension::Nodes,
                     actual: 3,
                     limit: 2
                 }
@@ -445,7 +457,7 @@ mod tests {
             super::super::graph::walk_roots(&conn, &roots, &limits).expect("read"),
             Err(
                 lash_core_store::checkpoint_graph::GraphRefusal::DecodeLimit {
-                    dimension: lash_core_store::checkpoint_graph::DecodeDimension::TotalBytes,
+                    dimension: lash_vocabulary::tokens::DecodeDimension::TotalBytes,
                     ..
                 }
             )
@@ -474,9 +486,12 @@ mod tests {
     /// D + ceil(N / 128) body SELECTs, each returning at most 128 bodies.
     #[tokio::test]
     async fn run_fact_hydration_uses_bounded_frontiers() {
-        use lash_core_store::checkpoint_graph::{
-            EncodeBudget, ExplicitLimit, GraphStaging, NodeKind, TokenWriter, TypedBody,
-        };
+        use lash_core_store::checkpoint_graph::EncodeBudget;
+        use lash_core_store::checkpoint_graph::ExplicitLimit;
+        use lash_core_store::checkpoint_graph::GraphStaging;
+        use lash_core_store::checkpoint_graph::NodeKind;
+        use lash_core_store::checkpoint_graph::TypedBody;
+        use lash_vocabulary::tokens::TokenWriter;
         for (width, depth, sparse) in [
             (1_usize, 3, false),
             (127, 3, false),
@@ -591,10 +606,18 @@ mod tests {
     /// later root's corruption precede an earlier root's descendant or budget.
     #[test]
     fn frontier_batches_preserve_depth_first_refusals() {
-        use lash_core_store::checkpoint_graph::{
-            BlobEncoding, DecodeDimension, DecodeLimits, EncodeBudget, ExplicitLimit, GraphRefusal,
-            GraphStaging, NodeId, NodeKind, NodeSource as _, TokenWriter, TypedBody,
-        };
+        use lash_core_store::checkpoint_graph::BlobEncoding;
+        use lash_core_store::checkpoint_graph::DecodeLimits;
+        use lash_core_store::checkpoint_graph::EncodeBudget;
+        use lash_core_store::checkpoint_graph::ExplicitLimit;
+        use lash_core_store::checkpoint_graph::GraphRefusal;
+        use lash_core_store::checkpoint_graph::GraphStaging;
+        use lash_core_store::checkpoint_graph::NodeId;
+        use lash_core_store::checkpoint_graph::NodeKind;
+        use lash_core_store::checkpoint_graph::NodeSource as _;
+        use lash_core_store::checkpoint_graph::TypedBody;
+        use lash_vocabulary::tokens::DecodeDimension;
+        use lash_vocabulary::tokens::TokenWriter;
         let conn = Connection::open_in_memory().expect("SQLite");
         conn.execute_batch(crate::schema::SCHEMA).expect("schema");
         let mut staging = GraphStaging::new(EncodeBudget::new(ExplicitLimit::new(u64::MAX)));

@@ -21,10 +21,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash::tools::{StaticToolExecute, StaticToolProvider};
+use lash_core::LlmOutputPart;
+use lash_core::ToolCall;
+use lash_core::ToolOutcome;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent, StreamBlockIdentity};
 use lash_core::runtime::durable::session::SessionActivation;
-use lash_core::{ExecutionPolicy, LlmOutputPart, ToolCall, ToolOutcome};
 use lash_core_execution::DurableSettings;
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, DurableStore, LeaseConfig};
@@ -34,7 +36,9 @@ use lash_execution_contracts::backend::BackendParts;
 use lash_execution_contracts::backend::StoreSet;
 use lash_execution_contracts::projection::NoProjectionProviders;
 use lash_protocol_types::sync::MutexExt as _;
-use lash_protocol_types::{SessionId, TurnId};
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
+use lash_vocabulary::tool_contract::ExecutionPolicy;
 
 const SESSION: &str = "pool-width-session";
 const RUN: &str = "pool-width-turn";
@@ -100,7 +104,7 @@ impl StaticToolExecute for Touch {
 }
 
 fn touch(touched: Arc<Mutex<Vec<u64>>>) -> Arc<dyn lash_core::ToolProvider> {
-    let definition = lash_core::ToolDefinition::raw(
+    let definition = lash_vocabulary::tool_contract::ToolDefinition::raw(
         TOOL,
         TOOL_OPERATION,
         "Answers the number it is given.",

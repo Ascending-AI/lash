@@ -335,7 +335,8 @@ fn null_base_assignment_precedes_key_conversion() {
 /// FIG-6524: only free callees are tool candidates, at their lexical scope.
 #[test]
 fn tool_discovery_resolves_lexical_values_before_namespaces() {
-    let bindings = std::collections::BTreeSet::from([lash_kernel_doc::Name::new("previous")]);
+    let bindings =
+        std::collections::BTreeSet::from([lash_vocabulary::legacy_names::Name::new("previous")]);
     let calls = crate::Parser::default()
         .tool_calls(
             r#"
@@ -353,7 +354,7 @@ fn tool_discovery_resolves_lexical_values_before_namespaces() {
                 super::library(),
                 &lash_kernel_dialect::Namespaces::of_effects(
                     &Default::default(),
-                    &lash_kernel_doc::ContractId::new("1"),
+                    &lash_vocabulary::operations::ContractId::new("1"),
                     &Default::default(),
                 )
                 .expect("the test's effects are operations"),
@@ -385,7 +386,7 @@ fn tool_discovery_survives_refusals_and_ignores_bare_calls() {
                     super::library(),
                     &lash_kernel_dialect::Namespaces::of_effects(
                         &Default::default(),
-                        &lash_kernel_doc::ContractId::new("1"),
+                        &lash_vocabulary::operations::ContractId::new("1"),
                         &Default::default(),
                     )
                     .expect("the test's effects are operations"),

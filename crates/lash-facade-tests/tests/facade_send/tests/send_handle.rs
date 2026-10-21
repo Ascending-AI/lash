@@ -39,11 +39,14 @@ async fn input_probe_distinguishes_unknown_refused_and_accepted() -> Result<()> 
     )
     .plugin(Arc::new(plugin))
     .build(lash_facade_tests::runtime_lease_owner())?;
-    let session = created_session(&core, lash::SessionId::fixture("probe-input-outcome"))
-        .await
-        .open()
-        .await?;
-    let id = lash::TurnId::fixture("probe-before-send");
+    let session = created_session(
+        &core,
+        lash_vocabulary::identity::SessionId::fixture("probe-input-outcome"),
+    )
+    .await
+    .open()
+    .await?;
+    let id = lash_vocabulary::identity::TurnId::fixture("probe-before-send");
     for outcome in [
         session.attach_id(id.clone()).outcome().await?,
         session.durable().attach_id(id.clone()).outcome().await?,
@@ -72,7 +75,7 @@ async fn input_probe_distinguishes_unknown_refused_and_accepted() -> Result<()> 
     );
 
     // Pre-admission errors leave the id reusable: the probe remains provisional.
-    let valid_id = lash::TurnId::fixture("probe-valid-send");
+    let valid_id = lash_vocabulary::identity::TurnId::fixture("probe-valid-send");
     let error = session
         .send(TurnInput::text("valid input"))
         .id(valid_id.clone())
@@ -103,7 +106,7 @@ async fn absent_sessions_answer_unknown_promptly() -> Result<()> {
     let fixture = fixture(1).await?;
     let id = SessionId::fixture("absent-input-outcome");
     let missing = fixture.core.session(id.clone()).durable().await?;
-    let key = lash::TurnId::fixture("never-sent");
+    let key = lash_vocabulary::identity::TurnId::fixture("never-sent");
     let answer = |session: lash::DurableSession| {
         let key = key.clone();
         async move {
@@ -278,7 +281,8 @@ async fn a_settled_run_no_execution_here_can_report_answers_at_once() -> Result<
     let fixture = fixture(1).await?;
     let session = created_session(
         &fixture.core,
-        lash::SessionId::parse("send-no-grace").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("send-no-grace")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -286,7 +290,8 @@ async fn a_settled_run_no_execution_here_can_report_answers_at_once() -> Result<
 
     let handle = session
         .send(TurnInput::text("report me once"))
-        .id(lash::TurnId::parse("no-grace-run").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("no-grace-run")
+            .expect("nonblank host identity"))
         .await?;
     let input_id = handle.input_id().clone();
     let live = handle.output().await?;
@@ -310,16 +315,16 @@ async fn a_settled_run_no_execution_here_can_report_answers_at_once() -> Result<
 /// awaited: everything a resolution of the input reads.
 #[derive(Default)]
 struct StatusReads {
-    input: std::sync::Mutex<Option<lash_core::InputId>>,
+    input: std::sync::Mutex<Option<lash_vocabulary::identity::InputId>>,
     reads: AtomicUsize,
 }
 
 impl StatusReads {
-    fn watch(&self, input: &lash_core::InputId) {
+    fn watch(&self, input: &lash_vocabulary::identity::InputId) {
         *self.input.lock_recover() = Some(input.clone());
     }
 
-    fn watches(&self, input: &lash_core::InputId) -> bool {
+    fn watches(&self, input: &lash_vocabulary::identity::InputId) -> bool {
         self.input.lock_recover().as_ref() == Some(input)
     }
 
@@ -351,8 +356,8 @@ impl lash_core::RuntimeStoreDecorator for CountedStatusReads {
     async fn run_of_input(
         &self,
         session_id: &SessionId,
-        input: &lash_core::InputId,
-    ) -> std::result::Result<Option<lash_core::TurnId>, lash_core::StoreError> {
+        input: &lash_vocabulary::identity::InputId,
+    ) -> std::result::Result<Option<lash_vocabulary::identity::TurnId>, lash_core::StoreError> {
         if self.reads.watches(input) {
             self.reads.count();
         }
@@ -362,7 +367,7 @@ impl lash_core::RuntimeStoreDecorator for CountedStatusReads {
     async fn pending_turn_input(
         &self,
         session_id: &SessionId,
-        input: &lash_core::InputId,
+        input: &lash_vocabulary::identity::InputId,
     ) -> std::result::Result<Option<lash_core::PendingTurnInputRead>, lash_core::StoreError> {
         if self.reads.watches(input) {
             self.reads.count();
@@ -418,7 +423,8 @@ async fn an_unbound_inputs_durable_follower_reads_its_status_once_per_floor_tick
     .await?;
     let session = created_session(
         &fixture.core,
-        lash::SessionId::parse("send-floor-read").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("send-floor-read")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -474,7 +480,8 @@ async fn a_withdrawn_send_answers_cancelled_without_output() -> Result<()> {
     let fixture = fixture(1).await?;
     let session = created_session(
         &fixture.core,
-        lash::SessionId::parse("send-withdrawn").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("send-withdrawn")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -482,12 +489,13 @@ async fn a_withdrawn_send_answers_cancelled_without_output() -> Result<()> {
 
     let running = session
         .send(TurnInput::text(HELD))
-        .id(lash::TurnId::parse("held-run").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("held-run").expect("nonblank host identity"))
         .await?;
     provider_called(&fixture, 1).await;
     let waiting = session
         .send(TurnInput::text("withdraw me"))
-        .id(lash::TurnId::parse("withdrawn-run").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("withdrawn-run")
+            .expect("nonblank host identity"))
         .await?;
     let input_id = waiting.input_id().clone();
     let receipt = waiting.cancel().await?;
@@ -509,7 +517,10 @@ async fn a_withdrawn_send_answers_cancelled_without_output() -> Result<()> {
     assert!(
         matches!(
             session
-                .attach_id(lash::TurnId::parse("withdrawn-run").expect("nonblank host identity"))
+                .attach_id(
+                    lash_vocabulary::identity::TurnId::parse("withdrawn-run")
+                        .expect("nonblank host identity")
+                )
                 .outcome()
                 .await?,
             lash::SendOutcome::Withdrawn { .. }
@@ -558,7 +569,8 @@ async fn an_input_answered_inside_another_run_resolves_answered_with_that_run() 
     let fixture = composing_fixture().await?;
     let session = created_session(
         &fixture.core,
-        lash::SessionId::parse("send-shared-run").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("send-shared-run")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -566,16 +578,16 @@ async fn an_input_answered_inside_another_run_resolves_answered_with_that_run() 
 
     let running = session
         .send(TurnInput::text(HELD))
-        .id(lash::TurnId::parse("held-run").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("held-run").expect("nonblank host identity"))
         .await?;
     provider_called(&fixture, 1).await;
     let second = session
         .send(TurnInput::text("second"))
-        .id(lash::TurnId::parse("second-run").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("second-run").expect("nonblank host identity"))
         .await?;
     let third = session
         .send(TurnInput::text("third"))
-        .id(lash::TurnId::parse("third-run").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("third-run").expect("nonblank host identity"))
         .await?;
     let third_input = third.input_id().clone();
     fixture.release.notify_one();
@@ -586,7 +598,7 @@ async fn an_input_answered_inside_another_run_resolves_answered_with_that_run() 
     assert_eq!(third.status(), lash::TurnStatus::Answered);
     assert_eq!(
         third.run().cloned(),
-        Some(lash::RunId::parse("second-run").unwrap())
+        Some(lash_vocabulary::identity::RunId::parse("second-run").unwrap())
     );
     let third = third.output().expect("an answered input has a report");
     // One turn applied both inputs, each as its own user row (FIG-5288), so
@@ -603,7 +615,10 @@ async fn an_input_answered_inside_another_run_resolves_answered_with_that_run() 
         .find(|application| application.input_id == third_input)
         .map(|application| application.turn_id)
         .expect("the third input was applied");
-    assert_eq!(applied_by, lash_core::TurnId::from("second-run"));
+    assert_eq!(
+        applied_by,
+        lash_vocabulary::identity::TurnId::from("second-run")
+    );
     assert_eq!(
         fixture.calls.load(Ordering::SeqCst),
         2,
@@ -637,23 +652,31 @@ async fn a_session_the_engine_opens_first_reopens_under_its_recorded_protocol() 
     )
     .build(lash_facade_tests::runtime_lease_owner())?;
     let durable = core
-        .session(lash::SessionId::parse("engine-first").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("engine-first")
+                .expect("nonblank host identity"),
+        )
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;
     durable
         .send(TurnInput::text("the engine opens this session first"))
-        .id(lash::TurnId::parse("engine-first-run").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("engine-first-run")
+            .expect("nonblank host identity"))
         .output()
         .await?;
     drop(durable);
 
     let session = core
-        .session(lash::SessionId::parse("engine-first").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("engine-first")
+                .expect("nonblank host identity"),
+        )
         .open()
         .await?;
     let again = session
         .send(TurnInput::text("and a host opens it after"))
-        .id(lash::TurnId::parse("host-after-run").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("host-after-run")
+            .expect("nonblank host identity"))
         .output()
         .await?;
     assert_eq!(again.status(), lash::TurnStatus::Answered);
@@ -695,14 +718,18 @@ async fn a_cancel_reaches_a_run_past_its_frame_switch() -> Result<()> {
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::parse("cancel-past-switch").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("cancel-past-switch")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
     .await?;
     let switched = session
         .send(TurnInput::text("switch frames, then wait"))
-        .id(lash::TurnId::parse("cancel-past-switch-run").expect("nonblank host identity"))
+        .id(
+            lash_vocabulary::identity::TurnId::parse("cancel-past-switch-run")
+                .expect("nonblank host identity"),
+        )
         .output()
         .await?;
     let lash_core::facade_support::TurnOutcome::AgentFrameSwitch { frame_key, .. } =
@@ -734,7 +761,8 @@ async fn a_host_reattaches_by_its_id_alone() -> Result<()> {
     let fixture = fixture(4).await?;
     let session = created_session(
         &fixture.core,
-        lash::SessionId::parse("send-attach-id").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("send-attach-id")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -742,26 +770,33 @@ async fn a_host_reattaches_by_its_id_alone() -> Result<()> {
 
     let running = session
         .send(TurnInput::text(HELD))
-        .id(lash::TurnId::parse("held-run").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("held-run").expect("nonblank host identity"))
         .await?;
     provider_called(&fixture, 1).await;
     let second = session
         .send(TurnInput::text("second"))
-        .id(lash::TurnId::parse("second-run").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("second-run").expect("nonblank host identity"))
         .await?;
     let third = session
         .send(TurnInput::text("third"))
-        .id(lash::TurnId::parse("third-run").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("third-run").expect("nonblank host identity"))
         .await?;
     let durable = fixture
         .core
-        .session(lash::SessionId::parse("send-attach-id").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("send-attach-id")
+                .expect("nonblank host identity"),
+        )
         .durable()
         .await?;
-    let attached =
-        durable.attach_id(lash::TurnId::parse("third-run").expect("nonblank host identity"));
+    let attached = durable.attach_id(
+        lash_vocabulary::identity::TurnId::parse("third-run").expect("nonblank host identity"),
+    );
     assert_eq!(attached.input_id(), third.input_id());
-    assert_eq!(attached.id(), Some(&lash_core::TurnId::from("third-run")));
+    assert_eq!(
+        attached.id(),
+        Some(&lash_vocabulary::identity::TurnId::from("third-run"))
+    );
     fixture.release.notify_one();
     running.outcome().await?;
     second.outcome().await?;
@@ -777,7 +812,10 @@ async fn a_host_reattaches_by_its_id_alone() -> Result<()> {
     );
     assert_eq!(
         session
-            .attach_id(lash::TurnId::parse("third-run").expect("nonblank host identity"))
+            .attach_id(
+                lash_vocabulary::identity::TurnId::parse("third-run")
+                    .expect("nonblank host identity")
+            )
             .outcome()
             .await?
             .status(),
@@ -793,7 +831,8 @@ async fn an_unobserved_run_answers_with_a_reported_gap() -> Result<()> {
     let fixture = fixture(1).await?;
     let session = created_session(
         &fixture.core,
-        lash::SessionId::parse("send-unobserved-run").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("send-unobserved-run")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -801,7 +840,8 @@ async fn an_unobserved_run_answers_with_a_reported_gap() -> Result<()> {
 
     let handle = session
         .send(TurnInput::text("watch me"))
-        .id(lash::TurnId::parse("watched-run").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("watched-run")
+            .expect("nonblank host identity"))
         .await?;
     let input_id = handle.input_id().clone();
     let watched = handle.outcome().await?;
@@ -850,23 +890,30 @@ async fn send_batch_refuses_reserved_source_keys_without_admitting_other_members
     let fixture = fixture(1).await?;
     fixture
         .core
-        .session(lash::SessionId::parse("reserved-batch").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("reserved-batch")
+                .expect("nonblank host identity"),
+        )
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;
     let session = fixture
         .core
-        .session(lash::SessionId::parse("reserved-batch").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("reserved-batch")
+                .expect("nonblank host identity"),
+        )
         .open()
         .await?;
     for key in ["command:refresh_tool_catalog:foreign"] {
         let refused = session
             .send_batch([
                 (
-                    lash::TurnId::parse("host:must-roll-back").expect("nonblank host identity"),
+                    lash_vocabulary::identity::TurnId::parse("host:must-roll-back")
+                        .expect("nonblank host identity"),
                     TurnInput::text("valid member"),
                 ),
                 (
-                    lash::TurnId::parse(key).expect("nonblank host identity"),
+                    lash_vocabulary::identity::TurnId::parse(key).expect("nonblank host identity"),
                     TurnInput::text("reserved member"),
                 ),
             ])
@@ -900,26 +947,35 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
     .await?;
     fixture
         .core
-        .session(lash::SessionId::parse("send-batch").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("send-batch")
+                .expect("nonblank host identity"),
+        )
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;
     let session = fixture
         .core
-        .session(lash::SessionId::parse("send-batch").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("send-batch")
+                .expect("nonblank host identity"),
+        )
         .open()
         .await?;
     let batch = || {
         [
             (
-                lash::TurnId::parse("batch-a").expect("nonblank host identity"),
+                lash_vocabulary::identity::TurnId::parse("batch-a")
+                    .expect("nonblank host identity"),
                 TurnInput::text("first"),
             ),
             (
-                lash::TurnId::parse("batch-b").expect("nonblank host identity"),
+                lash_vocabulary::identity::TurnId::parse("batch-b")
+                    .expect("nonblank host identity"),
                 TurnInput::text("second"),
             ),
             (
-                lash::TurnId::parse("batch-c").expect("nonblank host identity"),
+                lash_vocabulary::identity::TurnId::parse("batch-c")
+                    .expect("nonblank host identity"),
                 TurnInput::text("third"),
             ),
         ]
@@ -929,7 +985,7 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
     assert_eq!(
         handles.iter().map(lash::SendHandle::id).collect::<Vec<_>>(),
         ["batch-a", "batch-b", "batch-c"]
-            .map(|id| Some(lash_core::TurnId::from(id)))
+            .map(|id| Some(lash_vocabulary::identity::TurnId::from(id)))
             .iter()
             .map(Option::as_ref)
             .collect::<Vec<_>>(),
@@ -975,11 +1031,13 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
         session
             .send_batch([
                 (
-                    lash::TurnId::parse("batch-d").expect("nonblank host identity"),
+                    lash_vocabulary::identity::TurnId::parse("batch-d")
+                        .expect("nonblank host identity"),
                     TurnInput::text("new"),
                 ),
                 (
-                    lash::TurnId::parse("batch-b").expect("nonblank host identity"),
+                    lash_vocabulary::identity::TurnId::parse("batch-b")
+                        .expect("nonblank host identity"),
                     TurnInput::text("changed"),
                 ),
             ])
@@ -989,11 +1047,13 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
         session
             .send_batch([
                 (
-                    lash::TurnId::parse("batch-e").expect("nonblank host identity"),
+                    lash_vocabulary::identity::TurnId::parse("batch-e")
+                        .expect("nonblank host identity"),
                     TurnInput::text("once"),
                 ),
                 (
-                    lash::TurnId::parse("batch-e").expect("nonblank host identity"),
+                    lash_vocabulary::identity::TurnId::parse("batch-e")
+                        .expect("nonblank host identity"),
                     TurnInput::text("twice"),
                 ),
             ])
@@ -1001,7 +1061,9 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
     );
     for never in ["batch-d", "batch-e"] {
         let outcome = session
-            .attach_id(lash::TurnId::parse(never).expect("nonblank host identity"))
+            .attach_id(
+                lash_vocabulary::identity::TurnId::parse(never).expect("nonblank host identity"),
+            )
             .outcome()
             .await?;
         assert_eq!(
@@ -1014,35 +1076,49 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
     // These are the current creating, resident, and store-only entry verbs.
     let created = fixture
         .core
-        .session(lash::SessionId::parse("send-entry-matrix").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("send-entry-matrix")
+                .expect("nonblank host identity"),
+        )
         .create(lash::SessionCreation::root(mock_session_spec()))
         .await?;
     let held = created
         .send(TurnInput::text(HELD))
-        .id(lash::TurnId::parse("entry-held").expect("nonblank host identity"))
+        .id(lash_vocabulary::identity::TurnId::parse("entry-held").expect("nonblank host identity"))
         .await?;
     provider_called(&fixture, calls + 1).await;
     let live = fixture
         .core
-        .session(lash::SessionId::parse("send-entry-matrix").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("send-entry-matrix")
+                .expect("nonblank host identity"),
+        )
         .open()
         .await?;
     let durable = fixture
         .core
-        .session(lash::SessionId::parse("send-entry-matrix").expect("nonblank host identity"))
+        .session(
+            lash_vocabulary::identity::SessionId::parse("send-entry-matrix")
+                .expect("nonblank host identity"),
+        )
         .durable()
         .await?;
     let entries = vec![
         live.send(TurnInput::text("resident input"))
-            .id(lash::TurnId::parse("entry-live").expect("nonblank host identity"))
+            .id(lash_vocabulary::identity::TurnId::parse("entry-live")
+                .expect("nonblank host identity"))
             .await?,
         durable
             .send(TurnInput::text("durable input"))
-            .id(lash::TurnId::parse("entry-durable").expect("nonblank host identity"))
+            .id(lash_vocabulary::identity::TurnId::parse("entry-durable")
+                .expect("nonblank host identity"))
             .await?,
         live.durable()
             .send(TurnInput::text("resident durable input"))
-            .id(lash::TurnId::parse("entry-live-durable").expect("nonblank host identity"))
+            .id(
+                lash_vocabulary::identity::TurnId::parse("entry-live-durable")
+                    .expect("nonblank host identity"),
+            )
             .await?,
     ];
     let snapshots = entries
@@ -1052,11 +1128,13 @@ async fn all_ingress_entries_preserve_receipts_caps_and_cancel_outcomes() -> Res
     let cancelled = durable
         .send_batch([
             (
-                lash::TurnId::parse("entry-cancel-a").expect("nonblank host identity"),
+                lash_vocabulary::identity::TurnId::parse("entry-cancel-a")
+                    .expect("nonblank host identity"),
                 TurnInput::text("cancel a"),
             ),
             (
-                lash::TurnId::parse("entry-cancel-b").expect("nonblank host identity"),
+                lash_vocabulary::identity::TurnId::parse("entry-cancel-b")
+                    .expect("nonblank host identity"),
                 TurnInput::text("cancel b"),
             ),
         ])
@@ -1113,7 +1191,8 @@ async fn exact_host_root_settlement(host_id: &str) -> Result<()> {
     let fixture = fixture(1).await?;
     let session = created_session(
         &fixture.core,
-        lash::SessionId::parse("exact-host-settlement").expect("nonblank host identity"),
+        lash_vocabulary::identity::SessionId::parse("exact-host-settlement")
+            .expect("nonblank host identity"),
     )
     .await
     .open()
@@ -1121,27 +1200,33 @@ async fn exact_host_root_settlement(host_id: &str) -> Result<()> {
     let input = TurnInput::text("only once");
     let first = session
         .send(input.clone())
-        .id(lash_core::TurnId::fixture(host_id.to_string()))
+        .id(lash_vocabulary::identity::TurnId::fixture(
+            host_id.to_string(),
+        ))
         .await?;
     let input_id = first.input_id().clone();
     assert_eq!(
         first.outcome().await?.run().cloned(),
-        Some(lash::RunId::parse(host_id).unwrap())
+        Some(lash_vocabulary::identity::RunId::parse(host_id).unwrap())
     );
     let durable = tokio::time::timeout(
         std::time::Duration::from_secs(2),
-        session.run(lash::RunId::parse(host_id).unwrap()).outcome(),
+        session
+            .run(lash_vocabulary::identity::RunId::parse(host_id).unwrap())
+            .outcome(),
     )
     .await
     .expect("the exact host run settles")?;
     assert_eq!(
         durable.run().cloned(),
-        Some(lash::RunId::parse(host_id).unwrap())
+        Some(lash_vocabulary::identity::RunId::parse(host_id).unwrap())
     );
     assert_eq!(durable.status(), lash::TurnStatus::Answered);
     let retry = session
         .send(input)
-        .id(lash_core::TurnId::fixture(host_id.to_string()))
+        .id(lash_vocabulary::identity::TurnId::fixture(
+            host_id.to_string(),
+        ))
         .await?;
     assert_eq!(retry.input_id(), &input_id);
     let retried = tokio::time::timeout(std::time::Duration::from_secs(2), retry.outcome())
@@ -1149,13 +1234,15 @@ async fn exact_host_root_settlement(host_id: &str) -> Result<()> {
         .expect("the settled host id answers its retry")?;
     assert_eq!(
         retried.run().cloned(),
-        Some(lash::RunId::parse(host_id).unwrap())
+        Some(lash_vocabulary::identity::RunId::parse(host_id).unwrap())
     );
     assert_eq!(fixture.calls.load(Ordering::SeqCst), 1);
     assert!(
         matches!(
             session
-                .attach_id(lash_core::TurnId::fixture(host_id.to_string()))
+                .attach_id(lash_vocabulary::identity::TurnId::fixture(
+                    host_id.to_string()
+                ))
                 .cancel()
                 .await?,
             lash::CancelReceipt::UnknownOrRevoked
@@ -1257,17 +1344,19 @@ async fn session_start_discovers_exact_host_run_across_frame_switch() -> Result<
     .build(lash_facade_tests::runtime_lease_owner())?;
     let session = created_session(
         &core,
-        lash::SessionId::fixture("exact-host-run-observation"),
+        lash_vocabulary::identity::SessionId::fixture("exact-host-run-observation"),
     )
     .await
     .open()
     .await?;
     let cursor = session.observe().snapshot().await?.cursor;
     let mut observations = session.observe().subscribe_and_recover(cursor);
-    let host_run = lash::RunId::parse("job:agent-frame:1")?;
+    let host_run = lash_vocabulary::identity::RunId::parse("job:agent-frame:1")?;
     let sent = session
         .send(TurnInput::text("switch frames"))
-        .id(lash::TurnId::fixture(host_run.as_str()))
+        .id(lash_vocabulary::identity::TurnId::fixture(
+            host_run.as_str(),
+        ))
         .await?;
     let switched = sent.output().await?;
     let lash_core::facade_support::TurnOutcome::AgentFrameSwitch { frame_key, .. } =
@@ -1276,7 +1365,10 @@ async fn session_start_discovers_exact_host_run_across_frame_switch() -> Result<
         panic!("the first run switches frame: {:?}", switched.outcome);
     };
     let next_run = lash_core::runtime::durable::session_mail::frame_task_run(frame_key);
-    let expected = [host_run, lash::RunId::parse(next_run.as_str())?];
+    let expected = [
+        host_run,
+        lash_vocabulary::identity::RunId::parse(next_run.as_str())?,
+    ];
     for expected_run in expected {
         let (turn, discovered) = tokio::time::timeout(std::time::Duration::from_secs(20), async {
             loop {
@@ -1296,7 +1388,10 @@ async fn session_start_discovers_exact_host_run_across_frame_switch() -> Result<
                     let run = value["run_id"]
                         .as_str()
                         .expect("turn start names its admitted run");
-                    break Result::Ok((turn_id.clone(), lash::RunId::parse(run)?));
+                    break Result::Ok((
+                        turn_id.clone(),
+                        lash_vocabulary::identity::RunId::parse(run)?,
+                    ));
                 }
             }
         })

@@ -14,11 +14,8 @@
 use lash_core::ActorContext;
 use lash_core::AdmittedScope;
 use lash_core::CancellationToken;
-use lash_core::InputId;
 use lash_core::PendingTurnInputDraft;
 use lash_core::PendingTurnInputReadStatus;
-use lash_core::SessionId;
-use lash_core::TurnId;
 use lash_core::TurnInput;
 use lash_core::TurnInputIngress;
 use lash_core::durable_port::domain::SESSION_ACTOR_FORMATS;
@@ -32,6 +29,9 @@ use lash_durable_test::{Cut, Fault, Scenario, SimClock, SimNodes, SimNodesConfig
 use lash_execution_contracts::backend::Backend;
 use lash_execution_contracts::backend::StoreSet;
 use lash_protocol_types::sync::MutexExt as _;
+use lash_vocabulary::identity::InputId;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
 use std::sync::{Arc, Mutex, OnceLock};
 
 const SESSION: &str = "session-mail-matrix";

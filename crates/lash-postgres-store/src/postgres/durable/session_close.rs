@@ -11,9 +11,9 @@ use lash_durable::domain::{
     DomainRefusal, ScopeKey, SessionCloseRow, SessionCloseStep, SessionCloseWrite,
 };
 use lash_durable::{DurableError, DurableInstant, Epoch};
-use lash_protocol_types::SessionId;
 use lash_store_sql::Dialect;
 use lash_store_sql::durable::session_close::SessionCloseStatements;
+use lash_vocabulary::identity::SessionId;
 use sqlx::PgConnection;
 
 use super::{Committing, corrupt, get, sqlx_failure};

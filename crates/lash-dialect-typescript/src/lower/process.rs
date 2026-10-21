@@ -2,9 +2,15 @@
 
 use std::collections::HashSet;
 
-use lash_kernel_doc::{
-    EffectName, Expr, Literal, Name, Param, RecordType, RecordTypeField, Signature, Type,
-};
+use lash_kernel_doc::Expr;
+use lash_kernel_doc::Literal;
+use lash_vocabulary::legacy_names::EffectName;
+use lash_vocabulary::legacy_names::Name;
+use lash_vocabulary::types::Param;
+use lash_vocabulary::types::RecordType;
+use lash_vocabulary::types::RecordTypeField;
+use lash_vocabulary::types::Signature;
+use lash_vocabulary::types::Type;
 
 use lash_kernel_dialect::workflow::{self, ModuleRefusal};
 

@@ -94,7 +94,8 @@ macro_rules! hook_key {
     }};
 }
 
-pub use lash_core_store::plugin_registrations::{ToolProviderKey, ToolProviderKeyError};
+pub use lash_vocabulary::providers::ToolProviderKey;
+pub use lash_vocabulary::providers::ToolProviderKeyError;
 
 /// A provider key validated at compile time.
 #[macro_export]
