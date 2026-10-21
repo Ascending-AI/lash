@@ -10,7 +10,10 @@ use lash_core_store::tool_run::{
 };
 use lash_durable::domain::{Ordinal, OwnerKey, RunFacts, RunSeq};
 use lash_durable::{ActorKey, ActorTx, DurableInstant, Epoch, MailSeq, OpenedActor, StateRevision};
-use lash_protocol_types::{ExecutionLimit, ExecutionPolicy, SessionId, TurnId};
+use lash_protocol_types::ExecutionLimit;
+use lash_vocabulary::identity::SessionId;
+use lash_vocabulary::identity::TurnId;
+use lash_vocabulary::tool_contract::ExecutionPolicy;
 
 use super::records::{Record, StagedRecord};
 use super::{
@@ -18,9 +21,12 @@ use super::{
     Recovery, RunFold, RunRecords, admit, completed_material, fold, settle, settle_retry,
     settle_staged, start_retry,
 };
-use crate::{ModelToolReturn, ToolCallId, ToolCallOutput, ToolId};
+use crate::ModelToolReturn;
+use crate::ToolCallId;
+use crate::ToolCallOutput;
 use lash_core_store::tool_run::Material;
 use lash_core_store::tool_run::SettledOutput;
+use lash_vocabulary::tool_contract::ToolId;
 
 const RUN: RunSeq = RunSeq(1);
 
@@ -125,6 +131,7 @@ fn repeatable() -> ExecutionPolicy {
 
 fn draft(name: &str, tool: &str, policy: ExecutionPolicy) -> ExecutionDraft {
     ExecutionDraft::new(
+        lash_durable::DurableInstant(0),
         ToolCallId::fixture(name),
         ToolId::new(tool),
         material(name),

@@ -185,6 +185,76 @@ pub(crate) async fn lock_referrer_tx(
     .map(|_| ())
 }
 
+/// Retain exact provenance under the environment's claim and transaction.
+async fn retain_process_env_tx(
+    tx: &mut sqlx::PgConnection,
+    env_ref: &str,
+    referrer: &ArtifactReferrer,
+) -> Result<(), ArtifactStoreError> {
+    async fn read(
+        tx: &mut sqlx::PgConnection,
+        namespace: &str,
+        reference: &str,
+    ) -> Result<Vec<u8>, ArtifactStoreError> {
+        let stored: Option<(Option<Vec<u8>>, Option<crate::keys::Key>)> =
+            crate::observed_sql::query_as(artifact_sql().lash_vm_artifacts.select_stored.sql())
+                .bind(namespace)
+                .bind(reference)
+                .fetch_optional(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(backend)?;
+        match stored {
+            Some((Some(bytes), _)) => Ok(bytes),
+            // Node-bodied documents are terminal package dependencies. The root
+            // pointer is locked and rechecked below before any edge is written.
+            Some((None, Some(_))) if namespace == MODULE_ARTIFACT_NAMESPACE => Ok(Vec::new()),
+            _ => Err(ArtifactStoreError::ArtifactMissing {
+                artifact_ref: reference.into(),
+            }),
+        }
+    }
+    let bytes = read(tx, PROCESS_ENV_NAMESPACE, env_ref).await?;
+    let mut pending = lash_durable::packages::process_env_roots(&bytes)?;
+    let mut found = BTreeSet::new();
+    while let Some(reference) = pending.pop() {
+        if !found.insert(reference.clone()) {
+            continue;
+        }
+        let bytes = read(tx, MODULE_ARTIFACT_NAMESPACE, &reference).await?;
+        pending.extend(lash_durable::packages::content_dependencies(
+            &reference, &bytes,
+        )?);
+    }
+    // Package writers lock sorted artifact keys. Follow the same order and
+    // recheck pointers after locking, since cleanup may have won during reads.
+    for reference in &found {
+        lock_artifact_tx(tx, MODULE_ARTIFACT_NAMESPACE, reference).await?;
+        let exists: bool =
+            crate::observed_sql::query_scalar(artifact_sql().lash_vm_artifacts.exists.sql())
+                .bind(MODULE_ARTIFACT_NAMESPACE)
+                .bind(reference)
+                .fetch_one(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(backend)?;
+        if !exists {
+            return Err(ArtifactStoreError::ArtifactMissing {
+                artifact_ref: reference.clone(),
+            });
+        }
+    }
+    for reference in found {
+        crate::observed_sql::query(artifact_sql().edges.insert_edge.sql())
+            .bind(MODULE_ARTIFACT_NAMESPACE)
+            .bind(reference)
+            .bind(referrer.kind().as_str())
+            .bind(referrer.canonical_id())
+            .execute(crate::observed_sql::executor(&mut *tx))
+            .await
+            .map_err(backend)?;
+    }
+    Ok(())
+}
+
 /// Validate and retain a start's environment in its admission transaction.
 /// The artifact lock orders this acquisition against source cleanup.
 pub(crate) async fn acquire_process_env_tx(
@@ -211,6 +281,7 @@ pub(crate) async fn acquire_process_env_tx(
         }
         .into());
     }
+    retain_process_env_tx(tx, env.as_str(), &referrer).await?;
     crate::observed_sql::query(artifact_sql().edges.insert_edge.sql())
         .bind(PROCESS_ENV_NAMESPACE)
         .bind(env.as_str())
@@ -350,6 +421,9 @@ impl PostgresLashVmArtifactStore {
                     artifact_ref: artifact_ref.to_owned(),
                 });
             }
+        }
+        if namespace == PROCESS_ENV_NAMESPACE {
+            retain_process_env_tx(&mut tx, artifact_ref, &claim.referrer()).await?;
         }
         crate::observed_sql::query(artifact_sql().edges.insert_edge.sql())
             .bind(namespace)
@@ -793,6 +867,9 @@ impl PostgresLashVmArtifactStore {
                     artifact_ref: artifact_ref.clone(),
                     to: carry.to.clone(),
                 });
+            }
+            if namespace == PROCESS_ENV_NAMESPACE {
+                retain_process_env_tx(tx, artifact_ref, &carry.to).await?;
             }
             crate::observed_sql::query(artifact_sql().edges.insert_edge.sql())
                 .bind(namespace)

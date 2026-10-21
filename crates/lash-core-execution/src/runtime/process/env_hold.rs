@@ -194,10 +194,9 @@ pub(crate) async fn hold_launch(
     choice: &super::ProcessStartChoice,
     kind: &str,
     payload: &serde_json::Value,
-    start: &lash_vocabulary::names::LinkedStart,
 ) -> Result<super::EngineLaunch, HoldEnvError> {
     let inspection = engines
-        .inspect_link(kind, start)
+        .inspect_code(kind, payload)
         .await
         .map_err(port_error)?;
     hold_launch_performing(engines, scope, choice, kind, payload, &inspection).await

@@ -35,6 +35,7 @@ impl MemberDraft {
         pin: lash_core_execution::runtime::actor::round::MemberPin,
     ) -> Result<Self, ParentFault> {
         let mut member = Self::new(
+            pin.admitted_at,
             call,
             pin.tool,
             request,
@@ -55,6 +56,7 @@ impl MemberDraft {
     ///
     /// [`ParentFault`] when the request does not stage.
     pub fn new(
+        admitted_at: lash_durable::DurableInstant,
         call: lash_protocol_types::ToolCallId,
         tool: lash_protocol_types::ToolId,
         request: FrozenRequest,
@@ -72,6 +74,7 @@ impl MemberDraft {
         let (policy, limit) = pin;
         Ok(Self {
             draft: ExecutionDraft::new(
+                admitted_at,
                 call,
                 tool,
                 request_material(opener, node),

@@ -27,14 +27,18 @@ use lash_core_store::execution_state::{
     ExecutionGraphCapture, ExecutionGraphPurpose, HydratedExecutionGraph,
 };
 use lash_durable::domain::pages::RootLease;
+use lash_kernel_doc::Datum;
+use lash_kernel_doc::KERNEL_VERSION;
+use lash_kernel_doc::NumberPolicy;
 use lash_kernel_doc::heap::{HeapFault, PageGrant, PageId, PageRef};
-use lash_kernel_doc::{Datum, FunctionId, KERNEL_VERSION, Name, NumberPolicy};
 use lash_kernel_state::paged::session::{Note, SessionNotes, edit_notes, read_notes};
 use lash_kernel_state::paged::{PageAnswer, PageBody, PageSource, SessionRoot};
 use lash_kernel_vm::{SessionEditor, SessionValue};
 use lash_vm_broker::kernel::closure::Closure;
 use lash_vm_broker::kernel::pages::{ParentSeal, SharedSpool, SpoolRoot, answer_page};
 use lash_vm_client::service::LowerFunction;
+use lash_vocabulary::legacy_names::FunctionId;
+use lash_vocabulary::legacy_names::Name;
 
 use super::pages::{PageAccessError, SessionPageAccess};
 use super::snapshot::SessionOpenError;
@@ -534,9 +538,11 @@ impl CodeModeExecutionState {
     /// A saved function's description as a cell is lowered against it,
     /// carried to this build's kernel version.
     fn lower_function(&self, name: &Name, meta: &[u8]) -> Result<LowerFunction, String> {
-        let function =
-            LowerFunction::from_description(meta, lash_kernel_doc::KernelDataLimits::standard())
-                .map_err(|error| format!("the saved function `{name}` does not decode: {error}"))?;
+        let function = LowerFunction::from_description(
+            meta,
+            lash_vocabulary::data_limits::KernelDataLimits::standard(),
+        )
+        .map_err(|error| format!("the saved function `{name}` does not decode: {error}"))?;
         match self.kernel.saved_function(&function.clone().into_saved()) {
             Ok(None) => Ok(function),
             Ok(Some(carried)) => Ok(LowerFunction {
@@ -630,10 +636,11 @@ impl CodeModeExecutionState {
                     name.clone(),
                     function.held.as_ref().map(|held| held.binding.clone()),
                     unusable.to_string(),
+                    saved.environment,
                 )),
             }
         }
-        for (name, _, _) in &dropped {
+        for (name, _, _, _) in &dropped {
             functions.remove(name);
         }
         // A relinked record names its new closure, which the cell's run
@@ -675,9 +682,9 @@ impl CodeModeExecutionState {
                     )
                 })
                 .collect();
-            let drops: Vec<(Name, Option<Name>)> = dropped
+            let drops: Vec<(Name, Option<Name>, lash_kernel_doc::heap::EntityId)> = dropped
                 .iter()
-                .map(|(name, holder, _)| (name.clone(), holder.clone()))
+                .map(|(name, holder, _, environment)| (name.clone(), holder.clone(), *environment))
                 .collect();
             let (session, removed) = self
                 .pages
@@ -690,9 +697,11 @@ impl CodeModeExecutionState {
                     // generated name takes the binding that held it, while
                     // that binding still refers to it.
                     let mut removed = Vec::new();
-                    for (name, holder) in &drops {
+                    for (name, holder, environment) in &drops {
                         let holder = match holder {
-                            Some(holder) if editor.refers(holder, name)? => Some(holder.clone()),
+                            Some(holder) if editor.refers(holder, environment)? => {
+                                Some(holder.clone())
+                            }
                             Some(_) => None,
                             None => Some(name.clone()),
                         };
@@ -708,14 +717,14 @@ impl CodeModeExecutionState {
             next.session = Some(session);
             unbound = removed;
             let root = self.current.notes;
-            let functions: Vec<Name> = dropped.iter().map(|(name, _, _)| name.clone()).collect();
+            let functions: Vec<Name> = dropped.iter().map(|(name, _, _, _)| name.clone()).collect();
             let notes: Vec<(Name, String)> = unbound
                 .iter()
                 .filter_map(|(function, binding)| {
                     dropped
                         .iter()
-                        .find(|(name, _, _)| name == function)
-                        .map(|(_, _, why)| (binding.clone(), why.clone()))
+                        .find(|(name, _, _, _)| name == function)
+                        .map(|(_, _, why, _)| (binding.clone(), why.clone()))
                 })
                 .collect();
             next.notes = self
@@ -734,7 +743,7 @@ impl CodeModeExecutionState {
                 .await?;
         }
         if let Some(notes) = &mut self.view.notes {
-            for (name, _, _) in &dropped {
+            for (name, _, _, _) in &dropped {
                 if let Some(note) = notes.get_mut(name) {
                     note.saved = None;
                     if note.not_carried.is_none() {
@@ -748,9 +757,9 @@ impl CodeModeExecutionState {
                 names.remove(binding);
             }
             self.view.values.remove(binding);
-            if let (Some(notes), Some((_, _, why))) = (
+            if let (Some(notes), Some((_, _, why, _))) = (
                 &mut self.view.notes,
-                dropped.iter().find(|(name, _, _)| name == function),
+                dropped.iter().find(|(name, _, _, _)| name == function),
             ) {
                 let note = notes.entry(binding.clone()).or_default();
                 note.not_carried = Some(why.clone());

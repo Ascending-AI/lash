@@ -539,6 +539,8 @@ pub enum UseBinding {
 pub struct ExecutionEnvironment {
     pub publications: Vec<PublicationRecord>,
     pub roots: BTreeSet<LinkId>,
+    /// Cell roots admitted by this source execution; never supplied by a guest.
+    pub authored: BTreeSet<LinkId>,
     #[serde(with = "lash_vocabulary::ordered_pairs")]
     pub uses: BTreeMap<OperationUse, UseBinding>,
     pub registry: RegistryKind,
@@ -559,6 +561,7 @@ impl ExecutionEnvironment {
         Self {
             publications: Vec::new(),
             roots: BTreeSet::new(),
+            authored: BTreeSet::new(),
             uses: BTreeMap::new(),
             registry,
             requirements: ClaimRequirements::default(),

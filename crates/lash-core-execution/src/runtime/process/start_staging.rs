@@ -1075,8 +1075,8 @@ pub(crate) async fn inspect_start(
         return Ok(None);
     };
     match provider.document_ref(payload).await? {
-        lash_execution_contracts::process::ProcessDocumentRefRead::Named(start) => engines
-            .inspect_link(kind, &start)
+        lash_execution_contracts::process::ProcessDocumentRefRead::Named { .. } => engines
+            .inspect_code(kind, payload)
             .await
             .map(Some)
             .map_err(package_start_error),

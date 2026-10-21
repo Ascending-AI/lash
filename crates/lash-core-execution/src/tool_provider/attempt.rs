@@ -2,6 +2,20 @@
 use super::*;
 
 impl<'run> AttemptContext<'run> {
+    /// The immutable recorded execution that admitted this attempt.
+    pub fn execution_environment(
+        &self,
+    ) -> Option<&lash_core_store::tool_surface::ExecutionEnvironment> {
+        self.linked_execution
+            .as_ref()
+            .map(|execution| execution.environment.as_ref())
+            .or_else(|| {
+                self.enclosing_env
+                    .as_ref()
+                    .map(|parent| parent.env.execution())
+            })
+    }
+
     /// One injected clock snapshot before the provider callback. A committed timer
     /// retains its absolute deadline; replay never recomputes this snapshot.
     pub fn admission_now(&self) -> lash_durable::DurableInstant {
@@ -80,7 +94,7 @@ impl<'run> AttemptContext<'run> {
     /// host-started process or an operation outside a turn. The full turn
     /// address of a process's starting run is on
     /// [`process_spawn_provenance`](Self::process_spawn_provenance).
-    pub fn logical_run(&self) -> Option<crate::TurnId> {
+    pub fn logical_run(&self) -> Option<lash_vocabulary::identity::TurnId> {
         match self.process_spawn_provenance.as_ref() {
             Some(provenance) => provenance.run.as_ref().map(|run| run.turn_id.clone()),
             None => self.parent_scope.scope().logical_run(),
@@ -266,7 +280,7 @@ impl<'run> AttemptContext<'run> {
     /// The execution binding of the deferred match this call runs on, its
     /// readability already checked against the provider's declared formats;
     /// `None` for a call that carries none.
-    pub fn tool_execution_binding(&self) -> Option<&crate::ExecutionBinding> {
+    pub fn tool_execution_binding(&self) -> Option<&lash_vocabulary::providers::ExecutionBinding> {
         self.tool_execution_binding.as_ref()
     }
 
@@ -356,23 +370,8 @@ impl<'run> AttemptContext<'run> {
             .start_payload(&args)
             .map_err(|error| ResolveTargetError::Refused(error.to_string()))?;
         let engine_kind = resolved.draft.engine_kind().as_str().to_owned();
-        let provider = engines.document_provider(&engine_kind).ok_or_else(|| {
-            ResolveTargetError::Refused("the engine has no document provider".into())
-        })?;
-        let start = match provider
-            .document_ref(&payload)
-            .await
-            .map_err(ResolveTargetError::Fault)?
-        {
-            lash_execution_contracts::process::ProcessDocumentRefRead::Named(start) => start,
-            _ => {
-                return Err(ResolveTargetError::Refused(
-                    "the linked start is not retained".into(),
-                ));
-            }
-        };
         let linked = engines
-            .inspect_link(&engine_kind, &start)
+            .inspect_code(&engine_kind, &payload)
             .await
             .map_err(|error| ResolveTargetError::Fault(error.into()))?;
         Ok(crate::ResolvedStartTarget {
@@ -417,19 +416,6 @@ impl<'run> AttemptContext<'run> {
             .inspect(&request)
             .await
             .map_err(|error| refused_or_fault(error.into()))?;
-        let start = lash_vocabulary::names::LinkedStart {
-            link: inline.linked.link,
-            selector: match &inline.linked.selector {
-                lash_execution_contracts::process::linking::ReachSelector::Start(selector) => {
-                    selector.clone()
-                }
-                _ => {
-                    return Err(ResolveTargetError::Refused(
-                        "inline start did not select a start".into(),
-                    ));
-                }
-            },
-        };
         let resolved = lash_execution_contracts::process::ResolvedProcessDefinition {
             definition: lash_execution_contracts::process::ProcessDefinition::new(
                 inline.draft.id(),
@@ -450,7 +436,6 @@ impl<'run> AttemptContext<'run> {
                 linked: inline.linked,
             },
             request,
-            start,
         })
     }
 
@@ -553,32 +538,12 @@ impl<'run> AttemptContext<'run> {
         kind: &str,
         payload: &serde_json::Value,
     ) -> Result<lash_execution_contracts::process::DeclaredLaunch, crate::HoldEnvError> {
-        let start = match self
-            .definition_engines
-            .document_provider(kind)
-            .ok_or_else(|| {
-                crate::HoldEnvError::Fault(PluginError::Session(
-                    "the engine has no document provider".into(),
-                ))
-            })?
-            .document_ref(payload)
-            .await
-            .map_err(crate::HoldEnvError::Fault)?
-        {
-            lash_execution_contracts::process::ProcessDocumentRefRead::Named(start) => start,
-            _ => {
-                return Err(crate::HoldEnvError::Fault(PluginError::Session(
-                    "the linked start is not retained".into(),
-                )));
-            }
-        };
         let launch = crate::runtime::process::hold_launch(
             &self.definition_engines,
             &self.execution_scope,
             choice,
             kind,
             payload,
-            &start,
         )
         .await?;
         self.held_launches.lock_recover().push(launch.env.clone());

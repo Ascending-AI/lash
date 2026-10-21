@@ -364,7 +364,7 @@ pub(crate) struct EffectRead {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RecordedStart {
-    pub(crate) start: lash_vocabulary::names::LinkedStart,
+    pub(crate) code: super::InlineRequest,
     pub(crate) from: StartedFrom,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) admissions: Vec<RecordedAdmission>,

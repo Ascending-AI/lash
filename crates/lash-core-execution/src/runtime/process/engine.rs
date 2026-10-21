@@ -7,7 +7,7 @@ pub struct ProcessEngineRegistration {
     /// The host's retry policies for engine step kinds, over the engine's.
     engine_step_retries: BTreeMap<
         lash_execution_contracts::process::EngineStepKind,
-        lash_protocol_types::ExecutionPolicy,
+        lash_vocabulary::tool_contract::ExecutionPolicy,
     >,
 }
 
@@ -156,7 +156,7 @@ impl ProcessEngineRegistration {
     pub fn with_engine_step_retry(
         mut self,
         kind: lash_execution_contracts::process::EngineStepKind,
-        policy: lash_protocol_types::ExecutionPolicy,
+        policy: lash_vocabulary::tool_contract::ExecutionPolicy,
     ) -> Self {
         self.engine_step_retries.insert(kind, policy);
         self
@@ -198,7 +198,7 @@ struct RetriedEngineSteps {
     steps: Arc<dyn lash_execution_contracts::process::EngineSteps>,
     retries: BTreeMap<
         lash_execution_contracts::process::EngineStepKind,
-        lash_protocol_types::ExecutionPolicy,
+        lash_vocabulary::tool_contract::ExecutionPolicy,
     >,
 }
 
@@ -218,7 +218,7 @@ impl lash_execution_contracts::process::EngineSteps for RetriedEngineSteps {
     fn retry(
         &self,
         kind: &lash_execution_contracts::process::EngineStepKind,
-    ) -> lash_protocol_types::ExecutionPolicy {
+    ) -> lash_vocabulary::tool_contract::ExecutionPolicy {
         self.retries
             .get(kind)
             .copied()
@@ -491,7 +491,30 @@ impl ProcessEngineRegistry {
                     message: error.to_string(),
                 }
             })?
-            .inspect_link(start)
+            .inspect_link(
+                start.link,
+                &lash_execution_contracts::process::linking::ReachSelector::Start(
+                    start.selector.clone(),
+                ),
+            )
+            .await
+    }
+
+    pub async fn inspect_code(
+        &self,
+        kind: &str,
+        payload: &serde_json::Value,
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        self.require(kind)
+            .map_err(|error| {
+                lash_execution_contracts::process::linking::EnginePortError::Unavailable {
+                    message: error.to_string(),
+                }
+            })?
+            .inspect_start(payload)
             .await
     }
 

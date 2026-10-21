@@ -89,7 +89,7 @@ struct InlineStop {
 #[derive(Clone, Serialize, Deserialize)]
 struct CallInput {
     attribution: crate::session::ToolObservationAttribution,
-    definition: crate::ToolDefinition,
+    definition: lash_vocabulary::tool_contract::ToolDefinition,
     pending: Option<Box<crate::sansio::PendingToolCall>>,
     grant: Option<Box<crate::ToolExecutionGrant>>,
     parent: Option<crate::RuntimeInvocation>,
@@ -176,7 +176,10 @@ fn cause<T: Serialize>(kind: &str, value: &T) -> HookCause {
 /// The failure of a call whose outcome its tool's declaration refuses.
 /// The failure an outcome of tool `tool_name` that its admitted
 /// declaration or contract does not admit answers with, naming the tool.
-fn declaration_refused(tool_name: &str, refusal: crate::DeclarationRefusal) -> ToolCallOutput {
+fn declaration_refused(
+    tool_name: &str,
+    refusal: lash_vocabulary::tool_declaration::DeclarationRefusal,
+) -> ToolCallOutput {
     ToolCallOutput::failure(
         crate::ToolFailure::runtime(
             crate::ToolFailureClass::Internal,
@@ -230,10 +233,10 @@ impl<'run> ProductionToolHandlers<'run> {
         &self,
         owner: &crate::EffectOpener,
         call_id: &crate::ToolCallId,
-        tool_id: &crate::ToolId,
+        tool_id: &lash_vocabulary::tool_contract::ToolId,
         args: &serde_json::Value,
         engine: &str,
-        executable: &crate::plugin::PluginCallbackIdentity,
+        executable: &lash_vocabulary::providers::PluginCallbackIdentity,
     ) -> Result<IsolatedToolStart, crate::HoldEnvError> {
         let provider = self
             .context
@@ -252,13 +255,6 @@ impl<'run> ProductionToolHandlers<'run> {
                 run: self.context.resolved_run().map(Arc::as_ref),
             })
             .map_err(crate::HoldEnvError::Refused)?;
-        let linked = crate::runtime::process::linked_start(
-            &self.context.dispatch().process_engines,
-            engine,
-            &start.payload,
-        )
-        .await
-        .map_err(|error| crate::HoldEnvError::Fault(error))?;
         let launch = crate::runtime::process::hold_launch(
             &self.context.dispatch().process_engines,
             self.context.dispatch().effect_controller.execution_scope(),
@@ -269,7 +265,6 @@ impl<'run> ProductionToolHandlers<'run> {
             },
             engine,
             &start.payload,
-            &linked,
         )
         .await?;
         let provenance = owner.session_id().map_or_else(
@@ -457,7 +452,7 @@ impl<'run> ProductionToolHandlers<'run> {
 
     pub(crate) fn with_admitted_declaration(
         mut self,
-        declaration: Option<crate::ToolDeclaration>,
+        declaration: Option<lash_vocabulary::tool_declaration::ToolDeclaration>,
     ) -> Self {
         self.admitted_declaration = declaration;
         self
@@ -869,7 +864,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                         ) {
                             prepared.input.definition.manifest.declaration().admits(
                                 OutcomeShape::Done {
-                                    intents: &[crate::ToolIntentKind::StartProcess],
+                                    intents: &[lash_vocabulary::ToolIntentKind::StartProcess],
                                     control: None,
                                 },
                             )

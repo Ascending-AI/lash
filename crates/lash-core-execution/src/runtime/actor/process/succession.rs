@@ -28,10 +28,8 @@ use lash_durable::{
 use super::activation::{Live, Pass, ProcessActivation, corrupt};
 use super::driver::Driver;
 use super::effects::append_event;
-use crate::ProcessId;
 use crate::runtime::actor::round::RunFold;
 use crate::runtime::process::carry_refusal;
-use crate::runtime::process::relinked_step;
 use lash_execution_contracts::process::EngineState;
 use lash_execution_contracts::process::ProcessEngine;
 use lash_execution_contracts::process::ProcessEventAppendRequest;
@@ -41,6 +39,7 @@ use lash_execution_contracts::process::ProcessSuccessorRefusal;
 use lash_execution_contracts::process::ProcessSuccessorRequest;
 use lash_execution_contracts::process::SUCCESSOR_MAIL;
 use lash_execution_contracts::process::SuccessorCarry;
+use lash_vocabulary::identity::ProcessId;
 
 /// What a successor step did with the pass's transaction.
 pub(super) enum Succession {
@@ -169,12 +168,7 @@ impl ProcessActivation {
         state: Option<&EngineState>,
         fold: Option<&RunFold>,
     ) -> Result<Succession, DurableError> {
-        let ProcessInput::Engine {
-            kind,
-            payload,
-            launch,
-        } = current.record.input.as_ref()
-        else {
+        let ProcessInput::Engine { kind, payload, .. } = current.record.input.as_ref() else {
             return Err(corrupt("a successor request", "the process runs no engine"));
         };
         let successor_env = lash_execution_contracts::process::load_process_env(
@@ -183,21 +177,11 @@ impl ProcessActivation {
         )
         .await
         .map_err(unavailable)?;
-        let refusal = if current.record.cancel_request.is_some() {
-            Some(ProcessSuccessorRefusal::Cancelling)
-        } else {
-            let envs = self.backend.process_env_store();
-            let load = |env_ref| {
-                let envs = std::sync::Arc::clone(&envs);
-                async move {
-                    lash_execution_contracts::process::load_process_env(envs.as_ref(), &env_ref)
-                        .await
-                        .map_err(unavailable)
-                }
-            };
-            let old = load(launch.env.clone()).await?;
-            relinked_step(driver.in_flight_effects(), &old, &successor_env)
-        };
+        let refusal = current
+            .record
+            .cancel_request
+            .is_some()
+            .then_some(ProcessSuccessorRefusal::Cancelling);
         let context = self
             .steps
             .succession_context(current.record, &request, &successor_env)
@@ -205,7 +189,12 @@ impl ProcessActivation {
             .map_err(unavailable)?;
         let inspection = current
             .engine
-            .inspect_link(&context.to)
+            .inspect_link(
+                context.to.link,
+                &lash_execution_contracts::process::linking::ReachSelector::Start(
+                    context.to.selector.clone(),
+                ),
+            )
             .await
             .map_err(unavailable)?;
         let carried = match refusal {
@@ -403,6 +392,40 @@ fn validate_pins(
     resolutions: &[lash_core_store::resolutions::ResolutionRecord],
 ) -> Result<(), String> {
     use lash_execution_contracts::process::linking::OperationNeed;
+    let required: std::collections::BTreeSet<_> = context
+        .predecessor
+        .uses
+        .keys()
+        .chain(context.resolutions.keys())
+        .copied()
+        .collect();
+    if correspondence
+        .uses
+        .keys()
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>()
+        != required
+    {
+        return Err("carry changed live or held use membership".into());
+    }
+    for (source, target) in &correspondence.uses {
+        if !inspection.operations.contains_key(target) {
+            return Err("live use maps outside successor reach".into());
+        }
+        let old = context
+            .predecessor
+            .uses
+            .get(source)
+            .ok_or("source use has no retained binding")?;
+        let new = context
+            .environment
+            .uses
+            .get(target)
+            .ok_or("successor use has no retained binding")?;
+        if old != new {
+            return Err("carry changed a live requirement, route or scoped grant".into());
+        }
+    }
     let mut expected = std::collections::BTreeMap::new();
     for (source, entry) in &context.resolutions {
         let target = correspondence

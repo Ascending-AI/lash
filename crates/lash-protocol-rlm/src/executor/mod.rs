@@ -53,6 +53,7 @@ use lash_vm_broker::kernel::{KernelBroker, KernelCeilings, KernelEnd, KernelFail
 use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 use lash_vm_client::service::{Request, Response};
 use lash_vm_runtime::HostBoundary;
+use lash_vocabulary::legacy_names::Name;
 
 use self::envelope::CellEnvelope;
 use self::host::{CellHost, CellHostLedgers};
@@ -254,7 +255,7 @@ struct LinkedCell {
     graph: host::HostGraph,
     /// The effect identity each call a resumed cell holds open was
     /// performed at.
-    open_sites: BTreeMap<lash_core::ToolCallId, lash_kernel_doc::EffectId>,
+    open_sites: BTreeMap<lash_core::ToolCallId, lash_vocabulary::sites::EffectId>,
     resumed: bool,
 }
 
@@ -523,8 +524,10 @@ async fn run_linked_cell(
     };
     let observation = ctx
         .run_spec()
-        .map_or(lash_kernel_doc::RunObservation::Off, |spec| spec.observe);
-    let trace = trace::CellTrace::new(&ctx, document_identity, &envelope.dialect, segment);
+        .map_or(lash_vocabulary::observation::RunObservation::Off, |spec| {
+            spec.observe
+        });
+    let trace = trace::CellTrace::new(&ctx, envelope.link, &envelope.dialect, segment);
     if let Some(trace) = &trace {
         trace.started();
     }
@@ -970,7 +973,7 @@ async fn end_cell(
     state: &mut CodeModeExecutionState,
     snapshots: &lash_vm_broker::DurableSnapshotStore,
     host: &CellHost<'_>,
-    document: lash_kernel_doc::DocumentId,
+    document: lash_vocabulary::legacy_names::DocumentId,
     ledger: lash_vm_broker::kernel::EffectLedger,
     end: End,
     pages: &lash_vm_broker::kernel::pages::SharedPages,
@@ -1001,7 +1004,7 @@ async fn record_end(
     state: &mut CodeModeExecutionState,
     snapshots: &lash_vm_broker::DurableSnapshotStore,
     host: &CellHost<'_>,
-    document: lash_kernel_doc::DocumentId,
+    document: lash_vocabulary::legacy_names::DocumentId,
     ledger: lash_vm_broker::kernel::EffectLedger,
     end: End,
     pages: &lash_vm_broker::kernel::pages::SharedPages,

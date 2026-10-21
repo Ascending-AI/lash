@@ -24,7 +24,8 @@ use std::time::{Duration, Instant};
 use lash_durable::domain::WaitPurpose;
 use lash_durable::runner::{Runner, RunnerConfig, Stopped};
 use lash_durable::{ActorKey, ActorState, DurableError, NoProbe, NodeId, NodeSpec};
-use lash_protocol_types::{ExecutionLimit, ExecutionPolicy};
+use lash_protocol_types::ExecutionLimit;
+use lash_vocabulary::tool_contract::ExecutionPolicy;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
@@ -32,7 +33,6 @@ use super::process::ProcessActivation;
 use super::wait_laws::{LawBroken, LawOutcome};
 use crate::CancelOrigin;
 use crate::DurableSettings;
-use crate::ProcessId;
 use crate::ScopeId;
 use crate::ToolCallId;
 use crate::ToolCallOutput;
@@ -46,6 +46,7 @@ use lash_core_store::tool_run::{
 };
 use lash_execution_contracts::waits::ParkDeadline;
 use lash_execution_contracts::waits::WaitDeadline;
+use lash_vocabulary::identity::ProcessId;
 
 macro_rules! ensure {
     ($condition:expr, $($message:tt)+) => {
@@ -62,6 +63,7 @@ mod engine_keys;
 mod panicking;
 mod parked_calls;
 mod passes;
+mod steps;
 
 pub use blockers::{
     a_process_awaiting_a_child_reads_waiting_on_that_process,
@@ -288,11 +290,10 @@ fn await_action(script: &Value) -> Result<EngineAction, ProcessInfraError> {
         .ok_or_else(|| infra("an await names no process"))?;
     Ok(EngineAction::AwaitProcess {
         process: ProcessId::parse(target).map_err(infra)?,
-        bound: script["deadline_ms"]
-            .as_u64()
-            .map_or(crate::ParkBound::UntilScopeEnd, |ms| {
-                crate::ParkBound::Within(Duration::from_millis(ms))
-            }),
+        bound: script["deadline_ms"].as_u64().map_or(
+            lash_vocabulary::tool_contract::ParkBound::UntilScopeEnd,
+            |ms| lash_vocabulary::tool_contract::ParkBound::Within(Duration::from_millis(ms)),
+        ),
         site: None,
     })
 }
@@ -378,7 +379,7 @@ const SLEEP_NODE: &str = "sleep-node";
 
 /// The first occurrence of `node`, as the law engine's document
 /// would name it.
-fn law_site(node: &str) -> lash_protocol_types::EffectId {
+fn law_site(node: &str) -> lash_vocabulary::sites::EffectId {
     lash_protocol_types::effect_identity_fixture(node, 1)
 }
 
@@ -415,22 +416,34 @@ impl ProcessEngine for LawEngine {
 
     async fn inspect_link(
         &self,
-        start: &lash_vocabulary::LinkedStart,
+        link: lash_vocabulary::LinkId,
+        selector: &lash_execution_contracts::process::linking::ReachSelector,
     ) -> Result<
         lash_execution_contracts::process::linking::LinkInspection,
         lash_execution_contracts::process::linking::EnginePortError,
     > {
         Ok(lash_execution_contracts::process::linking::LinkInspection {
-            link: start.link,
+            link,
             document: lash_vocabulary::DocumentId::from_bytes([0; 32]),
-            selector: lash_execution_contracts::process::linking::ReachSelector::Start(
-                start.selector.clone(),
-            ),
+            selector: selector.clone(),
             operations: Default::default(),
             machine: Default::default(),
             artifacts: Vec::new(),
             signature: None,
         })
+    }
+    async fn inspect_start(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Err(
+            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
+                operation: "generic fixture has no linked code".into(),
+            },
+        )
     }
     fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
         Default::default()
@@ -524,7 +537,7 @@ impl ProcessEngine for LawEngine {
                 "await" => await_action(&script)?,
                 "await_key" | "key" => EngineAction::PinKey {
                     name: KeyName(PEER_KEY.to_owned()),
-                    bound: crate::ParkBound::UntilScopeEnd,
+                    bound: lash_vocabulary::tool_contract::ParkBound::UntilScopeEnd,
                 },
                 "complete" => ended(json!({"real_terminal": true})),
                 "retry" => law_step("flaky", LAW_FLAKY),
@@ -720,140 +733,6 @@ fn step_output(process: &ProcessId, text: &str) -> Material {
         MaterialRole::AttemptOutput,
         text.to_owned(),
     )
-}
-
-#[async_trait::async_trait]
-impl ProcessSteps for LawSteps {
-    fn stop_grace(&self) -> std::time::Duration {
-        std::time::Duration::from_secs(2)
-    }
-
-    async fn admit(
-        &self,
-        _runtime: &Arc<crate::runtime::process::StepRuntime>,
-        _process: &ProcessRecord,
-        step: &StepRequest,
-        _target: Option<&crate::runtime::process::steps::InvocationTarget>,
-        now_ms: u64,
-    ) -> Result<StepAdmission, StepRefusal> {
-        let policy = match step_tool(step) {
-            LAW_FLAKY => ExecutionPolicy::repeatable(
-                std::num::NonZeroU32::new(3).unwrap_or(std::num::NonZeroU32::MIN),
-                10,
-                50,
-            ),
-            _ => ExecutionPolicy::Once,
-        };
-        let limit = ExecutionLimit::starting_at(now_ms, LONG, LONG);
-        Ok(StepAdmission::new(
-            lash_protocol_types::ToolId::new(step_tool(step)),
-            policy,
-            limit,
-            (step_tool(step) == LAW_PARK).then(|| {
-                ParkDeadline::At(WaitDeadline::at_instant(lash_durable::DurableInstant(
-                    i64::try_from(limit.expires_at).unwrap_or(i64::MAX),
-                )))
-            }),
-        ))
-    }
-
-    fn resolved(
-        &self,
-        process: &ProcessRecord,
-        _step: &StepRequest,
-        _execution: &AdmittedExecution,
-        parked: &Material<CompletionSource>,
-        resolution: Resolution,
-    ) -> SettledOutput {
-        let text = match resolution {
-            Resolution::Ok(value) => {
-                json!({ "resolved": value, "parked": parked.payload() }).to_string()
-            }
-            other => format!("{other:?}"),
-        };
-        SettledOutput::Completed(step_output(&process.id, &text))
-    }
-
-    fn body(
-        &self,
-        _runtime: &std::sync::Arc<crate::runtime::process::StepRuntime>,
-        process: &ProcessRecord,
-        step: &StepRequest,
-        execution: &AdmittedExecution,
-    ) -> crate::runtime::actor::round::MemberBody {
-        if step_tool(step) == LAW_PAGED {
-            return passes::paged_body(process.id.clone(), execution.call().clone());
-        }
-        crate::runtime::actor::round::member_body({
-            let tool = step_tool(step).to_owned();
-            let owner = process.id.clone();
-            let tag = match process.input.as_ref() {
-                ProcessInput::Engine { payload, .. } => {
-                    payload["tag"].as_str().unwrap_or_default().to_owned()
-                }
-                _ => String::new(),
-            };
-            let call = execution.call().clone();
-            let attempt = execution.attempt();
-            // A step that may park re-derives the key of the wait its admission
-            // pinned, as a round member does.
-            let key = execution
-                .draft()
-                .pinned_wait()
-                .and_then(|pinned| waits::host_key(&pinned.wait()).map(|key| (pinned.id, key)));
-            Box::new(move |_token| {
-                Box::pin(async move {
-                    *STEP_ENTRIES
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .entry(call.as_str().to_owned())
-                        .or_default() += 1;
-                    match tool.as_str() {
-                        LAW_FLAKY if attempt == 1 => SettledOutput::Failed(
-                            step_output(&owner, "failed once")
-                                .failure(KnownFailureReason::Reported, Some(10)),
-                        ),
-                        LAW_FLAKY => SettledOutput::Completed(step_output(
-                            &owner,
-                            &format!("succeeded on attempt {attempt}"),
-                        )),
-                        LAW_READY => {
-                            let gate = READY_GATES
-                                .lock()
-                                .unwrap_or_else(PoisonError::into_inner)
-                                .get(&tag)
-                                .cloned();
-                            if let Some(gate) = gate {
-                                gate.wait().await;
-                            }
-                            SettledOutput::Completed(step_output(&owner, "ready"))
-                        }
-                        LAW_PARK => {
-                            let Some((wait, key)) = key else {
-                                return SettledOutput::Interrupted;
-                            };
-                            PARKED_KEYS
-                                .lock()
-                                .unwrap_or_else(PoisonError::into_inner)
-                                .insert(tag, key.as_str().to_owned());
-                            SettledOutput::Waiting(
-                                step_output(&owner, "parked").parked(wait.to_hex()),
-                            )
-                        }
-                        _ => std::future::pending().await,
-                    }
-                })
-            })
-        })
-    }
-}
-
-// --- the rig ----------------------------------------------------------------
-
-/// A runner serving `backend`'s process actors until stopped.
-struct Serving {
-    stop: CancellationToken,
-    task: tokio::task::JoinHandle<Result<Stopped, DurableError>>,
 }
 
 fn serve(backend: &Backend) -> Serving {

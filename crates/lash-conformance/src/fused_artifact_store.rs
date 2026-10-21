@@ -18,6 +18,7 @@ use pretty_assertions::assert_eq;
 /// A durable store accessed through both artifact-store traits over the same
 /// backing storage.
 pub struct ArtifactStoreHandles {
+    pub packages: Arc<dyn lash_durable::packages::PackageStore>,
     pub artifacts: Arc<dyn lash_execution_contracts::module_artifacts::ModuleArtifactStore>,
     pub process_env: Arc<dyn ProcessEnvStore>,
     pub turn_preludes: Arc<dyn lash_execution_contracts::turn_prelude::TurnPreludeStore>,

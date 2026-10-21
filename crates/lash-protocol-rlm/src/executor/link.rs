@@ -184,7 +184,7 @@ pub(super) async fn link_cell(
         })
         .await
         .map_err(package_error)?;
-    let environment = lash_core::facade_support::select_routes(
+    let mut environment = lash_core::facade_support::select_routes(
         &fulfilled.inspection,
         lash_vocabulary::claims::RegistryKind::Session,
         &packages.routes,
@@ -195,6 +195,7 @@ pub(super) async fn link_cell(
         },
     )
     .map_err(package_error)?;
+    environment.authored.insert(fulfilled.inspection.link);
     documents
         .hold(
             &claim,
@@ -204,6 +205,25 @@ pub(super) async fn link_cell(
         )
         .await
         .map_err(package_error)?;
+    let package_store = ctx.actor_context().backend().stores().package_store();
+    for publication in &environment.publications {
+        let key = publication.key();
+        package_store
+            .acquire_publication(&claim, &key)
+            .await
+            .map_err(|error| host_failure(error.to_string()))?;
+        if package_store
+            .publication(&key)
+            .await
+            .map_err(|error| host_failure(error.to_string()))?
+            .as_ref()
+            != Some(publication)
+        {
+            return Err(host_failure(
+                "accepted publication differs from retained provenance",
+            ));
+        }
+    }
     let execution = execution_id(snapshots.exec());
     let mut tx = ctx
         .actor_context()

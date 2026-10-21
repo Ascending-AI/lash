@@ -121,22 +121,34 @@ impl lash_execution_contracts::process::ProcessEngine for HeldProcessEngine {
 
     async fn inspect_link(
         &self,
-        start: &lash_vocabulary::LinkedStart,
+        link: lash_vocabulary::LinkId,
+        selector: &lash_execution_contracts::process::linking::ReachSelector,
     ) -> Result<
         lash_execution_contracts::process::linking::LinkInspection,
         lash_execution_contracts::process::linking::EnginePortError,
     > {
         Ok(lash_execution_contracts::process::linking::LinkInspection {
-            link: start.link,
+            link,
             document: lash_vocabulary::DocumentId::from_bytes([0; 32]),
-            selector: lash_execution_contracts::process::linking::ReachSelector::Start(
-                start.selector.clone(),
-            ),
+            selector: selector.clone(),
             operations: Default::default(),
             machine: Default::default(),
             artifacts: Vec::new(),
             signature: None,
         })
+    }
+    async fn inspect_start(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Err(
+            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
+                operation: "generic fixture has no linked code".into(),
+            },
+        )
     }
     fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
         Default::default()
@@ -292,22 +304,34 @@ impl lash_execution_contracts::process::ProcessEngine for FixtureProcessEngine {
 
     async fn inspect_link(
         &self,
-        start: &lash_vocabulary::LinkedStart,
+        link: lash_vocabulary::LinkId,
+        selector: &lash_execution_contracts::process::linking::ReachSelector,
     ) -> Result<
         lash_execution_contracts::process::linking::LinkInspection,
         lash_execution_contracts::process::linking::EnginePortError,
     > {
         Ok(lash_execution_contracts::process::linking::LinkInspection {
-            link: start.link,
+            link,
             document: lash_vocabulary::DocumentId::from_bytes([0; 32]),
-            selector: lash_execution_contracts::process::linking::ReachSelector::Start(
-                start.selector.clone(),
-            ),
+            selector: selector.clone(),
             operations: Default::default(),
             machine: Default::default(),
             artifacts: Vec::new(),
             signature: None,
         })
+    }
+    async fn inspect_start(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<
+        lash_execution_contracts::process::linking::LinkInspection,
+        lash_execution_contracts::process::linking::EnginePortError,
+    > {
+        Err(
+            lash_execution_contracts::process::linking::EnginePortError::Unsupported {
+                operation: "generic fixture has no linked code".into(),
+            },
+        )
     }
     fn capabilities(&self) -> lash_vocabulary::claims::NodeRequirements {
         Default::default()

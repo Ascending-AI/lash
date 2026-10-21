@@ -166,6 +166,69 @@ fn decode_stored_edge(kind: &str, id: &str) -> Result<ArtifactReferrer, StoreErr
     })
 }
 
+/// Read and retain environment provenance inside the same writer transaction.
+fn retain_process_env_tx(
+    tx: &rusqlite::Connection,
+    env_ref: &str,
+    referrer: &ArtifactReferrer,
+) -> rusqlite::Result<()> {
+    fn read(
+        tx: &rusqlite::Connection,
+        namespace: &str,
+        reference: &str,
+    ) -> rusqlite::Result<Vec<u8>> {
+        let stored: Option<(String, Option<i64>)> = tx
+            .prepare_cached(artifact_sql().refs.select_body_ref.sql())?
+            .query_row(params![namespace, reference], |row| {
+                Ok((crate::codec::hash_column(row, 0)?, row.get(1)?))
+            })
+            .optional()?;
+        let Some((blob, encoding)) = stored else {
+            return Err(artifact_failure(ArtifactStoreError::ArtifactMissing {
+                artifact_ref: reference.into(),
+            }));
+        };
+        if encoding == Some(1) {
+            SqliteStore::module_node_conn(tx, &blob).map_err(sqlite_conversion_error)
+        } else {
+            SqliteStore::get_blob_conn(tx, &BlobRef(blob))
+                .map_err(sqlite_conversion_error)?
+                .ok_or_else(|| {
+                    artifact_failure(ArtifactStoreError::ArtifactMissing {
+                        artifact_ref: reference.into(),
+                    })
+                })
+        }
+    }
+    let bytes = read(tx, PROCESS_ENV_NAMESPACE, env_ref)?;
+    let mut pending = lash_durable::packages::process_env_roots(&bytes)
+        .map_err(|error| artifact_failure(error.into()))?;
+    let mut found = std::collections::BTreeSet::new();
+    while let Some(reference) = pending.pop() {
+        if !found.insert(reference.clone()) {
+            continue;
+        }
+        let bytes = read(tx, MODULE_ARTIFACT_NAMESPACE, &reference)?;
+        pending.extend(
+            lash_durable::packages::content_dependencies(&reference, &bytes)
+                .map_err(|error| artifact_failure(error.into()))?,
+        );
+    }
+    for reference in found {
+        crate::conn::cached_execute(
+            tx,
+            artifact_sql().edges.insert_edge.sql(),
+            params![
+                MODULE_ARTIFACT_NAMESPACE,
+                reference,
+                referrer.kind().as_str(),
+                referrer.canonical_id()
+            ],
+        )?;
+    }
+    Ok(())
+}
+
 /// Validate and retain a start's environment in the transaction admitting
 /// its process. The writer orders this acquisition against source cleanup.
 pub(crate) fn acquire_process_env_tx(
@@ -192,6 +255,7 @@ pub(crate) fn acquire_process_env_tx(
         }
         .into());
     }
+    retain_process_env_tx(tx, env.as_str(), &referrer).map_err(artifact_sqlite_error)?;
     crate::conn::cached_execute(
         tx,
         artifact_sql().edges.insert_edge.sql(),
@@ -297,6 +361,9 @@ impl SqliteStore {
                         artifact_ref,
                     }));
                 }
+                if namespace == PROCESS_ENV_NAMESPACE {
+                    retain_process_env_tx(tx, &artifact_ref, referrer)?;
+                }
                 crate::conn::cached_execute(
                     tx,
                     artifact_sql().edges.insert_edge.sql(),
@@ -338,6 +405,9 @@ impl SqliteStore {
             if let Some(cleanup) = claim.guard_cleanup() {
                 crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now_ms)
                     .map_err(sqlite_conversion_error)?;
+            }
+            if namespace == PROCESS_ENV_NAMESPACE {
+                retain_process_env_tx(tx, &artifact_ref, referrer)?;
             }
             crate::conn::cached_execute(tx, artifact_sql().edges.insert_edge.sql(),
                 params![namespace, artifact_ref, referrer.kind().as_str(), referrer.canonical_id()])?;
@@ -432,6 +502,9 @@ impl SqliteStore {
                     artifact_ref: artifact_ref.clone(),
                     to: carry.to.clone(),
                 }));
+            }
+            if namespace == PROCESS_ENV_NAMESPACE {
+                retain_process_env_tx(tx, artifact_ref, &carry.to)?;
             }
             crate::conn::cached_execute(
                 tx,

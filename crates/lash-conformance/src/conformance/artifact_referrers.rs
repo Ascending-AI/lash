@@ -112,7 +112,10 @@ where
     let key = artifact.key().to_owned();
     let bytes = artifact.to_store_bytes().expect("module bytes");
     let frame = ArtifactReferrer::FrameEnvironment(FrameEnvironmentId::new(
-        lash_core::SessionId::fixture(format!("artifact-race-{}", HostArtifactPin::mint())),
+        lash_vocabulary::identity::SessionId::fixture(format!(
+            "artifact-race-{}",
+            HostArtifactPin::mint()
+        )),
         lash_core::FrameNodeId::new("frame-1").expect("frame node id"),
     ));
     let frame_claim = ReferrerClaim::unguarded(frame.clone()).expect("frame claim");
@@ -402,10 +405,12 @@ where
         .expect("journal identity");
     let values = [
         ArtifactReferrer::FrameEnvironment(FrameEnvironmentId::new(
-            lash_core::SessionId::from("canonical-session"),
+            lash_vocabulary::identity::SessionId::from("canonical-session"),
             lash_core::FrameNodeId::new("canonical-frame").expect("frame id"),
         )),
-        ArtifactReferrer::ProcessRecord(lash_core::ProcessId::fixture("canonical-process")),
+        ArtifactReferrer::ProcessRecord(lash_vocabulary::identity::ProcessId::fixture(
+            "canonical-process",
+        )),
         ArtifactReferrer::Start(lash_core::StartKey::for_host("canonical-start")),
         ArtifactReferrer::StartInput {
             start_key: lash_core::StartKey::for_host("canonical-start"),
@@ -413,9 +418,11 @@ where
         },
         ArtifactReferrer::Execution(journal),
         ArtifactReferrer::HostPin(HostArtifactPin::mint()),
-        ArtifactReferrer::Session(lash_core::SessionId::from("canonical-session")),
+        ArtifactReferrer::Session(lash_vocabulary::identity::SessionId::from(
+            "canonical-session",
+        )),
         ArtifactReferrer::Upload(lash_core::UploadReferrerId::mint(
-            lash_core::SessionId::from("canonical-session"),
+            lash_vocabulary::identity::SessionId::from("canonical-session"),
         )),
         ArtifactReferrer::Source(Box::new(lash_core::AwaitEventKey {
             scope: lash_core::ExecutionScope::turn("canonical-session", "canonical-turn"),
@@ -480,10 +487,10 @@ where
             .await
             .expect("capture publishes");
     }
-    let first = ArtifactReferrer::ProcessRecord(lash_core::ProcessId::fixture(
+    let first = ArtifactReferrer::ProcessRecord(lash_vocabulary::identity::ProcessId::fixture(
         "captured-environment-first",
     ));
-    let second = ArtifactReferrer::ProcessRecord(lash_core::ProcessId::fixture(
+    let second = ArtifactReferrer::ProcessRecord(lash_vocabulary::identity::ProcessId::fixture(
         "captured-environment-second",
     ));
     for reader in [&first, &second] {
@@ -663,5 +670,236 @@ where
             .await
             .expect("read"),
         None
+    );
+}
+
+/// L-ENV-ORIGIN: publishing/acquiring an env and carrying Start to ProcessRecord
+/// retains the exact publication and authored Link closure under the same claim.
+/// Source cleanup, cold acquisition and the final fence cannot lose or resurrect it.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance law validates each store step"
+)]
+pub async fn process_env_carry_retains_exact_origin<F>(make: F)
+where
+    F: Fn() -> ReopenableArtifactStore,
+{
+    use lash_core_store::packages::{LinkRecord, PackageRecord};
+    use lash_vocabulary::{claims::RegistryKind, names::*, package::*};
+    let fixture = make();
+    let handles = fixture.open;
+    let (configured, configured_claim) = pin_claim();
+    let document = DocumentId::from_bytes([73; 32]);
+    handles
+        .artifacts
+        .publish_module_artifact(&configured_claim, &document.to_string(), b"origin document")
+        .await
+        .expect("document");
+    let link = Link {
+        document,
+        fills: Default::default(),
+    };
+    let link = LinkRecord {
+        id: link.identity(),
+        link,
+    };
+    handles
+        .packages
+        .put_link(&configured_claim, &link, &[])
+        .await
+        .expect("Link");
+    let package = Package {
+        path: PackagePath::parse("law").expect("path"),
+        members: [(
+            Segment::new("run").expect("segment"),
+            Member {
+                visibility: Visibility::Public,
+                kind: MemberKind::Export {
+                    link: link.id,
+                    export: ExportName {
+                        name: Name::new("run"),
+                        member: None,
+                    },
+                },
+            },
+        )]
+        .into(),
+    };
+    let package = PackageRecord {
+        id: package.identity(),
+        package,
+    };
+    handles
+        .packages
+        .put_package(&configured_claim, &package)
+        .await
+        .expect("Package");
+    let publication = PublicationRecord {
+        context: PublicationContext {
+            domain: PublicationDomain("law".into()),
+            scope: PublicationScope::Host,
+            publisher: PublisherInstance("configured".into()),
+            root: Segment::new("law").expect("root"),
+        },
+        path: package.package.path.clone(),
+        content: PublishedContent::Package(package.id),
+        code_links: [link.id].into(),
+        imported_publications: Vec::new(),
+    };
+    let key = handles
+        .packages
+        .publish(&configured_claim, &publication)
+        .await
+        .expect("publication");
+    // An authored root is retained independently of the published package roots.
+    let authored = Link {
+        document,
+        fills: [(
+            ImportSlot(0),
+            Fill::Export {
+                link: link.id,
+                export: ExportName {
+                    name: Name::new("run"),
+                    member: None,
+                },
+            },
+        )]
+        .into(),
+    };
+    let authored = LinkRecord {
+        id: authored.identity(),
+        link: authored,
+    };
+    handles
+        .packages
+        .put_link(&configured_claim, &authored, &[])
+        .await
+        .expect("authored root");
+    let mut execution =
+        lash_core_store::tool_surface::ExecutionEnvironment::empty(RegistryKind::Process);
+    execution.publications = vec![publication.clone()];
+    execution.authored.insert(authored.id);
+    let env = lash_core::ProcessEnv::builder(lash_core::MaxToolCalls::new(1024))
+        .execution(execution)
+        .build()
+        .expect("env");
+    let env_ref = env.stable_ref().expect("env ref");
+    let bytes = env.to_store_bytes().expect("env bytes");
+    let start_key = lash_core::StartKey::for_host(format!("origin-{}", HostArtifactPin::mint()));
+    let start = ArtifactReferrer::Start(start_key.clone());
+    let start_claim = ReferrerClaim::guarded(ReferrerGuard::Start {
+        start_key,
+        starter: lash_core::ExecutionScope::runtime_operation("env-origin")
+            .journal_identity()
+            .expect("journal"),
+    });
+    handles
+        .process_env
+        .publish_process_env(&start_claim, &env_ref, &bytes)
+        .await
+        .expect("publish env and origin");
+    handles
+        .artifacts
+        .end_module_referrer(&end(configured))
+        .await
+        .expect("configured end");
+    assert_eq!(
+        handles
+            .packages
+            .publication(&key)
+            .await
+            .expect("publication read"),
+        Some(publication.clone())
+    );
+    let process = ArtifactReferrer::ProcessRecord(lash_vocabulary::identity::ProcessId::fixture(
+        "env-origin",
+    ));
+    handles
+        .process_env
+        .end_process_env_referrer(&ResolvedArtifactCleanup {
+            referrer: start.clone(),
+            carries: vec![ArtifactCarry {
+                artifact: ArtifactName {
+                    store: ArtifactStoreId::ProcessEnv,
+                    artifact_ref: env_ref.as_str().into(),
+                },
+                to: process.clone(),
+            }],
+        })
+        .await
+        .expect("carry env with origin");
+    handles
+        .artifacts
+        .end_module_referrer(&end(start.clone()))
+        .await
+        .expect("start module end");
+    drop(handles);
+    let cold = (fixture.reopen)();
+    assert_eq!(
+        cold.packages
+            .publication(&key)
+            .await
+            .expect("cold provenance"),
+        Some(publication)
+    );
+    assert_eq!(
+        cold.packages
+            .link(&authored.id)
+            .await
+            .expect("cold authored root"),
+        Some(authored.clone())
+    );
+    let (pin, pin_claim) = pin_claim();
+    cold.process_env
+        .acquire_process_env(&pin_claim, &env_ref)
+        .await
+        .expect("cold acquire env and origin");
+    cold.process_env
+        .end_process_env_referrer(&end(process.clone()))
+        .await
+        .expect("process env end");
+    cold.artifacts
+        .end_module_referrer(&end(process))
+        .await
+        .expect("process modules end");
+    assert!(
+        cold.packages
+            .link(&authored.id)
+            .await
+            .expect("pin still owns authored")
+            .is_some()
+    );
+    cold.process_env
+        .end_process_env_referrer(&end(pin.clone()))
+        .await
+        .expect("last env end");
+    cold.artifacts
+        .end_module_referrer(&end(pin))
+        .await
+        .expect("last origin end");
+    assert!(
+        cold.packages
+            .publication(&key)
+            .await
+            .expect("reclaimed publication")
+            .is_none()
+    );
+    assert!(
+        cold.packages
+            .link(&authored.id)
+            .await
+            .expect("reclaimed authored")
+            .is_none()
+    );
+    assert!(
+        cold.artifacts
+            .get_module_artifact(&document.to_string())
+            .await
+            .expect("reclaimed document")
+            .is_none()
+    );
+    assert!(
+        matches!(cold.process_env.publish_process_env(&start_claim, &env_ref, &bytes).await,
+        Err(ArtifactStoreError::ReferrerEnded { referrer }) if referrer == start)
     );
 }

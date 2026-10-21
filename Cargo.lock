@@ -2276,6 +2276,7 @@ dependencies = [
  "lash-internal-core",
  "lash-internal-core-store",
  "lash-internal-core-worker",
+ "lash-internal-durable",
  "lash-internal-execution-contracts",
  "lash-internal-protocol-types",
  "lash-internal-sqlite-store",

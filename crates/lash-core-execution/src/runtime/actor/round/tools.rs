@@ -20,8 +20,9 @@ use lash_core_store::tool_run::{
 };
 use lash_durable::ActorTx;
 use lash_durable::domain::{OwnerKey, RunSeq};
-use lash_protocol_types::{ExecutionLimit, ExecutionPolicy};
+use lash_protocol_types::ExecutionLimit;
 use lash_sansio::sansio::PendingToolCall;
+use lash_vocabulary::tool_contract::ExecutionPolicy;
 
 use super::super::ActorContext;
 use super::super::waits::Resolution;
@@ -29,10 +30,11 @@ use super::{
     AdmittedExecution, ExecutionDraft, MemberBodies, MemberBody, PinnedWaits, PolicyView,
     RoundError, fold, settle,
 };
-use crate::{ToolCallId, ToolId};
+use crate::ToolCallId;
 use lash_core_store::tool_run::Material;
 use lash_core_store::tool_run::SettledOutput;
 use lash_execution_contracts::waits::ParkDeadline;
+use lash_vocabulary::tool_contract::ToolId;
 
 /// A settled member as the turn's machine is answered with it.
 pub type CompletedCall = lash_sansio::sansio::CompletedToolCall<
@@ -42,6 +44,7 @@ pub type CompletedCall = lash_sansio::sansio::CompletedToolCall<
 /// What the catalog pins a member to at admission: never refreshed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MemberPin {
+    pub admitted_at: lash_durable::DurableInstant,
     /// The tool the call names.
     pub tool: ToolId,
     /// Its declared execution policy.
@@ -55,7 +58,7 @@ pub struct MemberPin {
     /// The declaration its call settles under, every attempt and every
     /// owner: its tool's at admission, whatever the host offers since.
     /// `None` when no tool answered the call at admission.
-    pub declaration: Option<crate::ToolDeclaration>,
+    pub declaration: Option<lash_vocabulary::tool_declaration::ToolDeclaration>,
     /// The callbacks its admission bound (S7): the provider that runs it
     /// and the presentation plan its final answer is presented under, on
     /// every owner. What the actor's claim obligations hold while the call
@@ -71,11 +74,12 @@ impl MemberPin {
     pub fn admitted(
         tool: ToolId,
         policy: ExecutionPolicy,
-        bounds: crate::ToolBounds,
+        bounds: lash_vocabulary::tool_contract::ToolBounds,
         now_ms: u64,
     ) -> Self {
         let now = lash_durable::DurableInstant(i64::try_from(now_ms).unwrap_or(i64::MAX));
         Self {
+            admitted_at: now,
             tool,
             policy,
             limit: ExecutionLimit::starting_at(now_ms, bounds.execution, bounds.execution),
@@ -94,7 +98,10 @@ impl MemberPin {
 
     /// This pin with `declaration`, the one its call settles under.
     #[must_use]
-    pub fn with_declaration(mut self, declaration: crate::ToolDeclaration) -> Self {
+    pub fn with_declaration(
+        mut self,
+        declaration: lash_vocabulary::tool_declaration::ToolDeclaration,
+    ) -> Self {
         self.declaration = Some(declaration);
         self
     }
@@ -326,6 +333,7 @@ pub fn call_draft(
     pin: MemberPin,
 ) -> Result<ExecutionDraft, RoundCallsRefusal> {
     Ok(ExecutionDraft::new(
+        pin.admitted_at,
         call.call_id.clone(),
         pin.tool,
         request_material(owner, call)?,

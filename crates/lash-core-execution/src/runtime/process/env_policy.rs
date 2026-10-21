@@ -63,7 +63,6 @@ pub struct ResolvedInlineStart {
     pub target: ResolvedStartTarget,
     /// The function, as its engine's payload.
     pub request: lash_execution_contracts::process::InlineRequest,
-    pub start: lash_vocabulary::names::LinkedStart,
 }
 
 /// The process a start is made inside: its recorded environment and
