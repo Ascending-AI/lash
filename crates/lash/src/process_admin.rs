@@ -79,6 +79,29 @@ fn decode_environment(
 }
 
 impl Processes {
+    /// The node holding this process's committed actor row, or `None` when
+    /// no node holds it (including when the actor does not exist).
+    ///
+    /// This uncached read never claims or wakes the process. The answer may
+    /// immediately become stale; routing by it is optional, and requests sent
+    /// to any node still reach the owner through the store.
+    pub async fn owner_node(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<Option<crate::durable::NodeId>> {
+        let Ok(actor) = crate::durable::ActorKey::process(process_id.as_str()) else {
+            return Ok(None);
+        };
+        Ok(self
+            .core
+            .backend()
+            .durable()
+            .actor(&actor)
+            .await?
+            .and_then(|snapshot| snapshot.owner)
+            .map(|owner| owner.node))
+    }
+
     /// Read a retained tool call by the typed id on its process effect
     /// occurrence. Reads committed round outcomes, including after reopening
     /// the deployment; it runs no engine, tool, hook or current catalog lookup.

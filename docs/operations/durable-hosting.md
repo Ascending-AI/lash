@@ -35,6 +35,16 @@ mailbox row and wakes the actor that owns the work. Whichever node owns that
 actor runs it. A host never drives a turn itself: there is no handler, effect
 controller or work driver for it to call.
 
+Hosts may read `core.session(id).durable().await?.owner_node().await?`
+or `core.processes().owner_node(&process_id).await?` to learn the committed
+actor row's current owner as `Option<lash::durable::NodeId>`. The id is the
+host's `runtime_owner.owner_id`; `None` means no node holds the actor,
+including when the actor does not exist. These reads never claim, wake or
+cache an owner. The answer may be stale immediately. Routing directly to the
+named node is optional: correctness never depends on it, because mail sent
+through any node still wakes the owner through the store. Lash publishes this
+fact; the host owns any routing decision.
+
 ### Retrying host delivery with stable keys
 
 Start a process with `ProcessStartRequest::with_host_start_key(key)` when a

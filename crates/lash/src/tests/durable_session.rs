@@ -158,3 +158,66 @@ async fn every_cell_call_beyond_the_prompt_bound_survives_a_reopen() -> Result<(
     reopened.shutdown().await?;
     Ok(())
 }
+
+/// FIG-7114: owner reads publish the committed actor owner across nodes,
+/// including release and takeover, without acquiring or changing ownership.
+#[tokio::test]
+async fn a_session_owner_read_names_the_owning_node() -> Result<()> {
+    use crate::durable::{ActorKey, CommitLabel, FormatSet, MailTx, NodeId, NodeSpec};
+
+    let backend = sqlite_memory_store_backend().await;
+    let core = |name: &str| {
+        standard_core_builder_over(backend.clone())
+            // Drive claims explicitly so no activation races the read's snapshot.
+            .serve_sessions(false)
+            .build(crate::persistence::LeaseOwnerIdentity::opaque(
+                crate::persistence::LeaseOwnerId::new(name),
+                crate::persistence::LeaseIncarnationId::new(format!("{name}-boot")),
+            ))
+            .expect("reader core")
+    };
+    let core_a = core("owner-A");
+    let core_b = core("owner-B");
+    let session_id = id("owner-read");
+    let process_id = crate::ProcessId::fixture("owner-read");
+    let session = core_b.session(session_id.clone()).durable().await?;
+    let processes = core_b.processes();
+    let store = backend.durable();
+    let session_actor = ActorKey::session(session_id.as_str()).unwrap();
+    let process_actor = ActorKey::process(process_id.as_str()).unwrap();
+    let formats = FormatSet::new("owner-read");
+    let spec = |core: &LashCore| NodeSpec {
+        node: NodeId::new(core.runtime_owner.owner_id.clone()),
+        decodes: vec![formats.clone()],
+        serves: Vec::new(),
+        capabilities: Default::default(),
+        ttl_millis: 60_000,
+    };
+    let a = store.register_node(&spec(&core_a)).await?;
+    let b = store.register_node(&spec(&core_b)).await?;
+
+    assert_eq!(session.owner_node().await?, None);
+    assert_eq!(processes.owner_node(&process_id).await?, None);
+    let mut mail = MailTx::new();
+    mail.create_actor(session_actor.clone(), formats.clone());
+    mail.create_actor(process_actor.clone(), formats);
+    store.commit_mail(mail, CommitLabel::TURN_ADMIT).await?;
+    assert_eq!(store.claim(&a, 2).await?.len(), 2);
+
+    // Reuse B's same handles throughout: no owner fact may be cached.
+    for expected in [Some(a.owner.node.clone()), None, Some(b.owner.node.clone())] {
+        let before_session = store.actor(&session_actor).await?;
+        let before_process = store.actor(&process_actor).await?;
+        assert_eq!(session.owner_node().await?, expected);
+        assert_eq!(processes.owner_node(&process_id).await?, expected);
+        assert_eq!(store.actor(&session_actor).await?, before_session);
+        assert_eq!(store.actor(&process_actor).await?, before_process);
+        if expected.as_ref() == Some(&a.owner.node) {
+            assert_eq!(store.release_node(&a).await?.len(), 2);
+        } else if expected.is_none() {
+            assert_eq!(store.claim(&b, 2).await?.len(), 2);
+        }
+    }
+    store.release_node(&b).await?;
+    Ok(())
+}

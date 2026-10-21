@@ -675,6 +675,26 @@ impl DurableSession {
             .map(|unfinished| unfinished.run))
     }
 
+    /// The node holding this session's committed actor row, or `None` when
+    /// no node holds it (including when the actor does not exist).
+    ///
+    /// This uncached read never claims or wakes the session. The answer may
+    /// immediately become stale; routing by it is optional, and requests sent
+    /// to any node still reach the owner through the store.
+    pub async fn owner_node(&self) -> Result<Option<crate::durable::NodeId>> {
+        let Ok(actor) = crate::durable::ActorKey::session(self.session_id.as_str()) else {
+            return Ok(None);
+        };
+        Ok(self
+            .effect_host
+            .backend()
+            .durable()
+            .actor(&actor)
+            .await?
+            .and_then(|snapshot| snapshot.owner)
+            .map(|owner| owner.node))
+    }
+
     /// Why the session is parked, if it is: the typed reason its actor
     /// parked with, as it recorded it. A parked session runs nothing until
     /// an operator redrives it ([`redrive`](Self::redrive)), a turn cancel
