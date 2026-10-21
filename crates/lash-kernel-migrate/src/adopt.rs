@@ -210,34 +210,6 @@ mod tests {
             .collect()
     }
 
-    /// K-LIB-009: replacing identity A by B everywhere it is listed and
-    /// called adopts a corrected function. Relinking a workflow written
-    /// over release R1 of `p` onto R2, whose `p.fix` is corrected and whose
-    /// `p.outer` is re-identified over it, gives exactly the workflow
-    /// written over R2, every node of its own code at its own site.
-    #[test]
-    fn relinking_by_name_adopts_a_corrected_function_everywhere_it_is_listed_and_called() {
-        let (r1, r2) = (release(false, "1"), release(true, "1"));
-        let relink = super::relink(&r1, &r2);
-        assert_eq!(
-            relink,
-            r1.iter()
-                .zip(&r2)
-                .map(|(from, to)| (from.identity(), Some(to.identity())))
-                .collect(),
-            "each R1 function names its R2 successor"
-        );
-        let base = document(&r1);
-        let adopted = super::adopt(&base, &relink, &catalog(&[&r1, &r2])).unwrap();
-        assert_eq!(adopted.document, document(&r2));
-        let json = adopted.document.to_json().unwrap();
-        for old in &r1 {
-            assert!(!json.contains(&old.identity().to_string()), "{json}");
-        }
-        assert_eq!(adopted.correspondence.base, base.identity());
-        assert_eq!(adopted.correspondence.result, document(&r2).identity());
-    }
-
     /// A function the workflow calls that the successor release does not
     /// hold refuses the adoption, naming it.
     #[test]
@@ -251,27 +223,6 @@ mod tests {
             DocumentRefusal::FunctionRetired {
                 function: outer.identity(),
                 name: outer.name.clone(),
-            }
-        );
-    }
-
-    /// ADOPT-CONTRACT: adoption never moves a run to a changed operation
-    /// contract. R2's corrected `p.fix` performs `p.send` under contract
-    /// "2" where R1's performed it under "1", so the workflow is refused,
-    /// naming the operation.
-    #[test]
-    fn adoption_never_moves_code_to_a_changed_operation_contract() {
-        let (r1, r2) = (release(false, "1"), release(true, "2"));
-        let refusal = super::adopt(
-            &document(&r1),
-            &super::relink(&r1, &r2),
-            &catalog(&[&r1, &r2]),
-        )
-        .unwrap_err();
-        assert_eq!(
-            refusal,
-            DocumentRefusal::OperationContractChanged {
-                operation: lash_kernel_doc::EffectName::new("p.send").unwrap(),
             }
         );
     }

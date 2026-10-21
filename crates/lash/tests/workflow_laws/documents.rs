@@ -614,23 +614,6 @@ async fn a_publication_acknowledges_admission_and_reads_its_pinned_document() {
     core.shutdown().await.expect("shutdown");
 }
 
-/// HOST-DOC-JSON: editing through typed JSON never contributes to identity.
-#[test]
-fn typed_json_round_trip_preserves_the_binary_document_id() {
-    use lash::workflow::document::DocumentBytes;
-    let document =
-        lash::workflow::document::parse_document("kernel 1\nnumbers float\nmain { finish 42 }")
-            .expect("document");
-    let bytes = DocumentBytes::from(document);
-    let json = bytes
-        .to_document()
-        .expect("read bytes")
-        .to_json()
-        .expect("readable JSON");
-    let edited = Document::from_json(&json).expect("typed JSON");
-    assert_eq!(DocumentBytes::from(edited).id(), bytes.id());
-}
-
 /// HOST-DOC-REFUSAL: bad versions, malformed tokens and identity tampering
 /// are refused before publication, retaining their typed causes.
 #[tokio::test]

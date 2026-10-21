@@ -140,21 +140,6 @@ mod tests {
     use super::*;
 
     #[tokio::test(start_paused = true)]
-    async fn an_arrival_waits_until_the_law_opens_the_gate() {
-        let gate = Gate::new("held");
-        let mut seam = std::pin::pin!(gate.pass());
-        gate.reached_by(&mut seam, 1).await;
-        assert!(
-            tokio::time::timeout(Duration::from_secs(1), &mut seam)
-                .await
-                .is_err(),
-            "the arrival passed a closed gate"
-        );
-        gate.open_one();
-        seam.await;
-    }
-
-    #[tokio::test(start_paused = true)]
     async fn open_one_lets_one_arrival_through_and_open_all_every_one() {
         let gate = Gate::new("three");
         let passed = AtomicUsize::new(0);

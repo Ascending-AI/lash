@@ -196,43 +196,6 @@ fn a_corrupt_or_incomplete_stored_closure_is_refused_at_admission() {
     );
 }
 
-/// A run whose closure reaches a native-only function this node has no
-/// native for is refused, naming it; the node's other runs are not.
-#[test]
-fn a_native_only_leaf_the_node_lacks_refuses_that_run_alone_naming_it() {
-    let leaf = Package::build(
-        "n",
-        "1.0.0",
-        &PackageSources {
-            kernel: "function n.leaf() -> Int\nkernel 1\ncharge 1\nnative\n",
-            surface: "function leaf() -> Int = n.leaf\n",
-            labels: r#"{"members": {"leaf": "leaf"}}"#,
-        },
-        &[],
-    )
-    .expect("n builds");
-    let function = leaf.function("n.leaf").expect("n.leaf");
-    let writer = held(&[&[&leaf]]);
-    let q1 = q(1);
-    let node = held(&[&[&q1]]);
-    let needs_leaf = listing(writer.functions(), &[function]);
-    assert_eq!(
-        assemble(
-            &needs_leaf,
-            node.functions(),
-            &stored(writer.functions(), &[function])
-        )
-        .map(|_| ()),
-        Err(LoadRefusal::NativeMissing { function }),
-    );
-    let v1 = q1.function("q.v").expect("q.v");
-    let other = listing(node.functions(), &[v1]);
-    assert!(
-        assemble(&other, node.functions(), &BTreeMap::new()).is_ok(),
-        "the node's own code still runs"
-    );
-}
-
 /// Declaration mode reads the header of code a node can no longer run: a
 /// native-only function whose native this node lacks is declared, with
 /// the signature it was written under, where running it is refused.

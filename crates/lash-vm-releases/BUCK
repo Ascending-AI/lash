@@ -82,6 +82,31 @@ lash_rust_unit_test(
     version = "0.0.0-dev",
 )
 
+lash_rust_binary(
+    name = "record-helper-data__bin",
+    crate_features = [
+        "dialect-python",
+        "dialect-typescript",
+    ],
+    crate_name = "record_helper_data",
+    crate_root = "src/bin/record-helper-data.rs",
+    declared_features = [
+        "dialect-python",
+        "dialect-typescript",
+        "synthetic-next",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-vm-releases", "record_helper_data"),
+    extra_compile_data = [],
+    include_dev_deps = False,
+    library = ":lash-vm-releases",
+    library_crate_name = "lash_vm_releases",
+    manifest_dir = "crates/lash-vm-releases",
+    package_name = "lash-internal-vm-releases",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
 filegroup(
     name = "rust_sources",
     srcs = glob(["**/*.rs"]),

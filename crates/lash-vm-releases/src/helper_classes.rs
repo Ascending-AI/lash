@@ -123,13 +123,17 @@ impl Graph {
         self.flow(right, left);
     }
 
-    fn variable(scope: &Scope, name: &Name) -> Slot {
-        *scope
+    fn variable(scope: &Scope, name: &Name) -> Result<Slot, String> {
+        scope
             .get(name)
-            .expect("release bodies have validated lexical scopes")
+            .copied()
+            .ok_or_else(|| format!("release body has no binding for {name:?}"))
     }
 
-    fn build(definitions: &BTreeMap<FunctionId, FunctionDefinition>, root: FunctionId) -> Self {
+    fn build(
+        definitions: &BTreeMap<FunctionId, FunctionDefinition>,
+        root: FunctionId,
+    ) -> Result<Self, String> {
         // Analyze each export independently. An argument to an unrelated helper
         // must never contaminate this helper's local closure origins.
         let mut reachable = BTreeSet::new();
@@ -167,7 +171,7 @@ impl Graph {
             let unit = graph.functions[id];
             match &definition.implementation {
                 Implementation::Body(body) | Implementation::Both(body) => {
-                    graph.block(&body.block, &scopes[id], unit);
+                    graph.block(&body.block, &scopes[id], unit)?;
                 }
                 Implementation::Native => {
                     graph.units[unit].native_result =
@@ -180,7 +184,7 @@ impl Graph {
                 graph.units[unit].class = Class::Body;
             }
         }
-        graph
+        Ok(graph)
     }
 
     fn literal(&mut self, value: &Literal) -> Slot {
@@ -192,51 +196,51 @@ impl Graph {
         slot
     }
 
-    fn atom(&mut self, atom: &Atom, scope: &Scope) -> Slot {
+    fn atom(&mut self, atom: &Atom, scope: &Scope) -> Result<Slot, String> {
         match atom {
             Atom::Variable(name) => Self::variable(scope, name),
-            Atom::Literal(value) => self.literal(value),
+            Atom::Literal(value) => Ok(self.literal(value)),
         }
     }
 
-    fn member(&mut self, member: &Member, scope: &Scope, owner: usize) -> Slot {
+    fn member(&mut self, member: &Member, scope: &Scope, owner: usize) -> Result<Slot, String> {
         let target = match member {
             Member::Field { target, .. } => target,
             Member::Index { target, index } => {
-                self.expr(index, scope, owner);
+                self.expr(index, scope, owner)?;
                 target
             }
         };
         self.expr(target, scope, owner)
     }
 
-    fn expr(&mut self, expr: &Expr, scope: &Scope, owner: usize) -> Slot {
-        match expr {
+    fn expr(&mut self, expr: &Expr, scope: &Scope, owner: usize) -> Result<Slot, String> {
+        Ok(match expr {
             Expr::If { cond, then, r#else } => {
-                self.expr(cond, scope, owner);
+                self.expr(cond, scope, owner)?;
                 let result = self.slot();
-                let then = self.expr(then, scope, owner);
-                let otherwise = self.expr(r#else, scope, owner);
+                let then = self.expr(then, scope, owner)?;
+                let otherwise = self.expr(r#else, scope, owner)?;
                 self.alias(then, result);
                 self.alias(otherwise, result);
                 result
             }
             Expr::Let { name, value, body } => {
-                let value = self.expr(value, scope, owner);
+                let value = self.expr(value, scope, owner)?;
                 let binding = self.slot();
                 self.alias(value, binding);
                 let mut inner = scope.clone();
                 inner.insert(name.clone(), binding);
-                self.expr(body, &inner, owner)
+                self.expr(body, &inner, owner)?
             }
-            Expr::Variable(name) => Self::variable(scope, name),
+            Expr::Variable(name) => Self::variable(scope, name)?,
             Expr::Literal(value) => self.literal(value),
-            Expr::Member(member) => self.member(member, scope, owner),
+            Expr::Member(member) => self.member(member, scope, owner)?,
             Expr::Closure(closure) => {
                 let mut captured = scope.clone();
                 let unit = self.unit(closure.params.clone(), &mut captured);
                 self.contains.push((owner, unit));
-                self.block(&closure.body, &captured, unit);
+                self.block(&closure.body, &captured, unit)?;
                 let slot = self.slot();
                 self.values[slot].closures.insert(unit);
                 slot
@@ -245,13 +249,13 @@ impl Graph {
                 let args = args
                     .iter()
                     .map(|arg| self.expr(arg, scope, owner))
-                    .collect();
-                self.library_call(*function, args, owner)
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.library_call(*function, args, owner)?
             }
             Expr::Tuple(items) | Expr::List(items) | Expr::Set(items) => {
                 let result = self.slot();
                 for item in items {
-                    let value = self.expr(item, scope, owner);
+                    let value = self.expr(item, scope, owner)?;
                     self.alias(value, result);
                 }
                 result
@@ -259,8 +263,8 @@ impl Graph {
             Expr::Map(items) => {
                 let result = self.slot();
                 for item in items {
-                    let key = self.expr(&item.key, scope, owner);
-                    let value = self.expr(&item.value, scope, owner);
+                    let key = self.expr(&item.key, scope, owner)?;
+                    let value = self.expr(&item.value, scope, owner)?;
                     self.alias(key, result);
                     self.alias(value, result);
                 }
@@ -269,7 +273,7 @@ impl Graph {
             Expr::Record(items) => {
                 let result = self.slot();
                 for item in items {
-                    let value = self.expr(&item.value, scope, owner);
+                    let value = self.expr(&item.value, scope, owner)?;
                     self.alias(value, result);
                 }
                 result
@@ -280,8 +284,8 @@ impl Graph {
             }
             Expr::Read(read) => {
                 self.units[owner].class = Class::Body;
-                self.expr(&read.handle, scope, owner);
-                self.expr(&read.request, scope, owner);
+                self.expr(&read.handle, scope, owner)?;
+                self.expr(&read.request, scope, owner)?;
                 let result = self.slot();
                 self.values[result].unknown = true;
                 result
@@ -291,13 +295,13 @@ impl Graph {
                     .args
                     .iter()
                     .map(|arg| self.expr(arg, scope, owner))
-                    .collect();
+                    .collect::<Result<Vec<_>, _>>()?;
                 match &act.kind {
                     ActKind::Call(Callee::Library(id)) | ActKind::Await(id) => {
-                        self.library_call(*id, args, owner)
+                        self.library_call(*id, args, owner)?
                     }
                     ActKind::Call(Callee::Value(name)) => {
-                        self.call(Self::variable(scope, name), args, owner)
+                        self.call(Self::variable(scope, name)?, args, owner)
                     }
                     ActKind::Call(Callee::Declared(_))
                     | ActKind::Perform { .. }
@@ -314,17 +318,23 @@ impl Graph {
                     }
                 }
             }
-        }
+        })
     }
 
-    fn library_call(&mut self, id: FunctionId, args: Vec<Slot>, owner: usize) -> Slot {
-        let unit = *self
+    fn library_call(
+        &mut self,
+        id: FunctionId,
+        args: Vec<Slot>,
+        owner: usize,
+    ) -> Result<Slot, String> {
+        let unit = self
             .functions
             .get(&id)
-            .expect("the release holds every library callee");
+            .copied()
+            .ok_or_else(|| format!("release lacks library callee {id}"))?;
         let callee = self.slot();
         self.values[callee].closures.insert(unit);
-        self.call(callee, args, owner)
+        Ok(self.call(callee, args, owner))
     }
 
     fn call(&mut self, callee: Slot, args: Vec<Slot>, owner: usize) -> Slot {
@@ -338,13 +348,16 @@ impl Graph {
         result
     }
 
-    fn action(&mut self, action: &Action, scope: &Scope, owner: usize) -> Slot {
-        match action {
+    fn action(&mut self, action: &Action, scope: &Scope, owner: usize) -> Result<Slot, String> {
+        Ok(match action {
             Action::Call { callee, args } => {
-                let args = args.iter().map(|arg| self.atom(arg, scope)).collect();
+                let args = args
+                    .iter()
+                    .map(|arg| self.atom(arg, scope))
+                    .collect::<Result<Vec<_>, _>>()?;
                 match callee {
-                    Callee::Library(id) => self.library_call(*id, args, owner),
-                    Callee::Value(name) => self.call(Self::variable(scope, name), args, owner),
+                    Callee::Library(id) => self.library_call(*id, args, owner)?,
+                    Callee::Value(name) => self.call(Self::variable(scope, name)?, args, owner),
                     Callee::Declared(_) => {
                         self.units[owner].class = Class::Body;
                         let result = self.slot();
@@ -354,8 +367,8 @@ impl Graph {
                 }
             }
             Action::Await { policy, value } => {
-                let args = vec![self.atom(value, scope)];
-                self.library_call(*policy, args, owner)
+                let args = vec![self.atom(value, scope)?];
+                self.library_call(*policy, args, owner)?
             }
             Action::Perform { .. }
             | Action::Sleep { .. }
@@ -369,50 +382,50 @@ impl Graph {
                 self.values[result].unknown = true;
                 result
             }
-        }
+        })
     }
 
-    fn rhs(&mut self, rhs: &Rhs, scope: &Scope, owner: usize) -> Slot {
+    fn rhs(&mut self, rhs: &Rhs, scope: &Scope, owner: usize) -> Result<Slot, String> {
         match rhs {
             Rhs::Expr(expr) => self.expr(expr, scope, owner),
             Rhs::Action(action) => self.action(action, scope, owner),
         }
     }
 
-    fn block(&mut self, block: &Block, outer: &Scope, owner: usize) {
+    fn block(&mut self, block: &Block, outer: &Scope, owner: usize) -> Result<(), String> {
         let mut scope = outer.clone();
         for stmt in block {
             match stmt {
                 Stmt::Let { name, value } => {
                     // K-FORM-003: the initializer sees the outer binding. The
                     // new cell is visible only from the following statement.
-                    let value = self.rhs(value, &scope, owner);
+                    let value = self.rhs(value, &scope, owner)?;
                     let binding = self.slot();
                     self.alias(value, binding);
                     scope.insert(name.clone(), binding);
                 }
                 Stmt::Assign { place, value, .. } => {
-                    let value = self.rhs(value, &scope, owner);
+                    let value = self.rhs(value, &scope, owner)?;
                     let target = match place {
-                        Place::Variable(name) => Self::variable(&scope, name),
-                        Place::Member(member) => self.member(member, &scope, owner),
+                        Place::Variable(name) => Self::variable(&scope, name)?,
+                        Place::Member(member) => self.member(member, &scope, owner)?,
                     };
                     self.alias(value, target);
                 }
                 Stmt::Do { value } => {
-                    self.expr(value, &scope, owner);
+                    self.expr(value, &scope, owner)?;
                 }
                 Stmt::Remove { member } => {
-                    self.member(member, &scope, owner);
+                    self.member(member, &scope, owner)?;
                 }
                 Stmt::If {
                     condition,
                     then_block,
                     else_block,
                 } => {
-                    self.expr(condition, &scope, owner);
-                    self.block(then_block, &scope, owner);
-                    self.block(else_block, &scope, owner);
+                    self.expr(condition, &scope, owner)?;
+                    self.block(then_block, &scope, owner)?;
+                    self.block(else_block, &scope, owner)?;
                 }
                 Stmt::While {
                     condition,
@@ -420,9 +433,9 @@ impl Graph {
                     else_block,
                     ..
                 } => {
-                    self.expr(condition, &scope, owner);
-                    self.block(body, &scope, owner);
-                    self.block(else_block, &scope, owner);
+                    self.expr(condition, &scope, owner)?;
+                    self.block(body, &scope, owner)?;
+                    self.block(else_block, &scope, owner)?;
                 }
                 Stmt::For {
                     binding,
@@ -432,20 +445,20 @@ impl Graph {
                     else_block,
                     ..
                 } => {
-                    let iterable = self.expr(iterable, &scope, owner);
+                    let iterable = self.expr(iterable, &scope, owner)?;
                     let item = self.slot();
                     match via {
                         None => self.alias(iterable, item),
                         // The hooks are library calls: on the iterated
                         // value, what open gives, and its items.
                         Some(via) => {
-                            let source = self.library_call(via.open, vec![iterable], owner);
+                            let source = self.library_call(via.open, vec![iterable], owner)?;
                             for hook in [via.next, via.check].into_iter().flatten() {
-                                let stepped = self.library_call(hook, vec![source], owner);
+                                let stepped = self.library_call(hook, vec![source], owner)?;
                                 self.alias(stepped, item);
                             }
                             if let Some(hook) = via.item {
-                                let element = self.library_call(hook, vec![source, item], owner);
+                                let element = self.library_call(hook, vec![source, item], owner)?;
                                 self.alias(element, item);
                             }
                             self.alias(source, item);
@@ -453,11 +466,11 @@ impl Graph {
                     }
                     let mut inner = scope.clone();
                     inner.insert(binding.clone(), item);
-                    self.block(body, &inner, owner);
-                    self.block(else_block, &scope, owner);
+                    self.block(body, &inner, owner)?;
+                    self.block(else_block, &scope, owner)?;
                 }
                 Stmt::Try(stmt) => {
-                    self.block(&stmt.body, &scope, owner);
+                    self.block(&stmt.body, &scope, owner)?;
                     if let Some(catch) = &stmt.catch {
                         let mut inner = scope.clone();
                         let error = self.slot();
@@ -465,33 +478,34 @@ impl Graph {
                         // kernel error, so an apply through it is not proved safe.
                         self.values[error].unknown = true;
                         inner.insert(catch.binding.clone(), error);
-                        self.block(&catch.body, &inner, owner);
+                        self.block(&catch.body, &inner, owner)?;
                     }
                     if let Some(finally) = &stmt.finally {
-                        self.block(finally, &scope, owner);
+                        self.block(finally, &scope, owner)?;
                     }
                 }
                 Stmt::ReturnVia { value, policy } => {
-                    let held = self.expr(value, &scope, owner);
-                    let value = self.library_call(*policy, vec![held], owner);
+                    let held = self.expr(value, &scope, owner)?;
+                    let value = self.library_call(*policy, vec![held], owner)?;
                     self.flow(value, self.units[owner].result);
                     self.escapes.push(value);
                 }
                 Stmt::Return { value } => {
-                    let value = self.expr(value, &scope, owner);
+                    let value = self.expr(value, &scope, owner)?;
                     self.flow(value, self.units[owner].result);
                     self.escapes.push(value);
                 }
                 Stmt::Throw { value } => {
-                    self.expr(value, &scope, owner);
+                    self.expr(value, &scope, owner)?;
                 }
                 Stmt::Print { value } | Stmt::Finish { value } | Stmt::Fail { value } => {
                     self.units[owner].class = Class::Body;
-                    self.expr(value, &scope, owner);
+                    self.expr(value, &scope, owner)?;
                 }
                 Stmt::Break | Stmt::Continue => {}
             }
         }
+        Ok(())
     }
 
     fn solve(&mut self) {
@@ -599,23 +613,25 @@ fn can_hold_closure(ty: &Type) -> bool {
 fn census(
     definitions: &BTreeMap<FunctionId, FunctionDefinition>,
     exports: &BTreeSet<FunctionId>,
-) -> String {
+) -> Result<String, String> {
     let rows: BTreeMap<_, _> = exports
         .iter()
         .map(|id| {
-            let mut graph = Graph::build(definitions, *id);
+            let mut graph = Graph::build(definitions, *id)?;
             graph.solve();
-            (
+            Ok((
                 &definitions[id].name,
                 graph.units[graph.functions[id]].class,
-            )
+            ))
         })
-        .collect();
-    rows.into_iter()
+        .collect::<Result<_, String>>()?;
+    Ok(rows
+        .into_iter()
         .map(|(name, class)| format!("{name}\t{}\n", class.label()))
-        .collect()
+        .collect())
 }
 
+#[cfg(test)]
 fn diff(expected: &str, actual: &str) -> String {
     let pinned: BTreeSet<_> = expected.lines().collect();
     let computed: BTreeSet<_> = actual.lines().collect();
@@ -641,7 +657,7 @@ fn diff(expected: &str, actual: &str) -> String {
 #[test]
 #[cfg(all(feature = "dialect-python", feature = "dialect-typescript"))]
 fn helper_release_census_matches_checked_call_graph() {
-    let actual = current_census();
+    let actual = current_census().expect("the release census analyzes");
     let expected = include_str!("helper-classes.tsv");
 
     assert!(
@@ -672,7 +688,8 @@ fn argument_apply_changes_total_census() {
         census(
             &BTreeMap::from([(id, definition.clone())]),
             &BTreeSet::from([id])
-        ),
+        )
+        .expect("the fixture analyzes"),
         pinned
     );
     let mut seeded = definition;
@@ -690,7 +707,8 @@ fn argument_apply_changes_total_census() {
         },
     );
     let id = seeded.identity();
-    let changed = census(&BTreeMap::from([(id, seeded)]), &BTreeSet::from([id]));
+    let changed = census(&BTreeMap::from([(id, seeded)]), &BTreeSet::from([id]))
+        .expect("the seeded fixture analyzes");
     assert_eq!(changed, "helper\toperation\n");
     assert_eq!(
         diff(pinned, &changed),
@@ -714,29 +732,32 @@ body {
     .expect("conditional closures and an expression-local alias");
     let id = conditional.identity();
     assert_eq!(
-        census(&BTreeMap::from([(id, conditional)]), &BTreeSet::from([id])),
+        census(&BTreeMap::from([(id, conditional)]), &BTreeSet::from([id]))
+            .expect("conditional closures analyze"),
         "helper\toperation\n"
     );
 }
 
 #[cfg(all(feature = "dialect-python", feature = "dialect-typescript"))]
-pub(super) fn current_census() -> String {
+pub(super) fn current_census() -> Result<String, String> {
     let read = |built: &crate::BuiltPackage| {
-        lash_kernel_doc::ReleasedFunctions::read(built.image).expect("a package reads")
+        lash_kernel_doc::ReleasedFunctions::read(built.image).map_err(|error| error.to_string())
     };
     let mut definitions = BTreeMap::new();
     for built in crate::PACKAGES {
-        let code = read(built);
+        let code = read(built)?;
         for at in 0..code.len() {
-            let definition = code.definition(at).expect("a definition reads");
+            let definition = code.definition(at).map_err(|error| error.to_string())?;
             definitions.insert(definition.identity(), definition);
         }
     }
     let mut actual = String::new();
     for dialect in [crate::PYTHON, crate::TYPESCRIPT] {
-        let code = read(crate::package(dialect).expect("the dialect's package"));
+        let code = read(
+            crate::package(dialect).ok_or_else(|| format!("release lacks {dialect} package"))?,
+        )?;
         let exports = (0..code.len()).map(|at| code.id(at)).collect();
-        actual.push_str(&census(&definitions, &exports));
+        actual.push_str(&census(&definitions, &exports)?);
     }
-    actual
+    Ok(actual)
 }

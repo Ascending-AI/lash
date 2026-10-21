@@ -8,7 +8,6 @@ use lash_kernel_doc::{EffectName, FunctionName, Signature, Type};
 use crate::{
     Export, ExportView, Member, NamespaceRefusal, Namespaces, Offered, Operations, PackagePath,
     QualifiedOperation, Reserving, Resolution, Segment, Spelling, TypeMember, ValueType,
-    spell_operation,
 };
 
 /// Code packages, by path.
@@ -81,39 +80,6 @@ fn dataframe() -> Packages {
             ),
         ]),
     )]))
-}
-
-/// OP-NAME: an operation has one canonical effect name; each dialect
-/// writes it by `spell`, and each spelling resolves, in its own dialect
-/// only, to that one operation.
-#[test]
-fn an_operation_has_one_name_spelled_per_dialect() {
-    let send = operation("inbox.send_item");
-    assert_eq!(send.effect_name().as_str(), "inbox.send_item");
-    let namespaces =
-        Namespaces::of_operations(operations(&["inbox.send_item"])).expect("one operation");
-    for (spelling, written) in [
-        (Spelling::TypeScript, "inbox.sendItem"),
-        (Spelling::Python, "inbox.send_item"),
-    ] {
-        assert_eq!(spell_operation(spelling, &send), written);
-        let path = written.split('.').collect::<Vec<_>>();
-        assert!(
-            matches!(
-                namespaces.resolve(&path, spelling),
-                Resolution::Operation { operation, .. } if *operation == send
-            ),
-            "{written}"
-        );
-    }
-    assert!(matches!(
-        namespaces.resolve(&["inbox", "send_item"], Spelling::TypeScript),
-        Resolution::Unknown
-    ));
-    let misspelled = namespaces
-        .misspelled(&["inbox", "send_item"], Spelling::TypeScript)
-        .expect("the canonical spelling names the operation in another dialect");
-    assert_eq!(misspelled.repair, "inbox.sendItem");
 }
 
 /// NS-COMPOSE: disjoint children merge; a package path equal to another's

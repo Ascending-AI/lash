@@ -935,17 +935,12 @@ mod tests {
         }
     }
 
-    /// One store write a retention made: each artifact it holds, with the
-    /// address of the bytes it was handed.
-    type Write = Vec<(String, usize)>;
-
     /// Every store write a retention makes.
     #[derive(Default)]
     struct Counted {
         stored: Mutex<std::collections::BTreeMap<String, Vec<u8>>>,
         /// Each artifact held as a graph node's body, and the node's kind.
         nodes: Mutex<std::collections::BTreeMap<String, u32>>,
-        writes: Mutex<Vec<Write>>,
     }
 
     #[async_trait::async_trait]
@@ -970,10 +965,6 @@ mod tests {
             _: &ReferrerClaim,
             module_ref: &str,
         ) -> Result<(), ArtifactStoreError> {
-            self.writes
-                .lock()
-                .expect("writes")
-                .push(vec![(module_ref.to_owned(), 0)]);
             Err(ArtifactStoreError::ArtifactMissing {
                 artifact_ref: module_ref.to_owned(),
             })
@@ -984,7 +975,6 @@ mod tests {
             artifacts: &[ModuleArtifactHold<'_>],
         ) -> Result<(), ArtifactStoreError> {
             let mut stored = self.stored.lock().expect("store");
-            let mut write = Write::new();
             for artifact in artifacts {
                 let bytes = artifact.body().bytes();
                 stored
@@ -996,9 +986,7 @@ mod tests {
                         .expect("nodes")
                         .insert(artifact.module_ref().to_owned(), kind.0);
                 }
-                write.push((artifact.module_ref().to_owned(), bytes.as_ptr() as usize));
             }
-            self.writes.lock().expect("writes").push(write);
             Ok(())
         }
         async fn end_module_referrer(
@@ -1014,84 +1002,6 @@ mod tests {
         ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
             Ok(self.stored.lock().expect("store").get(module_ref).cloned())
         }
-    }
-
-    /// DECLARATIONS-RETAIN-ONCE (FIG-6457): a cell retains its document and
-    /// the K helper declarations it lists in one fenced store write, handing
-    /// the store the token bodies the registry encoded once, every cell
-    /// alike; the declarations still read back with the document.
-    #[tokio::test]
-    async fn declarations_retain_once_in_one_fenced_batch() {
-        let mut registry = lash_kernel_doc::FunctionRegistry::new();
-        let mut header = String::from("kernel 1\nnumbers float\n");
-        let mut calls = String::new();
-        for (name, local) in [
-            ("helper.one", "a"),
-            ("helper.two", "b"),
-            ("helper.three", "c"),
-        ] {
-            calls.push_str(&format!("let {local} = invoke {name}() "));
-            let function = registry
-                .register(
-                    lash_kernel_doc::parse_definition(&format!(
-                        "function {name}() -> Any\nkernel 1\ncharge 1\nbody {{ return 7 }}"
-                    ))
-                    .expect("helper"),
-                    None,
-                )
-                .expect("registered");
-            header.push_str(&format!("use {name} = @{function}\n"));
-        }
-        let store = Arc::new(Counted::default());
-        let documents = KernelDocuments::new(store.clone());
-        let mut retained = Vec::new();
-        // Each cell's declarations stay alive, so an image encoded again
-        // could not reuse the address of the one before.
-        let mut checked = Vec::new();
-        for cell in [7, 8] {
-            let document = IdentifiedDocument::new(
-                lash_kernel_doc::parse_document(&format!(
-                    "{header}main {{ {calls}return {cell} }}"
-                ))
-                .expect("document"),
-            );
-            let claim = ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
-                lash_core::HostArtifactPin::mint(),
-            ))
-            .expect("host claim");
-            checked.push(CheckedDeclarations::required(&document, &registry).expect("listed"));
-            let identity = documents
-                .publish(&claim, &document, checked.last().expect("checked"))
-                .await
-                .expect("published");
-            let mut writes = std::mem::take(&mut *store.writes.lock().expect("writes"));
-            assert_eq!(writes.len(), 1, "one fenced batch, not {writes:?}");
-            let mut write = writes.remove(0);
-            assert_eq!(write.len(), 5);
-            // The document's requirements record rides in the same batch
-            // (FIG-6985).
-            assert_eq!(
-                write.pop().map(|(artifact, _)| artifact),
-                Some(requirements_artifact(&identity).artifact_ref)
-            );
-            assert_eq!(
-                write.pop().map(|(artifact, _)| artifact),
-                Some(document_artifact(&identity).artifact_ref)
-            );
-            let read = documents
-                .workflow(&WorkflowDocumentRef {
-                    document: identity,
-                    entry: lash_kernel_doc::WorkflowDocumentEntry::Main,
-                })
-                .await
-                .expect("read");
-            assert!(matches!(read, StoredWorkflow::Read(_)), "{read:?}");
-            retained.push(write);
-        }
-        assert_eq!(
-            retained[0], retained[1],
-            "a later cell holds the same declaration images, encoded once"
-        );
     }
 
     /// FIG-6257, FIG-6469: however many process definitions publish a

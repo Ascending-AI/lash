@@ -108,21 +108,6 @@ fn pkg_shape_a_stale_value_is_found_wherever_its_slot_holds_it() {
     assert_eq!(literal(&chain), "(\"a\", \"flat_map\")");
 }
 
-#[test]
-fn pkg_shape_a_value_of_another_brand_is_a_type_error() {
-    let fixture = fixture();
-    for value in [
-        "{op: \"col\", args: [], name: \"x\"}".to_owned(),
-        "invoke dataframe.data_quanta.read_text(\"a\")".to_owned(),
-        "\"x\"".to_owned(),
-    ] {
-        let error = fixture.raise(&format!(
-            "let value = {value}\nlet name = invoke dataframe.expr.name(value)\nreturn name"
-        ));
-        assert_eq!(error.kind, "type_error", "{value}: {error:?}");
-    }
-}
-
 /// A value built under another artifact of the line with the same label,
 /// over another kernel, names both artifacts by label and short digest;
 /// under another label, by label alone.

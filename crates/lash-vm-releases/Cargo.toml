@@ -34,6 +34,12 @@ synthetic-next = [
     "lash-kernel-package/synthetic-next",
 ]
 
+[[bin]]
+name = "record-helper-data"
+path = "src/bin/record-helper-data.rs"
+required-features = ["dialect-typescript", "dialect-python"]
+test = false
+
 [lints]
 workspace = true
 

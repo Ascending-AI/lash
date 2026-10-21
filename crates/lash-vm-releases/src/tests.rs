@@ -1,29 +1,9 @@
 //! Laws of lash's packages as the build makes them.
 
-// FIG-2971: this file is test/tooling code; the generator's ambient fs/env
-// access is sanctioned here (the workspace clippy ban targets production
-// library code).
-#![allow(clippy::disallowed_methods)]
-
 use super::*;
 
 #[path = "helper_classes.rs"]
 mod helper_classes;
-
-/// Records the kernel's closed names from the actual registry for review.
-#[test]
-#[ignore = "regenerates crates/lash-kernel-lib/src/helpers.rs"]
-#[cfg(any(feature = "dialect-typescript", feature = "dialect-python"))]
-fn record_kernel_helper_catalog() {
-    assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok("1"));
-    let root =
-        std::path::PathBuf::from(std::env::var("BUILD_WORKSPACE_DIRECTORY").expect("workspace"));
-    std::fs::write(
-        root.join("crates/lash-kernel-lib/src/helpers.rs"),
-        include_str!(concat!(env!("OUT_DIR"), "/kernel_helpers.rs")),
-    )
-    .unwrap();
-}
 
 /// HELP-SET: each dialect's packages, its own and every package it
 /// requires, name the closed kernel variants, the dialect's helpers and its
@@ -147,19 +127,4 @@ fn concurrent_cold_readers_assemble_the_library_once() {
         assert_eq!(assemblies.load(Ordering::SeqCst), 1);
         assert!(Arc::ptr_eq(&first, &second));
     });
-}
-
-/// Records the reviewed current helper classification.
-#[test]
-#[ignore = "regenerates crates/lash-vm-releases/src/helper-classes.tsv"]
-#[cfg(all(feature = "dialect-python", feature = "dialect-typescript"))]
-fn record_helper_classes() {
-    assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok("1"));
-    let root =
-        std::path::PathBuf::from(std::env::var("BUILD_WORKSPACE_DIRECTORY").expect("workspace"));
-    std::fs::write(
-        root.join("crates/lash-vm-releases/src/helper-classes.tsv"),
-        helper_classes::current_census(),
-    )
-    .unwrap();
 }

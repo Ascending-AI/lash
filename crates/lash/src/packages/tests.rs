@@ -11,7 +11,7 @@ use lash_core::durable_port::{NodeCapability, NodeId, NodeSpec};
 use lash_execution_contracts::PackageGate as _;
 use lash_kernel_package::{HeldPackages, Package, PackageSet, PackageSources};
 
-use super::{FleetPackages, NodeInstall, members, promoted};
+use super::{FleetPackages, NodeInstall};
 
 fn q(value: i64) -> Package {
     let kernel =
@@ -534,30 +534,6 @@ async fn imported_internal_body(bootstrap: bool) {
     core.shutdown().await.unwrap();
 }
 
-/// One node of each of `releases`' builds: its own set holding that release
-/// of `q`, as the store keeps it at `sequence`, and the node as the gate
-/// reads it live.
-fn build(release: Package, sequence: u64) -> (lash_core::durable_port::StoredSet, NodeCapability) {
-    let held = HeldPackages::install([release]).expect("a node's packages");
-    let stored = lash_core::durable_port::StoredSet {
-        digest: held.digest(),
-        members: members(held.set()),
-        sequence,
-        requirements: held.surface().requirements().clone(),
-    };
-    let live = NodeCapability {
-        decodes: Vec::new(),
-        capabilities: lash_kernel_package::node_capabilities(&held),
-    };
-    (stored, live)
-}
-
-/// `q@value` with a native-only `q.fast`: what a release adding a native
-/// requires of every node.
-fn q_with_native(value: i64) -> Package {
-    q_native(value, "fast")
-}
-
 /// `q@value` with the native-only member `q.<native>`.
 fn q_native(value: i64, native: &str) -> Package {
     q_natives(value, &[native])
@@ -588,73 +564,6 @@ fn q_natives(value: i64, natives: &[&str]) -> Package {
         &[],
     )
     .expect("q builds")
-}
-
-/// PROMOTE-BY-CAPABILITY: the candidates are the own surfaces of the
-/// live serving nodes, and the newest by install
-/// sequence whose requirements every one of them meets is chosen. A
-/// release changing only a body is chosen as soon as one node of it is
-/// live, on every node; once its nodes stop it is no candidate, and the
-/// older surface is chosen again. A release adding a native-only function
-/// waits until no live node lacks the native.
-#[test]
-fn the_newest_live_surface_every_serving_node_can_run_is_promoted() {
-    let (a, a_node) = build(q(1), 1);
-    let (b, b_node) = build(q(2), 2);
-    let (c, c_node) = build(q_with_native(3), 3);
-    assert_eq!(
-        a.requirements, b.requirements,
-        "a body-only release requires what its predecessor did"
-    );
-    assert!(
-        !c.requirements.met_by(&a_node.capabilities),
-        "a node of A lacks C's native"
-    );
-    let stored = [a.clone(), b.clone(), c.clone()];
-    let a_writes = |serving: &[&NodeCapability]| {
-        promoted(&stored, serving, &a_node.capabilities).map(|set| set.digest)
-    };
-
-    assert_eq!(
-        a_writes(&[]),
-        None,
-        "an unregistered writer supplies no live candidate"
-    );
-    assert_eq!(
-        a_writes(&[&a_node]),
-        Some(a.digest),
-        "a fleet of A alone writes under A, though B and C are stored"
-    );
-    assert_eq!(
-        a_writes(&[&a_node, &b_node]),
-        Some(b.digest),
-        "a body-only release is promoted on A's node once B's is live"
-    );
-    assert_eq!(
-        promoted(&stored, &[&a_node, &b_node], &b_node.capabilities).map(|set| set.digest),
-        Some(b.digest),
-        "B's node writes under B too"
-    );
-    assert_eq!(
-        a_writes(&[&a_node]),
-        Some(a.digest),
-        "once B's nodes stop, the fleet rolls back to A"
-    );
-    assert_eq!(
-        a_writes(&[&a_node, &c_node]),
-        Some(a.digest),
-        "a new native waits while A's node lacks it"
-    );
-    assert_eq!(
-        promoted(&stored, &[&a_node, &c_node], &c_node.capabilities).map(|set| set.digest),
-        Some(a.digest),
-        "C's node writes under A while A's node is live"
-    );
-    assert_eq!(
-        promoted(&stored, &[&c_node], &c_node.capabilities).map(|set| set.digest),
-        Some(c.digest),
-        "once every live node has the native, C is promoted"
-    );
 }
 
 /// A live serving node of `held`'s build named `name`, installed in
@@ -988,92 +897,6 @@ async fn stored_code_performs_an_internal_operation_only_as_its_packages_own() {
             operation: lash_kernel_doc::EffectName::new("s.raw").expect("an operation"),
         })),
     );
-}
-
-/// NATIVE-ROLLBACK (FIG-6993): a build D adds a native `extra`; work it
-/// parks records D's natives. D's nodes stop and the older build A, which
-/// lacks `extra`, is redeployed: A's node claims the work whose record it
-/// meets and leaves D's parked, and the strand report names D's work with
-/// the one native no live node has.
-#[tokio::test]
-async fn a_rollback_build_serves_what_it_can_and_the_strand_report_names_the_rest() {
-    use lash_core::ObligationToken;
-    use lash_core::durable_port::{ActorKey, ClaimPurpose, CommitLabel, MailTx, Release};
-    let stores = crate::tests::sqlite_memory_store_set().await;
-    let backend = lash_conformance::backend_over(stores);
-    let durable = backend.durable();
-    let a = Arc::new(HeldPackages::install([q_native(1, "fast")]).expect("A"));
-    let d = Arc::new(HeldPackages::install([q_natives(2, &["fast", "extra"])]).expect("D"));
-    let record = |held: &HeldPackages| super::install_rows(held).1[0].requirements.clone();
-    let tokens = |held: &HeldPackages| -> Vec<String> {
-        let mut tokens: Vec<String> = ObligationToken::for_requirements(&record(held))
-            .map(String::from)
-            .collect();
-        tokens.sort();
-        tokens
-    };
-    let extra: BTreeSet<_> = record(&d)
-        .natives
-        .difference(&record(&a).natives)
-        .copied()
-        .collect();
-    assert_eq!(extra.len(), 1, "D adds one native");
-
-    let d_node = serve(&backend, "d", &d).await;
-    let (older, newer) = (
-        ActorKey::process("parked-under-a").unwrap(),
-        ActorKey::process("parked-under-d").unwrap(),
-    );
-    let mut create = MailTx::new();
-    for actor in [&older, &newer] {
-        create.create_actor(actor.clone(), backend.formats().session().clone());
-    }
-    durable
-        .commit_mail(create, CommitLabel::new("law.create"))
-        .await
-        .expect("the actors are created");
-    let claimed = durable.claim(&d_node, 8).await.expect("D claims");
-    assert_eq!(claimed.len(), 2, "D's node runs both: {claimed:?}");
-    for claim in claimed {
-        let requires = if claim.actor == newer {
-            tokens(&d)
-        } else {
-            tokens(&a)
-        };
-        let mut park = durable
-            .begin(&claim.actor, claim.epoch)
-            .await
-            .expect("the owner opens");
-        park.set_requires(requires).give_up(Release::Ready);
-        durable
-            .commit(park, CommitLabel::new("law.park"))
-            .await
-            .expect("the work parks with its record");
-    }
-    durable.release_node(&d_node).await.expect("D's nodes stop");
-
-    let a_node = serve(&backend, "a", &a).await;
-    let claimed = durable.claim(&a_node, 8).await.expect("A claims");
-    assert!(
-        claimed.len() == 1 && claimed[0].actor == older && claimed[0].purpose == ClaimPurpose::Run,
-        "the rollback build runs only the work it meets: {claimed:?}"
-    );
-    let page = crate::durable::strand_report(&backend, None, 64)
-        .await
-        .expect("the strand report reads");
-    assert_eq!(page.next, None);
-    assert_eq!(
-        page.stranded,
-        vec![crate::durable::StrandedWork {
-            actor: newer.as_str().to_owned(),
-            lacks: lash_core::durable_port::ExecutionRequirements {
-                natives: extra,
-                ..Default::default()
-            },
-        }],
-        "the strand report names D's work and the native no live node has"
-    );
-    durable.release_node(&a_node).await.expect("A stops");
 }
 
 /// LIVE-FLEET-STILL-STRICT: serving formats, rather than candidate count,

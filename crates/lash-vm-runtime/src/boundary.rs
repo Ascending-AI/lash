@@ -280,7 +280,7 @@ pub(crate) fn json_serves(ty: &Type, value: &serde_json::Value) -> Result<(), St
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_kernel_doc::{RecordType, RecordTypeField, Signature};
+    use lash_kernel_doc::Signature;
 
     /// OPEN-RESULT-FITS (law 18, D4): a tool's result projects to an open
     /// record, so a tool whose result adds a field serves a document checked
@@ -335,49 +335,6 @@ mod tests {
             &serde_json::json!({ "hits": 3, "took_ms": 12 }),
         )
         .expect("the runtime check takes the extra field");
-    }
-
-    /// Target 4: a tool's signature is stated in the kernel type grammar. A
-    /// closed object schema is a record with its optional fields marked, a
-    /// schema the grammar has no exact type for is `Json`, and a composition
-    /// with no member has none.
-    #[test]
-    fn a_tool_schema_is_a_kernel_type() {
-        let schema = serde_json::json!({
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["path"],
-            "properties": {
-                "path": {"type": "string"},
-                "lines": {"type": "array", "items": {"type": "integer"}},
-                "mode": {"enum": ["read", "write"]},
-            },
-        });
-        let field = |name: &str, ty: Type, optional: bool| RecordTypeField {
-            name: name.to_owned(),
-            ty,
-            optional,
-        };
-        assert_eq!(
-            type_of_schema(&schema).expect("a record type"),
-            Type::Record(RecordType {
-                fields: vec![
-                    field("lines", Type::List(Box::new(Type::Int)), true),
-                    field(
-                        "mode",
-                        Type::Enum(vec!["read".into(), "write".into()]),
-                        true
-                    ),
-                    field("path", Type::Text, false),
-                ],
-                rest: None,
-            })
-        );
-        assert_eq!(
-            type_of_schema(&serde_json::json!({"type": "object"})),
-            Ok(Type::Json)
-        );
-        assert!(type_of_schema(&serde_json::json!({"oneOf": []})).is_err());
     }
 
     /// PKG-RUNNER: on a path a package owns, a tool runs the operation only

@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 6,
   "cargo_package_count": 91,
-  "cargo_target_count": 362,
+  "cargo_target_count": 363,
   "facade_production_check_targets": [
     "//crates/lash-checkpoint-encoder:lash-checkpoint-encoder__fv_57546a29__metadata[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_4de6aa89__metadata[check]",
@@ -91983,7 +91983,7 @@
       "//third-party/vendored/lash-rmcp:lash-rmcp__fv_e2e7b48c"
     ]
   },
-  "generated_label_count": 462,
+  "generated_label_count": 463,
   "main_test_exclusions": {
     "//crates/lash-s3-store:lash-s3-store__unit_test": "requires an external service or credentials"
   },
@@ -93388,7 +93388,7 @@
     "//third-party/vendored/lash-rmcp:test_tool_routers__test",
     "//third-party/vendored/lash-rmcp:test_trace_context__test"
   ],
-  "metadata_target_count": 1603,
+  "metadata_target_count": 1604,
   "packages": [
     {
       "declared_features": [
@@ -98660,6 +98660,15 @@
           "kind": "unit-test",
           "label": "//crates/lash-vm-releases:lash-vm-releases__unit_test",
           "tags": []
+        },
+        {
+          "build_label": "//crates/lash-vm-releases:record-helper-data__bin",
+          "cargo": "record-helper-data",
+          "check_label": "//crates/lash-vm-releases:record-helper-data__bin__metadata[check]",
+          "clippy_label": "//crates/lash-vm-releases:record-helper-data__bin__clippy[clippy.txt]",
+          "kind": "bin",
+          "label": "//crates/lash-vm-releases:record-helper-data__bin",
+          "tags": []
         }
       ],
       "test_batch": {
@@ -102210,6 +102219,7 @@
     "//crates/lash-vm-releases:build_script__build",
     "//crates/lash-vm-releases:lash-vm-releases[static]",
     "//crates/lash-vm-releases:lash-vm-releases__unit_test",
+    "//crates/lash-vm-releases:record-helper-data__bin",
     "//crates/lash-vm-runtime:lash-vm-runtime[static]",
     "//crates/lash-vm-runtime:lash-vm-runtime__unit_test",
     "//crates/lash-vm-worker:build_script",
@@ -102733,6 +102743,7 @@
     "//crates/lash-vm-releases:lash-vm-releases__fv_adf9f938__metadata[check]",
     "//crates/lash-vm-releases:lash-vm-releases__metadata[check]",
     "//crates/lash-vm-releases:lash-vm-releases__unit_test__rust_test__metadata[check]",
+    "//crates/lash-vm-releases:record-helper-data__bin__metadata[check]",
     "//crates/lash-vm-runtime:lash-vm-runtime__fv_ec338fc9__metadata[check]",
     "//crates/lash-vm-runtime:lash-vm-runtime__metadata[check]",
     "//crates/lash-vm-runtime:lash-vm-runtime__unit_test__rust_test__metadata[check]",
@@ -103198,6 +103209,7 @@
     "//crates/lash-vm-releases:build_script__build__clippy[clippy.txt]",
     "//crates/lash-vm-releases:lash-vm-releases__clippy[clippy.txt]",
     "//crates/lash-vm-releases:lash-vm-releases__unit_test__clippy[clippy.txt]",
+    "//crates/lash-vm-releases:record-helper-data__bin__clippy[clippy.txt]",
     "//crates/lash-vm-runtime:lash-vm-runtime__clippy[clippy.txt]",
     "//crates/lash-vm-runtime:lash-vm-runtime__unit_test__clippy[clippy.txt]",
     "//crates/lash-vm-worker:build_script__build__clippy[clippy.txt]",
@@ -103578,6 +103590,7 @@
     "//crates/lash-vm-releases:build_script__build",
     "//crates/lash-vm-releases:lash-vm-releases",
     "//crates/lash-vm-releases:lash-vm-releases__unit_test",
+    "//crates/lash-vm-releases:record-helper-data__bin",
     "//crates/lash-vm-runtime:lash-vm-runtime",
     "//crates/lash-vm-runtime:lash-vm-runtime__unit_test",
     "//crates/lash-vm-worker:build_script__build",
@@ -103961,6 +103974,7 @@
     "//crates/lash-vm-releases:build_script__build",
     "//crates/lash-vm-releases:lash-vm-releases",
     "//crates/lash-vm-releases:lash-vm-releases__unit_test",
+    "//crates/lash-vm-releases:record-helper-data__bin",
     "//crates/lash-vm-runtime:lash-vm-runtime",
     "//crates/lash-vm-runtime:lash-vm-runtime__unit_test",
     "//crates/lash-vm-worker:build_script",

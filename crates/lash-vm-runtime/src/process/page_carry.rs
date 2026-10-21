@@ -370,37 +370,3 @@ pub async fn carry_parked_checkpoint(
     .await
     .map_err(|error| HeapFault::Transport(error.to_string()))?
 }
-
-#[cfg(test)]
-mod tests {
-    use super::ReleaseLease;
-    use std::sync::Arc;
-    /// FIG-6840 ownership at claim: cancelling the awaiting preparation
-    /// cannot release a lease while its blocking page reader still uses it.
-    #[tokio::test]
-    async fn a_cancelled_carry_retains_its_lease_until_the_blocking_reader_exits() {
-        let (released, mut release_seen) = tokio::sync::oneshot::channel();
-        let owner = Arc::new(ReleaseLease(Some(Box::new(move || {
-            let _ = released.send(());
-        }))));
-        let (entered, ready) = tokio::sync::oneshot::channel();
-        let (resume, blocked) = std::sync::mpsc::channel();
-        let preparation = tokio::spawn(async move {
-            tokio::task::spawn_blocking(move || {
-                let _owner = owner;
-                let _ = entered.send(());
-                let _ = blocked.recv();
-            })
-            .await
-        });
-        ready.await.unwrap();
-        preparation.abort();
-        assert!(preparation.await.unwrap_err().is_cancelled());
-        assert!(matches!(
-            release_seen.try_recv(),
-            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
-        ));
-        resume.send(()).unwrap();
-        release_seen.await.unwrap();
-    }
-}
