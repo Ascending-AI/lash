@@ -115,12 +115,11 @@ impl LatencyEnv {
 
     /// What the report records about the engine under measurement.
     pub(crate) fn describe(&self) -> serde_json::Value {
-        use sha2::Digest;
-        let executable = std::env::current_exe()
+        let executable_sha256 = std::env::current_exe()
             .ok()
-            .and_then(|path| std::fs::read(path).ok());
+            .and_then(|path| crate::perf_support::git::artifact_sha256(&path));
         serde_json::json!({
-            "executable_sha256": executable.map(|bytes| format!("{:x}", sha2::Sha256::digest(bytes))),
+            "executable_sha256": executable_sha256,
             "clock": "Linux CLOCK_MONOTONIC for intervals; Unix nanoseconds for load joins",
             "engine_commit_clock": "successful COMMIT start, with terminal COMMIT return retained as the upper bound",
             "engine": "lash-durable",
